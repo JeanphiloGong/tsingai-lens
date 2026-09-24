@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
+from domain.feedback.tool_failure import ToolFailureAnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.review_decision import ReviewDecision
@@ -21,6 +22,7 @@ from infra.persistence.postgres.models.feedback import (
     FeedbackAnalysisResultRow,
     FeedbackCaseRow,
     FeedbackSignalAnalysisResultRow,
+    ToolFailureAnalysisResultRow,
     FeedbackReviewDecisionRow,
 )
 
@@ -164,6 +166,78 @@ class PostgresFeedbackCaseRepository:
             await session.flush()
             return _case(row)
 
+    async def save_tool_failure_analysis_result(
+        self, result: ToolFailureAnalysisResult
+    ) -> ToolFailureAnalysisResult:
+        async with self.session_factory.begin() as session:
+            row = await _save_tool_failure_result_row(session, result)
+            await session.flush()
+            return _tool_failure_result(row)
+
+    async def upsert_case_from_tool_failure(
+        self,
+        result: ToolFailureAnalysisResult,
+        *,
+        context_snapshot: dict[str, Any],
+        source_signal_ids: tuple[str, ...] = (),
+        now: str,
+    ) -> FeedbackCase:
+        """Attach a failed tool observation to the human case projection."""
+
+        timestamp = _datetime(now)
+        signals = _ordered_unique(source_signal_ids or (result.signal_id,))
+        anchor_message_id = str(
+            context_snapshot.get("answer_message_id") or result.assistant_message_id
+        ).strip()
+        if not anchor_message_id:
+            raise ValueError("tool failure case requires an anchor message")
+        async with self.session_factory.begin() as session:
+            await _save_tool_failure_result_row(session, result)
+            row = await session.scalar(
+                select(FeedbackCaseRow)
+                .where(
+                    FeedbackCaseRow.session_id == result.session_id,
+                    FeedbackCaseRow.anchor_message_id == anchor_message_id,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                row = FeedbackCaseRow(
+                    case_id=f"case_{uuid4().hex[:32]}",
+                    collection_id=result.collection_id,
+                    session_id=result.session_id,
+                    anchor_message_id=anchor_message_id,
+                    source_signal_ids=list(signals),
+                    analysis_result_ids=[],
+                    signal_analysis_result_ids=[],
+                    tool_failure_analysis_result_ids=[result.result_id],
+                    context_snapshot=deepcopy(context_snapshot),
+                    status="needs_annotation",
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                    annotation_digest=None,
+                )
+                session.add(row)
+            else:
+                if row.collection_id != result.collection_id:
+                    raise ValueError("feedback case identity cannot change collection")
+                row.source_signal_ids = list(
+                    _ordered_unique(tuple(row.source_signal_ids or ()) + signals)
+                )
+                row.tool_failure_analysis_result_ids = list(
+                    _ordered_unique(
+                        tuple(row.tool_failure_analysis_result_ids or ())
+                        + (result.result_id,)
+                    )
+                )
+                if context_snapshot:
+                    row.context_snapshot = deepcopy(context_snapshot)
+                if row.status not in {"accepted", "withdrawn"}:
+                    row.status = "needs_annotation"
+                row.updated_at = timestamp
+            await session.flush()
+            return _case(row)
+
     async def read_case(self, case_id: str) -> FeedbackCase | None:
         async with self.session_factory() as session:
             row = await session.get(FeedbackCaseRow, case_id)
@@ -197,6 +271,21 @@ class PostgresFeedbackCaseRepository:
                 )
             )
             by_id = {row.result_id: _correction_result(row) for row in rows}
+            return tuple(by_id[value] for value in ids if value in by_id)
+
+    async def read_tool_failure_analysis_results(
+        self, result_ids: tuple[str, ...]
+    ) -> tuple[ToolFailureAnalysisResult, ...]:
+        ids = tuple(dict.fromkeys(str(value) for value in result_ids if value))
+        if not ids:
+            return ()
+        async with self.session_factory() as session:
+            rows = await session.scalars(
+                select(ToolFailureAnalysisResultRow).where(
+                    ToolFailureAnalysisResultRow.result_id.in_(ids)
+                )
+            )
+            by_id = {row.result_id: _tool_failure_result(row) for row in rows}
             return tuple(by_id[value] for value in ids if value in by_id)
 
     async def list_cases(
@@ -237,8 +326,14 @@ class PostgresFeedbackCaseRepository:
                     for row in rows
                     for result_id in (row.signal_analysis_result_ids or ())
                 }
+                tool_failure_result_ids = {
+                    result_id
+                    for row in rows
+                    for result_id in (row.tool_failure_analysis_result_ids or ())
+                }
                 analysis_rows: tuple[Any, ...] = ()
                 signal_rows: tuple[Any, ...] = ()
+                tool_failure_rows: tuple[Any, ...] = ()
                 if analysis_result_ids:
                     analysis_rows = tuple(await session.scalars(
                         select(FeedbackAnalysisResultRow).where(
@@ -251,9 +346,15 @@ class PostgresFeedbackCaseRepository:
                             FeedbackSignalAnalysisResultRow.result_id.in_(signal_result_ids),
                         )
                     ))
+                if tool_failure_result_ids:
+                    tool_failure_rows = tuple(await session.scalars(
+                        select(ToolFailureAnalysisResultRow).where(
+                            ToolFailureAnalysisResultRow.result_id.in_(tool_failure_result_ids),
+                        )
+                    ))
                 by_result_id = {
                     result_row.result_id: result_row
-                    for result_row in (*analysis_rows, *signal_rows)
+                    for result_row in (*analysis_rows, *signal_rows, *tool_failure_rows)
                 }
                 rows = [
                     row
@@ -265,6 +366,7 @@ class PostgresFeedbackCaseRepository:
                                 for result_id in (
                                     *(row.analysis_result_ids or ()),
                                     *(row.signal_analysis_result_ids or ()),
+                                    *(row.tool_failure_analysis_result_ids or ()),
                                 )
                                 if result_id in by_result_id
                             ),
@@ -554,6 +656,67 @@ async def _save_correction_result_row(
     return row
 
 
+async def _save_tool_failure_result_row(
+    session: AsyncSession, result: ToolFailureAnalysisResult
+) -> ToolFailureAnalysisResultRow:
+    row = await session.get(ToolFailureAnalysisResultRow, result.result_id)
+    by_job = await session.scalar(
+        select(ToolFailureAnalysisResultRow).where(
+            ToolFailureAnalysisResultRow.job_id == result.job_id
+        )
+    )
+    if row is not None and row.job_id != result.job_id:
+        raise ValueError("tool failure analysis result identity cannot be reassigned")
+    if by_job is not None and by_job.result_id != result.result_id:
+        raise ValueError("tool failure analysis job already has another result")
+    existing = row or by_job
+    if existing is not None:
+        identity = (
+            existing.job_id,
+            existing.signal_id,
+            existing.session_id,
+            existing.collection_id,
+            existing.tool_call_id,
+            existing.assistant_message_id,
+            existing.result_message_id,
+        )
+        requested_identity = (
+            result.job_id,
+            result.signal_id,
+            result.session_id,
+            result.collection_id,
+            result.tool_call_id,
+            result.assistant_message_id,
+            result.result_message_id,
+        )
+        if identity != requested_identity:
+            raise ValueError("tool failure analysis result identity cannot be reassigned")
+    if row is None:
+        row = by_job or ToolFailureAnalysisResultRow(result_id=result.result_id)
+        if by_job is None:
+            session.add(row)
+    row.job_id = result.job_id
+    row.signal_id = result.signal_id
+    row.signal_type = result.signal_type
+    row.session_id = result.session_id
+    row.collection_id = result.collection_id
+    row.tool_call_id = result.tool_call_id
+    row.assistant_message_id = result.assistant_message_id
+    row.result_message_id = result.result_message_id
+    row.tool_name = result.tool_name
+    row.error_code = result.error_code
+    row.problem_type = result.problem_type
+    row.confidence = result.confidence
+    row.related_message_ids = list(result.related_message_ids)
+    row.suggested_evidence = list(result.suggested_evidence)
+    row.suggested_target = result.suggested_target
+    row.evidence_coverage = result.evidence_coverage.to_record()
+    row.model = result.model
+    row.input_digest = result.input_digest
+    row.created_at = _datetime(result.created_at)
+    return row
+
+
 def _result(row: FeedbackAnalysisResultRow) -> AnalysisResult:
     from domain.feedback.evidence_coverage import EvidenceCoverage
 
@@ -602,6 +765,33 @@ def _correction_result(
     )
 
 
+def _tool_failure_result(row: ToolFailureAnalysisResultRow) -> ToolFailureAnalysisResult:
+    from domain.feedback.evidence_coverage import EvidenceCoverage
+
+    return ToolFailureAnalysisResult(
+        result_id=row.result_id,
+        job_id=row.job_id,
+        signal_id=row.signal_id,
+        signal_type=row.signal_type,
+        session_id=row.session_id,
+        collection_id=row.collection_id,
+        tool_call_id=row.tool_call_id,
+        assistant_message_id=row.assistant_message_id,
+        result_message_id=row.result_message_id,
+        tool_name=row.tool_name,
+        error_code=row.error_code,
+        problem_type=row.problem_type,
+        confidence=float(row.confidence),
+        related_message_ids=tuple(row.related_message_ids or ()),
+        suggested_evidence=tuple(row.suggested_evidence or ()),
+        suggested_target=row.suggested_target,
+        evidence_coverage=EvidenceCoverage.from_record(row.evidence_coverage),
+        model=row.model,
+        input_digest=row.input_digest,
+        created_at=_iso(row.created_at),
+    )
+
+
 def _case(row: FeedbackCaseRow) -> FeedbackCase:
     return FeedbackCase(
         case_id=row.case_id,
@@ -616,6 +806,9 @@ def _case(row: FeedbackCaseRow) -> FeedbackCase:
         updated_at=_iso(row.updated_at),
         annotation_digest=row.annotation_digest,
         signal_analysis_result_ids=tuple(row.signal_analysis_result_ids or ()),
+        tool_failure_analysis_result_ids=tuple(
+            row.tool_failure_analysis_result_ids or ()
+        ),
     )
 
 

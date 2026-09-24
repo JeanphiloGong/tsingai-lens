@@ -32,6 +32,7 @@ class FeedbackCase:
     updated_at: str
     annotation_digest: str | None = None
     signal_analysis_result_ids: tuple[str, ...] = ()
+    tool_failure_analysis_result_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -47,6 +48,11 @@ class FeedbackCase:
             self,
             "signal_analysis_result_ids",
             tuple(self.signal_analysis_result_ids),
+        )
+        object.__setattr__(
+            self,
+            "tool_failure_analysis_result_ids",
+            tuple(self.tool_failure_analysis_result_ids),
         )
         object.__setattr__(self, "context_snapshot", dict(self.context_snapshot))
 
@@ -64,4 +70,5 @@ class FeedbackCase:
             "updated_at": self.updated_at,
             "annotation_digest": self.annotation_digest,
             "signal_analysis_result_ids": list(self.signal_analysis_result_ids),
+            "tool_failure_analysis_result_ids": list(self.tool_failure_analysis_result_ids),
         }

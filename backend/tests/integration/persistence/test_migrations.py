@@ -30,7 +30,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260925_0076"
+HEAD_REVISION = "20260925_0077"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 
@@ -290,6 +290,10 @@ def test_feedback_signal_migration_replays_without_changing_p1_result_identity(t
         assert "signal_analysis_result_ids" in {
             column["name"] for column in initial.get_columns("feedback_cases")
         }
+        assert "tool_failure_analysis_results" in initial.get_table_names()
+        assert "tool_failure_analysis_result_ids" in {
+            column["name"] for column in initial.get_columns("feedback_cases")
+        }
 
         command.downgrade(config, "20260924_0075")
         after_downgrade = inspect(connection)
@@ -298,6 +302,11 @@ def test_feedback_signal_migration_replays_without_changing_p1_result_identity(t
         )
         assert "feedback_signal_analysis_results" not in after_downgrade.get_table_names()
         assert "signal_analysis_result_ids" not in {
+            column["name"]
+            for column in after_downgrade.get_columns("feedback_cases")
+        }
+        assert "tool_failure_analysis_results" not in after_downgrade.get_table_names()
+        assert "tool_failure_analysis_result_ids" not in {
             column["name"]
             for column in after_downgrade.get_columns("feedback_cases")
         }
@@ -312,6 +321,10 @@ def test_feedback_signal_migration_replays_without_changing_p1_result_identity(t
         replayed = inspect(connection)
         assert "feedback_signal_analysis_results" in replayed.get_table_names()
         assert "signal_analysis_result_ids" in {
+            column["name"] for column in replayed.get_columns("feedback_cases")
+        }
+        assert "tool_failure_analysis_results" in replayed.get_table_names()
+        assert "tool_failure_analysis_result_ids" in {
             column["name"] for column in replayed.get_columns("feedback_cases")
         }
         replayed_result_columns = {

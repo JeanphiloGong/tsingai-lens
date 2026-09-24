@@ -16,6 +16,11 @@ from domain.feedback.correction_signal import (
     CORRECTION_SIGNAL_PAYLOAD_VERSION,
     correction_signal_idempotency_key,
 )
+from domain.feedback.tool_failure import (
+    TOOL_FAILURE_JOB_TYPE,
+    TOOL_FAILURE_PAYLOAD_VERSION,
+    tool_failure_idempotency_key,
+)
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
 
 
@@ -158,6 +163,89 @@ class PostgresAnalysisJobRepository:
                 _ensure_correction_identity(existing, payload)
                 return _job(existing)
 
+    async def enqueue_tool_failure_analysis(
+        self,
+        *,
+        session_id: str,
+        tool_call_id: str,
+        assistant_message_id: str,
+        result_message_id: str,
+        result_digest: str,
+        idempotency_key: str,
+        now: str,
+    ) -> AnalysisJob:
+        """Queue one immutable failed tool result for isolated analysis."""
+
+        values = tuple(
+            str(value or "").strip()
+            for value in (
+                session_id,
+                tool_call_id,
+                assistant_message_id,
+                result_message_id,
+                result_digest,
+                idempotency_key,
+            )
+        )
+        if any(not value for value in values):
+            raise ValueError("tool failure job identity is required")
+        expected_key = tool_failure_idempotency_key(
+            session_id=session_id,
+            tool_call_id=tool_call_id,
+            assistant_message_id=assistant_message_id,
+            result_message_id=result_message_id,
+            result_digest=result_digest,
+        )
+        if idempotency_key != expected_key:
+            raise ValueError("tool failure idempotency key does not match payload")
+        timestamp = _datetime(now)
+        payload = {
+            "session_id": session_id,
+            "tool_call_id": tool_call_id,
+            "assistant_message_id": assistant_message_id,
+            "result_message_id": result_message_id,
+            "result_digest": result_digest,
+        }
+        try:
+            async with self.session_factory.begin() as session:
+                existing = await session.scalar(
+                    select(AnalysisJobRow).where(
+                        AnalysisJobRow.idempotency_key == idempotency_key
+                    )
+                )
+                if existing is not None:
+                    _ensure_tool_failure_identity(existing, payload)
+                    return _job(existing)
+                row = AnalysisJobRow(
+                    job_id=f"job_{uuid4().hex[:32]}",
+                    job_type=TOOL_FAILURE_JOB_TYPE,
+                    payload_version=TOOL_FAILURE_PAYLOAD_VERSION,
+                    payload=payload,
+                    status="pending",
+                    available_at=timestamp,
+                    started_at=None,
+                    finished_at=None,
+                    result_id=None,
+                    error_code=None,
+                    idempotency_key=idempotency_key,
+                    created_at=timestamp,
+                    updated_at=timestamp,
+                )
+                session.add(row)
+                await session.flush()
+                return _job(row)
+        except IntegrityError:
+            async with self.session_factory() as session:
+                existing = await session.scalar(
+                    select(AnalysisJobRow).where(
+                        AnalysisJobRow.idempotency_key == idempotency_key
+                    )
+                )
+                if existing is None:
+                    raise
+                _ensure_tool_failure_identity(existing, payload)
+                return _job(existing)
+
     async def claim_next_feedback_analysis_job(self, now: str) -> AnalysisJob | None:
         timestamp = _datetime(now)
         async with self.session_factory.begin() as session:
@@ -193,6 +281,32 @@ class PostgresAnalysisJobRepository:
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == CORRECTION_SIGNAL_JOB_TYPE,
+                    AnalysisJobRow.status == "pending",
+                    AnalysisJobRow.available_at <= timestamp,
+                )
+                .order_by(
+                    AnalysisJobRow.available_at,
+                    AnalysisJobRow.created_at,
+                    AnalysisJobRow.job_id,
+                )
+                .with_for_update(skip_locked=True)
+                .limit(1)
+            )
+            if row is None:
+                return None
+            row.status = "running"
+            row.started_at = timestamp
+            row.updated_at = timestamp
+            await session.flush()
+            return _job(row)
+
+    async def claim_next_tool_failure_analysis_job(self, now: str) -> AnalysisJob | None:
+        timestamp = _datetime(now)
+        async with self.session_factory.begin() as session:
+            row = await session.scalar(
+                select(AnalysisJobRow)
+                .where(
+                    AnalysisJobRow.job_type == TOOL_FAILURE_JOB_TYPE,
                     AnalysisJobRow.status == "pending",
                     AnalysisJobRow.available_at <= timestamp,
                 )
@@ -430,6 +544,13 @@ def _ensure_correction_identity(
     row: AnalysisJobRow, payload: dict[str, str]
 ) -> None:
     if row.job_type != CORRECTION_SIGNAL_JOB_TYPE or dict(row.payload or {}) != payload:
+        raise ValueError("idempotency key is already bound to another analysis input")
+
+
+def _ensure_tool_failure_identity(
+    row: AnalysisJobRow, payload: dict[str, str]
+) -> None:
+    if row.job_type != TOOL_FAILURE_JOB_TYPE or dict(row.payload or {}) != payload:
         raise ValueError("idempotency key is already bound to another analysis input")
 
 

@@ -254,6 +254,75 @@ class FeedbackSignalAnalysisResultRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ToolFailureAnalysisResultRow(Base):
+    """Candidate analysis tied to one durable failed Chat tool result."""
+
+    __tablename__ = "tool_failure_analysis_results"
+    __table_args__ = (
+        CheckConstraint(
+            "signal_type IN ('tool_failure')",
+            name="tool_failure_analysis_signal_type_valid",
+        ),
+        CheckConstraint(
+            "problem_type = 'tool_failure'",
+            name="tool_failure_analysis_problem_type_valid",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="tool_failure_analysis_confidence_range",
+        ),
+        CheckConstraint(
+            "suggested_target IS NULL",
+            name="tool_failure_analysis_target_absent",
+        ),
+        CheckConstraint(
+            "length(input_digest) = 64",
+            name="tool_failure_analysis_input_digest_length",
+        ),
+        UniqueConstraint("job_id", name="uq_tool_failure_analysis_results_job_id"),
+        UniqueConstraint(
+            "tool_call_id", "result_message_id",
+            name="uq_tool_failure_analysis_results_observation",
+        ),
+    )
+
+    result_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("analysis_jobs.job_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    signal_id: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    signal_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    collection_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    tool_call_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    assistant_message_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    result_message_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    tool_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    error_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    problem_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    related_message_ids: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    suggested_evidence: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    suggested_target: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_coverage: Mapped[dict[str, Any]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False
+    )
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class FeedbackCaseRow(Base):
     """Human-facing case assembled from one or more analysis signals."""
 
@@ -299,6 +368,9 @@ class FeedbackCaseRow(Base):
         _JSON_DOCUMENT, nullable=False, default=list
     )
     signal_analysis_result_ids: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    tool_failure_analysis_result_ids: Mapped[list[str]] = mapped_column(
         _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
     )
     context_snapshot: Mapped[dict[str, Any]] = mapped_column(
@@ -463,6 +535,7 @@ __all__ = [
     "AnalysisJobRow",
     "ChatModelCallRow",
     "FeedbackAnalysisResultRow",
+    "ToolFailureAnalysisResultRow",
     "FeedbackCaseRow",
     "FeedbackAnnotationRow",
     "FeedbackReviewDecisionRow",

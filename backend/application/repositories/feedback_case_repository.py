@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
+from domain.feedback.tool_failure import ToolFailureAnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.review_decision import ReviewDecision
@@ -36,6 +37,19 @@ class FeedbackCaseRepository(Protocol):
         now: str,
     ) -> FeedbackCase: ...
 
+    async def save_tool_failure_analysis_result(
+        self, result: ToolFailureAnalysisResult
+    ) -> ToolFailureAnalysisResult: ...
+
+    async def upsert_case_from_tool_failure(
+        self,
+        result: ToolFailureAnalysisResult,
+        *,
+        context_snapshot: dict[str, Any],
+        source_signal_ids: tuple[str, ...] = (),
+        now: str,
+    ) -> FeedbackCase: ...
+
     async def read_case(self, case_id: str) -> FeedbackCase | None: ...
 
     async def read_analysis_results(
@@ -45,6 +59,10 @@ class FeedbackCaseRepository(Protocol):
     async def read_correction_signal_analysis_results(
         self, result_ids: tuple[str, ...]
     ) -> tuple[CorrectionSignalAnalysisResult, ...]: ...
+
+    async def read_tool_failure_analysis_results(
+        self, result_ids: tuple[str, ...]
+    ) -> tuple[ToolFailureAnalysisResult, ...]: ...
 
     async def list_cases(
         self,

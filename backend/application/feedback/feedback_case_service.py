@@ -102,6 +102,14 @@ class FeedbackCaseService:
             if signal_reader is not None
             else ()
         )
+        tool_failure_reader = getattr(
+            self.case_repository, "read_tool_failure_analysis_results", None
+        )
+        tool_failure_results = (
+            await tool_failure_reader(case.tool_failure_analysis_result_ids)
+            if tool_failure_reader is not None
+            else ()
+        )
         feedback_items: list[Any] = []
         for signal_id in case.source_signal_ids:
             item = await self.chat_repository.read_feedback_by_id(signal_id)
@@ -134,6 +142,7 @@ class FeedbackCaseService:
             decisions,
             signal_results=signal_results,
             correction_items=correction_items,
+            tool_failure_results=tool_failure_results,
         )
 
     async def save_annotation_for_user(
@@ -211,7 +220,15 @@ class FeedbackCaseService:
             if signal_reader is not None
             else ()
         )
-        return case, (*results, *signal_results)
+        tool_failure_reader = getattr(
+            self.case_repository, "read_tool_failure_analysis_results", None
+        )
+        tool_failure_results = (
+            await tool_failure_reader(case.tool_failure_analysis_result_ids)
+            if tool_failure_reader is not None
+            else ()
+        )
+        return case, (*results, *signal_results, *tool_failure_results)
 
     async def _read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
         reader = getattr(self.case_repository, "read_annotation", None)
@@ -335,7 +352,15 @@ class FeedbackCaseService:
             if signal_reader is not None
             else ()
         )
-        result = _latest_result((*results, *signal_results))
+        tool_failure_reader = getattr(
+            self.case_repository, "read_tool_failure_analysis_results", None
+        )
+        tool_failure_results = (
+            await tool_failure_reader(case.tool_failure_analysis_result_ids)
+            if tool_failure_reader is not None
+            else ()
+        )
+        result = _latest_result((*results, *signal_results, *tool_failure_results))
         needs_review = case.status in {
             "detected",
             "collecting_context",
@@ -377,8 +402,9 @@ def _detail(
     *,
     signal_results: tuple[Any, ...] = (),
     correction_items: tuple[dict[str, Any], ...] = (),
+    tool_failure_results: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
-    latest = _latest_result((*results, *signal_results))
+    latest = _latest_result((*results, *signal_results, *tool_failure_results))
     answer = next(
         (message for message in messages if message.message_id == case.anchor_message_id),
         None,
@@ -407,7 +433,7 @@ def _detail(
                 "created_at": item.created_at,
             }
             for item in feedback
-        ] + list(correction_items),
+        ] + list(correction_items) + list(_tool_failure_records(tool_failure_results)),
         "question": question,
         "answer": answer.content if answer is not None else str(case.context_snapshot.get("answer") or ""),
         "requested_scope": _readable_scope(
@@ -450,10 +476,20 @@ def _analysis_projection(result: Any) -> dict[str, Any]:
             {
                 "signal_type": result.signal_type,
                 "signal_id": result.signal_id,
-                "trigger_message_id": result.trigger_message_id,
                 "resolution": "unresolved_candidate",
             }
         )
+        if hasattr(result, "trigger_message_id"):
+            projection["trigger_message_id"] = result.trigger_message_id
+        if hasattr(result, "tool_call_id"):
+            projection.update(
+                {
+                    "tool_call_id": result.tool_call_id,
+                    "result_message_id": result.result_message_id,
+                    "tool_name": result.tool_name,
+                    "error_code": result.error_code,
+                }
+            )
     else:
         projection["signal_type"] = "chat_message_feedback"
         projection["feedback_id"] = result.feedback_id
@@ -487,6 +523,26 @@ def _correction_signal_records(
             }
         )
     return tuple(records)
+
+
+def _tool_failure_records(results: tuple[Any, ...]) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "signal_type": result.signal_type,
+            "signal_id": result.signal_id,
+            "tool_call_id": result.tool_call_id,
+            "assistant_message_id": result.assistant_message_id,
+            "result_message_id": result.result_message_id,
+            "tool_name": result.tool_name,
+            "error_code": result.error_code,
+            "problem_type": result.problem_type,
+            "confidence": result.confidence,
+            "suggested_target": None,
+            "resolution": "unresolved_candidate",
+            "created_at": result.created_at,
+        }
+        for result in results
+    )
 
 
 def _case_source_refs(

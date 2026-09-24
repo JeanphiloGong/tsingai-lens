@@ -94,6 +94,8 @@ from application.feedback import (
     CorrectionSignalAnalysisWorker,
     FeedbackAnalysisHandler,
     FeedbackAnalysisWorker,
+    ToolFailureAnalysisHandler,
+    ToolFailureAnalysisWorker,
 )
 from application.feedback.dataset_snapshot_service import DatasetSnapshotService
 from application.feedback.feedback_case_service import FeedbackCaseService
@@ -281,6 +283,7 @@ class ApplicationOverrides:
     feedback_case_service: FeedbackCaseService | None = None
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None
+    tool_failure_analysis_worker: ToolFailureAnalysisWorker | None = None
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None
     dataset_snapshot_service: DatasetSnapshotService | None = None
     paper_experiment_repository: PaperExperimentRepository | None = None
@@ -341,6 +344,7 @@ class ApplicationRuntime:
     feedback_case_service: FeedbackCaseService | None
     feedback_analysis_worker: FeedbackAnalysisWorker | None
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None
+    tool_failure_analysis_worker: ToolFailureAnalysisWorker | None
     dataset_snapshot_repository: DatasetSnapshotRepository | None
     dataset_snapshot_service: DatasetSnapshotService | None
     experiment_plan_service: ExperimentPlanService
@@ -529,6 +533,19 @@ async def build_application_runtime(
                 job_repository=analysis_job_repository,
                 case_repository=feedback_case_repository,
                 handler=CorrectionSignalAnalysisHandler(chat_repository=chat_repository),
+            )
+
+        tool_failure_analysis_worker = overrides.tool_failure_analysis_worker
+        if (
+            tool_failure_analysis_worker is None
+            and analysis_job_repository is not None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            tool_failure_analysis_worker = ToolFailureAnalysisWorker(
+                job_repository=analysis_job_repository,
+                case_repository=feedback_case_repository,
+                handler=ToolFailureAnalysisHandler(chat_repository=chat_repository),
             )
 
         feedback_case_service = overrides.feedback_case_service
@@ -823,6 +840,7 @@ async def build_application_runtime(
             feedback_case_service=feedback_case_service,
             feedback_analysis_worker=feedback_analysis_worker,
             correction_signal_analysis_worker=correction_signal_analysis_worker,
+            tool_failure_analysis_worker=tool_failure_analysis_worker,
             dataset_snapshot_repository=dataset_snapshot_repository,
             dataset_snapshot_service=dataset_snapshot_service,
             experiment_plan_service=experiment_plan_service,
@@ -874,6 +892,7 @@ def install_application_runtime(
     application.state.correction_signal_analysis_worker = (
         runtime.correction_signal_analysis_worker
     )
+    application.state.tool_failure_analysis_worker = runtime.tool_failure_analysis_worker
     application.state.dataset_snapshot_repository = runtime.dataset_snapshot_repository
     application.state.dataset_snapshot_service = runtime.dataset_snapshot_service
     application.state.experiment_plan_service = runtime.experiment_plan_service
@@ -1041,6 +1060,7 @@ def create_app(
     feedback_case_service: FeedbackCaseService | None = None,
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None,
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None,
+    tool_failure_analysis_worker: ToolFailureAnalysisWorker | None = None,
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None,
     dataset_snapshot_service: DatasetSnapshotService | None = None,
     paper_experiment_repository: PaperExperimentRepository | None = None,
@@ -1070,6 +1090,7 @@ def create_app(
         feedback_case_service=feedback_case_service,
         feedback_analysis_worker=feedback_analysis_worker,
         correction_signal_analysis_worker=correction_signal_analysis_worker,
+        tool_failure_analysis_worker=tool_failure_analysis_worker,
         dataset_snapshot_repository=dataset_snapshot_repository,
         dataset_snapshot_service=dataset_snapshot_service,
         paper_experiment_repository=paper_experiment_repository,

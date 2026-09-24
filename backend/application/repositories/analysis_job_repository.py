@@ -28,11 +28,25 @@ class AnalysisJobRepository(Protocol):
         now: str,
     ) -> AnalysisJob: ...
 
+    async def enqueue_tool_failure_analysis(
+        self,
+        *,
+        session_id: str,
+        tool_call_id: str,
+        assistant_message_id: str,
+        result_message_id: str,
+        result_digest: str,
+        idempotency_key: str,
+        now: str,
+    ) -> AnalysisJob: ...
+
     async def claim_next_feedback_analysis_job(self, now: str) -> AnalysisJob | None: ...
 
     async def claim_next_correction_signal_analysis_job(
         self, now: str
     ) -> AnalysisJob | None: ...
+
+    async def claim_next_tool_failure_analysis_job(self, now: str) -> AnalysisJob | None: ...
 
     async def cancel_feedback_analysis_jobs(
         self, feedback_id: str, finished_at: str

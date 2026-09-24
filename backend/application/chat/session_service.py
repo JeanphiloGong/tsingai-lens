@@ -43,6 +43,7 @@ from domain.feedback.correction_signal import (
     correction_signal_idempotency_key,
     is_correction_challenge,
 )
+from domain.feedback.tool_failure import tool_failure_idempotency_key, tool_result_digest
 
 
 logger = logging.getLogger(__name__)
@@ -575,6 +576,11 @@ class ChatSessionService:
                     result,
                     warnings=(*result.warnings, "correction_signal_enqueue_failed"),
                 )
+            if await self._enqueue_tool_failure_candidates(session, result=result) is False:
+                result = replace(
+                    result,
+                    warnings=(*result.warnings, "tool_failure_enqueue_failed"),
+                )
         return self._turn_record(result, previous_count=len(previous_messages))
 
     async def stream_message_for_user(
@@ -639,6 +645,11 @@ class ChatSessionService:
                                 *result.warnings,
                                 "correction_signal_enqueue_failed",
                             ),
+                        )
+                    if await self._enqueue_tool_failure_candidates(session, result=result) is False:
+                        result = replace(
+                            result,
+                            warnings=(*result.warnings, "tool_failure_enqueue_failed"),
                         )
                     emit(
                         {
@@ -752,6 +763,81 @@ class ChatSessionService:
             )
             return False
         return True
+
+    async def _enqueue_tool_failure_candidates(
+        self,
+        session: ChatSession,
+        *,
+        result: AgentRunResult,
+    ) -> bool | None:
+        """Queue failed tool observations after their trajectory checkpoint."""
+
+        repository = self.analysis_job_repository
+        enqueue = getattr(repository, "enqueue_tool_failure_analysis", None)
+        if enqueue is None:
+            return None
+        calls = {call.tool_call_id: call for call in result.tool_calls}
+        messages = {message.message_id: message for message in result.messages}
+        result_messages = {
+            message.tool_call_id: message
+            for message in result.messages
+            if message.role.value == "tool"
+            and message.tool_result is not None
+            and message.tool_call_id
+        }
+        excluded_errors = {
+            "user_rejected",
+            "permission_write_denied",
+            "tool_permission_denied",
+            "current_request_prohibits_write",
+        }
+        queued = False
+        failed = False
+        for tool_result in result.tool_results:
+            if tool_result.status is not ToolResultStatus.FAILED:
+                continue
+            if tool_result.error_code in excluded_errors:
+                continue
+            call = calls.get(tool_result.tool_call_id)
+            result_message = result_messages.get(tool_result.tool_call_id)
+            if call is None or result_message is None:
+                continue
+            assistant = messages.get(call.assistant_message_id)
+            if (
+                assistant is None
+                or assistant.session_id != session.session_id
+                or result_message.session_id != session.session_id
+            ):
+                continue
+            digest = tool_result_digest(tool_result.to_record())
+            key = tool_failure_idempotency_key(
+                session_id=session.session_id,
+                tool_call_id=call.tool_call_id,
+                assistant_message_id=call.assistant_message_id,
+                result_message_id=result_message.message_id,
+                result_digest=digest,
+            )
+            queued = True
+            try:
+                await enqueue(
+                    session_id=session.session_id,
+                    tool_call_id=call.tool_call_id,
+                    assistant_message_id=call.assistant_message_id,
+                    result_message_id=result_message.message_id,
+                    result_digest=digest,
+                    idempotency_key=key,
+                    now=_now_iso(),
+                )
+            except Exception:  # noqa: BLE001
+                failed = True
+                logger.exception(
+                    "tool failure enqueue failed session_id=%s tool_call_id=%s",
+                    session.session_id,
+                    call.tool_call_id,
+                )
+        if failed:
+            return False
+        return True if queued else None
 
     async def _run_response(
         self, session: ChatSession, *, previous_messages: tuple[ChatMessage, ...],
@@ -1150,6 +1236,11 @@ class ChatSessionService:
                 previous_messages=previous_messages,
                 claimed_call=claimed,
             )
+            if await self._enqueue_tool_failure_candidates(session, result=run_result) is False:
+                run_result = replace(
+                    run_result,
+                    warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
+                )
         return self._turn_record(
             run_result,
             previous_count=len(previous_messages),

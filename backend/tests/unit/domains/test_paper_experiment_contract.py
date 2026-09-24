@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+import pytest
+
+from domain.core.paper_experiment import (
+    ExperimentComparison,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
+    ExperimentalVariant,
+    PaperExperimentRevision,
+)
+
+
+def _experiment_payload() -> dict:
+    return {
+        "experiment_id": "exp-1",
+        "document_id": "doc-1",
+        "experiment_version": 1,
+        "source_fingerprint": "prep-1",
+        "label": "Preheat tensile series",
+        "scope_description": "A, B, and C under one tensile method",
+        "design_type": "parallel",
+        "identity_status": "identified",
+        "binding_status": "bound",
+        "variants": [
+            {"variant_key": "A", "variant_label": "NP"},
+            {"variant_key": "B", "variant_label": "P150"},
+            {"variant_key": "C", "variant_label": "P200"},
+        ],
+        "test_conditions": [{"test_key": "tensile-1", "test_type": "tensile"}],
+        "measurements": [
+            {
+                "measurement_key": "a-elongation",
+                "outcome": "elongation",
+                "variant_key": "A",
+                "test_key": "tensile-1",
+                "value": 72,
+                "unit": "%",
+                "binding_status": "direct",
+            },
+            {
+                "measurement_key": "b-elongation",
+                "outcome": "elongation",
+                "variant_key": "B",
+                "test_key": "tensile-1",
+                "value": 82,
+                "unit": "%",
+                "binding_status": "direct",
+            },
+            {
+                "measurement_key": "c-elongation",
+                "outcome": "elongation",
+                "variant_key": "C",
+                "test_key": "tensile-1",
+                "value": 85,
+                "unit": "%",
+                "binding_status": "direct",
+            },
+            {
+                "measurement_key": "a-strength",
+                "outcome": "yield_strength",
+                "variant_key": "A",
+                "test_key": "tensile-1",
+                "value": 500,
+                "unit": "MPa",
+                "binding_status": "direct",
+            },
+        ],
+    }
+
+
+def test_revision_preserves_multi_variant_multi_outcome_table() -> None:
+    experiment = PaperExperimentRevision.from_mapping(_experiment_payload())
+
+    assert [item.variant_key for item in experiment.variants] == ["A", "B", "C"]
+    assert {item.outcome for item in experiment.measurements} == {
+        "elongation",
+        "yield_strength",
+    }
+    restored = PaperExperimentRevision.from_mapping(experiment.to_record())
+    assert restored.to_record() == experiment.to_record()
+
+
+def test_measurement_cannot_reference_variant_outside_revision() -> None:
+    payload = _experiment_payload()
+    payload["measurements"][0]["variant_key"] = "missing"
+
+    with pytest.raises(ValueError, match="variant outside"):
+        PaperExperimentRevision.from_mapping(payload)
+
+
+def test_duplicate_variant_keys_are_rejected() -> None:
+    payload = _experiment_payload()
+    payload["variants"].append({"variant_key": "A", "variant_label": "duplicate"})
+
+    with pytest.raises(ValueError, match="variant keys must be unique"):
+        PaperExperimentRevision.from_mapping(payload)
+
+
+def test_comparison_must_use_same_outcome_measurements() -> None:
+    payload = _experiment_payload()
+    payload["comparisons"] = [
+        {
+            "comparison_key": "a-to-b",
+            "baseline_variant_key": "A",
+            "target_variant_key": "B",
+            "outcome": "elongation",
+            "baseline_measurement_keys": ["a-elongation"],
+            "target_measurement_keys": ["a-strength"],
+        }
+    ]
+
+    with pytest.raises(ValueError, match="share the comparison outcome"):
+        PaperExperimentRevision.from_mapping(payload)
+
+
+def test_reported_result_can_preserve_non_numeric_text_and_unresolved_issue() -> None:
+    payload = _experiment_payload()
+    payload["measurements"].append(
+        {
+            "measurement_key": "b-text",
+            "outcome": "fracture_mode",
+            "variant_key": "B",
+            "test_key": "tensile-1",
+            "result_text": "ductile-looking fracture",
+        }
+    )
+    payload["unresolved_issues"] = [
+        {"target_ref": "measurements/b-text", "description": "test temperature unknown"}
+    ]
+
+    experiment = PaperExperimentRevision.from_mapping(payload)
+
+    assert experiment.measurements[-1].value is None
+    assert experiment.measurements[-1].result_text == "ductile-looking fracture"
+    assert experiment.unresolved_issues[0]["target_ref"] == "measurements/b-text"

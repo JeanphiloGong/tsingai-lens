@@ -5,6 +5,13 @@
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { ChevronDown, Quote, X, ArrowUpRight } from '@lucide/svelte';
 	import type { ChatSourceContext } from '../../../_shared/chatSessions';
+	import {
+		matchingResearchAgentSlashCommands,
+		resolveResearchAgentSlashCommand,
+		slashCommandToken,
+		type ResearchAgentSlashCommand,
+		type ResearchAgentSlashCommandName
+	} from '../../../_shared/researchAgentSlashCommands';
 	import type { PaperUploadItem } from './messageComposer';
 
 	export let collectionId = '';
@@ -15,6 +22,8 @@
 	export let hasExtraContext = false;
 	export let onInput: (value: string) => void = () => {};
 	export let onSend: (nextText?: string) => void = () => {};
+	export let onCommand: (command: ResearchAgentSlashCommandName) => void = () => {};
+	export let onUnknownCommand: (name: string) => void = () => {};
 	export let onRemovePendingSourceContexts: (index: number) => void = () => {};
 	export let onClearPendingSourceContexts: () => void = () => {};
 	$: sourceGroups = Array.from(
@@ -27,11 +36,79 @@
 	}));
 
 	let uploadInput: HTMLInputElement | null = null;
+	let messageInput: HTMLTextAreaElement | null = null;
+	let commandMenuOpen = false;
+	let commandIndex = 0;
+	$: commandMatches = matchingResearchAgentSlashCommands(input);
+	$: if (commandIndex >= commandMatches.length) commandIndex = 0;
+	$: if (!commandMatches.length) commandMenuOpen = false;
 
 	function handleComposerKeydown(event: KeyboardEvent) {
+		if (commandMenuOpen && commandMatches.length) {
+			if (event.key === 'ArrowDown') {
+				event.preventDefault();
+				commandIndex = (commandIndex + 1) % commandMatches.length;
+				return;
+			}
+			if (event.key === 'ArrowUp') {
+				event.preventDefault();
+				commandIndex = (commandIndex - 1 + commandMatches.length) % commandMatches.length;
+				return;
+			}
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				commandMenuOpen = false;
+				return;
+			}
+			if (event.key === 'Tab') {
+				event.preventDefault();
+				selectCommand(commandMatches[commandIndex]);
+				return;
+			}
+			if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+				event.preventDefault();
+				if (resolveResearchAgentSlashCommand(input)) executeCommand();
+				else selectCommand(commandMatches[commandIndex]);
+				return;
+			}
+		}
 		if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229)
 			return;
 		event.preventDefault();
+		handleSubmit();
+	}
+
+	function handleInput(value: string) {
+		onInput(value);
+		commandMenuOpen = value.startsWith('/') && !/\s/.test(value);
+		commandIndex = 0;
+	}
+
+	function selectCommand(command: ResearchAgentSlashCommand) {
+		onInput(`/${command.name}`);
+		commandMenuOpen = false;
+		commandIndex = 0;
+		requestAnimationFrame(() => messageInput?.focus());
+	}
+
+	function executeCommand() {
+		const command = resolveResearchAgentSlashCommand(input);
+		if (!command) return false;
+		onInput('');
+		commandMenuOpen = false;
+		commandIndex = 0;
+		onCommand(command.name);
+		return true;
+	}
+
+	function handleSubmit() {
+		if (executeCommand()) return;
+		const command = slashCommandToken(input);
+		if (command !== null) {
+			commandMenuOpen = false;
+			onUnknownCommand(command);
+			return;
+		}
 		onSend();
 	}
 
@@ -59,6 +136,11 @@
 				observer.disconnect();
 			}
 		};
+	}
+
+	function sourceHref(source: ChatSourceContext): `/collections/${string}` {
+		const documentPath = `/collections/${source.collection_id}/documents/${source.document_id}`;
+		return `${documentPath}?source_ref=${encodeURIComponent(source.source_ref)}` as `/collections/${string}`;
 	}
 	import {
 		isDuplicateCollectionDocumentError,
@@ -238,7 +320,7 @@
 	}
 </script>
 
-<form class="composer" on:submit|preventDefault={() => onSend()}>
+<form class="composer" on:submit|preventDefault={handleSubmit}>
 	<input
 		class="sr-only"
 		bind:this={uploadInput}
@@ -324,9 +406,7 @@
 									{#each group.items as { source, index } (`${source.source_kind}:${source.source_ref}`)}
 										<li data-testid="pending-source-context">
 											<div>
-												<a
-													href={`${resolve('/collections/[id]/documents/[document_id]', { id: collectionId, document_id: source.document_id })}?source_ref=${encodeURIComponent(source.source_ref)}`}
-												>
+												<a href={resolve(sourceHref(source))}>
 													<span
 														>{source.heading_path ||
 															$t('researchAgent.sourceContext.passage')}{#if source.page}
@@ -361,6 +441,33 @@
 		</div>
 	{/if}
 	<div class="composer-row">
+		{#if commandMenuOpen && commandMatches.length && !disabled}
+			<div
+				class="command-menu"
+				id="research-agent-command-menu"
+				role="listbox"
+				aria-label={$t('researchAgent.commands.menuLabel')}
+				data-testid="slash-command-menu"
+			>
+				<div class="command-menu-title">{$t('researchAgent.commands.menuLabel')}</div>
+				{#each commandMatches as command, index (command.name)}
+					<button
+						type="button"
+						role="option"
+						aria-selected={index === commandIndex}
+						class:active={index === commandIndex}
+						on:mousedown|preventDefault
+						on:click={() => selectCommand(command)}
+					>
+						<code>/{command.name}</code>
+						<span>
+							<strong>{$t(command.labelKey)}</strong>
+							<small>{$t(command.descriptionKey)}</small>
+						</span>
+					</button>
+				{/each}
+			</div>
+		{/if}
 		<div class="composer-shell">
 			<IconButton
 				className="add-papers"
@@ -372,12 +479,15 @@
 			<label class="sr-only" for="research-agent-message">{$t('researchAgent.messageLabel')}</label>
 			<textarea
 				id="research-agent-message"
+				bind:this={messageInput}
+				aria-autocomplete="list"
+				aria-controls="research-agent-command-menu"
 				rows="1"
 				value={input}
 				use:fitInput={input}
 				placeholder={$t('researchAgent.messagePlaceholder')}
 				{disabled}
-				on:input={(event) => onInput((event.currentTarget as HTMLTextAreaElement).value)}
+				on:input={(event) => handleInput((event.currentTarget as HTMLTextAreaElement).value)}
 				on:keydown={handleComposerKeydown}
 			></textarea>
 			<IconButton
@@ -418,6 +528,78 @@
 		flex: 0 0 auto;
 		width: min(100%, 900px);
 		margin: 0 auto;
+	}
+
+	.command-menu {
+		display: grid;
+		gap: 2px;
+		margin-bottom: 8px;
+		padding: 6px;
+		border: 1px solid var(--border-default);
+		border-radius: 8px;
+		background: var(--surface-card);
+		box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+	}
+
+	.command-menu-title {
+		padding: 5px 8px 7px;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.03em;
+		text-transform: uppercase;
+	}
+
+	.command-menu button {
+		display: grid;
+		grid-template-columns: 106px minmax(0, 1fr);
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		padding: 8px;
+		border: 0;
+		border-radius: 5px;
+		background: transparent;
+		color: var(--text-primary);
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.command-menu button:hover,
+	.command-menu button.active {
+		background: var(--bg-subtle);
+	}
+
+	.command-menu code {
+		color: var(--brand-primary);
+		font:
+			600 12px/1.3 ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			monospace;
+	}
+
+	.command-menu button span {
+		display: grid;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.command-menu button strong {
+		font-size: 12px;
+	}
+
+	.command-menu button small {
+		overflow: hidden;
+		color: var(--text-secondary);
+		font-size: 11px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.command-menu button:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: -2px;
 	}
 
 	.composer-shell {
@@ -726,6 +908,10 @@
 		.composer {
 			gap: 8px;
 			padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+		}
+
+		.command-menu button {
+			grid-template-columns: 92px minmax(0, 1fr);
 		}
 
 		.composer-shell {

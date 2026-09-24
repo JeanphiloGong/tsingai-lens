@@ -21,17 +21,26 @@
 	let permission: ChatPermission | null = null;
 	let mode: ChatPermission['mode'] = 'confirm';
 	let actions: string[] = [];
+	let duration: 'persistent' | 'temporary' = 'persistent';
+	let loadedDuration: 'persistent' | 'temporary' = 'persistent';
 	let hours = 1;
 	let loadedHours = 1;
 	let busy = false;
 	let error = '';
-	let disclosure: HTMLDetailsElement;
+	let disclosure: HTMLDetailsElement | undefined;
+
+	export function openPanel() {
+		if (!disclosure) return;
+		disclosure.open = true;
+		disclosure.querySelector('summary')?.focus();
+	}
 	$: hasPendingChanges = Boolean(
 		permission &&
 		(mode !== permission.mode ||
 			actions.length !== (permission?.actions.length ?? 0) ||
 			actions.some((action) => !(permission?.actions ?? []).includes(action)) ||
-			(mode === 'auto' && hours !== loadedHours))
+			(mode === 'auto' &&
+				(duration !== loadedDuration || (duration === 'temporary' && hours !== loadedHours))))
 	);
 	$: autoSelectionValid = mode !== 'auto' || actions.length > 0;
 	const available = [...AGENT_WRITE_ACTIONS];
@@ -53,6 +62,8 @@
 		permission = next;
 		mode = next.mode;
 		actions = [...next.actions];
+		duration = next.expires_at ? 'temporary' : 'persistent';
+		loadedDuration = duration;
 		hours = hoursUntil(next.expires_at);
 		loadedHours = hours;
 	}
@@ -78,9 +89,10 @@
 		try {
 			const nextMode = revoke ? 'confirm' : mode;
 			const expiresAt =
-				nextMode !== 'auto'
+				nextMode !== 'auto' || duration === 'persistent'
 					? null
 					: permission.mode === 'auto' &&
+						  duration === loadedDuration &&
 						  hasLiveExpiry(permission.expires_at) &&
 						  hours === loadedHours
 						? permission.expires_at
@@ -153,6 +165,13 @@
 									: 'agentPermission.actions'
 							)}</legend
 						>
+						<label
+							>{$t('agentPermission.duration')}
+							<select bind:value={duration}>
+								<option value="persistent">{$t('agentPermission.persistent')}</option>
+								<option value="temporary">{$t('agentPermission.temporary')}</option>
+							</select>
+						</label>
 						<label class="select-all"
 							><input
 								type="checkbox"
@@ -167,18 +186,28 @@
 								)}</label
 							>
 						{/each}
-						<label
-							>{$t('agentPermission.hours')}<input
-								type="number"
-								min="1"
-								max="24"
-								bind:value={hours}
-							/></label
-						>
+						{#if duration === 'temporary'}
+							<label
+								>{$t('agentPermission.hours')}<input
+									type="number"
+									min="1"
+									max="24"
+									bind:value={hours}
+								/></label
+							>
+						{:else}
+							<p class="permission-hint">{$t('agentPermission.persistentScope')}</p>
+						{/if}
 						<p class="permission-hint">{$t('agentPermission.automaticScope')}</p>
 						{#if hasAllActions()}
 							<p class="permission-warning" role="note">
 								{$t('agentPermission.automaticWarning')}
+								<br />
+								{$t(
+									duration === 'persistent'
+										? 'agentPermission.persistentWarning'
+										: 'agentPermission.temporaryWarning'
+								)}
 							</p>
 						{/if}
 					</fieldset>
@@ -189,14 +218,16 @@
 				{#if hasPendingChanges}<p class="permission-dirty" role="status">
 						{$t('agentPermission.unsaved')}
 					</p>{/if}
-				{#if permission.expires_at}<p>
+				{#if permission.mode === 'auto' && !permission.expires_at}<p>
+						{$t('agentPermission.persistentActive')}
+					</p>{:else if permission.expires_at}<p>
 						{$t('agentPermission.expires')}: {new Date(permission.expires_at).toLocaleString()}
 					</p>{/if}
 				<button
 					type="button"
 					disabled={busy ||
 						!autoSelectionValid ||
-						(mode === 'auto' && !(hours >= 1 && hours <= 24))}
+						(mode === 'auto' && duration === 'temporary' && !(hours >= 1 && hours <= 24))}
 					on:click={() => save()}>{$t('agentPermission.save')}</button
 				>
 				{#if permission.mode === 'auto'}<button

@@ -129,10 +129,16 @@ This node owns the Collection route family.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.
+  The composer also provides a Codex-style local slash-command menu.
+  `/permissions` opens the current session's authority controls, `/settings`
+  opens collection defaults, and `/status`, `/new`, `/history`, `/tree`, and
+  `/help` operate on the client conversation surface. These commands are
+  resolved before message submission and are never sent to the Agent as
+  research text.
 - `collections/[id]/settings/+page.svelte`
   Collection-level Agent permission defaults for newly created sessions. The
-  owner can choose read-only, per-write confirmation, or an expiring automatic
-  grant and can authorize the complete current write-action set. Existing
+  owner can choose read-only, per-write confirmation, or a persistent/temporary
+  automatic grant and can authorize the complete current write-action set. Existing
   sessions keep their own permission record and must be changed from the
   conversation control.
 

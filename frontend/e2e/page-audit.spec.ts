@@ -3022,6 +3022,23 @@ async function mockApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence-map`) {
 			return route.fulfill(json(objectiveEvidenceMap()));
 		}
+		if (/^\/api\/v1\/chat-sessions\/[^/]+\/permissions$/.test(path)) {
+			if (method === 'PUT') {
+				const body = route.request().postDataJSON() as Record<string, unknown>;
+				return route.fulfill(
+					json({
+						mode: body.mode ?? 'confirm',
+						actions: body.actions ?? [],
+						expires_at: body.expires_at ?? null,
+						revision: Number(body.expected_revision ?? 0) + 1
+					})
+				);
+			}
+			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
+		}
+		if (/^\/api\/v1\/collections\/[^/]+\/agent-permissions$/.test(path)) {
+			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
+		}
 		if (path === '/api/v1/chat-sessions') return route.fulfill(json(chatSession(), 201));
 		if (path === `/api/v1/chat-sessions/${sessionId}`) return route.fulfill(json(chatSession()));
 		if (path === `/api/v1/chat-sessions/${sessionId}/messages`) {

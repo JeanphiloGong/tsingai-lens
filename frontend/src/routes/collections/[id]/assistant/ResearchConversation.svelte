@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
@@ -45,6 +46,7 @@
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
+	import type { ResearchAgentSlashCommandName } from '../../../_shared/researchAgentSlashCommands';
 	import {
 		Plus,
 		History,
@@ -100,6 +102,7 @@
 	let revisionRequest: { key: string; id: string } | null = null;
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: ChatToolCall | null = null;
+	let permissionsPanel: { openPanel: () => void } | null = null;
 	let history: StoredChatSession[] = [];
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
 	let historyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1008,6 +1011,48 @@
 		input = value;
 	}
 
+	function handleSlashCommand(command: ResearchAgentSlashCommandName) {
+		switch (command) {
+			case 'permissions':
+				permissionsPanel?.openPanel();
+				return;
+			case 'settings':
+				void goto(resolve('/collections/[id]/settings', { id: collectionId }));
+				return;
+			case 'new':
+				void startNewSession();
+				return;
+			case 'history':
+				if (embedded) {
+					showHistory = !showHistory;
+					if (showHistory) void refreshHistoryActivities(true);
+				} else {
+					notice = $t('researchAgent.commands.historySidebar');
+				}
+				return;
+			case 'tree':
+				void openTree();
+				return;
+			case 'status': {
+				const status = pendingApproval
+					? $t('researchAgent.sessionState.approval')
+					: running || sending || recoveringCallId
+						? $t('researchAgent.sessionState.running')
+						: $t('researchAgent.commands.idleStatus');
+				notice = $t('researchAgent.commands.statusNotice', { status });
+				return;
+			}
+			case 'help':
+				notice = $t('researchAgent.commands.helpNotice');
+				return;
+		}
+	}
+
+	function handleUnknownSlashCommand(command: string) {
+		error = $t('researchAgent.commands.unknown', { command: `/${command}` });
+		notice = '';
+	}
+
 	function removePendingSourceContexts(index: number) {
 		pendingSourceContexts = pendingSourceContexts.filter((_, candidate) => candidate !== index);
 		storePendingChatSourceContexts(userId, collectionId, pendingSourceContexts);
@@ -1213,7 +1258,10 @@
 		{/if}
 
 		{#if session}
-			{#key session.session_id}<OperationPermissions sessionId={session.session_id} />{/key}
+			{#key session.session_id}<OperationPermissions
+					bind:this={permissionsPanel}
+					sessionId={session.session_id}
+				/>{/key}
 		{/if}
 		{#if error}
 			<div class="status status-error" role="alert">
@@ -1305,6 +1353,8 @@
 				hasExtraContext={!checkpointId && selectedPapers.length > 0}
 				onInput={handleComposerInput}
 				onSend={sendMessage}
+				onCommand={handleSlashCommand}
+				onUnknownCommand={handleUnknownSlashCommand}
 				onRemovePendingSourceContexts={removePendingSourceContexts}
 				onClearPendingSourceContexts={clearPendingSources}
 			>

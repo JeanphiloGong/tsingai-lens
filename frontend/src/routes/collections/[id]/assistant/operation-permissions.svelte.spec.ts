@@ -55,6 +55,7 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 	(screen.container.querySelector('button') as HTMLButtonElement).click();
 	await expect.poll(() => writes.length).toBe(1);
 	expect(writes[0].actions).toEqual(['create_evidence_version']);
+	expect(writes[0].expires_at).toBeNull();
 	expect(writes[0].expected_revision).toBe(0);
 	await expect.poll(() => screen.container.querySelectorAll('button').length).toBe(2);
 	(screen.container.querySelectorAll('button')[1] as HTMLButtonElement).click();

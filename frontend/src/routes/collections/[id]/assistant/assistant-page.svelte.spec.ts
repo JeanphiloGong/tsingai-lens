@@ -1,4 +1,4 @@
-import { page as browserPage } from 'vitest/browser';
+import { page as browserPage, userEvent } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { authState, fetchCurrentSession, login, logout } from '../../../_shared/auth';
@@ -321,6 +321,28 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
 			.toBeVisible();
+	});
+
+	it('executes slash commands locally instead of sending them as research text', async () => {
+		installApi();
+		const composer = await renderReady();
+		await composer.fill('/per');
+		await expect.element(browserPage.getByTestId('slash-command-menu')).toBeVisible();
+		await userEvent.keyboard('{Enter}');
+		await expect.element(composer).toHaveValue('/permissions');
+		await userEvent.keyboard('{Enter}');
+		await expect.element(browserPage.getByRole('combobox')).toBeVisible();
+		await composer.fill('/missing');
+		await userEvent.keyboard('{Enter}');
+		await expect
+			.element(browserPage.getByRole('alert'))
+			.toHaveTextContent('Unknown local command /missing');
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST'
+			)
+		).toBe(false);
 	});
 
 	it('prefills the exact Finding review without submitting or replacing researcher edits', async () => {

@@ -23,9 +23,10 @@ Collection screening stays separate from Source reading, and deriving a new
 Objective requires an explicit request. A Core write remains paused until the
 user approves the exact persisted arguments by default. The collection Settings
 page controls the default for new collection Agent sessions with read-only, per-call
-confirmation, and automatic grants that expire within 24 hours. A select-all control can authorize
+confirmation, and automatic grants. An automatic grant can stay active until revoked or be
+limited to at most 24 hours. A select-all control can authorize
 the complete current write-action set. The session permission control remains a
-temporary override for one active conversation; changing the collection default
+session-scoped override for one active conversation; changing the collection default
 never silently changes an active session. Branches continue to start with
 confirmation so a copied conversation cannot inherit automatic authority.
 Granting Evidence or Finding creation includes publishing its new analysis version. The control

@@ -38,6 +38,11 @@ from application.repositories.analysis_job_repository import AnalysisJobReposito
 from domain.chat.model_call import ModelCallInput, ModelCallOutcome, ModelCallObserver
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 from domain.chat.permissions import permits_automatic
+from domain.feedback.correction_signal import (
+    CorrectionSignal,
+    correction_signal_idempotency_key,
+    is_correction_challenge,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -558,6 +563,18 @@ class ChatSessionService:
                 source_contexts=source_contexts,
                 permission_mode=effective_permission_mode,
             )
+            if (
+                await self._enqueue_correction_signal_candidate(
+                    session,
+                    previous_messages=previous_messages,
+                    result=result,
+                )
+                is False
+            ):
+                result = replace(
+                    result,
+                    warnings=(*result.warnings, "correction_signal_enqueue_failed"),
+                )
         return self._turn_record(result, previous_count=len(previous_messages))
 
     async def stream_message_for_user(
@@ -608,6 +625,21 @@ class ChatSessionService:
                             source_contexts=source_contexts, emit=emit,
                             permission_mode=effective_permission_mode,
                         )
+                    if (
+                        await self._enqueue_correction_signal_candidate(
+                            session,
+                            previous_messages=current_messages,
+                            result=result,
+                        )
+                        is False
+                    ):
+                        result = replace(
+                            result,
+                            warnings=(
+                                *result.warnings,
+                                "correction_signal_enqueue_failed",
+                            ),
+                        )
                     emit(
                         {
                             "type": "turn",
@@ -644,6 +676,82 @@ class ChatSessionService:
                 connected = False
 
         return events()
+
+    async def _enqueue_correction_signal_candidate(
+        self,
+        session: ChatSession,
+        *,
+        previous_messages: tuple[ChatMessage, ...],
+        result: AgentRunResult,
+    ) -> bool | None:
+        """Queue only an adjacent, explicit challenge after a final answer.
+
+        ``None`` means the turn was ordinary Chat and produced no candidate;
+        ``True`` means a candidate was durably accepted or deduplicated;
+        ``False`` means the trigger was valid but the hand-off failed.  The
+        latter is surfaced as a warning while preserving the completed Chat
+        response, because this signal is auxiliary to the user conversation.
+        """
+
+        repository = self.analysis_job_repository
+        enqueue = getattr(repository, "enqueue_correction_signal_analysis", None)
+        if enqueue is None or not previous_messages:
+            return None
+        anchor = previous_messages[-1]
+        if (
+            anchor.session_id != session.session_id
+            or anchor.role.value != "assistant"
+            or not anchor.content.strip()
+            or anchor.tool_calls
+        ):
+            return None
+        messages = result.messages
+        if len(messages) <= len(previous_messages):
+            return None
+        if tuple(item.message_id for item in messages[: len(previous_messages)]) != tuple(
+            item.message_id for item in previous_messages
+        ):
+            return None
+        trigger = messages[len(previous_messages)]
+        if (
+            trigger.session_id != session.session_id
+            or trigger.role.value != "user"
+            or not trigger.content.strip()
+            or not is_correction_challenge(trigger.content)
+        ):
+            return None
+        # The new user message must be immediately after the anchor in the
+        # durable trajectory.  The worker repeats this check from storage.
+        signal = CorrectionSignal.from_message(
+            session_id=session.session_id,
+            anchor_message_id=anchor.message_id,
+            trigger_message_id=trigger.message_id,
+            content=trigger.content,
+            created_at=trigger.created_at,
+        )
+        key = correction_signal_idempotency_key(
+            session_id=session.session_id,
+            anchor_message_id=anchor.message_id,
+            trigger_message_id=trigger.message_id,
+            trigger_digest=signal.trigger_digest,
+        )
+        try:
+            await enqueue(
+                session_id=signal.session_id,
+                anchor_message_id=signal.anchor_message_id,
+                trigger_message_id=signal.trigger_message_id,
+                trigger_digest=signal.trigger_digest,
+                idempotency_key=key,
+                now=_now_iso(),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "correction signal enqueue failed session_id=%s trigger_message_id=%s",
+                session.session_id,
+                trigger.message_id,
+            )
+            return False
+        return True
 
     async def _run_response(
         self, session: ChatSession, *, previous_messages: tuple[ChatMessage, ...],

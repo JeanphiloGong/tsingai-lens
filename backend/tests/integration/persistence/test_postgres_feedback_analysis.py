@@ -8,6 +8,10 @@ from infra.persistence.postgres.analysis_job_repository import (
     PostgresAnalysisJobRepository,
 )
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
+from domain.feedback.correction_signal import (
+    CORRECTION_SIGNAL_JOB_TYPE,
+    correction_signal_idempotency_key,
+)
 
 
 pytestmark = pytest.mark.anyio
@@ -131,3 +135,67 @@ async def test_requeue_rejects_unknown_job(postgres_session_factory) -> None:
             "job-missing",
             now=BASE_TIME.isoformat(),
         )
+
+
+async def test_correction_signal_jobs_use_payload_identity_and_are_idempotent(
+    postgres_session_factory,
+) -> None:
+    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    kwargs = {
+        "session_id": "session-1",
+        "anchor_message_id": "answer-1",
+        "trigger_message_id": "challenge-1",
+        "trigger_digest": "a" * 64,
+        "idempotency_key": correction_signal_idempotency_key(
+            session_id="session-1",
+            anchor_message_id="answer-1",
+            trigger_message_id="challenge-1",
+            trigger_digest="a" * 64,
+        ),
+        "now": BASE_TIME.isoformat(),
+    }
+    first = await repository.enqueue_correction_signal_analysis(**kwargs)
+    second = await repository.enqueue_correction_signal_analysis(**kwargs)
+
+    assert first.job_id == second.job_id
+    assert first.job_type == CORRECTION_SIGNAL_JOB_TYPE
+    assert first.payload == {
+        "session_id": "session-1",
+        "anchor_message_id": "answer-1",
+        "trigger_message_id": "challenge-1",
+        "trigger_digest": "a" * 64,
+    }
+    claimed = await repository.claim_next_correction_signal_analysis_job(
+        (BASE_TIME + timedelta(seconds=1)).isoformat()
+    )
+    assert claimed is not None and claimed.job_id == first.job_id
+
+
+async def test_correction_signal_pending_job_can_be_cancelled_by_trigger(
+    postgres_session_factory,
+) -> None:
+    repository = PostgresAnalysisJobRepository(postgres_session_factory)
+    trigger_digest = "b" * 64
+    job = await repository.enqueue_correction_signal_analysis(
+        session_id="session-1",
+        anchor_message_id="answer-1",
+        trigger_message_id="challenge-withdrawn",
+        trigger_digest=trigger_digest,
+        idempotency_key=correction_signal_idempotency_key(
+            session_id="session-1",
+            anchor_message_id="answer-1",
+            trigger_message_id="challenge-withdrawn",
+            trigger_digest=trigger_digest,
+        ),
+        now=BASE_TIME.isoformat(),
+    )
+    cancelled = await repository.cancel_correction_signal_analysis_jobs(
+        trigger_message_id="challenge-withdrawn",
+        finished_at=(BASE_TIME + timedelta(seconds=1)).isoformat(),
+    )
+    saved = await repository.read_job(job.job_id)
+
+    assert cancelled == 1
+    assert saved is not None
+    assert saved.status == "cancelled"
+    assert saved.error_code == "correction_signal_withdrawn"

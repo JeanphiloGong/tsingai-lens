@@ -94,6 +94,14 @@ class FeedbackCaseService:
         if any(message.session_id != case.session_id for message in messages):
             raise FileNotFoundError(f"feedback case not found: {case_id}")
         results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
+        signal_reader = getattr(
+            self.case_repository, "read_correction_signal_analysis_results", None
+        )
+        signal_results = (
+            await signal_reader(case.signal_analysis_result_ids)
+            if signal_reader is not None
+            else ()
+        )
         feedback_items: list[Any] = []
         for signal_id in case.source_signal_ids:
             item = await self.chat_repository.read_feedback_by_id(signal_id)
@@ -104,6 +112,11 @@ class FeedbackCaseService:
             ):
                 feedback_items.append(item)
         feedback = tuple(feedback_items)
+        correction_items = _correction_signal_records(
+            signal_results,
+            messages=messages,
+            session_id=case.session_id,
+        )
         annotation_reader = getattr(self.case_repository, "read_annotation", None)
         annotation = (
             await annotation_reader(case.case_id)
@@ -112,7 +125,16 @@ class FeedbackCaseService:
         )
         review_reader = getattr(self.case_repository, "read_review_decisions", None)
         decisions = await review_reader(case.case_id) if review_reader is not None else ()
-        return _detail(case, messages, results, feedback, annotation, decisions)
+        return _detail(
+            case,
+            messages,
+            results,
+            feedback,
+            annotation,
+            decisions,
+            signal_results=signal_results,
+            correction_items=correction_items,
+        )
 
     async def save_annotation_for_user(
         self,
@@ -180,7 +202,16 @@ class FeedbackCaseService:
             or session.collection_id != case.collection_id
         ):
             raise FileNotFoundError(f"feedback case not found: {case_id}")
-        return case, await self.case_repository.read_analysis_results(case.analysis_result_ids)
+        results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
+        signal_reader = getattr(
+            self.case_repository, "read_correction_signal_analysis_results", None
+        )
+        signal_results = (
+            await signal_reader(case.signal_analysis_result_ids)
+            if signal_reader is not None
+            else ()
+        )
+        return case, (*results, *signal_results)
 
     async def _read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
         reader = getattr(self.case_repository, "read_annotation", None)
@@ -295,7 +326,16 @@ class FeedbackCaseService:
         messages = await self.chat_repository.read_messages(case.session_id)
         if any(message.session_id != case.session_id for message in messages):
             return None
-        result = await self._latest_result(case)
+        results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
+        signal_reader = getattr(
+            self.case_repository, "read_correction_signal_analysis_results", None
+        )
+        signal_results = (
+            await signal_reader(case.signal_analysis_result_ids)
+            if signal_reader is not None
+            else ()
+        )
+        result = _latest_result((*results, *signal_results))
         needs_review = case.status in {
             "detected",
             "collecting_context",
@@ -327,11 +367,6 @@ class FeedbackCaseService:
             coverage_status=coverage.coverage_status if coverage else "unknown",
         )
 
-    async def _latest_result(self, case: FeedbackCase) -> AnalysisResult | None:
-        results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
-        return max(results, key=lambda item: (item.created_at, item.result_id), default=None)
-
-
 def _detail(
     case: FeedbackCase,
     messages: tuple[Any, ...],
@@ -339,8 +374,11 @@ def _detail(
     feedback: tuple[Any, ...],
     annotation: FeedbackAnnotation | None = None,
     decisions: tuple[ReviewDecision, ...] = (),
+    *,
+    signal_results: tuple[Any, ...] = (),
+    correction_items: tuple[dict[str, Any], ...] = (),
 ) -> dict[str, Any]:
-    latest = max(results, key=lambda item: (item.created_at, item.result_id), default=None)
+    latest = _latest_result((*results, *signal_results))
     answer = next(
         (message for message in messages if message.message_id == case.anchor_message_id),
         None,
@@ -361,6 +399,7 @@ def _detail(
         "status": case.status,
         "source_signals": [
             {
+                "signal_type": "chat_message_feedback",
                 "feedback_id": item.feedback_id,
                 "rating": item.rating,
                 "reason": item.reason,
@@ -368,7 +407,7 @@ def _detail(
                 "created_at": item.created_at,
             }
             for item in feedback
-        ],
+        ] + list(correction_items),
         "question": question,
         "answer": answer.content if answer is not None else str(case.context_snapshot.get("answer") or ""),
         "requested_scope": _readable_scope(
@@ -380,14 +419,7 @@ def _detail(
         "gaps": coverage.get("gaps", case.context_snapshot.get("gaps", [])),
         "coverage_status": coverage.get("coverage_status", "unknown"),
         "analysis": (
-            {
-                "problem_type": latest.problem_type,
-                "confidence": latest.confidence,
-                "suggested_target": latest.suggested_target,
-                "model": latest.model,
-                "result_id": latest.result_id,
-                "coverage_status": latest.evidence_coverage.coverage_status,
-            }
+            _analysis_projection(latest)
             if latest
             else None
         ),
@@ -398,6 +430,63 @@ def _detail(
         "created_at": case.created_at,
         "updated_at": case.updated_at,
     }
+
+
+def _latest_result(results: tuple[Any, ...]) -> Any | None:
+    return max(results, key=lambda item: (item.created_at, item.result_id), default=None)
+
+
+def _analysis_projection(result: Any) -> dict[str, Any]:
+    projection = {
+        "problem_type": result.problem_type,
+        "confidence": result.confidence,
+        "suggested_target": result.suggested_target,
+        "model": result.model,
+        "result_id": result.result_id,
+        "coverage_status": result.evidence_coverage.coverage_status,
+    }
+    if hasattr(result, "signal_type"):
+        projection.update(
+            {
+                "signal_type": result.signal_type,
+                "signal_id": result.signal_id,
+                "trigger_message_id": result.trigger_message_id,
+                "resolution": "unresolved_candidate",
+            }
+        )
+    else:
+        projection["signal_type"] = "chat_message_feedback"
+        projection["feedback_id"] = result.feedback_id
+    return projection
+
+
+def _correction_signal_records(
+    results: tuple[Any, ...],
+    *,
+    messages: tuple[Any, ...],
+    session_id: str,
+) -> tuple[dict[str, Any], ...]:
+    by_id = {item.message_id: item for item in messages}
+    records: list[dict[str, Any]] = []
+    for result in results:
+        trigger = by_id.get(result.trigger_message_id)
+        if trigger is None or trigger.session_id != session_id:
+            continue
+        records.append(
+            {
+                "signal_type": result.signal_type,
+                "signal_id": result.signal_id,
+                "anchor_message_id": result.anchor_message_id,
+                "trigger_message_id": result.trigger_message_id,
+                "content": trigger.content,
+                "created_at": trigger.created_at,
+                "problem_type": result.problem_type,
+                "confidence": result.confidence,
+                "suggested_target": None,
+                "resolution": "unresolved_candidate",
+            }
+        )
+    return tuple(records)
 
 
 def _case_source_refs(

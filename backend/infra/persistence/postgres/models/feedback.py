@@ -179,6 +179,81 @@ class FeedbackAnalysisResultRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class FeedbackSignalAnalysisResultRow(Base):
+    """Candidate analysis for a non-rating feedback signal.
+
+    Natural-language correction candidates have a different source identity
+    from ``chat_message_feedback``.  Keeping them in their own table leaves
+    the P1 feedback-analysis contract and its non-null ``feedback_id`` intact.
+    """
+
+    __tablename__ = "feedback_signal_analysis_results"
+    __table_args__ = (
+        CheckConstraint(
+            "signal_type IN ('natural_language_correction')",
+            name="feedback_signal_analysis_type_valid",
+        ),
+        CheckConstraint(
+            "problem_type IN ('fact_error', 'source_missing', 'evidence_mismatch', "
+            "'retrieval_failure', 'tool_failure', 'intent_mismatch', "
+            "'incomplete_answer', 'style_or_format', 'undetermined_dissatisfaction')",
+            name="feedback_signal_analysis_problem_type_valid",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="feedback_signal_analysis_confidence_range",
+        ),
+        CheckConstraint(
+            "suggested_target IS NULL",
+            name="feedback_signal_analysis_target_absent",
+        ),
+        CheckConstraint(
+            "length(input_digest) = 64",
+            name="feedback_signal_analysis_input_digest_length",
+        ),
+        UniqueConstraint("job_id", name="uq_feedback_signal_analysis_results_job_id"),
+    )
+
+    result_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    job_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("analysis_jobs.job_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    signal_id: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    signal_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    collection_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("collections.collection_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    anchor_message_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    trigger_message_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    problem_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    related_message_ids: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    suggested_evidence: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list
+    )
+    suggested_target: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_coverage: Mapped[dict[str, Any]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False
+    )
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class FeedbackCaseRow(Base):
     """Human-facing case assembled from one or more analysis signals."""
 
@@ -222,6 +297,9 @@ class FeedbackCaseRow(Base):
     )
     analysis_result_ids: Mapped[list[str]] = mapped_column(
         _JSON_DOCUMENT, nullable=False, default=list
+    )
+    signal_analysis_result_ids: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
     )
     context_snapshot: Mapped[dict[str, Any]] = mapped_column(
         _JSON_DOCUMENT, nullable=False

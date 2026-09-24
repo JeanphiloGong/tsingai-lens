@@ -5,7 +5,12 @@ import pytest
 from application.feedback.feedback_case_service import FeedbackCaseService
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
-from domain.feedback import AnalysisResult, EvidenceCoverage, FeedbackCase
+from domain.feedback import (
+    AnalysisResult,
+    CorrectionSignalAnalysisResult,
+    EvidenceCoverage,
+    FeedbackCase,
+)
 
 
 pytestmark = pytest.mark.anyio
@@ -47,9 +52,10 @@ class _Chat:
 
 
 class _Cases:
-    def __init__(self, case, result):
+    def __init__(self, case, result, signal_result=None):
         self.case = case
         self.result = result
+        self.signal_result = signal_result
 
     async def list_cases(self, **kwargs):
         ids = kwargs.get("collection_ids")
@@ -60,6 +66,11 @@ class _Cases:
 
     async def read_analysis_results(self, result_ids):
         return (self.result,) if self.result.result_id in result_ids else ()
+
+    async def read_correction_signal_analysis_results(self, result_ids):
+        if self.signal_result is not None and self.signal_result.result_id in result_ids:
+            return (self.signal_result,)
+        return ()
 
 
 def _fixture():
@@ -172,3 +183,57 @@ async def test_case_service_hides_a_case_from_another_collection_owner() -> None
 
     with pytest.raises(FileNotFoundError):
         await service.read_for_user(case.case_id, "other-user")
+
+
+async def test_case_service_exposes_message_correction_signal_without_claiming_target() -> None:
+    case, result, feedback, messages = _fixture()
+    challenge = ChatMessage.user(
+        message_id="challenge-1",
+        session_id="session-1",
+        content="不对，图注里有预热信息。",
+        created_at="2026-09-24T00:00:05+00:00",
+    )
+    signal_result = CorrectionSignalAnalysisResult(
+        result_id="signal-result-1",
+        job_id="signal-job-1",
+        signal_id="correction_signal:challenge-1",
+        signal_type="natural_language_correction",
+        session_id="session-1",
+        collection_id="collection-1",
+        anchor_message_id="answer-1",
+        trigger_message_id="challenge-1",
+        problem_type="fact_error",
+        confidence=0.58,
+        related_message_ids=("question-1", "answer-1", "challenge-1"),
+        suggested_evidence=("figure-3-caption",),
+        suggested_target=None,
+        evidence_coverage=result.evidence_coverage,
+        model="rule-based-correction-v1",
+        input_digest="b" * 64,
+        created_at="2026-09-24T00:00:06+00:00",
+    )
+    signal_case = FeedbackCase(
+        **{
+            **case.to_record(),
+            "source_signal_ids": (feedback.feedback_id, signal_result.signal_id),
+            "signal_analysis_result_ids": (signal_result.result_id,),
+        }
+    )
+    service = FeedbackCaseService(
+        case_repository=_Cases(signal_case, result, signal_result),
+        chat_repository=_Chat(feedback, (*messages, challenge)),
+        collection_service=_Collections(),
+    )
+
+    detail = await service.read_for_user(signal_case.case_id, "user-1")
+
+    correction = next(
+        item
+        for item in detail["source_signals"]
+        if item.get("signal_type") == "natural_language_correction"
+    )
+    assert correction["trigger_message_id"] == "challenge-1"
+    assert correction["content"].startswith("不对")
+    assert detail["analysis"]["signal_type"] == "natural_language_correction"
+    assert detail["analysis"]["suggested_target"] is None
+    assert detail["analysis"]["resolution"] == "unresolved_candidate"

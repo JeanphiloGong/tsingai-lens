@@ -30,7 +30,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260924_0075"
+HEAD_REVISION = "20260925_0076"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 
@@ -259,6 +259,66 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
 
         with pytest.raises(RuntimeError, match="irreversible"):
             command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_feedback_signal_migration_replays_without_changing_p1_result_identity(tmp_path) -> None:
+    """0076 adds the message-signal path while preserving the P1 table contract."""
+
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "feedback-signal-migration.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        # The historical 0038 cutover creates the then-current ORM metadata
+        # while rebuilding an empty database.  Round-trip from the real head
+        # so 0076's own downgrade removes those objects before replaying them.
+        command.upgrade(config, "head")
+        initial = inspect(connection)
+        old_result_columns = {
+            column["name"]: column["nullable"]
+            for column in initial.get_columns("feedback_analysis_results")
+        }
+        assert old_result_columns["feedback_id"] is False
+        assert "feedback_signal_analysis_results" in initial.get_table_names()
+        assert "signal_analysis_result_ids" in {
+            column["name"] for column in initial.get_columns("feedback_cases")
+        }
+
+        command.downgrade(config, "20260924_0075")
+        after_downgrade = inspect(connection)
+        assert MigrationContext.configure(connection).get_current_revision() == (
+            "20260924_0075"
+        )
+        assert "feedback_signal_analysis_results" not in after_downgrade.get_table_names()
+        assert "signal_analysis_result_ids" not in {
+            column["name"]
+            for column in after_downgrade.get_columns("feedback_cases")
+        }
+        downgraded_result_columns = {
+            column["name"]: column["nullable"]
+            for column in after_downgrade.get_columns("feedback_analysis_results")
+        }
+        assert downgraded_result_columns == old_result_columns
+
+        command.upgrade(config, "head")
+        assert MigrationContext.configure(connection).get_current_revision() == HEAD_REVISION
+        replayed = inspect(connection)
+        assert "feedback_signal_analysis_results" in replayed.get_table_names()
+        assert "signal_analysis_result_ids" in {
+            column["name"] for column in replayed.get_columns("feedback_cases")
+        }
+        replayed_result_columns = {
+            column["name"]: column["nullable"]
+            for column in replayed.get_columns("feedback_analysis_results")
+        }
+        assert replayed_result_columns == old_result_columns
 
     engine.dispose()
 

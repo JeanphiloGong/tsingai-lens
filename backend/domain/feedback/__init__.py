@@ -5,6 +5,16 @@ from domain.feedback.analysis_result import (
     AnalysisResult,
     FeedbackProblemType,
 )
+from domain.feedback.correction_signal import (
+    CORRECTION_SIGNAL_JOB_TYPE,
+    CORRECTION_SIGNAL_PAYLOAD_VERSION,
+    CORRECTION_SIGNAL_TYPE,
+    CorrectionSignal,
+    CorrectionSignalAnalysisResult,
+    correction_signal_id,
+    correction_signal_idempotency_key,
+    is_correction_challenge,
+)
 from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.feedback_case import FeedbackCase, FeedbackCaseStatus
 from domain.feedback.annotation import AnnotationSeverity, DatasetUse, FeedbackAnnotation
@@ -15,6 +25,14 @@ __all__ = [
     "AnalysisJob",
     "AnalysisJobStatus",
     "AnalysisResult",
+    "CorrectionSignal",
+    "CorrectionSignalAnalysisResult",
+    "CORRECTION_SIGNAL_JOB_TYPE",
+    "CORRECTION_SIGNAL_PAYLOAD_VERSION",
+    "CORRECTION_SIGNAL_TYPE",
+    "correction_signal_id",
+    "correction_signal_idempotency_key",
+    "is_correction_challenge",
     "EvidenceCoverage",
     "FeedbackCase",
     "FeedbackCaseStatus",

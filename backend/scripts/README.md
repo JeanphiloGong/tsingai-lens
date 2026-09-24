@@ -31,6 +31,21 @@ running, cancelled, non-feedback, or already-resulted jobs. This is an
 internal CLI operation; this checkpoint does not add an HTTP endpoint, RBAC, or
 automatic retry policy.
 
+## Correction Signal Analysis Worker
+
+Run one message-derived correction-signal job:
+
+```bash
+cd backend
+./.venv/bin/python scripts/correction_signal_analysis_worker.py --once
+```
+
+The worker only processes `correction_signal_analysis` jobs. A candidate is
+cancelled when its adjacent challenge disappears or its durable content digest
+changes; ordinary follow-up questions never enter this queue. It does not
+modify Chat messages or create a training target. Use `--interval <seconds>`
+for an explicit polling loop; no hidden FastAPI background task is started.
+
 The PaperExperiment live chain acceptance probe is maintained at
 [`benchmarks/paper_experiment_chain_probe.py`](benchmarks/paper_experiment_chain_probe.py).
 It is opt-in because it uses a real PDF and an online model; see the benchmark

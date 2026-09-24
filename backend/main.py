@@ -89,7 +89,12 @@ from application.pipeline import PipelineRunService
 from application.evaluation import (
     FindingFeedbackService,
 )
-from application.feedback import FeedbackAnalysisHandler, FeedbackAnalysisWorker
+from application.feedback import (
+    CorrectionSignalAnalysisHandler,
+    CorrectionSignalAnalysisWorker,
+    FeedbackAnalysisHandler,
+    FeedbackAnalysisWorker,
+)
 from application.feedback.dataset_snapshot_service import DatasetSnapshotService
 from application.feedback.feedback_case_service import FeedbackCaseService
 from application.goal.brief_service import GoalService
@@ -275,6 +280,7 @@ class ApplicationOverrides:
     feedback_case_repository: FeedbackCaseRepository | None = None
     feedback_case_service: FeedbackCaseService | None = None
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None
+    correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None
     dataset_snapshot_service: DatasetSnapshotService | None = None
     paper_experiment_repository: PaperExperimentRepository | None = None
@@ -334,6 +340,7 @@ class ApplicationRuntime:
     feedback_case_repository: FeedbackCaseRepository | None
     feedback_case_service: FeedbackCaseService | None
     feedback_analysis_worker: FeedbackAnalysisWorker | None
+    correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None
     dataset_snapshot_repository: DatasetSnapshotRepository | None
     dataset_snapshot_service: DatasetSnapshotService | None
     experiment_plan_service: ExperimentPlanService
@@ -509,6 +516,19 @@ async def build_application_runtime(
                 job_repository=analysis_job_repository,
                 case_repository=feedback_case_repository,
                 handler=FeedbackAnalysisHandler(chat_repository=chat_repository),
+            )
+
+        correction_signal_analysis_worker = overrides.correction_signal_analysis_worker
+        if (
+            correction_signal_analysis_worker is None
+            and analysis_job_repository is not None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            correction_signal_analysis_worker = CorrectionSignalAnalysisWorker(
+                job_repository=analysis_job_repository,
+                case_repository=feedback_case_repository,
+                handler=CorrectionSignalAnalysisHandler(chat_repository=chat_repository),
             )
 
         feedback_case_service = overrides.feedback_case_service
@@ -802,6 +822,7 @@ async def build_application_runtime(
             feedback_case_repository=feedback_case_repository,
             feedback_case_service=feedback_case_service,
             feedback_analysis_worker=feedback_analysis_worker,
+            correction_signal_analysis_worker=correction_signal_analysis_worker,
             dataset_snapshot_repository=dataset_snapshot_repository,
             dataset_snapshot_service=dataset_snapshot_service,
             experiment_plan_service=experiment_plan_service,
@@ -850,6 +871,9 @@ def install_application_runtime(
     application.state.feedback_case_repository = runtime.feedback_case_repository
     application.state.feedback_case_service = runtime.feedback_case_service
     application.state.feedback_analysis_worker = runtime.feedback_analysis_worker
+    application.state.correction_signal_analysis_worker = (
+        runtime.correction_signal_analysis_worker
+    )
     application.state.dataset_snapshot_repository = runtime.dataset_snapshot_repository
     application.state.dataset_snapshot_service = runtime.dataset_snapshot_service
     application.state.experiment_plan_service = runtime.experiment_plan_service
@@ -1016,6 +1040,7 @@ def create_app(
     feedback_case_repository: FeedbackCaseRepository | None = None,
     feedback_case_service: FeedbackCaseService | None = None,
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None,
+    correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None,
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None,
     dataset_snapshot_service: DatasetSnapshotService | None = None,
     paper_experiment_repository: PaperExperimentRepository | None = None,
@@ -1044,6 +1069,7 @@ def create_app(
         feedback_case_repository=feedback_case_repository,
         feedback_case_service=feedback_case_service,
         feedback_analysis_worker=feedback_analysis_worker,
+        correction_signal_analysis_worker=correction_signal_analysis_worker,
         dataset_snapshot_repository=dataset_snapshot_repository,
         dataset_snapshot_service=dataset_snapshot_service,
         paper_experiment_repository=paper_experiment_repository,

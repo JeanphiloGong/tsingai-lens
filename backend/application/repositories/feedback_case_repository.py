@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from domain.feedback.analysis_result import AnalysisResult
+from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.review_decision import ReviewDecision
@@ -22,11 +23,28 @@ class FeedbackCaseRepository(Protocol):
         now: str,
     ) -> FeedbackCase: ...
 
+    async def save_correction_signal_analysis_result(
+        self, result: CorrectionSignalAnalysisResult
+    ) -> CorrectionSignalAnalysisResult: ...
+
+    async def upsert_case_from_correction_signal(
+        self,
+        result: CorrectionSignalAnalysisResult,
+        *,
+        context_snapshot: dict[str, Any],
+        source_signal_ids: tuple[str, ...] = (),
+        now: str,
+    ) -> FeedbackCase: ...
+
     async def read_case(self, case_id: str) -> FeedbackCase | None: ...
 
     async def read_analysis_results(
         self, result_ids: tuple[str, ...]
     ) -> tuple[AnalysisResult, ...]: ...
+
+    async def read_correction_signal_analysis_results(
+        self, result_ids: tuple[str, ...]
+    ) -> tuple[CorrectionSignalAnalysisResult, ...]: ...
 
     async def list_cases(
         self,

@@ -31,6 +31,7 @@ class FeedbackCase:
     created_at: str
     updated_at: str
     annotation_digest: str | None = None
+    signal_analysis_result_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -42,6 +43,11 @@ class FeedbackCase:
             raise ValueError("feedback case identity is required")
         object.__setattr__(self, "source_signal_ids", tuple(self.source_signal_ids))
         object.__setattr__(self, "analysis_result_ids", tuple(self.analysis_result_ids))
+        object.__setattr__(
+            self,
+            "signal_analysis_result_ids",
+            tuple(self.signal_analysis_result_ids),
+        )
         object.__setattr__(self, "context_snapshot", dict(self.context_snapshot))
 
     def to_record(self) -> dict[str, Any]:
@@ -57,4 +63,5 @@ class FeedbackCase:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "annotation_digest": self.annotation_digest,
+            "signal_analysis_result_ids": list(self.signal_analysis_result_ids),
         }

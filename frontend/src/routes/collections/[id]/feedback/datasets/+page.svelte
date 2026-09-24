@@ -237,7 +237,7 @@
 						<div class="case-option">
 							<input id={`case-${item.case_id}`} type="checkbox" checked={selectedIds.includes(item.case_id)} on:change={() => toggleCase(item.case_id)} />
 							<label class="case-copy" for={`case-${item.case_id}`}><strong>{item.question_preview || $t('datasetSnapshots.untitledCase')}</strong><small>{item.document_titles.join(' · ') || $t('datasetSnapshots.noDocuments')}</small></label>
-							<select aria-label={$t('datasetSnapshots.splitFor', { case: item.question_preview || item.case_id })} value={splitByCase[item.case_id] ?? 'eval'} on:change={(event) => (splitByCase[item.case_id] = (event.currentTarget as HTMLSelectElement).value as DatasetSplit)}>
+						<select aria-label={$t('datasetSnapshots.splitFor', { case: caseLabel(item.case_id) })} value={splitByCase[item.case_id] ?? 'eval'} on:change={(event) => (splitByCase[item.case_id] = (event.currentTarget as HTMLSelectElement).value as DatasetSplit)}>
 								<option value="eval">eval</option><option value="train">train</option>
 							</select>
 						</div>

@@ -28,7 +28,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260924_0074"
+HEAD_REVISION = "20260924_0075"
 
 
 def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
@@ -223,6 +223,65 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
 
         with pytest.raises(RuntimeError, match="irreversible"):
             command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_legacy_objective_checkpoints_are_classified_with_sqlite_autoincrement(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "legacy-objective-checkpoints.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260924_0074")
+        analyses = Table(
+            "objective_analyses", MetaData(), autoload_with=connection
+        )
+        now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+        connection.execute(
+            analyses.insert().values(
+                collection_id="legacy-collection",
+                objective_id="legacy-objective",
+                analysis_version=1,
+                status="succeeded",
+                payload={
+                    "document_evidence_checkpoints": {
+                        "paper-1:fp-1": {
+                            "document_id": "paper-1",
+                            "input_fingerprint": "fp-1",
+                            "status": "succeeded",
+                            "contribution": {"document_id": "paper-1"},
+                        }
+                    },
+                    "other_metadata": {"preserve": True},
+                },
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+        command.upgrade(config, "head")
+
+        legacy = Table(
+            "objective_analysis_legacy_checkpoints",
+            MetaData(),
+            autoload_with=connection,
+        )
+        classified = connection.execute(select(legacy)).mappings().all()
+        assert len(classified) == 1
+        assert classified[0]["id"] == 1
+        assert classified[0]["classification"] == "manual_review_required"
+        assert len(classified[0]["payload_hash"]) == 64
+        current = connection.execute(select(analyses)).mappings().one()
+        assert "document_evidence_checkpoints" not in current["payload"]
+        assert current["payload"]["other_metadata"] == {"preserve": True}
 
     engine.dispose()
 

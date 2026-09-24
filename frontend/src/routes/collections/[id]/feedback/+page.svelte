@@ -183,6 +183,54 @@
 		return value ? value.replaceAll('_', ' ') : $t('feedbackWorkbench.unknown');
 	}
 
+	const problemTranslationKeys: Record<string, string> = {
+		fact_error: 'problemFactError',
+		source_missing: 'problemSourceMissing',
+		evidence_mismatch: 'problemEvidenceMismatch',
+		retrieval_failure: 'problemRetrievalFailure',
+		tool_failure: 'problemToolFailure',
+		intent_mismatch: 'problemIntentMismatch',
+		incomplete_answer: 'problemIncomplete',
+		style_or_format: 'problemStyle',
+		undetermined_dissatisfaction: 'problemUndetermined'
+	};
+
+	const decisionTranslationKeys: Record<string, string> = {
+		accept: 'decisionAccept',
+		reject: 'decisionReject',
+		insufficient: 'decisionInsufficient',
+		withdraw: 'decisionWithdraw'
+	};
+
+	const omissionReasonTranslationKeys: Record<string, string> = {
+		not_read: 'reasonNotRead',
+		not_requested: 'reasonNotRequested',
+		unavailable: 'reasonUnavailable'
+	};
+
+	function problemLabel(value: string | null | undefined) {
+		if (!value) return $t('feedbackWorkbench.unknown');
+		const key = problemTranslationKeys[value];
+		return key ? $t(`feedbackWorkbench.${key}`) : label(value);
+	}
+
+	function decisionLabel(value: string | null | undefined) {
+		if (!value) return $t('feedbackWorkbench.unknown');
+		const key = decisionTranslationKeys[value];
+		return key ? $t(`feedbackWorkbench.${key}`) : label(value);
+	}
+
+	function severityLabel(value: string | null | undefined) {
+		const key =
+			{
+				low: 'severityLow',
+				medium: 'severityMedium',
+				high: 'severityHigh',
+				critical: 'severityCritical'
+			}[value ?? ''] ?? '';
+		return key ? $t(`feedbackWorkbench.${key}`) : label(value);
+	}
+
 	function statusLabel(value: string) {
 		const key =
 			{
@@ -210,17 +258,64 @@
 	}
 
 	function sourceTitle(source: Record<string, unknown>) {
-		return String(source.document_title ?? source.title ?? $t('feedbackWorkbench.source'));
+		const title = source.document_title ?? source.title ?? source.document_name;
+		return String(title ?? '').trim() || $t('feedbackWorkbench.source');
 	}
 
 	function sourceLocator(source: Record<string, unknown>) {
-		return [source.source_ref, source.heading_path, source.page ? `p. ${source.page}` : '']
-			.filter(Boolean)
-			.join(' · ');
+		const locations = [source.heading_path, source.section, source.section_title, source.figure_label, source.table_label]
+			.map((value) => String(value ?? '').trim())
+			.filter(Boolean);
+		if (source.page !== undefined && source.page !== null && String(source.page).trim()) {
+			locations.push($t('feedbackWorkbench.page', { page: String(source.page) }));
+		}
+		return [...new Set(locations)].join(' · ');
+	}
+
+	function sourceReason(source: Record<string, unknown>) {
+		const raw = String(source.reason ?? '').trim().split(':', 1)[0];
+		if (!raw) return '';
+		const key = omissionReasonTranslationKeys[raw];
+		return key ? $t(`feedbackWorkbench.${key}`) : label(raw);
 	}
 
 	function claimText(claim: Record<string, unknown>) {
 		return String(claim.claim ?? claim.statement ?? claim.text ?? $t('feedbackWorkbench.unknown'));
+	}
+
+	function claimSourceLabel(claim: Record<string, unknown>) {
+		const ref = String(claim.source_ref ?? claim.source ?? claim.source_id ?? '').trim();
+		const source = selected
+			? [...selected.inspected_sources, ...selected.omitted_candidates, ...selected.requested_scope].find(
+					(item) => String(item.source_ref ?? item.source_id ?? '') === ref
+				  )
+			: undefined;
+		if (source) {
+			const location = sourceLocator(source);
+			return `${sourceTitle(source)}${location ? ` · ${location}` : ''}`;
+		}
+		return ref ? $t('feedbackWorkbench.supportRecorded') : $t('feedbackWorkbench.sourceUnknown');
+	}
+
+	function annotationText(key: string) {
+		const value = selected?.annotation?.[key];
+		return typeof value === 'string' ? value.trim() : '';
+	}
+
+	function datasetUseLabel(value: string) {
+		const key =
+			{
+				evaluation: 'useEvaluation',
+				sft: 'useSft',
+				preference: 'usePreference'
+			}[value] ?? '';
+		return key ? $t(`feedbackWorkbench.${key}`) : label(value);
+	}
+
+	function annotationUsesLabel() {
+		const values = selected?.annotation?.dataset_uses;
+		if (!Array.isArray(values) || !values.length) return $t('feedbackWorkbench.noDatasetUses');
+		return values.map((value) => datasetUseLabel(String(value))).join(' · ');
 	}
 </script>
 
@@ -276,7 +371,7 @@
 			</div>
 
 			{#if loading}
-				<div class="empty-state"><span class="loader"></span><p>{$t('feedbackWorkbench.loadingCases')}</p></div>
+				<div class="empty-state" role="status" aria-live="polite"><span class="loader"></span><p>{$t('feedbackWorkbench.loadingCases')}</p></div>
 			{:else if !visibleCases.length}
 				<div class="empty-state">
 					<CheckCircle2 size={24} />
@@ -293,7 +388,7 @@
 							on:click={() => openCase(item)}
 						>
 							<div class="case-item__topline">
-								<span class="case-type">{label(item.problem_type)}</span>
+							<span class="case-type">{problemLabel(item.problem_type)}</span>
 								<ChevronRight size={16} />
 							</div>
 							<strong>{item.question_preview || item.answer_preview || $t('feedbackWorkbench.unknown')}</strong>
@@ -311,9 +406,9 @@
 			{/if}
 		</aside>
 
-		<main class="case-detail" aria-live="polite">
+		<main class="case-detail" aria-busy={detailLoading}>
 			{#if detailLoading}
-				<div class="empty-state"><span class="loader"></span><p>{$t('feedbackWorkbench.loadingDetails')}</p></div>
+				<div class="empty-state" role="status" aria-live="polite"><span class="loader"></span><p>{$t('feedbackWorkbench.loadingDetails')}</p></div>
 			{:else if !selected}
 				<div class="detail-placeholder">
 					<div class="placeholder-icon"><FileText size={26} /></div>
@@ -337,7 +432,7 @@
 					<section class="detail-section">
 						<div class="section-heading"><h3>{$t('feedbackWorkbench.feedbackSignal')}</h3><span>{selected.source_signals.length} {selected.source_signals.length === 1 ? $t('feedbackWorkbench.record') : $t('feedbackWorkbench.records')}</span></div>
 						{#each selected.source_signals as signal}
-							<div class="signal"><span class:signal--negative={signal.rating === 'not_helpful'}>{signal.rating === 'not_helpful' ? $t('feedbackWorkbench.notHelpful') : $t('feedbackWorkbench.helpful')}</span><strong>{label(signal.reason)}</strong>{#if signal.comment}<p>{signal.comment}</p>{/if}</div>
+							<div class="signal"><span class:signal--negative={signal.rating === 'not_helpful'}>{signal.rating === 'not_helpful' ? $t('feedbackWorkbench.notHelpful') : $t('feedbackWorkbench.helpful')}</span><strong>{problemLabel(signal.reason)}</strong>{#if signal.comment}<p>{signal.comment}</p>{/if}</div>
 						{/each}
 					</section>
 				{/if}
@@ -354,19 +449,19 @@
 					{#if selected.inspected_sources.length}
 						<div class="source-list">
 							{#each selected.inspected_sources as source}
-								<article class="source-row"><div class="source-icon"><FileText size={16} /></div><div><strong>{sourceTitle(source)}</strong><span>{sourceLocator(source)}</span>{#if source.quote}<p>{String(source.quote)}</p>{:else}<p class="muted">{$t('feedbackWorkbench.noQuote')}</p>{/if}</div></article>
+								<article class="source-row"><div class="source-icon"><FileText size={16} /></div><div><strong>{sourceTitle(source)}</strong>{#if sourceLocator(source)}<span>{sourceLocator(source)}</span>{/if}{#if source.quote}<p>{String(source.quote)}</p>{:else}<p class="muted">{$t('feedbackWorkbench.noQuote')}</p>{/if}</div></article>
 							{/each}
 						</div>
 					{:else}<p class="muted">{$t('feedbackWorkbench.inspectedNone')}</p>{/if}
 				</section>
 
 				{#if selected.omitted_candidates.length}
-					<section class="detail-section detail-section--warning"><div class="section-heading"><h3>{$t('feedbackWorkbench.omittedCandidates')}</h3><span>{selected.omitted_candidates.length}</span></div>{#each selected.omitted_candidates as source}<div class="omitted"><XCircle size={16} /><span>{sourceTitle(source)}{sourceLocator(source) ? ` · ${sourceLocator(source)}` : ''}</span></div>{/each}</section>
+					<section class="detail-section detail-section--warning"><div class="section-heading"><h3>{$t('feedbackWorkbench.omittedCandidates')}</h3><span>{selected.omitted_candidates.length}</span></div>{#each selected.omitted_candidates as source}<div class="omitted"><XCircle size={16} /><span><strong>{sourceTitle(source)}{sourceLocator(source) ? ` · ${sourceLocator(source)}` : ''}</strong>{#if sourceReason(source)}<small>{$t('feedbackWorkbench.omissionReason', { reason: sourceReason(source) })}</small>{/if}</span></div>{/each}</section>
 				{/if}
 
 				<section class="detail-section">
 					<div class="section-heading"><h3>{$t('feedbackWorkbench.claimSupport')}</h3><span>{selected.claim_support.length}</span></div>
-					{#if selected.claim_support.length}{#each selected.claim_support as claim}<div class="support-row"><strong>{claimText(claim)}</strong><span>{String(claim.source_ref ?? claim.source ?? '')}</span></div>{/each}{:else}<p class="muted">{$t('feedbackWorkbench.noClaimSupport')}</p>{/if}
+					{#if selected.claim_support.length}{#each selected.claim_support as claim}<div class="support-row"><strong>{claimText(claim)}</strong><span>{claimSourceLabel(claim)}</span></div>{/each}{:else}<p class="muted">{$t('feedbackWorkbench.noClaimSupport')}</p>{/if}
 				</section>
 
 				<section class="detail-section">
@@ -377,10 +472,23 @@
 					<section class="detail-section analysis-panel">
 					<div class="section-heading"><h3>{$t('feedbackWorkbench.aiSuggestion')}</h3><span>{$t('feedbackWorkbench.candidateOnly')}</span></div>
 					{#if selected.analysis}
-						<div class="analysis-grid"><div><span class="section-label">{$t('feedbackWorkbench.possibleIssue')}</span><strong>{label(selected.analysis.problem_type)}</strong></div><div><span class="section-label">{$t('feedbackWorkbench.confidence')}</span><strong>{Math.round(selected.analysis.confidence * 100)}%</strong></div></div>
+						<div class="analysis-grid"><div><span class="section-label">{$t('feedbackWorkbench.possibleIssue')}</span><strong>{problemLabel(selected.analysis.problem_type)}</strong></div><div><span class="section-label">{$t('feedbackWorkbench.confidence')}</span><strong>{Math.round(selected.analysis.confidence * 100)}%</strong></div></div>
 					{:else}<p class="muted">{$t('feedbackWorkbench.analysisCollecting')}</p>{/if}
 					{#if selected.technical_error}<p class="technical-note">{$t('feedbackWorkbench.statusFailed')}: {$t('feedbackWorkbench.statusHelp')}</p>{/if}
 					</section>
+
+					{#if selected.annotation && (selected.status === 'accepted' || selected.status === 'withdrawn')}
+						<section class="detail-section annotation-record">
+							<div class="section-heading"><h3>{$t('feedbackWorkbench.savedAnnotation')}</h3><span>{$t('feedbackWorkbench.readOnly')}</span></div>
+							<div class="annotation-summary-grid">
+								<div><span class="section-label">{$t('feedbackWorkbench.annotationProblem')}</span><strong>{problemLabel(annotationText('problem_type'))}</strong></div>
+								<div><span class="section-label">{$t('feedbackWorkbench.annotationSeverity')}</span><strong>{severityLabel(annotationText('severity'))}</strong></div>
+								<div><span class="section-label">{$t('feedbackWorkbench.annotationUses')}</span><strong>{annotationUsesLabel()}</strong></div>
+							</div>
+							<div class="annotation-summary-field"><span class="section-label">{$t('feedbackWorkbench.annotationTarget')}</span><p>{annotationText('target') || $t('feedbackWorkbench.noTarget')}</p></div>
+							<div class="annotation-summary-field"><span class="section-label">{$t('feedbackWorkbench.annotationReason')}</span><p>{annotationText('reason') || $t('feedbackWorkbench.noReason')}</p></div>
+						</section>
+					{/if}
 
 					{#if selected.status === 'needs_annotation' || selected.status === 'ready_for_review' || selected.status === 'rejected' || selected.status === 'insufficient'}
 						<section class="detail-section annotation-panel">
@@ -393,7 +501,7 @@
 							</div>
 							<label class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationTarget')}</span><textarea bind:value={annotationTarget} rows="4" placeholder={$t('feedbackWorkbench.annotationTargetPlaceholder')}></textarea></label>
 							{#if annotationSources.length}
-								<div class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationSources')}</span><div class="annotation-sources">{#each annotationSources as source}<label class="source-choice"><input type="checkbox" value={String(source.source_ref ?? source.source_id)} bind:group={annotationSupportRefs} /><span><strong>{sourceTitle(source)}</strong><small>{sourceLocator(source)}</small></span></label>{/each}</div></div>
+								<div class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationSources')}</span><div class="annotation-sources">{#each annotationSources as source}<label class="source-choice"><input type="checkbox" value={String(source.source_ref ?? source.source_id)} bind:group={annotationSupportRefs} /><span><strong>{sourceTitle(source)}</strong>{#if sourceLocator(source)}<small>{sourceLocator(source)}</small>{/if}</span></label>{/each}</div></div>
 							{:else}<p class="muted">{$t('feedbackWorkbench.annotationNoSources')}</p>{/if}
 							<div class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationUses')}</span><div class="use-choices"><label><input type="checkbox" value="evaluation" bind:group={annotationDatasetUses} />{$t('feedbackWorkbench.useEvaluation')}</label><label><input type="checkbox" value="sft" bind:group={annotationDatasetUses} />{$t('feedbackWorkbench.useSft')}</label><label><input type="checkbox" value="preference" bind:group={annotationDatasetUses} />{$t('feedbackWorkbench.usePreference')}</label></div></div>
 							<label class="field-block"><span class="field-label">{$t('feedbackWorkbench.annotationReason')}</span><textarea bind:value={annotationReason} rows="3" placeholder={$t('feedbackWorkbench.annotationReasonPlaceholder')}></textarea></label>
@@ -413,7 +521,7 @@
 					{#if selected.review_decisions?.length}
 						<section class="detail-section">
 							<div class="section-heading"><h3>{$t('feedbackWorkbench.reviewHistory')}</h3><span>{selected.review_decisions.length}</span></div>
-							<div class="review-history">{#each selected.review_decisions as review}<div class="review-history__row"><strong>{label(review.decision)}</strong><span>{formatDate(review.created_at)}</span><p>{review.reason}</p></div>{/each}</div>
+							<div class="review-history">{#each selected.review_decisions as review}<div class="review-history__row"><strong>{decisionLabel(review.decision)}</strong><span>{formatDate(review.created_at)}</span><p>{review.reason}</p></div>{/each}</div>
 						</section>
 					{/if}
 				{/if}
@@ -487,17 +595,24 @@
 	.source-icon { display: grid; place-items: center; width: 28px; height: 28px; color: var(--brand-primary); }
 	.source-row strong, .source-row span { display: block; }
 	.source-row strong { font-size: 13px; }
-	.source-row span { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
-	.source-row p { margin: 8px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
+	.source-row span { margin-top: 2px; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+	.source-row p { margin: 8px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 	.support-row { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--border-default); font-size: 13px; }
-	.support-row span { color: var(--text-secondary); font-size: 11px; }
+	.support-row span { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
 	.gap-list { margin: 0; padding-left: 18px; color: var(--warning-text); font-size: 13px; line-height: 1.6; }
 	.muted { margin: 0; color: var(--text-secondary); font-size: 13px; }
 	.detail-section--warning { background: color-mix(in srgb, var(--warning-bg) 35%, transparent); }
-	.omitted { display: flex; align-items: center; gap: 8px; padding: 7px 0; color: var(--warning-text); font-size: 13px; }
+	.omitted { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; color: var(--warning-text); font-size: 13px; }
+	.omitted > span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+	.omitted small { color: var(--text-secondary); font-size: 11px; }
 	.analysis-panel { background: var(--brand-soft); }
 	.analysis-grid { justify-content: flex-start; gap: 44px; }
 	.analysis-grid strong { display: block; margin-top: 5px; font-size: 14px; text-transform: capitalize; }
+	.annotation-record { background: var(--bg-subtle); }
+	.annotation-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+	.annotation-summary-grid strong { display: block; margin-top: 5px; font-size: 13px; overflow-wrap: anywhere; }
+	.annotation-summary-field { display: grid; gap: 6px; margin-top: 14px; }
+	.annotation-summary-field p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 		.technical-note { margin: 16px 0 0; color: var(--danger-text); font-size: 12px; line-height: 1.5; }
 		.annotation-panel { background: var(--bg-subtle); }
 		.annotation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
@@ -522,12 +637,13 @@
 		.review-button:hover { border-color: var(--brand-border); }
 		.review-button:disabled { opacity: .5; cursor: default; }
 		.review-button--accept { color: var(--success-text); }
-		.review-button--reject { color: var(--danger-text); }
+	.review-button--reject { color: var(--danger-text); }
+	button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand-primary) 35%, transparent); outline-offset: 2px; }
 		.review-history { display: grid; gap: 8px; }
 		.review-history__row { display: grid; grid-template-columns: auto auto; gap: 4px 10px; padding: 10px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
 		.review-history__row span { color: var(--text-secondary); text-align: right; }
 		.review-history__row p { grid-column: 1 / -1; margin: 2px 0 0; color: var(--text-secondary); line-height: 1.45; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@media (max-width: 840px) { .workbench-grid { grid-template-columns: 1fr; } .case-list { order: 0; } .case-detail { order: 1; } .detail-placeholder { min-height: 260px; } }
-		@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer, .annotation-grid { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .annotation-actions { align-items: stretch; flex-direction: column; } }
+		@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer, .annotation-grid, .annotation-summary-grid { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .annotation-actions { align-items: stretch; flex-direction: column; } }
 </style>

@@ -14,6 +14,7 @@ async function mockFeedbackApis(page: Page) {
 	let reviewDecisions: Record<string, unknown>[] = [];
 	let reviewAttempts = 0;
 	const reviewKeys: string[] = [];
+	let datasetMode = false;
 
 	await page.route('**/*', async (route) => {
 		const request = route.request();
@@ -44,13 +45,14 @@ async function mockFeedbackApis(page: Page) {
 			);
 		}
 		if (path === '/api/v1/feedback-cases' && request.method() === 'GET') {
+			datasetMode = new URL(request.url()).searchParams.get('status') === 'accepted';
 			return route.fulfill(
 				json({
 					items: [
 						{
 							case_id: caseId,
 							collection_id: collectionId,
-							status,
+							status: datasetMode ? 'accepted' : status,
 							anchor_message_id: 'answer_feedback',
 							problem_type: 'source_missing',
 							confidence: 0.87,
@@ -73,12 +75,12 @@ async function mockFeedbackApis(page: Page) {
 					case_id: caseId,
 					collection_id: collectionId,
 					session_id: 'session_feedback',
-					status,
+					status: datasetMode ? 'accepted' : status,
 					source_signals: [],
 					question: 'Compare Paper A and Paper B.',
 					answer: 'Paper B has no preheating information.',
 					requested_scope: [{ document_id: 'doc_a', title: 'Paper A' }],
-					inspected_sources: [{ source_ref: 'source_b', document_title: 'Paper B', quote: 'Preheating at 200 C.' }],
+						inspected_sources: [{ source_ref: 'source_b', document_title: 'Paper B', heading_path: 'Figure 3 caption', page: 4, quote: 'Preheating at 200 C.' }],
 					omitted_candidates: [],
 					claim_support: [],
 					gaps: ['Paper B figure caption was omitted.'],
@@ -133,6 +135,48 @@ async function mockFeedbackApis(page: Page) {
 		if (path === `/api/v1/feedback-cases/${caseId}/review-decisions` && request.method() === 'GET') {
 			return route.fulfill(json({ items: reviewDecisions }));
 		}
+		if (path === '/api/v1/dataset-snapshots' && request.method() === 'GET') {
+			return route.fulfill(
+				json({
+					items: [
+						{
+							dataset_id: 'dataset_feedback',
+							collection_id: collectionId,
+							dataset_type: 'evaluation',
+							manifest_digest: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+							provenance_digest: 'fedcba1234567890fedcba1234567890fedcba1234567890fedcba1234567890',
+							content_digest: '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+							row_count: 1,
+							excluded_count: 1,
+							is_empty: false,
+							created_at: '2026-09-25T00:00:00Z'
+						}
+					],
+					limit: 50,
+					offset: 0
+				})
+			);
+		}
+		if (path === '/api/v1/dataset-snapshots/dataset_feedback' && request.method() === 'GET') {
+			return route.fulfill(
+				json({
+					dataset_id: 'dataset_feedback',
+					collection_id: collectionId,
+					dataset_type: 'evaluation',
+					rows: [],
+					exclusions: [{ case_id: caseId, split: 'eval', reason: 'paper_family_missing', detail: 'paper_family_missing:doc_a' }],
+					provenance: {},
+					manifest: {},
+					manifest_digest: 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+					provenance_digest: 'fedcba1234567890fedcba1234567890fedcba1234567890fedcba1234567890',
+					content_digest: '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+					row_count: 0,
+					excluded_count: 1,
+					is_empty: true,
+					created_at: '2026-09-25T00:00:00Z'
+				})
+			);
+		}
 		return route.fulfill(json({ detail: `unhandled test route: ${request.method()} ${path}` }, 404));
 	});
 
@@ -168,4 +212,24 @@ test('feedback workbench carries a retry key and keeps the reviewer out of techn
 	expect(keys[0]).toBeTruthy();
 	expect(keys[1]).toBe(keys[0]);
 	expect(await page.locator('body').textContent()).not.toContain(caseId);
+	expect(await page.locator('body').textContent()).not.toContain('source_b');
+	expect(await page.locator('body').textContent()).toContain('Figure 3 caption');
+});
+
+test('dataset history uses case context instead of internal identifiers', async ({ page }) => {
+	await mockFeedbackApis(page);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`/collections/${collectionId}/feedback/datasets`);
+
+	await expect(page.getByRole('heading', { name: 'Dataset snapshots' })).toBeVisible();
+	await page.locator(`#case-${caseId}`).check();
+	await page.getByRole('button', { name: 'View exclusions' }).click();
+	await expect(page.getByText('Paper family is missing')).toBeVisible();
+
+	const body = await page.locator('body').textContent();
+	expect(body).toContain('Compare Paper A and Paper B');
+	expect(body).not.toContain(caseId);
+	expect(body).not.toContain('dataset_feedback');
+	expect(body).not.toContain('abcdef123456');
+	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

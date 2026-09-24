@@ -2929,6 +2929,13 @@ const translations: Record<Language, Translations> = {
 			statusFailed: 'Technical failure',
 			statusHelp: 'This state describes processing or review progress; it does not declare the answer correct or incorrect.',
 			source: 'Source',
+			sourceUnknown: 'Source context recorded',
+			supportRecorded: 'Supporting source recorded',
+			page: 'p. {page}',
+			omissionReason: 'Reason: {reason}',
+			reasonNotRead: 'Not inspected',
+			reasonNotRequested: 'Not requested',
+			reasonUnavailable: 'Unavailable',
 			location: 'Location',
 				noQuote: 'No excerpt was recorded.'
 				,annotationTitle: 'Human annotation'
@@ -2949,6 +2956,15 @@ const translations: Record<Language, Translations> = {
 				,annotationSave: 'Save annotation'
 				,annotationSaving: 'Saving…'
 				,annotationSaved: 'Annotation saved and ready for review.'
+				,savedAnnotation: 'Saved annotation'
+				,readOnly: 'Read only'
+				,noTarget: 'No reference target was recorded.'
+				,noReason: 'No annotation reason was recorded.'
+				,noDatasetUses: 'No dataset use was selected.'
+				,decisionAccept: 'Accepted'
+				,decisionReject: 'Rejected'
+				,decisionInsufficient: 'Insufficient evidence'
+				,decisionWithdraw: 'Acceptance withdrawn'
 				,problemFactError: 'Factual error'
 				,problemSourceMissing: 'Source missing'
 				,problemEvidenceMismatch: 'Evidence mismatch'
@@ -2980,14 +2996,19 @@ const translations: Record<Language, Translations> = {
 			type: { evaluation: 'Evaluation', sft: 'Supervised training', preference: 'Preference comparison' },
 			typeHelp: { evaluation: 'Keeps the question, reference, evidence, and review criteria.', sft: 'Requires a reviewed target and supporting sources.', preference: 'Uses the reviewed target as chosen and the original answer as rejected.' },
 			loading: 'Loading accepted cases…', noAccepted: 'No accepted cases are ready.', noAcceptedDetail: 'Complete annotation and review for a case before selecting it here.',
-			untitledCase: 'Untitled case', noDocuments: 'No paper scope recorded', splitFor: 'Split for {case}',
+			untitledCase: 'Untitled case', noDocuments: 'No paper scope recorded', splitFor: 'Split for {case}', selectedCase: 'Selected case', selectedPaper: 'Selected paper', familyFor: 'Paper family for {document}',
 			paperFamilies: 'Paper families', paperFamiliesHint: 'Cases sharing a family cannot cross train and eval.',
 			freeze: 'Freeze snapshot', saving: 'Freezing…', freezeNote: 'The server rechecks review, source, and split rules before freezing. Nothing changes in Chat.',
 			created: 'Snapshot created with {count} rows.', historyEyebrow: 'Immutable exports', history: 'Snapshot history',
-			noSnapshots: 'No snapshots yet', noSnapshotsDetail: 'Frozen exports will appear here with their exclusion counts and digest.',
+			noSnapshots: 'No snapshots yet', noSnapshotsDetail: 'Frozen exports will appear here with their exclusion counts.', immutable: 'Immutable snapshot',
 			rows: 'rows', excluded: 'Excluded', empty: 'Empty', download: 'Download JSONL', downloading: 'Preparing…',
 			viewDetails: 'View exclusions', hideDetails: 'Hide exclusions', loadingDetails: 'Loading exclusions…',
-			exclusionReasons: 'Excluded selections', noExclusions: 'No selections were excluded.'
+			exclusionReasons: 'Excluded selections', noExclusions: 'No selections were excluded.',
+			reasonDuplicate: 'Duplicate selection', reasonSplitInvalid: 'Invalid split', reasonCaseNotInCollection: 'Case is outside this collection',
+			reasonCaseNotAccessible: 'Case is no longer accessible', reasonAnnotationStale: 'Annotation has changed', reasonReviewNotAccepted: 'Review was not accepted',
+			reasonDatasetUseNotAuthorized: 'Dataset use was not approved', reasonAnswerMissing: 'Answer is missing', reasonInputMissing: 'Question is missing',
+			reasonPaperFamilyMissing: 'Paper family is missing', reasonSourceNotInCase: 'Supporting source is unavailable', reasonTargetMissing: 'Reference target is missing',
+			reasonSupportSourceMissing: 'Supporting source is missing', reasonPreferencePairMissing: 'Preference pair is incomplete', reasonOther: 'Could not include this selection'
 		},
 		error: {
 			unexpected: 'Unexpected error.',
@@ -5791,6 +5812,13 @@ const translations: Record<Language, Translations> = {
 			statusFailed: '技术失败',
 			statusHelp: '这里的状态表示处理或审核进度，不代表回答已经被判定为正确或错误。',
 			source: 'Source',
+			sourceUnknown: '已记录来源上下文',
+			supportRecorded: '已记录支持性来源',
+			page: '第 {page} 页',
+			omissionReason: '原因：{reason}',
+			reasonNotRead: '尚未检查',
+			reasonNotRequested: '未被要求检查',
+			reasonUnavailable: '来源不可用',
 			location: '位置',
 				noQuote: '没有记录原文摘录。'
 				,annotationTitle: '人工标注'
@@ -5811,6 +5839,15 @@ const translations: Record<Language, Translations> = {
 				,annotationSave: '保存标注'
 				,annotationSaving: '正在保存…'
 				,annotationSaved: '标注已保存，可以进入审核。'
+				,savedAnnotation: '已保存的标注'
+				,readOnly: '只读'
+				,noTarget: '没有记录参考目标。'
+				,noReason: '没有记录标注理由。'
+				,noDatasetUses: '没有选择数据用途。'
+				,decisionAccept: '已接受'
+				,decisionReject: '已拒绝'
+				,decisionInsufficient: '依据不足'
+				,decisionWithdraw: '已撤回接受'
 				,problemFactError: '事实错误'
 				,problemSourceMissing: '来源遗漏'
 				,problemEvidenceMismatch: '证据不匹配'
@@ -5842,14 +5879,19 @@ const translations: Record<Language, Translations> = {
 			type: { evaluation: '评测', sft: '监督训练', preference: '偏好比较' },
 			typeHelp: { evaluation: '保留问题、参考目标、证据和审核标准。', sft: '必须有已审核目标和支持性 Source。', preference: '使用已审核目标作为 chosen，原回答作为 rejected。' },
 			loading: '正在加载已接受案例…', noAccepted: '当前没有可发布的已接受案例。', noAcceptedDetail: '先完成案例标注和审核，再从这里选择。',
-			untitledCase: '未命名案例', noDocuments: '没有记录文献范围', splitFor: '为 {case} 选择分区',
+			untitledCase: '未命名案例', noDocuments: '没有记录文献范围', splitFor: '为 {case} 选择分区', selectedCase: '所选案例', selectedPaper: '所选论文', familyFor: '为 {document} 设置论文家族',
 			paperFamilies: '论文家族', paperFamiliesHint: '同一家族不能同时出现在 train 和 eval。',
 			freeze: '冻结快照', saving: '正在冻结…', freezeNote: '服务端会再次检查审核、来源和分区规则；不会修改 Chat。',
 			created: '快照已创建，包含 {count} 行。', historyEyebrow: '不可变导出', history: '快照历史',
-			noSnapshots: '还没有快照', noSnapshotsDetail: '冻结后的导出会显示在这里，包括排除数量和摘要。',
+			noSnapshots: '还没有快照', noSnapshotsDetail: '冻结后的导出会显示在这里，包括排除数量。', immutable: '不可变快照',
 			rows: '行', excluded: '已排除', empty: '空快照', download: '下载 JSONL', downloading: '准备下载…',
 			viewDetails: '查看排除原因', hideDetails: '收起排除原因', loadingDetails: '正在加载排除原因…',
-			exclusionReasons: '被排除的选择', noExclusions: '没有被排除的选择。'
+			exclusionReasons: '被排除的选择', noExclusions: '没有被排除的选择。',
+			reasonDuplicate: '重复选择', reasonSplitInvalid: '分区无效', reasonCaseNotInCollection: '案例不属于当前集合',
+			reasonCaseNotAccessible: '案例当前不可访问', reasonAnnotationStale: '标注已经变化', reasonReviewNotAccepted: '审核未接受',
+			reasonDatasetUseNotAuthorized: '未批准该数据用途', reasonAnswerMissing: '缺少回答', reasonInputMissing: '缺少问题',
+			reasonPaperFamilyMissing: '缺少论文家族', reasonSourceNotInCase: '支持性来源不可用', reasonTargetMissing: '缺少参考目标',
+			reasonSupportSourceMissing: '缺少支持性来源', reasonPreferencePairMissing: '偏好对不完整', reasonOther: '无法纳入此选择'
 		},
 		error: {
 			unexpected: '发生未知错误。',

@@ -75,11 +75,12 @@
 					const item = [...detail.requested_scope, ...detail.inspected_sources, ...detail.omitted_candidates].find(
 						(source) => String(source.document_id ?? '') === id
 					);
+					const title = String(item?.document_title ?? item?.title ?? '').trim();
 					documentTitles = {
 						...documentTitles,
-						[id]: String(item?.document_title ?? item?.title ?? id)
+						[id]: title || $t('datasetSnapshots.selectedPaper')
 					};
-					if (!familyByDocument[id]) familyByDocument[id] = String(item?.document_title ?? item?.title ?? id);
+					if (!familyByDocument[id] && title) familyByDocument[id] = title;
 				}
 			} catch (err) {
 				error = errorMessage(err);
@@ -91,6 +92,39 @@
 		return [...detail.requested_scope, ...detail.inspected_sources, ...detail.omitted_candidates, ...detail.claim_support]
 			.map((source) => String(source.document_id ?? ''))
 			.filter((id, index, values) => id && values.indexOf(id) === index);
+	}
+
+	function documentLabel(documentId: string) {
+		return documentTitles[documentId] || $t('datasetSnapshots.selectedPaper');
+	}
+
+	function caseLabel(caseId: string) {
+		const item = acceptedCases.find((candidate) => candidate.case_id === caseId);
+		if (!item) return $t('datasetSnapshots.selectedCase');
+		return item.question_preview || item.answer_preview || item.document_titles.join(' · ') || $t('datasetSnapshots.selectedCase');
+	}
+
+	function exclusionReason(exclusion: Record<string, unknown>) {
+		const reason = String(exclusion.reason ?? '').trim().split(':', 1)[0];
+		const key =
+			{
+				duplicate_selection: 'reasonDuplicate',
+				split_invalid: 'reasonSplitInvalid',
+				case_not_in_collection: 'reasonCaseNotInCollection',
+				case_not_accessible: 'reasonCaseNotAccessible',
+				annotation_stale: 'reasonAnnotationStale',
+				review_not_accepted: 'reasonReviewNotAccepted',
+				dataset_use_not_authorized: 'reasonDatasetUseNotAuthorized',
+				anchor_answer_missing: 'reasonAnswerMissing',
+				input_missing: 'reasonInputMissing',
+				answer_missing: 'reasonAnswerMissing',
+				paper_family_missing: 'reasonPaperFamilyMissing',
+				source_not_in_case: 'reasonSourceNotInCase',
+				target_missing: 'reasonTargetMissing',
+				support_source_missing: 'reasonSupportSourceMissing',
+				preference_pair_missing: 'reasonPreferencePairMissing'
+			}[reason] ?? '';
+		return key ? $t(`datasetSnapshots.${key}`) : $t('datasetSnapshots.reasonOther');
 	}
 
 	async function toggleCase(caseId: string) {
@@ -110,7 +144,7 @@
 				collectionId,
 				datasetType,
 				selectedIds.map((caseId) => ({ case_id: caseId, split: splitByCase[caseId] ?? 'eval' })),
-				Object.fromEntries(selectedDocuments.map((id) => [id, familyByDocument[id] || documentTitles[id] || id]))
+				Object.fromEntries(selectedDocuments.map((id) => [id, familyByDocument[id] || '']))
 			);
 			notice = $t('datasetSnapshots.created', { count: snapshot.row_count });
 			snapshots = [snapshot, ...snapshots.filter((item) => item.dataset_id !== snapshot.dataset_id)];
@@ -215,7 +249,7 @@
 				<div class="families">
 					<div class="section-heading"><div><h3>{$t('datasetSnapshots.paperFamilies')}</h3><span>{$t('datasetSnapshots.paperFamiliesHint')}</span></div></div>
 					{#each selectedDocuments as documentId}
-						<label class="family-row"><span>{documentTitles[documentId] || documentId}</span><input bind:value={familyByDocument[documentId]} aria-label={documentTitles[documentId] || documentId} /></label>
+						<label class="family-row"><span>{documentLabel(documentId)}</span><input bind:value={familyByDocument[documentId]} aria-label={$t('datasetSnapshots.familyFor', { document: documentLabel(documentId) })} /></label>
 					{/each}
 				</div>
 			{/if}
@@ -232,7 +266,7 @@
 			<div class="snapshot-list">
 				{#each snapshots as snapshot (snapshot.dataset_id)}
 					<article class="snapshot-row">
-						<div class="snapshot-main"><div class="snapshot-title"><strong>{datasetLabel(snapshot.dataset_type)}</strong><span class="status-chip">{snapshot.row_count} {$t('datasetSnapshots.rows')}</span>{#if snapshot.is_empty}<span class="empty-chip">{$t('datasetSnapshots.empty')}</span>{/if}</div><small>{formatDate(snapshot.created_at)}</small><code>{snapshot.manifest_digest.slice(0, 12)}…</code></div>
+						<div class="snapshot-main"><div class="snapshot-title"><strong>{datasetLabel(snapshot.dataset_type)}</strong><span class="status-chip">{snapshot.row_count} {$t('datasetSnapshots.rows')}</span>{#if snapshot.is_empty}<span class="empty-chip">{$t('datasetSnapshots.empty')}</span>{/if}</div><small>{formatDate(snapshot.created_at)}</small><span class="snapshot-note">{$t('datasetSnapshots.immutable')}</span></div>
 						<div class="snapshot-meta"><span>{$t('datasetSnapshots.excluded')}: {snapshot.excluded_count}</span><div class="snapshot-actions"><button class="detail-button" type="button" aria-expanded={expandedSnapshot === snapshot.dataset_id} on:click={() => toggleSnapshot(snapshot)}><Eye size={15} />{expandedSnapshot === snapshot.dataset_id ? $t('datasetSnapshots.hideDetails') : $t('datasetSnapshots.viewDetails')}</button><button class="download-button" type="button" on:click={() => download(snapshot)} disabled={downloading === snapshot.dataset_id}><Download size={15} />{downloading === snapshot.dataset_id ? $t('datasetSnapshots.downloading') : $t('datasetSnapshots.download')}</button></div></div>
 						{#if expandedSnapshot === snapshot.dataset_id}
 							{@const detail = snapshotDetails[snapshot.dataset_id]}
@@ -242,7 +276,7 @@
 								{:else if detail && detail.exclusions.length}
 									<strong>{$t('datasetSnapshots.exclusionReasons')}</strong>
 									{#each detail.exclusions as exclusion}
-										<div class="exclusion-row"><span>{String(exclusion.case_id ?? '')}</span><span>{String(exclusion.detail ?? exclusion.reason ?? '')}</span></div>
+										<div class="exclusion-row"><span>{caseLabel(String(exclusion.case_id ?? ''))}</span><span>{exclusionReason(exclusion)}</span></div>
 									{/each}
 								{:else if detail}
 									<span class="muted">{$t('datasetSnapshots.noExclusions')}</span>
@@ -296,7 +330,7 @@
 	.case-option input { accent-color: var(--accent-primary); }
 	.case-copy { min-width: 0; display: grid; gap: 3px; cursor: pointer; }
 	.case-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-	.case-copy small, .snapshot-main small { color: var(--text-secondary); font-size: 11px; }
+	.case-copy small, .snapshot-main small, .snapshot-note { color: var(--text-secondary); font-size: 11px; }
 	.case-option select { min-height: 30px; font-size: 12px; }
 	.families { margin: 8px 0 18px; padding-top: 16px; border-top: 1px solid var(--border-subtle); }
 	.family-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, .65fr); gap: 10px; align-items: center; margin-top: 9px; font-size: 12px; }
@@ -312,11 +346,12 @@
 	.status-chip, .empty-chip { padding: 3px 6px; border-radius: 4px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 10px; }
 	.empty-chip { color: #9a6b1e; background: #fff5df; }
 	.snapshot-main { display: grid; gap: 5px; min-width: 0; }
-	.snapshot-main code { color: var(--text-tertiary); font-size: 10px; }
 	.snapshot-meta { justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 11px; }
 	.snapshot-actions { display: flex; align-items: center; gap: 7px; }
 	.exclusion-details { display: grid; gap: 7px; padding: 11px; border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--surface-base); font-size: 11px; }
 	.exclusion-row { display: grid; grid-template-columns: minmax(90px, .35fr) minmax(0, 1fr); gap: 10px; color: var(--text-secondary); }
+	.exclusion-row span { min-width: 0; overflow-wrap: anywhere; }
+	button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent-primary) 35%, transparent); outline-offset: 2px; }
 	.spin { display: inline-flex; animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 	@media (max-width: 860px) { .datasets { padding: 22px 16px 40px; } .builder-grid { grid-template-columns: 1fr; } }

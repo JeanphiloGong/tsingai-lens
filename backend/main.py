@@ -444,6 +444,14 @@ async def build_application_runtime(
                 group_repository=comparison_group_repository,
                 finding_repository=experiment_finding_repository,
             )
+        if session_factory is not None and (
+            experiment_analysis_writer is None
+            or experiment_compatibility_projection is None
+        ):
+            raise RuntimeError(
+                "database-backed runtime requires the PaperExperiment writer "
+                "and query projection"
+            )
         finding_review_repository = (
             overrides.finding_review_repository
             or PostgresFindingReviewRepository(session_factory)

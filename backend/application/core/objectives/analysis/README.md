@@ -8,7 +8,7 @@ Evidence. Technical failure is not a scientific conclusion.
 
 `ObjectiveEvidenceAnalysisService.generate_objective_analysis_artifacts()` in
 [`../objective_analysis_service.py`](../objective_analysis_service.py) coordinates
-the selected papers and their reusable checkpoints. Read
+the selected papers and their source-grounded experiment drafts. Read
 `_generate_document_evidence()` there for the single-paper scientific sequence.
 [`../analysis_service.py`](../analysis_service.py) separately owns scheduling,
 analysis versions, progress, and atomic publication.
@@ -19,9 +19,9 @@ confirmed Objective + exact prepared papers
   -> extract one Source -> validate that Source immediately
      -> read missing same-paper context when needed
   -> reconstruct same-paper experiments
-  -> materialize Evidence and checkpoint the paper
-  -> compare the selected paper outcomes
-  -> return Findings for publication
+  -> persist PaperExperiment revisions and Objective selections
+  -> optionally group compatible selections across papers
+  -> publish Findings through the experiment writer
 ```
 
 For example, a tensile table may contain elongation values while Methods
@@ -40,8 +40,8 @@ they are not promoted into standalone `BaselineReference` records.
 | Extract | `source_extraction.extract_and_validate_source_facts` | Routes and Sources -> source observations | When deterministic extraction is insufficient | None |
 | Ground | `source_validation.validate_source_fact` | One source observation and its exact Source -> validated, uncertain, or rejected observation | No | None |
 | Bind | `paper_experiment.reconstruct_paper_experiments` / `assemble_paper_experiments` | Same-paper facts -> scoped `PaperExperiment` records with measurement links and derived-observation lineage | No | None |
-| Materialize | `evidence_materialization.materialize_evidence` | `PaperExperiment` aggregates plus application `SourceReadAudit` records -> Evidence and contribution records | No | None; caller stores records |
-| Compare | `finding_synthesis.FindingSynthesisService.synthesize` | Paper contributions and Evidence -> Findings | Optional assertion judge | None; caller publishes |
+| Select | `experiment_analysis_writer.ExperimentAnalysisWriter` | Reconstructed experiments -> fixed revisions and Objective selections | No | PaperExperiment, Selection, optional Group, Finding |
+| Compare | `experiment_finding_synthesis.ExperimentFindingSynthesisService.synthesize` | Selected experiment measurements/comparisons -> Findings | Optional semantic judge | Finding repository |
 
 Extraction and grounding alternate per Source, not as two collection-wide
 passes. The next Source sees only already accepted facts. Missing conditions
@@ -78,19 +78,25 @@ not a persisted record or grounded Evidence.
 Modify the owner of the decision, then its existing regression test. For a
 table-layout problem, begin with `table_repair.py`; for an unsupported field,
 begin with `source_validation.py`; for incorrect cross-paper grouping, begin
-with `finding_synthesis.py`. Do not change all three to accommodate one result.
-Adding a scientific stage also requires the coordinator, checkpoint version,
-and scenario tests to acknowledge it; moving code does not change a version.
+with `experiment_finding_synthesis.py`. Do not change all three to accommodate
+one result. Adding a scientific stage also requires the coordinator, its
+extraction version, and scenario tests to acknowledge it; moving code does not
+change a version.
 
 Preserve comparable, associative, descriptive, unresolved, and non-comparable
 outcomes. A completed inspection can yield no Finding. Provider or parsing
 failure remains retryable; partial technical failure remains visible in paper
-contributions and traces. Publication never exposes incomplete checkpoint work.
+contributions and traces. Publication never exposes an incomplete experiment
+revision or an unbound selection.
 
 ## Tests
 
 See [Objective Analysis Verification](../../../../tests/objective-analysis-verification.md)
 for the real-paper cases, fixture limits, and commands. The nearest focused
-tests are `test_objective_evidence_extraction.py`,
-`test_objective_evidence_comparison.py`, and
-`test_objective_evidence_materialization.py` under `tests/unit/application/`.
+tests are `test_paper_experiment_assembly.py`,
+`test_experiment_analysis_writer.py`,
+`test_experiment_compatibility_projection.py`, and
+`test_objective_analysis_service.py` under `tests/unit/application/`. The old
+`test_objective_evidence_materialization.py` suite remains only for historical
+replay coverage while the legacy helper is removed; it is not the automatic
+runtime publication path.

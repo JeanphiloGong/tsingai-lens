@@ -124,10 +124,14 @@ Objective discovery
 
 ObjectiveAnalysis
   -> frozen document_id + preparation_fingerprint inputs
-  -> per-document Evidence checkpoints
-     -> PaperContribution
-     -> ObjectiveEvidence
+  -> PaperExperiment revision
+     -> ObjectiveExperimentSelection
+  -> optional ComparisonGroup
   -> Finding
+
+Human- or Agent-authored analysis versions keep their immutable authored
+Evidence/Finding snapshot; they do not participate in the automatic
+PaperExperiment write path.
 ```
 
 Collections only assemble Documents. Readiness and preparation failures belong
@@ -166,13 +170,13 @@ stores uploaded and extracted bytes. Local files are disposable runtime scratch.
 - Objective analysis validates every frozen fingerprint before reading Source.
   A changed or re-prepared Document makes the old analysis input stale and the
   operation fails instead of mixing versions.
-- Evidence inspection runs independently for each selected Document with a
-  process-local limit of `4`. A matching succeeded checkpoint is reused across
-  analysis retries; failed or unfinished inspection is rerun. Findings are
-  synthesized once after the selected checkpoint set is assembled.
-- Inspection that finds no routable or comparable Evidence is completed
-  scientific work and remains reusable. Provider, parsing, and execution errors
-  are technical failure and remain retryable.
+- Source inspection and PaperExperiment reconstruction run independently for
+  each selected Document with a process-local limit of `4`. Each successful
+  analysis writes a fixed experiment revision and its explicit Objective
+  selection; there is no automatic per-document Evidence checkpoint.
+- A run with no recoverable experiment is a scientific abstention or failed
+  technical run according to the returned contribution. Provider, parsing, and
+  execution errors remain retryable.
 
 ## Restart Recovery And Scientific Versioning
 
@@ -198,12 +202,10 @@ Documents' current preparation fingerprints and the current scientific logic,
 then atomically replaces the published version only after the complete analysis
 succeeds.
 
-Per-Document Objective Evidence checkpoints are reusable only when their input
-fingerprint matches the Objective, Document preparation, model, extraction
-version, and the six scientific stages: paper framing, evidence routing, Source
-extraction, Source grounding, paper experiment reconstruction, and Evidence
-materialization. Changing any of those stage versions invalidates the cached
-Evidence for new analysis without making an older published result unreadable.
+PaperExperiment revisions are immutable. A later read or supplementary Source
+creates a successor revision and a new analysis selection; older Findings keep
+pointing at the revision they used. The retired per-document checkpoint payload
+is classified by migration `20260924_0075` and is not read by runtime code.
 
 ## Related Docs
 

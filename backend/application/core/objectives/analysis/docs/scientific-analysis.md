@@ -100,34 +100,22 @@ Read the analysis responsibilities in real research order:
    identity.
    Unknown study identity remains `None`; these conservative series are not a
    claim to have reconstructed every experiment in the paper.
-6. `evidence_materialization.py` consumes only the `PaperExperiment` aggregate
-   produced for the current paper. Each `MeasurementResult` is the structured
-   result entry: materialization resolves its Source observation, linked
-   `SampleVariant`, and linked `TestCondition`, then projects those bound facts
-   into durable `ObjectiveEvidence`. It rejects a value, sample, or test binding
-   that disagrees with its Source and records an internal diagnostic. Missing
-   sample or test bindings preserve the reported measurement as
-   `needs_context`; they are never inferred or admitted to Finding synthesis.
-   Callers cannot pass an independent
-   observation stream alongside the experiment. Technical read failures are
-   supplied separately as
-   application `SourceReadAudit` records. Derived comparisons are observations
-   with explicit `derived_from_observation_ids`, not additional raw
-   measurements. It deduplicates replayed scientific claims by stable
-   Evidence identity, and derives each paper's `PaperContribution` from that
-   final Evidence set. Table row and column locators are part of a result's
-   Source-local identity, so equal scalar values in different specimen rows do
-   not collapse while true retries of the same row still coalesce. Imported
-   filenames and other page-less document labels
-   remain useful screening and lineage metadata, but they are not primary
-   scientific Sources when the same fact is grounded by an inspectable paged
-   Abstract, Methods, Results, table, or figure Source. Materialization keeps
-   the filename in related lineage and selects the paged Source as the durable
-   primary locator.
-7. `finding_synthesis.py` groups durable Evidence into backend-owned result
-   sets, asks the bounded assertion judge only for claim strength and supported
-   context, and constructs traceable cross-paper `Finding` records for the
-   analysis lifecycle service to publish. Within one
+6. `ExperimentAnalysisWriter` consumes the transient `PaperExperiment` records
+   produced for the completed Objective run. It assigns stable experiment
+   identities, writes immutable revisions, creates Objective-scoped Selections,
+   and preserves unresolved bindings instead of inventing Evidence rows. The
+   writer never copies legacy `ObjectiveEvidence` records into the automatic
+   graph. Its `ExperimentFindingSynthesisService` operates on the fixed
+   revisions and selections, and its publisher writes Findings that reference
+   those records.
+7. `ExperimentCompatibilityProjection` derives the existing Objective,
+   Evidence, and Finding response shapes from the fixed experiment graph. It is
+   read-only and version-bound; it does not create a second scientific-fact
+   ledger. Authored or historical analysis versions may still use their own
+   immutable snapshot payload. The old `evidence_materialization.py` and
+   `finding_synthesis.py` helpers remain only for historical tests and probes
+   until their cleanup checkpoint; they are not automatic runtime callers.
+   Within one
    paper, result sets that share the same outcome, Objective factor set, and
    comparison interval are treated as one experimental series only when the
    result Evidence has an overlapping primary or related Source lineage and
@@ -403,33 +391,22 @@ map earlier to prioritize Source inspection and later to report preliminary
 coverage gaps, but a map material, process, variable, or outcome label cannot
 fill, overwrite, or validate a `SourceObservation`.
 
-`evidence_materialization.py` owns the trust boundary from transient paper
-facts to durable Evidence. It keeps the confirmed Objective's result details,
-canonicalizes uniquely matching axes, resolves exact Source excerpts and
-related locators. The primary excerpt is always the exact primary paragraph,
-figure caption, or cited rows from the primary table; a table with no row-level
-excerpt falls back to its complete Source. Methods, other condition tables,
-figures, and row bindings used to reconstruct the experiment remain separate
-`related_source_refs` and are never concatenated into text that no single
-Source actually contains. Replayed model observations that canonicalize to the same complete
-source-grounded scientific record are deduplicated even when a provider attempt
-assigned a different `evidence_id`. Distinct claims from one Source remain
-separate because a table, figure, or paragraph can support several measurements
-or comparisons.
-`PaperContribution` route, extracted, failed, and comparable counts are computed
-from that complete claim set, and its contribution summary is assembled only
-from grounded result text in the final Evidence records. Contribution warnings
-count only final framing fallback, `PaperResearchMap` coverage gaps, and failed
-Evidence Sources; normal deterministic task organization and successful repair
-are not warnings. It does not persist artifacts or synthesize a cross-paper
-claim. Its private materialization trace records only bounded counts and paper
-dispositions, so an empty result can be distinguished from filtering and
-technical extraction failure without storing Source content in diagnostics.
-For factor/outcome candidates excluded only by material scope, material-scope
-decisions record the Source locator, Objective material scope, grounded Evidence
-material values, and mismatched or unresolved status without storing Source
-text. Detail records are capped at 100 per analysis and any remainder is kept as
-status counts.
+`ExperimentAnalysisWriter` owns the automatic write boundary from transient
+paper facts to durable experiment records. It keeps the confirmed Objective's
+source fingerprints, assigns stable identities, writes immutable revisions, and
+creates selections only from the experiment contents returned by the current
+run. The writer preserves unresolved bindings and does not copy transient or
+legacy Evidence into the new graph. `ExperimentFindingSynthesisService` then
+derives Findings from those fixed revisions and selections; a Finding always
+keeps its selection and optional comparison-group references.
+
+`ExperimentCompatibilityProjection` owns the read boundary for existing
+Objective, Evidence, and Finding response shapes. It resolves one requested
+analysis version and projects the experiment graph without writing a second
+scientific-fact ledger. Authored analysis versions continue to expose their
+own immutable snapshots. The old `evidence_materialization.py` helper still
+supports historical tests and probes, but no automatic production caller uses
+it after the hard switch.
 
 Each durable Evidence also carries a deterministic research status: `comparable`
 has complete source-grounded variables, comparison, material scope, result, and
@@ -456,17 +433,15 @@ failure, the analysis run fails and remains retryable. A partial technical
 failure may still publish surviving paper outcomes with explicit contribution
 warnings.
 
-The first six stages run and persist independently per Document. A checkpoint is
-reused only when Objective intent, Document preparation fingerprint, extraction
-version, and model identity still match. Scientific absence and
-non-comparability are successful inspections; provider, parsing, or unexpected
-execution errors are failed checkpoints. On retry, successful papers are reused
-and failed papers are inspected again. Only after the selected checkpoint set is
-assembled does `finding_synthesis.py` run once, followed by the existing atomic
-analysis publication.
+Each automatic run reads the frozen prepared Documents and writes successor
+experiment revisions; it does not reuse a per-document scientific checkpoint.
+Scientific absence and non-comparability are successful experiment outcomes,
+while provider, parsing, or unexpected execution errors fail the run and remain
+retryable. A later supplement creates a new revision, and existing Findings
+continue to reference the earlier selection.
 
-`finding_synthesis.py` owns cross-paper comparison after durable Evidence and
-paper outcomes exist. `FindingSynthesisService` deterministically selects
+`ExperimentFindingSynthesisService` owns cross-paper comparison after durable
+experiment revisions and selections exist. It deterministically selects
 comparable Evidence, constructs atomic factor/outcome result sets, balances the
 bounded model input across papers, assigns all supporting and opposing Evidence,
 and derives the published statement, status, certainty, limitations, identity,
@@ -599,9 +574,8 @@ persisted scientific object and does not add a public synthesis approval gate.
 The existing Evidence and Finding rules still own published scientific
 eligibility.
 
-These domain bindings and comparison assessments are per-execution state, not
-new persisted Evidence/Finding fields. Reused document checkpoints therefore
-have no newly reconstructed `PaperExperiment` aggregates. This change does not
-rewrite historical results, change HTTP schemas or enum values, or require
-frontend interaction changes. Expanding Finding beyond its current atomic
-claim contract remains separate work.
+These domain bindings and comparison assessments are persisted in immutable
+PaperExperiment revisions and fixed selections. A later revision cannot rewrite
+an earlier Finding. Authored analysis snapshots remain separate, and the public
+HTTP schemas and enum values stay unchanged. Expanding Finding beyond its
+current atomic claim contract remains separate work.

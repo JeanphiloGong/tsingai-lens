@@ -34,8 +34,9 @@ Objective discovery
 
 ResearchObjective
   -> ObjectiveAnalysis versions
-     -> private checkpoints and PaperContributions in analysis payload
-     -> ObjectiveEvidence
+     -> PaperExperiment revisions
+     -> ObjectiveExperimentSelections
+     -> optional ComparisonGroups
      -> Findings
 ```
 
@@ -130,30 +131,17 @@ does not create a Collection snapshot or duplicate preparation aggregates.
 Objective identity is `(collection_id, objective_id)`. Analysis identity is
 that pair plus positive `analysis_version`.
 
-Every analysis freezes its selected `document_inputs`. Before extracting
-Evidence, the service verifies that every Document is still ready and still has
-the same fingerprint. A mismatch is stale input and blocks the run. This prevents
-one analysis from reading Source from a different preparation than it recorded.
+Every analysis freezes its selected `document_inputs`. Before reading Source,
+the service verifies that every Document is still ready and still has the same
+fingerprint. A mismatch is stale input and blocks the run. This prevents one
+analysis from reading Source from a different preparation than it recorded.
 
-One private checkpoint entry in `objective_analyses.payload` represents
-inspection of one prepared Document for one Objective. Its logical identity is:
-
-```text
-collection_id + objective_id + document_id + input_fingerprint
-```
-
-The fingerprint covers the Objective scientific intent, the Document
-`preparation_fingerprint`, the Evidence extraction version, and model identity.
-Only `succeeded` checkpoint entries are reusable. A succeeded checkpoint
-contains one `PaperContribution` and its zero or more `ObjectiveEvidence`
-records in the same analysis payload; zero
-Evidence can mean a valid scientific absence. `failed` and unfinished `running`
-checkpoints are technical work and are replaced on retry.
-
-Checkpoint artifacts retain their producing analysis version internally. When
-reused, they are rebound to the new `analysis_version` before one cross-paper
-Finding synthesis. They are not published children and are never read by the
-Finding or Evidence APIs.
+The automatic path writes immutable PaperExperiment revisions and explicit
+ObjectiveExperimentSelections. A later supplement or correction creates a
+successor revision; it never mutates the revision used by an earlier Finding.
+Optional ComparisonGroups organize selections only when a cross-paper question
+requires them. Human- or Agent-authored analysis versions retain their own
+immutable Evidence/Finding snapshot.
 
 Public analysis results use the same Objective/version identity inside the
 `objective_analyses.payload` arrays:
@@ -162,9 +150,11 @@ Public analysis results use the same Objective/version identity inside the
 - Finding adds `finding_id`.
 - Finding relations and context remain children of that Finding.
 
-PaperContribution and checkpoint entries remain inside the analysis payload;
-they are not independent tables because they are private, lifecycle-local
-intermediates rather than public query artifacts.
+The former `document_evidence_checkpoints` payload is historical data only. A
+one-time migration records each entry in
+`objective_analysis_legacy_checkpoints` with a payload hash and
+`manual_review_required` classification, then removes it from the runtime
+analysis payload. No repository reads or writes that key anymore.
 
 Retry creates another `analysis_version`. Only a complete succeeded version may
 become published. Failure leaves the prior published pointer unchanged.
@@ -184,7 +174,11 @@ erDiagram
     COLLECTION ||--o| DISCOVERY_STATE : embeds
     COLLECTION ||--o{ RESEARCH_OBJECTIVE : frames
     RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_ANALYSIS : retries
-    OBJECTIVE_ANALYSIS ||--o{ OBJECTIVE_EVIDENCE : grounds
+    OBJECTIVE_ANALYSIS ||--o{ PAPER_EXPERIMENT : produces
+    OBJECTIVE_ANALYSIS ||--o{ OBJECTIVE_EXPERIMENT_SELECTION : selects
+    PAPER_EXPERIMENT ||--o{ OBJECTIVE_EXPERIMENT_SELECTION : fixed_revision
+    OBJECTIVE_EXPERIMENT_SELECTION ||--o{ FINDING_SELECTION : supports
+    COMPARISON_GROUP ||--o{ FINDING_COMPARISON_GROUP : supports
     OBJECTIVE_ANALYSIS ||--o{ FINDING : publishes
 ```
 
@@ -208,6 +202,10 @@ erDiagram
   Paper Map, Chat result, analysis-intermediate, discovery, evaluation child,
   and redundant Source/count storage; `0054` merges current document
   preparation artifacts and `0055` merges public Objective result records.
+  Revisions `20260924_0066`-`20260924_0070` add the immutable experiment,
+  selection, comparison-group, and Finding graph. Revisions
+  `20260924_0071`-`20260924_0074` add the feedback workbench aggregates, and
+  `20260924_0075` classifies retired per-document checkpoints for manual review.
 
 ## Implementation Boundary
 

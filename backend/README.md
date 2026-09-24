@@ -19,9 +19,10 @@ selected ready Documents
   -> Objective candidates
 
 confirmed Objective + selected ready Documents
-  -> reusable per-document Evidence inspection
-  -> ObjectiveEvidence
-  -> cross-document Findings
+  -> Source-grounded PaperExperiment revisions
+  -> ObjectiveExperimentSelection
+  -> optional cross-paper ComparisonGroup
+  -> Finding
 ```
 
 A Collection groups papers. It does not own a generated snapshot. Each Document
@@ -29,8 +30,10 @@ owns its current preparation status and current Source and Profile. A Paper Map
 is a lazy, document-scoped navigation artifact built by Objective discovery or
 analysis for the explicitly selected ready Documents. Adding or retrying one
 paper never rebuilds unrelated papers or maps.
-Objective analysis likewise reuses completed inspection for unchanged papers and
-retries only papers whose inspection is missing, failed, or stale.
+Objective analysis persists a new immutable PaperExperiment revision and
+Objective selection for each completed run; it does not reuse a runtime
+per-document Evidence checkpoint. A later supplement creates a successor
+revision while earlier Findings keep their original selection references.
 
 ## Ownership Map
 
@@ -38,7 +41,7 @@ retries only papers whose inspection is missing, failed, or stale.
 - `application/source/`: Collection lifecycle, upload, per-document preparation,
   run state, and Source reads.
 - `application/core/`: Document profiling, Paper Map creation, Objective
-  discovery, Evidence extraction, and Finding synthesis.
+  discovery, PaperExperiment extraction, selection, and Finding synthesis.
 - `application/chat/`: Research Agent trajectory and approved capability calls.
 - `domain/`: Business objects, invariants, and state transitions.
 - [`application/repositories/`](application/repositories/README.md): Repository

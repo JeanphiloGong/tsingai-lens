@@ -9,12 +9,12 @@ its optional review or experiment plan.
 
 The reference describes the schema represented by the SQLAlchemy models in
 [`infra/persistence/postgres/models/__init__.py`](../../infra/persistence/postgres/models/__init__.py)
-and the Alembic head `20260909_0056`. The identity and fingerprint rules are
+and the Alembic head `20260924_0075`. The identity and fingerprint rules are
 defined in [`persistence-model.md`](persistence-model.md); this page adds the
 flow-oriented table and repository map. The HTTP shapes remain owned by
 [`specs/api.md`](../specs/api.md).
 
-The current ORM metadata contains 18 application tables and 181 mapped fields. A
+The current ORM metadata contains 41 application tables and 447 mapped fields. A
 deployed database also contains Alembic's `alembic_version` bookkeeping table.
 
 ## End-to-End Data Flow
@@ -37,8 +37,11 @@ flowchart LR
     O --> R[Research Objective]
     R --> A[Versioned Objective Analysis]
     S --> A
-    A --> E[Evidence]
-    E --> F[Published Findings]
+    A --> PE[PaperExperiment revision]
+    PE --> SEL[ObjectiveExperimentSelection]
+    SEL -->|when cross-paper comparison is needed| CG[ComparisonGroup]
+    SEL --> F[Experiment Finding]
+    F --> E[Evidence compatibility projection]
     F --> V[Human feedback / curation]
     F --> X[Optional experiment plan]
     U --> H[Chat session and tool trajectory]
@@ -87,7 +90,7 @@ class is in `infra/persistence/postgres/models`.
 | Execute preparation and discovery pipelines | `application/source`, `application/pipeline`, `application/core/objectives`, `controllers/source/pipeline_runs.py` | `pipeline_runs` | One observable technical run snapshot per pipeline invocation, including nested node telemetry. |
 | Parse and analyze a paper | `infra/source`, `application/source`, `application/core/document_profiles` | `document_preparations` | One document-keyed preparation aggregate containing Source, Profile, Paper Map, and the provenance for each generated section. |
 | Triage papers and discover Objectives | `application/core/document_profiles`, `application/core/objectives/discovery`, `application/core/objectives` | `collections`, `document_preparations`, `research_objectives` | Collection-owned discovery state, current paper triage, embedded navigation-map cache, selected inputs, and Objective candidates. |
-| Inspect evidence and compare papers | `application/core/objectives`, `application/core/paper_facts` | `objective_analyses` | One versioned analysis row contains private checkpoints, paper contributions, public Evidence, and Findings. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
+| Inspect experiments and compare papers | `application/core/objectives`, `application/core/paper_facts` | `paper_experiment`, `objective_experiment_selection`, `comparison_group`, `experiment_finding`, `objective_analyses` | Automatic analysis stores immutable experiment revisions, explicit selections, optional cross-paper groups, and Finding references. `paper_facts` is an extraction helper, not a separate persisted aggregate. |
 | Run collection-bound Agent Chat | `application/chat`, `domain/chat` | `chat_sessions`, `chat_messages`, `chat_tool_calls` | Auditable conversation, capability calls, approval decisions, embedded structured results, and selected Source context. |
 | Assess an answer's usefulness | `application/chat`, `domain/chat/feedback.py` | `chat_message_feedback` | One mutable user assessment of a saved answer, separate from scientific Finding review and model context. |
 | Plan a follow-up experiment | `application/goal`, `controllers/goal` | `objective_experiment_plans` | Objective-scoped plan revisions with Source/Finding links and author provenance. |
@@ -219,31 +222,30 @@ record.
 
 ### 6. Objective Analysis, Evidence, and Findings
 
-`ObjectiveEvidenceAnalysisService` and its analysis stages implement the evidence-first
-comparison flow: frame each selected paper, route exact Sources, extract and
-ground facts, reconstruct within-paper experiments, compare only compatible
-results, and publish a reviewable Finding set.
+`ObjectiveEvidenceAnalysisService` and the experiment analysis writer implement
+the evidence-first comparison flow: frame each selected paper, route exact
+Sources, extract and ground facts, reconstruct within-paper experiments, select
+the results needed by the Objective, compare only compatible selections, and
+publish a reviewable Finding set.
 
 | Table | Primary identity | Important columns and constraints |
 | --- | --- | --- |
-| `objective_analyses` | `(collection_id, objective_id, analysis_version)` | One versioned analysis attempt. Its payload stores private checkpoints, paper contributions, public Evidence records, and public Findings produced by that exact analysis. |
+| `objective_analyses` | `(collection_id, objective_id, analysis_version)` | One versioned analysis attempt and its execution metadata. Automatic scientific facts live in PaperExperiment/Selection/Group/Finding tables; authored snapshots remain in this payload. |
+| `paper_experiment`, `experimental_variant`, `test_condition`, `measurement_result`, `experiment_comparison`, `experiment_comparison_measurement`, `reported_interpretation` | revision-local identities | Immutable same-paper experiment revisions and their source-bound components. A revision can be partial; unresolved bindings remain explicit. |
+| `objective_experiment_selection`, `selection_measurement`, `selection_comparison` | `selection_id` plus Objective analysis identity | The exact experiment revision, measurements, and comparisons used by one Objective analysis version. Selections never mean “latest”. |
+| `comparison_group`, `comparison_group_member` | `group_id` | Optional cross-paper comparison context and member disposition; no duplicate measurement values. |
+| `finding`, `finding_selection`, `finding_comparison_group` | `finding_id` | Automatic Findings that reference fixed selections/groups. Authored Finding snapshots remain in `objective_analyses.payload`. |
 
 Analysis identity always includes the selected preparation state. Before Source
 reads begin, the service verifies every frozen Document ID and fingerprint. A
 mismatch is stale input and blocks the run; it cannot mix Source generations.
 
 Retries allocate a new `analysis_version`. A failed or interrupted attempt does
-not replace the Objective's published pointer. Only a complete succeeded
-version is atomically published after contributions, Evidence, and Findings
-are written. A succeeded checkpoint with zero routable/comparable Evidence is
-valid scientific work and is reusable; provider or parsing failures remain
-retryable technical work.
-
-Checkpoint fingerprints cover the Objective intent, Document preparation
-fingerprint, extraction version, model identity, and the six analysis stages.
-When a checkpoint is reused for a new analysis version, its internal producing
-version is rebound during publication; the checkpoint is not itself a public
-Finding or Evidence child.
+not replace the Objective's published pointer. Automatic publication writes the
+PaperExperiment revisions, selections, optional groups, and Finding references
+in one workflow. Human- or Agent-authored versions continue to use their own
+immutable snapshot payload. The retired checkpoint payload is classified by
+migration `20260924_0075` and is not used at runtime.
 
 ### 7. Collection-Bound Agent Chat
 
@@ -288,9 +290,11 @@ prepare Source or rerun Objective analysis.
 
 `finding_feedback_records` and `finding_curation_records` both use the exact
 Finding identity `(collection_id, objective_id, analysis_version, finding_id)`.
-The review repository validates that identity against the `findings` array in
-the corresponding `objective_analyses.payload`; there is no separate Finding
-table after migration `20260908_0055`.
+The review repository validates that identity against the automatic `finding`
+row and its fixed selection/group references, or against the authored snapshot
+when the analysis origin is human- or agent-authored. Migration `20260908_0055`
+merged the historical public result payload; migrations `20260924_0066` through
+`20260924_0070` now persist the automatic experiment graph.
 
 - `finding_feedback_records` records a review status, issue type, note,
   reviewer, and creation time. Multiple feedback events are retained.
@@ -337,8 +341,12 @@ erDiagram
     COLLECTIONS ||--o| DISCOVERY_STATE : embeds
     COLLECTIONS ||--o{ RESEARCH_OBJECTIVES : frames
     RESEARCH_OBJECTIVES ||--o{ OBJECTIVE_ANALYSES : versions
-    OBJECTIVE_ANALYSES ||--o{ OBJECTIVE_EVIDENCE : grounds
-    OBJECTIVE_ANALYSES ||--o{ OBJECTIVE_FINDINGS : publishes
+    OBJECTIVE_ANALYSES ||--o{ PAPER_EXPERIMENT : produces
+    OBJECTIVE_ANALYSES ||--o{ OBJECTIVE_EXPERIMENT_SELECTION : selects
+    PAPER_EXPERIMENT ||--o{ OBJECTIVE_EXPERIMENT_SELECTION : fixed_revision
+    OBJECTIVE_EXPERIMENT_SELECTION ||--o{ FINDING_SELECTION : supports
+    COMPARISON_GROUP ||--o{ FINDING_COMPARISON_GROUP : supports
+    OBJECTIVE_ANALYSES ||--o{ FINDING : publishes
     CHAT_SESSIONS ||--o{ CHAT_MESSAGES : contains
     CHAT_SESSIONS ||--o{ CHAT_TOOL_CALLS : executes
     RESEARCH_OBJECTIVES ||--o{ OBJECTIVE_EXPERIMENT_PLANS : plans
@@ -356,10 +364,10 @@ resolved against the exact artifact row that produced it.
 
 The current model keeps lifecycle-local state together: the complete Source,
 Profile, and Paper Map preparation result lives on `document_preparations`,
-discovery state lives on `collections`, analysis checkpoints, contributions,
-Evidence, and Findings live in `objective_analyses.payload`, and
-capability results live on `chat_tool_calls`. These embedded values are not
-independent query identities.
+discovery state lives on `collections`, and automatic experiment selections and
+Findings use their own versioned tables. Authored Evidence/Finding snapshots
+remain in `objective_analyses.payload`; capability results live on
+`chat_tool_calls`.
 
 ## Fingerprints, Versions, and Reuse
 
@@ -389,8 +397,8 @@ The database therefore supports these observable outcomes:
 2. A stale Objective input fails before Source reads instead of mixing
    generations.
 3. A failed analysis leaves the last published version readable.
-4. A matching succeeded per-document checkpoint can be reused on an analysis
-   retry, including a valid scientific absence of comparable Evidence.
+4. A later PaperExperiment revision does not change a previously published
+   Finding; the Finding keeps its original selection references.
 5. A technical interruption remains retryable and is not reported as a
    scientific conclusion.
 
@@ -428,7 +436,7 @@ The database therefore supports these observable outcomes:
 ## Migration and Change Rules
 
 Alembic is the only schema authority. The maintained head is
-`20260909_0056`. Revisions `0044` and `0045` move preparation provenance and
+`20260924_0075`. Revisions `0044` and `0045` move preparation provenance and
 Task history into artifact-owned and Pipeline Run records.
 Revisions `0047`-`0053` merge Paper Maps, Chat results, Objective intermediate,
 discovery, evaluation child records, and redundant Source/count storage into
@@ -437,10 +445,16 @@ preparation artifacts and public Objective results. The current ORM metadata and
 migration head are checked together by
 `tests/integration/persistence/test_migrations.py`.
 
-Revision `0056` adds answer usefulness feedback; its downgrade drops only that
-table. The historical `0038` ORM-based cutover excludes this table so that
-fresh and existing databases both create it at `0056`. Upgrade/downgrade and
-PostgreSQL metadata parity are verified without runtime schema fallbacks.
+Revision `0056` adds answer usefulness feedback; revisions `0057`-`0065` add
+Chat trajectory/call history and remove the retired correction workflow.
+Revisions `0066`-`0070` add the PaperExperiment, Objective selection,
+ComparisonGroup, and automatic Finding graph. Revisions `0071`-`0074` add the
+feedback analysis, annotation, review, and dataset snapshot aggregates.
+Revision `0075` classifies retired per-document Objective checkpoints into
+`objective_analysis_legacy_checkpoints` with `manual_review_required` status and
+removes those payload entries from active analysis snapshots. Upgrade,
+downgrade, and PostgreSQL metadata parity are verified without runtime schema
+fallbacks.
 
 When a persisted contract changes, update these surfaces together:
 
@@ -465,7 +479,9 @@ identity used by the Evidence or Finding.
 | `PostgresSourceArtifactRepository` | `document_preparations.source_*`, `document_preparations.artifact_json` |
 | `PostgresDocumentProfileRepository` | `document_preparations.profile_json` |
 | `PostgresPaperMapRepository` | `document_preparations.paper_map_payload` |
-| `PostgresObjectiveRepository` | `collections.discovery_*`, `research_objectives`, `objective_analyses` (including checkpoints, contributions, Evidence, and Findings) |
+| `PostgresObjectiveRepository` | `collections.discovery_*`, `research_objectives`, and `objective_analyses` lifecycle metadata; authored snapshots remain in the analysis payload |
+| `PostgresPaperExperimentRepository` / `PostgresObjectiveExperimentSelectionRepository` | Immutable automatic experiment revisions and Objective-scoped selections |
+| `PostgresComparisonGroupRepository` / `PostgresExperimentFindingRepository` | Optional comparison groups and Findings that reference fixed selections |
 | `PostgresChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
 | `PostgresExperimentPlanRepository` | `objective_experiment_plans` |
 | `PostgresFindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
@@ -607,7 +623,7 @@ for Source, Profile, Objective, Evidence, or Finding results.
 | `scope_type` | `VARCHAR(32)` | No | IDX; non-empty | Kind of logical execution target, currently `document` or `collection`. |
 | `scope_id` | `VARCHAR(64)` | No | IDX; non-empty | Identifier of the logical target. For document runs this is `documents.document_id`; for collection runs it equals `collection_id`. It is intentionally not a foreign key because the column is polymorphic. |
 | `mode` | `VARCHAR(64)` | No | — | Execution or entry mode selected for this invocation, currently `standard` in the maintained flows. |
-| `input_fingerprint` | `VARCHAR(64)` | Yes | — | Identity of the complete input state consumed by the run. Matching successful document runs may be reused; collection runs reuse only active work. |
+| `input_fingerprint` | `VARCHAR(64)` | Yes | — | Identity of the complete input state consumed by the run. A later run writes successor experiment revisions; it does not reuse a per-document scientific checkpoint. |
 | `status` | `VARCHAR(32)` | No | IDX; `queued` / `running` / `completed` / `partial_success` / `failed` | Current technical lifecycle state used for polling and recovery. |
 | `record_json` | `JSONB` | No | — | Complete validated Pipeline Run snapshot: current node, progress, node telemetry, errors, warnings, statistics, context, timestamps, and retry lineage. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Time the run was admitted. Also mirrored inside the typed snapshot timestamps. |
@@ -726,12 +742,11 @@ The complete identity is `(collection_id, objective_id, analysis_version)` and l
 | `objective_id` | `VARCHAR(128)` | No | PK (composite); composite FK -> `research_objectives` | Stable identifier of the research Objective. |
 | `analysis_version` | `INTEGER` | No | PK (composite); positive integer | Positive analysis version; retries create a new version. |
 | `status` | `VARCHAR(16)` | No | `queued` / `running` / `succeeded` / `failed`; IDX | Lifecycle or execution status for the objective analyses record. |
-| `payload` | `JSONB` | No | — | Frozen document inputs, stage versions, statistics, source coverage, private checkpoints, paper contributions, `evidence_records`, and `findings`. |
+| `payload` | `JSONB` | No | — | Frozen document inputs, execution statistics, authored snapshot data, and analysis metadata. Automatic experiment facts are stored in the PaperExperiment family. |
 | `created_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Created timestamp. |
 | `updated_at` | `TIMESTAMP WITH TIME ZONE` | No | — | Updated timestamp. |
 
-The payload keeps checkpoint entries keyed by document and input fingerprint,
-paper-contribution entries keyed by source document, and public result arrays:
+Authored analysis payloads can keep their immutable public result arrays:
 
 ```json
 {
@@ -745,8 +760,9 @@ paper-contribution entries keyed by source document, and public result arrays:
 ```
 
 The repository applies bounded application-level pagination to those arrays.
-The analysis row remains the version boundary, so a published analysis cannot
-mix Evidence or Findings from another run.
+Automatic experiment projections instead read the fixed revision and selection
+rows for the requested analysis version, so a published analysis cannot mix
+revisions from another run.
 
 ### Agent Chat
 
@@ -940,4 +956,4 @@ to ensure each migration is applied once.
 
 | Field | Type | Nullable | Key / constraints | Description |
 | :--- | :--- | :---: | :--- | :--- |
-| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, for example `20260908_0055`. |
+| `version_num` | `VARCHAR(32)` | No | PK | Alembic revision currently applied to the database, currently `20260924_0075` for a fully migrated database. |

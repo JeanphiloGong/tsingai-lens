@@ -350,6 +350,7 @@ class FakeObjectiveRepository:
         self.claim_before_fail = claim_before_fail
         self.candidate_document_count = candidate_document_count
         self.published_calls = 0
+        self.experiment_published_calls = 0
 
     async def read_objective(self, collection_id, objective_id):
         return self.objective
@@ -441,6 +442,29 @@ class FakeObjectiveRepository:
         self.contributions[analysis_version] = artifacts["contributions"]
         self.evidence[analysis_version] = artifacts["evidence_records"]
         self.published_calls += 1
+        return self.objective, analysis
+
+    async def publish_experiment_analysis(
+        self,
+        collection_id,
+        objective_id,
+        analysis_version,
+        *,
+        abstention_reason=None,
+        abstention_note=None,
+    ):
+        analysis = self.analyses[analysis_version].succeed(
+            abstention_reason=abstention_reason,
+            abstention_note=abstention_note,
+        )
+        self.analyses[analysis_version] = analysis
+        self.objective = self.objective.publish_analysis(analysis)
+        self.findings[analysis_version] = (_finding(analysis_version),)
+        self.contributions[analysis_version] = _artifacts(
+            analysis_version
+        ).contributions
+        self.evidence[analysis_version] = _artifacts(analysis_version).evidence_records
+        self.experiment_published_calls += 1
         return self.objective, analysis
 
     async def read_analysis(
@@ -599,6 +623,24 @@ class RecordingExperimentAnalysisWriter:
         return SimpleNamespace()
 
 
+class NativeRecordingExperimentAnalysisWriter:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[dict] = []
+
+    async def write_experiment_analysis(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(
+            findings=(_finding(1),),
+            selections=(SimpleNamespace(comparison_keys=("comparison-1",)),),
+        )
+
+    async def write(self, **_kwargs):
+        pytest.fail("native writer path must not call the legacy write method")
+
+
 def _service(
     *,
     repository=None,
@@ -718,6 +760,39 @@ async def test_experiment_write_failure_prevents_successful_analysis_publication
     result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "failed"
+    assert repository.published_calls == 0
+    assert len(writer.calls) == 1
+
+
+async def test_native_experiment_writer_publishes_without_legacy_publication() -> None:
+    writer = NativeRecordingExperimentAnalysisWriter()
+    service, repository, _analyzer = _service(
+        experiment_analysis_writer=writer,
+    )
+
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "succeeded"
+    assert repository.experiment_published_calls == 1
+    assert repository.published_calls == 0
+    assert len(writer.calls) == 1
+    assert writer.calls[0]["analysis"].analysis_version == 1
+
+
+async def test_native_experiment_writer_failure_prevents_successful_publication() -> None:
+    writer = NativeRecordingExperimentAnalysisWriter(
+        error=RuntimeError("native experiment write failed")
+    )
+    service, repository, _analyzer = _service(
+        experiment_analysis_writer=writer,
+    )
+
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "failed"
+    assert repository.experiment_published_calls == 0
     assert repository.published_calls == 0
     assert len(writer.calls) == 1
 

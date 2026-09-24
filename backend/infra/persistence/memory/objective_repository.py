@@ -465,6 +465,31 @@ class MemoryObjectiveRepository:
         self._findings[key] = findings
         return objective, analysis
 
+    async def publish_experiment_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
+        key = (collection_id, objective_id, analysis_version)
+        analysis = self._require_analysis(*key)
+        if analysis.status != "running":
+            raise ValueError("only running objective analysis can be published")
+        analysis = analysis.succeed(
+            completed_at=datetime.now(timezone.utc),
+            abstention_reason=abstention_reason,
+            abstention_note=abstention_note,
+        )
+        objective_key = key[:2]
+        objective = self._require_objective(*objective_key).publish_analysis(analysis)
+        self._analyses[key] = analysis
+        self._objectives[objective_key] = objective
+        self._touch_objective(objective_key, datetime.now(timezone.utc))
+        return objective, analysis
+
     async def publish_authored_analysis(
         self,
         collection_id: str,

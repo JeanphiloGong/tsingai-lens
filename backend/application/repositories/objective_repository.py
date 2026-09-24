@@ -160,6 +160,16 @@ class ObjectiveRepository(Protocol):
         abstention_note: str | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
+    async def publish_experiment_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
+
     async def publish_authored_analysis(
         self,
         collection_id: str,

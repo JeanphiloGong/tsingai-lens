@@ -562,6 +562,53 @@ class PostgresObjectiveRepository:
             )
             return objective, analysis
 
+    async def publish_experiment_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
+        """Publish the Objective lifecycle after experiment records are written.
+
+        PaperExperiment, selections, groups, and Findings own the scientific
+        records.  This transaction only advances the existing Objective
+        analysis state and deliberately does not copy legacy Evidence payloads.
+        """
+
+        async with self.session_factory.begin() as session:
+            analysis_row = await self._locked_analysis(
+                session,
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            objective_row = await self._locked_objective(
+                session,
+                collection_id,
+                objective_id,
+            )
+            analysis = self._analysis_from_row(analysis_row)
+            if analysis.status != "running":
+                raise ValueError("only running objective analysis can be published")
+            analysis = analysis.succeed(
+                completed_at=datetime.now(timezone.utc),
+                abstention_reason=abstention_reason,
+                abstention_note=abstention_note,
+            )
+            objective = self._objective_from_row(objective_row).publish_analysis(
+                analysis
+            )
+            self._write_analysis(analysis_row, analysis)
+            self._write_objective(
+                objective_row,
+                objective,
+                now=datetime.now(timezone.utc),
+            )
+            return objective, analysis
+
     async def publish_authored_analysis(
         self,
         collection_id: str,

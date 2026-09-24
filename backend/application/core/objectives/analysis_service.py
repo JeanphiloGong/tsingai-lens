@@ -190,6 +190,32 @@ def _scientific_abstention(
     )
 
 
+def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
+    """Explain a successful experiment analysis with no published Finding."""
+
+    findings = tuple(getattr(result, "findings", ()) or ())
+    selections = tuple(getattr(result, "selections", ()) or ())
+    if findings:
+        return None, None
+    if not selections:
+        return (
+            "no_grounded_evidence",
+            "No Objective-relevant experiment selection was recovered from the prepared Sources.",
+        )
+    comparison_count = sum(
+        bool(getattr(selection, "comparison_keys", ())) for selection in selections
+    )
+    if comparison_count:
+        return (
+            "insufficient_evidence",
+            "Source-grounded experiment selections were retained, but none supported a defensible Finding under the recorded comparison conditions.",
+        )
+    return (
+        "no_comparable_evidence",
+        "Source-grounded measurements were retained, but no paper-internal comparison was available for this Objective.",
+    )
+
+
 class ObjectiveAnalysisDispatchError(RuntimeError):
     """A queued Objective analysis could not be handed to an asyncio worker."""
 
@@ -767,6 +793,35 @@ class ObjectiveAnalysisService:
                         diagnostics=diagnostics.records,
                     )
             if self.experiment_analysis_writer is not None:
+                native_writer = getattr(
+                    self.experiment_analysis_writer,
+                    "write_experiment_analysis",
+                    None,
+                )
+                if callable(native_writer):
+                    native_result = await native_writer(
+                        collection_id=collection_id,
+                        objective=objective,
+                        analysis=claimed,
+                        experiments=artifacts.experiments,
+                    )
+                    abstention_reason, abstention_note = _experiment_abstention(
+                        native_result
+                    )
+                    objective, completed = (
+                        await self.objective_repository.publish_experiment_analysis(
+                            collection_id,
+                            objective_id,
+                            analysis_version,
+                            abstention_reason=abstention_reason,
+                            abstention_note=abstention_note,
+                        )
+                    )
+                    return await self._result(
+                        collection_id,
+                        objective.objective_id,
+                        analysis=completed,
+                    )
                 await self.experiment_analysis_writer.write(
                     collection_id=collection_id,
                     objective=objective,

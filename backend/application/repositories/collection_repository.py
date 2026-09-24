@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from domain.source import Collection, Document
 
@@ -47,6 +47,18 @@ class CollectionRepository(Protocol):
     ) -> Document | None: ...
 
     async def update_collection(self, collection: Collection) -> bool: ...
+
+    async def read_agent_default_permission(
+        self, collection_id: str
+    ) -> dict[str, Any] | None: ...
+
+    async def set_agent_default_permission(
+        self,
+        collection_id: str,
+        permission: dict[str, Any],
+        *,
+        expected_revision: int,
+    ) -> bool: ...
 
     async def add_documents(
         self,

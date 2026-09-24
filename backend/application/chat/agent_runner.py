@@ -787,6 +787,27 @@ class ResearchAgentRunner:
             progress.trace(context, phase="tools", capability_names=tool_names,
                            new_resources=len(progress.resource_refs) - old_resource_count,
                            termination_reason=stop_reason.value if stop_reason else None)
+            permission_error = next(
+                (
+                    result.error_code
+                    for _, result in completed
+                    if result.error_code == "tool_permission_denied"
+                ),
+                None,
+            )
+            if permission_error is not None:
+                progress.trace(
+                    context,
+                    phase="terminal",
+                    termination_reason=permission_error,
+                )
+                return self._result(
+                    AgentRunStatus.FAILED,
+                    messages,
+                    calls,
+                    results,
+                    error_code=permission_error,
+                )
             if stop_reason:
                 return await self._finalize_with_current_evidence(
                     stop_reason, progress, context, messages, calls, results,

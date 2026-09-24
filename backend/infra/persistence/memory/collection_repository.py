@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 from application.repositories.collection_repository import (
     CollectionDocumentSummary,
@@ -15,6 +16,7 @@ class MemoryCollectionRepository:
 
     def __init__(self) -> None:
         self._collections: dict[str, Collection] = {}
+        self._agent_default_permissions: dict[str, dict[str, Any]] = {}
 
     async def add_collection(self, collection: Collection) -> None:
         if collection.collection_id in self._collections:
@@ -79,6 +81,28 @@ class MemoryCollectionRepository:
         self._collections[collection.collection_id] = collection
         return True
 
+    async def read_agent_default_permission(
+        self, collection_id: str
+    ) -> dict[str, Any] | None:
+        permission = self._agent_default_permissions.get(collection_id)
+        return dict(permission) if permission is not None else None
+
+    async def set_agent_default_permission(
+        self,
+        collection_id: str,
+        permission: dict[str, Any],
+        *,
+        expected_revision: int,
+    ) -> bool:
+        if collection_id not in self._collections:
+            return False
+        current = self._agent_default_permissions.get(collection_id)
+        current_revision = int((current or {}).get("revision", 0))
+        if current_revision != expected_revision:
+            raise ValueError("permission_revision_conflict")
+        self._agent_default_permissions[collection_id] = dict(permission)
+        return True
+
     async def add_documents(
         self,
         collection_id: str,
@@ -127,4 +151,6 @@ class MemoryCollectionRepository:
         return False
 
     async def delete_collection(self, collection_id: str) -> bool:
-        return self._collections.pop(collection_id, None) is not None
+        deleted = self._collections.pop(collection_id, None) is not None
+        self._agent_default_permissions.pop(collection_id, None)
+        return deleted

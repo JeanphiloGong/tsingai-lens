@@ -243,23 +243,44 @@ export async function fetchChatSession(sessionId: string, signal?: AbortSignal) 
 	})) as ChatSession;
 }
 
-export type ChatPermission = {
+export type AgentPermission = {
 	mode: 'read_only' | 'confirm' | 'auto';
 	actions: string[];
 	expires_at: string | null;
 	revision: number;
 };
 
+export const AGENT_WRITE_ACTIONS = [
+	'start_research_process',
+	'create_objective_candidate',
+	'confirm_objective',
+	'start_objective_analysis',
+	'create_evidence_version',
+	'create_finding_version',
+	'record_finding_feedback',
+	'curate_finding',
+	'publish_agent_objective_analysis',
+	'create_research_plan',
+	'revise_research_plan'
+] as const;
+
+export type ChatPermission = AgentPermission;
+
 export async function fetchChatPermission(sessionId: string) {
 	return (await requestJson(`${chatSessionPath(sessionId)}/permissions`)) as ChatPermission;
 }
 
-export async function updateChatPermission(sessionId: string, permission: ChatPermission) {
+export async function updateChatPermission(
+	sessionId: string,
+	permission: ChatPermission,
+	options: { allActions?: boolean } = {}
+) {
 	return (await requestJson(`${chatSessionPath(sessionId)}/permissions`, {
 		method: 'PUT',
 		body: JSON.stringify({
 			mode: permission.mode,
 			actions: permission.actions,
+			all_actions: options.allActions ?? false,
 			expires_at: permission.expires_at,
 			expected_revision: permission.revision
 		})

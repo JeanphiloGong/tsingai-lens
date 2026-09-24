@@ -1,6 +1,6 @@
 """User-controlled authority for Research Agent capabilities."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Mapping
 
@@ -26,6 +26,7 @@ AUTO_ACTIONS = frozenset({
     "create_research_plan",
     "revise_research_plan",
 })
+MAX_AUTOMATIC_PERMISSION_HOURS = 24
 
 
 def permission_record(value: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -42,6 +43,7 @@ def change_permission(
     *,
     mode: str,
     actions: list[str],
+    all_actions: bool = False,
     expires_at: str | None,
     expected_revision: int,
 ) -> dict[str, Any]:
@@ -50,14 +52,24 @@ def change_permission(
         raise ValueError("permission_revision_conflict")
     if mode not in {"read_only", "confirm", "auto"}:
         raise ValueError("invalid_permission_mode")
-    if not set(actions) <= AUTO_ACTIONS:
+    requested_actions = set(actions)
+    if not requested_actions <= AUTO_ACTIONS:
         raise ValueError("unknown_permission_action")
+    if all_actions and mode != "auto":
+        raise ValueError("only_automatic_permission_accepts_all_actions")
+    if all_actions:
+        actions = sorted(AUTO_ACTIONS)
     if mode == "auto":
         if not actions or not expires_at:
             raise ValueError("automatic_permission_requires_actions_and_expiry")
         expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
         if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
             raise ValueError("permission_expiry_must_be_in_the_future")
+        maximum = datetime.now(timezone.utc) + timedelta(
+            hours=MAX_AUTOMATIC_PERMISSION_HOURS
+        )
+        if expiry > maximum:
+            raise ValueError("permission_expiry_cannot_exceed_24_hours")
     elif actions or expires_at:
         raise ValueError("only_automatic_permission_accepts_actions_and_expiry")
     return {
@@ -86,6 +98,7 @@ def permits_automatic(
 
 __all__ = [
     "AUTO_ACTIONS",
+    "MAX_AUTOMATIC_PERMISSION_HOURS",
     "ToolPermissionMode",
     "change_permission",
     "permission_record",

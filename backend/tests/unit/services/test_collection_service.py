@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
 import json
@@ -18,6 +19,7 @@ from application.source.source_archive_service import (
 )
 from application.source.source_import_service import SourceImportService
 from domain.source import Document
+from domain.chat.permissions import AUTO_ACTIONS
 from infra.persistence.memory import MemoryCollectionRepository
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
@@ -147,6 +149,33 @@ async def test_collection_update_preserves_documents(tmp_path) -> None:
     assert updated["name"] == "After"
     assert updated["status"] == "running"
     assert updated["documents"] == [document]
+
+
+async def test_collection_agent_default_permission_is_owner_scoped(tmp_path) -> None:
+    service = build_test_collection_service(tmp_path / "collections")
+    collection = await service.create_collection("Permission defaults", owner_user_id="user-1")
+    expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+    saved = await service.set_agent_default_permission_for_user(
+        collection["collection_id"],
+        "user-1",
+        mode="auto",
+        actions=[],
+        all_actions=True,
+        expires_at=expiry,
+        expected_revision=0,
+    )
+
+    assert saved["actions"] == sorted(AUTO_ACTIONS)
+    assert (
+        await service.get_agent_default_permission_for_user(
+            collection["collection_id"], "user-1"
+        )
+    ) == saved
+    with pytest.raises(FileNotFoundError):
+        await service.get_agent_default_permission_for_user(
+            collection["collection_id"], "other-user"
+        )
 
 
 async def test_missing_collection_is_not_inferred_from_workspace(tmp_path) -> None:

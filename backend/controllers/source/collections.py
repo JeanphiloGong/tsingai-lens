@@ -17,6 +17,8 @@ from application.source.source_archive_service import CollectionSourceArchiveErr
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.source.collection import (
     CollectionCreateRequest,
+    CollectionAgentPermissionRequest,
+    CollectionAgentPermissionResponse,
     CollectionDeleteResponse,
     CollectionDocumentListResponse,
     CollectionDocumentResponse,
@@ -105,6 +107,47 @@ async def get_collection(collection_id: str, request: Request) -> CollectionResp
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return CollectionResponse(**record)
+
+
+@router.get(
+    "/{collection_id}/agent-permissions",
+    response_model=CollectionAgentPermissionResponse,
+    summary="Read the default Research Agent permission for a collection",
+)
+async def get_collection_agent_permission(
+    collection_id: str, request: Request
+) -> CollectionAgentPermissionResponse:
+    try:
+        permission = await request.app.state.collection_service.get_agent_default_permission_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return CollectionAgentPermissionResponse(**permission)
+
+
+@router.put(
+    "/{collection_id}/agent-permissions",
+    response_model=CollectionAgentPermissionResponse,
+    summary="Set the default Research Agent permission for a collection",
+)
+async def set_collection_agent_permission(
+    collection_id: str,
+    payload: CollectionAgentPermissionRequest,
+    request: Request,
+) -> CollectionAgentPermissionResponse:
+    try:
+        permission = await request.app.state.collection_service.set_agent_default_permission_for_user(
+            collection_id,
+            await current_user_id(request),
+            **payload.model_dump(),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
+    return CollectionAgentPermissionResponse(**permission)
 
 
 @router.delete(

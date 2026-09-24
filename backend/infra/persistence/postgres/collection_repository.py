@@ -13,6 +13,7 @@ from application.repositories.collection_repository import (
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from domain.chat.permissions import permission_record
 from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
 from infra.persistence.postgres.models.collection import Collection
@@ -134,6 +135,32 @@ class PostgresCollectionRepository:
             row.description = record.description
             row.status = record.status
             row.updated_at = _datetime(record.updated_at)
+            return True
+
+    async def read_agent_default_permission(
+        self, collection_id: str
+    ) -> dict[str, Any] | None:
+        async with self.session_factory() as session:
+            row = await session.get(Collection, collection_id)
+            if row is None:
+                return None
+            return dict(row.agent_default_permission or {}) or None
+
+    async def set_agent_default_permission(
+        self,
+        collection_id: str,
+        permission: dict[str, Any],
+        *,
+        expected_revision: int,
+    ) -> bool:
+        async with self.session_factory.begin() as session:
+            row = await session.get(Collection, collection_id, with_for_update=True)
+            if row is None:
+                return False
+            current_revision = permission_record(row.agent_default_permission)["revision"]
+            if current_revision != expected_revision:
+                raise ValueError("permission_revision_conflict")
+            row.agent_default_permission = dict(permission)
             return True
 
     async def add_documents(

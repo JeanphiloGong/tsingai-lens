@@ -146,7 +146,7 @@ handoff record or a second research-result identity.
 Session operation permissions are exposed by authenticated
 `GET/PUT /api/v1/chat-sessions/{session_id}/permissions`. PUT accepts `mode`
 (`read_only`, `confirm`, `auto`), an explicit `actions` list, nullable
-`expires_at`, and `expected_revision`. Existing and branched sessions default
+`expires_at` (a future time no more than 24 hours ahead), `all_actions`, and `expected_revision`. A session without a collection default and every branched session defaults
 to `confirm`; revision conflicts and invalid grants return `409`, inaccessible
 sessions return `404`. The model cannot call this settings endpoint.
 
@@ -168,6 +168,15 @@ New grants do not automatically execute old pending calls. Read-only mode
 blocks even explicit approvals. Request-level no-save constraints further
 restrict writes; natural-language detection remains bounded, and read-only
 settings are the deterministic control.
+
+Collection owners can set a default for newly created collection Agent sessions through
+authenticated `GET/PUT /api/v1/collections/{collection_id}/agent-permissions`.
+The endpoint uses the same mode, action, expiry, and revision contract and
+returns `404` for a collection the caller does not own. A collection default is
+copied when a session is created; changing it does not silently change an
+active session. Branches continue to default to confirmation. `all_actions=true` is expanded by the backend to every current
+registered write action, so clients do not need to maintain that authoritative
+list.
 
 - `POST /api/v1/chat-sessions`
 - `GET /api/v1/chat-sessions/{session_id}`

@@ -24,12 +24,16 @@ const translations: Record<Language, Translations> = {
 		},
 		agentPermission: {
 			title: 'Agent permissions',
+			defaultTitle: 'Collection Agent defaults',
+			defaultScope:
+				'These permissions are copied into new Agent sessions in this collection. An active session keeps its own authority until you change it there.',
 			mode: 'Mode',
 			read_only: 'Read and suggest',
 			confirm: 'Confirm each write',
 			auto: 'Authorized automatic execution',
 			loading: 'Loading',
-			actions: 'Allowed in this session and collection',
+			actions: 'Allowed writes',
+			defaultActions: 'Allowed writes for new sessions',
 			hours: 'Valid for (hours)',
 			expires: 'Expires',
 			unsaved: 'Changes are not applied yet.',
@@ -37,6 +41,8 @@ const translations: Record<Language, Translations> = {
 			allActions: 'Authorize all available write actions',
 			automaticScope:
 				'This grants execution authority for the selected writes only; reads and drafts remain automatic.',
+			automaticWarning:
+				'All available writes include publishing and revision actions. The grant expires within 24 hours.',
 			save: 'Apply permissions',
 			revoke: 'Revoke automatic execution',
 			reload: 'Reload settings',
@@ -219,7 +225,8 @@ const translations: Record<Language, Translations> = {
 				objectives: 'Objectives',
 				papers: 'Papers',
 				allComparisons: 'All Comparisons',
-				assistant: 'AI Copilot'
+				assistant: 'AI Copilot',
+				settings: 'Settings'
 			},
 			actionsLabel: 'Collection actions',
 			backToCollections: 'Back to collections',
@@ -2851,18 +2858,24 @@ const translations: Record<Language, Translations> = {
 		},
 		agentPermission: {
 			title: 'Agent 操作权限',
+			defaultTitle: '集合 Agent 默认权限',
+			defaultScope:
+				'这些权限会复制到该集合中新建的 Agent 会话。已存在的会话保留自己的权限，需在会话内单独修改。',
 			mode: '模式',
 			read_only: '只读与建议',
 			confirm: '逐次确认',
 			auto: '授权自动执行',
 			loading: '加载中',
-			actions: '仅授权当前会话与论文集合',
+			actions: '允许的写入动作',
+			defaultActions: '新会话允许的写入动作',
 			hours: '有效时间（小时）',
 			expires: '到期时间',
 			unsaved: '权限修改尚未应用。',
 			selectAction: '至少选择一个动作后，才能启用自动执行。',
 			allActions: '授权全部可用写入动作',
 			automaticScope: '这里只授予所选写入动作的执行权限；读取和草稿仍会自动执行。',
+			automaticWarning:
+				'全部写入动作包括发布和修订等操作；授权最长持续 24 小时，之后会自动恢复为逐次确认。',
 			save: '应用权限',
 			revoke: '撤销自动执行',
 			reload: '重新加载设置',
@@ -3044,7 +3057,8 @@ const translations: Record<Language, Translations> = {
 				objectives: '研究目标',
 				papers: '文献',
 				allComparisons: '全部比较',
-				assistant: 'AI 助手'
+				assistant: 'AI 助手',
+				settings: '设置'
 			},
 			actionsLabel: '集合操作',
 			backToCollections: '返回集合列表',

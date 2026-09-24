@@ -129,6 +129,12 @@ This node owns the Collection route family.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.
+- `collections/[id]/settings/+page.svelte`
+  Collection-level Agent permission defaults for newly created sessions. The
+  owner can choose read-only, per-write confirmation, or an expiring automatic
+  grant and can authorize the complete current write-action set. Existing
+  sessions keep their own permission record and must be changed from the
+  conversation control.
 
 ## Objective Interaction
 

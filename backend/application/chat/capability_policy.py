@@ -58,6 +58,22 @@ def validate_batch(
     _, forbidden_writes = intent_policy._write_request_scope(request_text)
     validated_arguments: dict[str, BaseModel] = {}
     for call, handler in requested:
+        if (
+            call.name == "discover_research_tools"
+            and permission_mode is ToolPermissionMode.READ_ONLY
+            and any(
+                isinstance(name, str)
+                and name in intent_policy.WRITE_CAPABILITIES
+                for name in (call.arguments.get("tool_names") or ())
+            )
+        ):
+            return (
+                (
+                    "tool_permission_denied",
+                    "The current read-only permission does not allow discovery of write actions.",
+                ),
+                validated_arguments,
+            )
         if handler is None and call.risk is ToolRisk.UNKNOWN:
             return (
                 ("unknown_capability", "The requested research capability is not available."),

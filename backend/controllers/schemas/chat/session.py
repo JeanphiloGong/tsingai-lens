@@ -21,6 +21,7 @@ class ChatPermissionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["read_only", "confirm", "auto"]
     actions: list[str] = Field(default_factory=list, max_length=len(AUTO_ACTIONS))
+    all_actions: bool = False
     expires_at: str | None = None
     expected_revision: int = Field(ge=0)
 

@@ -151,3 +151,59 @@ it('renews an expired automatic grant instead of resubmitting its past expiry', 
 	expect(writes[0].expires_at).not.toBe(expiredAt);
 	expect(Date.parse(String(writes[0].expires_at))).toBeGreaterThan(Date.now());
 });
+
+it('uses the collection settings endpoint for defaults and sends the server expansion flag', async () => {
+	let permission = {
+		mode: 'confirm' as const,
+		actions: [] as string[],
+		expires_at: null as string | null,
+		revision: 0
+	};
+	const calls: { url: string; body: Record<string, unknown> | null }[] = [];
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async (url, options) => {
+			const body = options?.body ? JSON.parse(String(options.body)) : null;
+			calls.push({ url: String(url), body });
+			if (options?.method === 'PUT') {
+				permission = {
+					mode: body.mode,
+					actions: body.actions,
+					expires_at: body.expires_at,
+					revision: permission.revision + 1
+				};
+			}
+			return new Response(JSON.stringify(permission), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		})
+	);
+	const screen = render(OperationPermissions, {
+		collectionId: 'collection-1',
+		scope: 'collection',
+		standalone: true
+	});
+	await expect.poll(() => screen.container.querySelector('select')).not.toBeNull();
+	const details = screen.container.querySelector('details') as HTMLDetailsElement;
+	details.open = true;
+	const select = screen.container.querySelector('select') as HTMLSelectElement;
+	select.value = 'auto';
+	select.dispatchEvent(new Event('change', { bubbles: true }));
+	await expect
+		.poll(() => screen.container.querySelectorAll('input[type=checkbox]').length)
+		.toBe(12);
+	(screen.container.querySelector('input[type=checkbox]') as HTMLInputElement).click();
+	await expect
+		.poll(() => screen.container.querySelectorAll('input[type=checkbox]:checked').length)
+		.toBe(12);
+	(screen.container.querySelector('button') as HTMLButtonElement).click();
+	await expect.poll(() => calls.some((call) => call.body?.all_actions === true)).toBe(true);
+	expect(calls[0].url).toContain('/collections/collection-1/agent-permissions');
+	const save = calls.find((call) => call.body?.all_actions === true);
+	expect(save?.body).toMatchObject({
+		mode: 'auto',
+		expected_revision: 0,
+		all_actions: true
+	});
+});

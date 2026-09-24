@@ -160,6 +160,12 @@
 	>
 		{$t('collection.tabs.assistant')}
 	</a>
+	<a
+		href={resolve('/collections/[id]/settings', { id: collectionId })}
+		class={tabClass(`/collections/${collectionId}/settings`)}
+	>
+		{$t('collection.tabs.settings')}
+	</a>
 </nav>
 
 <div class="collection-panel">

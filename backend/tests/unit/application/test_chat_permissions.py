@@ -4,7 +4,7 @@ import pytest
 
 from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner, ToolSpec, intent_policy
 from application.chat.session_service import ChatSessionService
-from domain.chat import ToolRisk
+from domain.chat import ToolPermissionMode, ToolRisk
 from domain.chat.permissions import AUTO_ACTIONS, change_permission, permits_automatic
 from tests.support.chat_repository import MemoryChatRepository
 from tests.unit.application.test_chat_session_service import _CollectionService, _WriteCapability, _Question, _SourceArtifactRepository
@@ -36,6 +36,14 @@ async def test_session_permission_controls_actual_write(mode, expected):
     result = await service.post_message_for_user(session.session_id, "user-1", message="Save feedback on this published Finding.")
     assert result["status"] == expected, [(c.name, c.error_code) for c in repository.calls.values()]
     calls = [call for call in repository.calls.values() if call.name == write.spec.name]
+    if mode == "read_only":
+        assert not calls
+        assert not write.executed
+        assert any(
+            call.error_code == "tool_permission_denied"
+            for call in repository.calls.values()
+        )
+        return
     assert len(calls) == 1
     if mode == "auto":
         assert calls[0].status.value == "succeeded"
@@ -140,6 +148,86 @@ async def test_permission_controller_enforces_owner_and_revision():
     assert (await get_chat_permission(fresh.session_id, _request(service)))["mode"] == "confirm"
 
 
+@pytest.mark.parametrize(
+    "default, expected",
+    [
+        (
+            {
+                "mode": "read_only",
+                "actions": [],
+                "expires_at": None,
+                "revision": 4,
+            },
+            {"mode": "read_only", "actions": [], "expires_at": None, "revision": 1},
+        ),
+        (
+            {
+                "mode": "auto",
+                "actions": ["create_finding_version"],
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                "revision": 4,
+            },
+            None,
+        ),
+    ],
+)
+async def test_new_session_inherits_collection_default_permission(default, expected) -> None:
+    class _CollectionDefaults(_CollectionService):
+        async def get_agent_default_permission_for_user(self, collection_id, user_id):
+            assert (collection_id, user_id) == ("col-1", "user-1")
+            return default
+
+    repository = MemoryChatRepository()
+    service = ChatSessionService(
+        repository=repository,
+        collection_service=_CollectionDefaults(),
+        source_artifact_repository=_SourceArtifactRepository(),
+        runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())),
+    )
+
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+
+    permission = await repository.read_permission(session.session_id, "user-1")
+    if expected is None:
+        assert permission["mode"] == "auto"
+        assert permission["actions"] == ["create_finding_version"]
+        assert permission["revision"] == 1
+    else:
+        assert permission == expected
+
+
+async def test_collection_read_only_default_is_applied_before_runner_tool_selection() -> None:
+    repository = MemoryChatRepository()
+
+    class _CollectionDefaults(_CollectionService):
+        async def get_agent_default_permission_for_user(self, collection_id, user_id):
+            return {
+                "mode": "read_only",
+                "actions": [],
+                "expires_at": None,
+                "revision": 2,
+            }
+
+    service = ChatSessionService(
+        repository=repository,
+        collection_service=_CollectionDefaults(),
+        source_artifact_repository=_SourceArtifactRepository(),
+        runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())),
+    )
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+
+    assert (
+        await service._effective_runner_permission_mode(
+            session.session_id, "user-1", ToolPermissionMode.CONFIRM
+        )
+    ) is ToolPermissionMode.READ_ONLY
+    assert (
+        await service._effective_runner_permission_mode(
+            session.session_id, "user-1", ToolPermissionMode.NONE
+        )
+    ) is ToolPermissionMode.NONE
+
+
 def test_automatic_permission_covers_every_registered_write_action() -> None:
     expected = {
         "start_research_process",
@@ -166,3 +254,39 @@ def test_automatic_permission_covers_every_registered_write_action() -> None:
         permits_automatic(permission, action, now=datetime.now(timezone.utc).isoformat())
         for action in expected
     )
+
+
+def test_all_actions_expands_on_the_server() -> None:
+    permission = change_permission(
+        None,
+        mode="auto",
+        actions=[],
+        all_actions=True,
+        expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        expected_revision=0,
+    )
+
+    assert permission["actions"] == sorted(AUTO_ACTIONS)
+
+
+def test_all_actions_does_not_hide_unknown_requested_actions() -> None:
+    with pytest.raises(ValueError, match="unknown_permission_action"):
+        change_permission(
+            None,
+            mode="auto",
+            actions=["not_a_registered_action"],
+            all_actions=True,
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            expected_revision=0,
+        )
+
+
+def test_automatic_permission_expiry_is_bounded() -> None:
+    with pytest.raises(ValueError, match="cannot_exceed_24_hours"):
+        change_permission(
+            None,
+            mode="auto",
+            actions=["create_finding_version"],
+            expires_at=(datetime.now(timezone.utc) + timedelta(hours=25)).isoformat(),
+            expected_revision=0,
+        )

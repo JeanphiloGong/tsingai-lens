@@ -6,9 +6,18 @@
 	import {
 		fetchChatPermission,
 		updateChatPermission,
+		AGENT_WRITE_ACTIONS,
 		type ChatPermission
 	} from '../../../_shared/chatSessions';
-	export let sessionId: string;
+	import {
+		fetchCollectionAgentPermission,
+		updateCollectionAgentPermission
+	} from '../../../_shared/collections';
+
+	export let sessionId = '';
+	export let collectionId = '';
+	export let scope: 'session' | 'collection' = 'session';
+	export let standalone = false;
 	let permission: ChatPermission | null = null;
 	let mode: ChatPermission['mode'] = 'confirm';
 	let actions: string[] = [];
@@ -25,20 +34,10 @@
 			(mode === 'auto' && hours !== loadedHours))
 	);
 	$: autoSelectionValid = mode !== 'auto' || actions.length > 0;
-	const available = [
-		'start_research_process',
-		'create_objective_candidate',
-		'confirm_objective',
-		'start_objective_analysis',
-		'create_evidence_version',
-		'create_finding_version',
-		'record_finding_feedback',
-		'curate_finding',
-		'publish_agent_objective_analysis',
-		'create_research_plan',
-		'revise_research_plan'
-	];
-	$: allActionsSelected = available.every((action) => actions.includes(action));
+	const available = [...AGENT_WRITE_ACTIONS];
+	function hasAllActions() {
+		return available.every((action) => actions.includes(action));
+	}
 	function hoursUntil(expiresAt: string | null) {
 		if (!expiresAt) return 1;
 		const remaining = (Date.parse(expiresAt) - Date.now()) / 3600000;
@@ -60,7 +59,11 @@
 	async function load() {
 		busy = true;
 		try {
-			applyPermission(await fetchChatPermission(sessionId));
+			const next =
+				scope === 'collection'
+					? await fetchCollectionAgentPermission(collectionId)
+					: await fetchChatPermission(sessionId);
+			applyPermission(next);
 			error = '';
 		} catch (cause) {
 			error = errorMessage(cause);
@@ -82,12 +85,20 @@
 						  hours === loadedHours
 						? permission.expires_at
 						: new Date(Date.now() + hours * 3600000).toISOString();
-			const updated = await updateChatPermission(sessionId, {
+			const nextPermission = {
 				...permission,
 				mode: nextMode,
 				actions: nextMode === 'auto' ? actions : [],
 				expires_at: expiresAt
-			});
+			};
+			const updated =
+				scope === 'collection'
+					? await updateCollectionAgentPermission(collectionId, nextPermission, {
+							allActions: nextMode === 'auto' && hasAllActions()
+						})
+					: await updateChatPermission(sessionId, nextPermission, {
+							allActions: nextMode === 'auto' && hasAllActions()
+						});
 			applyPermission(updated);
 			error = '';
 		} catch (cause) {
@@ -106,8 +117,8 @@
 		}
 	}}
 />
-<div class="permission-toolbar">
-	<details class="permissions" bind:this={disclosure}>
+<div class="permission-toolbar" class:standalone>
+	<details class="permissions" bind:this={disclosure} open={standalone}>
 		<summary aria-label={$t('agentPermission.title')}
 			><ShieldCheck size={14} /><span
 				>{permission
@@ -116,8 +127,15 @@
 			><ChevronDown size={12} /></summary
 		>
 		<div class="permission-panel">
-			<strong>{$t('agentPermission.title')}</strong>
+			<strong
+				>{$t(
+					scope === 'collection' ? 'agentPermission.defaultTitle' : 'agentPermission.title'
+				)}</strong
+			>
 			{#if permission}
+				{#if scope === 'collection' && !standalone}
+					<p class="permission-hint">{$t('agentPermission.defaultScope')}</p>
+				{/if}
 				<label
 					>{$t('agentPermission.mode')}
 					<select bind:value={mode} disabled={busy}>
@@ -128,12 +146,18 @@
 				</label>
 				{#if mode === 'auto'}
 					<fieldset disabled={busy}>
-						<legend>{$t('agentPermission.actions')}</legend>
+						<legend
+							>{$t(
+								scope === 'collection'
+									? 'agentPermission.defaultActions'
+									: 'agentPermission.actions'
+							)}</legend
+						>
 						<label class="select-all"
 							><input
 								type="checkbox"
-								checked={allActionsSelected}
-								on:change={() => (actions = allActionsSelected ? [] : [...available])}
+								checked={hasAllActions()}
+								on:change={() => (actions = hasAllActions() ? [] : [...available])}
 							/>{$t('agentPermission.allActions')}</label
 						>
 						{#each available as action (action)}
@@ -152,6 +176,11 @@
 							/></label
 						>
 						<p class="permission-hint">{$t('agentPermission.automaticScope')}</p>
+						{#if hasAllActions()}
+							<p class="permission-warning" role="note">
+								{$t('agentPermission.automaticWarning')}
+							</p>
+						{/if}
 					</fieldset>
 					{#if !autoSelectionValid}<p class="permission-hint" role="status">
 							{$t('agentPermission.selectAction')}
@@ -192,10 +221,17 @@
 		min-height: 34px;
 		flex-shrink: 0;
 	}
+	.permission-toolbar.standalone {
+		display: block;
+		padding: 0;
+	}
 	.permissions {
 		position: relative;
 		font-size: 12px;
 		max-width: 100%;
+	}
+	.standalone .permissions {
+		width: 100%;
 	}
 	summary {
 		display: flex;
@@ -223,6 +259,12 @@
 		background: var(--surface-card);
 		box-shadow: 0 8px 28px #00000014;
 		z-index: 20;
+	}
+	.standalone .permission-panel {
+		position: static;
+		width: 100%;
+		max-height: none;
+		box-shadow: none;
 	}
 	.permission-panel > strong {
 		display: block;
@@ -290,5 +332,14 @@
 	}
 	.permission-dirty {
 		color: var(--warning-text);
+	}
+	.permission-warning {
+		margin: 10px 0;
+		padding: 8px 10px;
+		border-left: 3px solid var(--warning-text);
+		background: color-mix(in srgb, var(--warning-text) 10%, transparent);
+		color: var(--text-primary);
+		font-size: 11px;
+		line-height: 16px;
 	}
 </style>

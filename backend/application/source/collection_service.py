@@ -12,6 +12,7 @@ from application.repositories.collection_repository import (
 )
 from domain.source import Collection, Document
 from application.repositories.object_store import ObjectStore
+from domain.chat.permissions import change_permission, permission_record
 from infra.persistence.file.collection_workspace import CollectionPaths
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
@@ -128,6 +129,45 @@ class CollectionService:
         if record["owner_user_id"] != owner_user_id:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record
+
+    async def get_agent_default_permission_for_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> dict[str, Any]:
+        await self.get_collection_for_user(collection_id, owner_user_id)
+        return permission_record(
+            await self.repository.read_agent_default_permission(collection_id)
+        )
+
+    async def set_agent_default_permission_for_user(
+        self,
+        collection_id: str,
+        owner_user_id: str,
+        *,
+        mode: str,
+        actions: list[str],
+        all_actions: bool = False,
+        expires_at: str | None,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        await self.get_collection_for_user(collection_id, owner_user_id)
+        current = permission_record(
+            await self.repository.read_agent_default_permission(collection_id)
+        )
+        updated = change_permission(
+            current,
+            mode=mode,
+            actions=actions,
+            all_actions=all_actions,
+            expires_at=expires_at,
+            expected_revision=expected_revision,
+        )
+        if not await self.repository.set_agent_default_permission(
+            collection_id,
+            updated,
+            expected_revision=current["revision"],
+        ):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+        return updated
 
     async def get_document(
         self,

@@ -33,6 +33,7 @@ from domain.chat import (
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.chat_repository import ChatRepository, ChatResponseSnapshot, ChatSessionBusyError
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
+from domain.chat.permissions import permits_automatic
 
 
 logger = logging.getLogger(__name__)
@@ -99,8 +100,69 @@ class ChatSessionService:
             collection_id=str(collection["collection_id"]),
             created_at=now,
         )
+        # Collection settings are defaults for newly created conversations. A
+        # session stores its own revision so later collection changes cannot
+        # silently change an active conversation's authority.
+        read_default = getattr(
+            self.collection_service,
+            "get_agent_default_permission_for_user",
+            None,
+        )
+        default: dict[str, Any] = {}
+        mode = "confirm"
+        should_seed = False
+        if callable(read_default):
+            default = await read_default(collection_id, user_id)
+            mode = str(default.get("mode") or "confirm")
+            should_seed = mode == "read_only" or (
+                mode == "auto"
+                and any(
+                    permits_automatic(
+                        default,
+                        action,
+                        now=_now_iso(),
+                    )
+                    for action in default.get("actions") or ()
+                )
+            )
         await self.repository.add_session(session)
+        if should_seed:
+            await self.repository.set_permission(
+                session.session_id,
+                user_id,
+                mode=mode,
+                actions=list(default.get("actions") or ()),
+                expires_at=default.get("expires_at"),
+                expected_revision=0,
+            )
         return session
+
+    async def _effective_runner_permission_mode(
+        self,
+        session_id: str,
+        user_id: str,
+        requested: ToolPermissionMode | str,
+    ) -> ToolPermissionMode:
+        """Resolve the model-facing mode without granting an elevation.
+
+        A persisted automatic grant is represented as ``confirm`` for the
+        normal request path: the Runner must first produce an exact write
+        request, after which the repository atomically claims it against the
+        stored grant. A persisted read-only (or disabled) session setting is
+        stricter than a caller's default ``confirm`` value, so writes are
+        hidden before the model is called instead of being rejected after it
+        proposes them.
+        """
+        requested_mode = ToolPermissionMode(requested)
+        if requested_mode is not ToolPermissionMode.CONFIRM:
+            return requested_mode
+        permission = await self.repository.read_permission(session_id, user_id)
+        stored_mode = str(permission.get("mode") or ToolPermissionMode.CONFIRM)
+        if stored_mode == ToolPermissionMode.READ_ONLY.value:
+            return ToolPermissionMode.READ_ONLY
+        if stored_mode == ToolPermissionMode.NONE.value:
+            return ToolPermissionMode.NONE
+        return ToolPermissionMode.CONFIRM
 
     async def get_session_for_user(
         self, session_id: str, user_id: str
@@ -392,12 +454,15 @@ class ChatSessionService:
             if branch_revision and len(previous_messages) != session.fork_position:
                 raise ChatBranchAlreadyStartedError("this revision has already been sent")
             await self._ensure_turn_ready(previous_messages)
+            effective_permission_mode = await self._effective_runner_permission_mode(
+                session_id, user_id, permission_mode
+            )
             result = await self._run_response(
                 session,
                 previous_messages=previous_messages,
                 message=message,
                 source_contexts=source_contexts,
-                permission_mode=permission_mode,
+                permission_mode=effective_permission_mode,
             )
         return self._turn_record(result, previous_count=len(previous_messages))
 
@@ -441,10 +506,13 @@ class ChatSessionService:
                         if branch_revision and len(current_messages) != session.fork_position:
                             raise ChatBranchAlreadyStartedError("this revision has already been sent")
                         await self._ensure_turn_ready(current_messages)
+                        effective_permission_mode = await self._effective_runner_permission_mode(
+                            session_id, user_id, permission_mode
+                        )
                         result = await self._run_response(
                             session, previous_messages=current_messages, message=message,
                             source_contexts=source_contexts, emit=emit,
-                            permission_mode=permission_mode,
+                            permission_mode=effective_permission_mode,
                         )
                     emit(
                         {

@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import { requestJson } from './api';
 import type { CollectionDocument } from './collectionDocuments';
+import type { AgentPermission } from './chatSessions';
 
 type CollectionRecord = {
 	id?: string;
@@ -195,4 +196,27 @@ export async function deleteCollection(collectionId: string) {
 		collection_id: deletedCollectionId,
 		deleted_at: record?.deleted_at
 	};
+}
+
+export async function fetchCollectionAgentPermission(collectionId: string) {
+	return (await requestJson(`/collections/${encodeURIComponent(collectionId)}/agent-permissions`, {
+		method: 'GET'
+	})) as AgentPermission;
+}
+
+export async function updateCollectionAgentPermission(
+	collectionId: string,
+	permission: AgentPermission,
+	options: { allActions?: boolean } = {}
+) {
+	return (await requestJson(`/collections/${encodeURIComponent(collectionId)}/agent-permissions`, {
+		method: 'PUT',
+		body: JSON.stringify({
+			mode: permission.mode,
+			actions: permission.actions,
+			all_actions: options.allActions ?? false,
+			expires_at: permission.expires_at,
+			expected_revision: permission.revision
+		})
+	})) as AgentPermission;
 }

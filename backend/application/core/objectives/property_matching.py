@@ -213,6 +213,10 @@ _PROPERTY_LABEL_ALIASES = {
     "maximum defect diameter": "max defect diameter",
     "maximum defect size": "max defect size",
     "maximum defect length": "max defect length",
+    # Methods often name the measured quantity "sample density" while the
+    # normalized result is reported as relative density. Keep this alias
+    # limited to the plain phrase; defect/current/energy density stay distinct.
+    "sample density": "density",
     "sigma y": "yield strength",
     "\u0131 y": "yield strength",
     "\u0131y": "yield strength",

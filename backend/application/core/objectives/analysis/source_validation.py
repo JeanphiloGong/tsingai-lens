@@ -2261,9 +2261,18 @@ def _objective_retain_source_grounded_context(
                     "measurement method",
                     "orientation",
                 }
+                source_grounded_test_name = bool(
+                    group == "test"
+                    and value not in (None, "")
+                    and _objective_test_context_name_is_source_grounded(
+                        attribute.get("name"),
+                        source_text=source_text,
+                    )
+                )
                 if (
                     str(attribute.get("name") or "").strip().casefold()
                     not in generic_context_names
+                    and not source_grounded_test_name
                     or value in (None, "")
                 ):
                     continue
@@ -2279,10 +2288,20 @@ def _objective_retain_source_grounded_context(
                     str(outcome).strip()
                     for outcome in applies_to_outcomes
                     if str(outcome).strip()
-                    and _objective_axis_is_source_grounded(
-                        outcome,
-                        source=source,
-                        source_text=source_text,
+                    and (
+                        _objective_axis_is_source_grounded(
+                            outcome,
+                            source=source,
+                            source_text=source_text,
+                        )
+                        or (
+                            group == "test"
+                            and _objective_test_context_outcome_is_source_grounded(
+                                attribute.get("name"),
+                                outcome,
+                                source_text=source_text,
+                            )
+                        )
                     )
                 ]
                 if grounded_outcomes:
@@ -2295,6 +2314,80 @@ def _objective_retain_source_grounded_context(
         grounded_context[group] = grounded_attributes
     grounded_record["scientific_context"] = grounded_context
     return grounded_record
+
+
+def _objective_test_context_name_is_source_grounded(
+    name: Any,
+    *,
+    source_text: str,
+) -> bool:
+    """Accept a normalized test label only when its source states that relation."""
+
+    name_tokens = _objective_test_context_tokens(name)
+    source_tokens = _objective_test_context_tokens(source_text)
+    relation_tokens = name_tokens & {"measure", "method", "normalize"}
+    property_tokens = name_tokens - {
+        "characterize",
+        "measure",
+        "method",
+        "normalize",
+        "test",
+    }
+    return bool(
+        relation_tokens
+        and property_tokens
+        and relation_tokens <= source_tokens
+        and property_tokens <= source_tokens
+    )
+
+
+def _objective_test_context_outcome_is_source_grounded(
+    name: Any,
+    outcome: Any,
+    *,
+    source_text: str,
+) -> bool:
+    """Validate a test-to-outcome binding through their source-stated property."""
+
+    if not _objective_test_context_name_is_source_grounded(
+        name,
+        source_text=source_text,
+    ):
+        return False
+    test_property_tokens = _objective_test_context_tokens(name) - {
+        "characterize",
+        "measure",
+        "method",
+        "normalize",
+        "test",
+    }
+    outcome_tokens = _objective_test_context_tokens(outcome)
+    source_tokens = _objective_test_context_tokens(source_text)
+    shared_property_tokens = test_property_tokens & outcome_tokens & source_tokens
+    if not shared_property_tokens:
+        return False
+    unsupported_outcome_qualifiers = outcome_tokens - test_property_tokens
+    return not unsupported_outcome_qualifiers or (
+        unsupported_outcome_qualifiers == {"relative"}
+        and "normalize" in source_tokens
+    )
+
+
+def _objective_test_context_tokens(value: Any) -> set[str]:
+    tokens: set[str] = set()
+    for token in re.findall(r"[a-z0-9]+", str(value or "").casefold()):
+        if token.startswith("measur"):
+            token = "measure"
+        elif token.startswith("normaliz"):
+            token = "normalize"
+        elif token.startswith("characteriz"):
+            token = "characterize"
+        elif token.endswith("ies") and len(token) > 4:
+            token = f"{token[:-3]}y"
+        elif token.endswith("s") and len(token) > 3:
+            token = token[:-1]
+        tokens.add(token)
+    return tokens
 
 
 def _objective_retain_outcome_applicable_test_context(

@@ -27,6 +27,10 @@ class DatasetSnapshotError(ValueError):
     """A user-correctable dataset selection or provenance error."""
 
 
+class DatasetSnapshotIntegrityError(RuntimeError):
+    """A persisted snapshot no longer matches its immutable digests."""
+
+
 class DatasetSnapshotService:
     """Build immutable rows from the current reviewed case projection."""
 
@@ -187,13 +191,12 @@ class DatasetSnapshotService:
         if snapshot is None or snapshot.owner_id != owner_id:
             raise FileNotFoundError(f"dataset snapshot not found: {dataset_id}")
         await self.collection_service.get_collection_for_user(snapshot.collection_id, owner_id)
+        _verify_snapshot_integrity(snapshot)
         return snapshot
 
     async def jsonl_for_user(self, *, owner_id: str, dataset_id: str) -> tuple[DatasetSnapshot, bytes]:
         snapshot = await self.read_for_user(owner_id=owner_id, dataset_id=dataset_id)
         payload = jsonl_bytes_for_rows(snapshot.rows)
-        if hashlib.sha256(payload).hexdigest() != snapshot.content_digest:
-            raise RuntimeError("dataset_snapshot_content_digest_mismatch")
         return snapshot, payload
 
     async def _candidate(
@@ -358,6 +361,77 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _verify_snapshot_integrity(snapshot: DatasetSnapshot) -> None:
+    """Recompute every persisted digest before exposing a frozen snapshot.
+
+    Creation computes these values from the same canonical structures. A
+    database or storage corruption that changes only provenance or manifest
+    metadata must be rejected just as a changed JSONL payload would be;
+    checking only ``content_digest`` would otherwise expose a misleading
+    lineage record alongside valid-looking rows.
+    """
+
+    if snapshot.provenance_digest != _digest(snapshot.provenance):
+        raise DatasetSnapshotIntegrityError(
+            "dataset_snapshot_provenance_digest_mismatch"
+        )
+
+    manifest = snapshot.manifest
+    if manifest.get("dataset_id") != snapshot.dataset_id:
+        raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_identity_mismatch")
+    if manifest.get("owner_id") != snapshot.owner_id:
+        raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_owner_mismatch")
+    if manifest.get("collection_id") != snapshot.collection_id:
+        raise DatasetSnapshotIntegrityError(
+            "dataset_snapshot_manifest_collection_mismatch"
+        )
+    if manifest.get("dataset_type") != snapshot.dataset_type:
+        raise DatasetSnapshotIntegrityError(
+            "dataset_snapshot_manifest_type_mismatch"
+        )
+    if manifest.get("manifest_digest") != snapshot.manifest_digest:
+        raise DatasetSnapshotIntegrityError(
+            "dataset_snapshot_manifest_digest_mismatch"
+        )
+    if manifest.get("content_digest") != snapshot.content_digest:
+        raise DatasetSnapshotIntegrityError(
+            "dataset_snapshot_manifest_content_digest_mismatch"
+        )
+    if manifest.get("rows") != list(snapshot.rows) or manifest.get("exclusions") != list(
+        snapshot.exclusions
+    ):
+        raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_rows_mismatch")
+    if manifest.get("provenance_digest") != snapshot.provenance_digest:
+        raise DatasetSnapshotIntegrityError(
+            "dataset_snapshot_manifest_provenance_mismatch"
+        )
+    if manifest.get("row_count") != snapshot.row_count or manifest.get(
+        "excluded_count"
+    ) != snapshot.excluded_count:
+        raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_count_mismatch")
+    if manifest.get("empty") != snapshot.is_empty:
+        raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_empty_mismatch")
+
+    digest_basis = {
+        key: manifest.get(key)
+        for key in (
+            "schema_version",
+            "owner_id",
+            "collection_id",
+            "dataset_type",
+            "rows",
+            "exclusions",
+            "provenance_digest",
+        )
+    }
+    if _digest(digest_basis) != snapshot.manifest_digest:
+        raise DatasetSnapshotIntegrityError("dataset_snapshot_manifest_digest_mismatch")
+
+    payload = jsonl_bytes_for_rows(snapshot.rows)
+    if hashlib.sha256(payload).hexdigest() != snapshot.content_digest:
+        raise DatasetSnapshotIntegrityError("dataset_snapshot_content_digest_mismatch")
+
+
 def _exclusion(selection: DatasetSelection, reason: str) -> dict[str, Any]:
     return {
         "case_id": selection.case_id,
@@ -443,6 +517,7 @@ def _ensure_split_isolation(rows: list[dict[str, Any]]) -> None:
 __all__ = [
     "DatasetSelection",
     "DatasetSnapshotError",
+    "DatasetSnapshotIntegrityError",
     "DatasetSnapshotService",
     "jsonl_bytes_for_rows",
 ]

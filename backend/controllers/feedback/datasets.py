@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from application.feedback.dataset_snapshot_service import (
     DatasetSelection,
     DatasetSnapshotError,
+    DatasetSnapshotIntegrityError,
     DatasetSnapshotService,
 )
 from controllers.dependencies.auth import current_user_id
@@ -150,6 +151,11 @@ async def get_dataset_snapshot(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DatasetSnapshotIntegrityError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": str(exc), "message": "frozen dataset metadata is inconsistent"},
+        ) from exc
     return _response(snapshot)
 
 

@@ -9,6 +9,7 @@ import pytest
 from application.feedback.dataset_snapshot_service import (
     DatasetSelection,
     DatasetSnapshotError,
+    DatasetSnapshotIntegrityError,
     DatasetSnapshotService,
     jsonl_bytes_for_rows,
 )
@@ -68,6 +69,12 @@ class _Snapshots:
     async def save(self, snapshot):
         self.saved.append(snapshot)
         return snapshot
+
+    async def read(self, dataset_id):
+        return next(
+            (snapshot for snapshot in self.saved if snapshot.dataset_id == dataset_id),
+            None,
+        )
 
 
 def _fixture(*, target: str | None = "A corrected answer"):
@@ -320,3 +327,47 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
         )
     )
     assert snapshot.row_count == 1
+
+
+def test_read_rejects_snapshot_when_provenance_digest_no_longer_matches() -> None:
+    service, snapshots = _fixture(target=None)
+    snapshot = asyncio.run(
+        service.create_for_user(
+            owner_id="user-1",
+            collection_id="collection-1",
+            dataset_type="evaluation",
+            selections=(DatasetSelection("case-1", "eval"),),
+            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+        )
+    )
+    snapshot.provenance["items"].append({"case_id": "tampered", "split": "eval"})
+
+    with pytest.raises(
+        DatasetSnapshotIntegrityError,
+        match="dataset_snapshot_provenance_digest_mismatch",
+    ):
+        asyncio.run(
+            service.read_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
+        )
+
+
+def test_download_rejects_snapshot_when_manifest_digest_no_longer_matches() -> None:
+    service, snapshots = _fixture(target=None)
+    snapshot = asyncio.run(
+        service.create_for_user(
+            owner_id="user-1",
+            collection_id="collection-1",
+            dataset_type="evaluation",
+            selections=(DatasetSelection("case-1", "eval"),),
+            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+        )
+    )
+    snapshot.manifest["manifest_digest"] = "0" * 64
+
+    with pytest.raises(
+        DatasetSnapshotIntegrityError,
+        match="dataset_snapshot_manifest_digest_mismatch",
+    ):
+        asyncio.run(
+            service.jsonl_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
+        )

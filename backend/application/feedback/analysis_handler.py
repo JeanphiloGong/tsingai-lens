@@ -9,6 +9,10 @@ import json
 from typing import Any, Protocol
 from uuid import uuid4
 
+from application.feedback.source_coverage import (
+    ChatCoverageAudit,
+    build_evidence_coverage,
+)
 from application.repositories.chat_repository import ChatRepository
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.chat.feedback import ChatMessageFeedback
@@ -118,7 +122,15 @@ class FeedbackAnalysisHandler:
         if answer.content == "":
             raise AnalysisInputError("feedback_answer_empty")
         messages = await self.chat_repository.read_messages(feedback.session_id)
-        coverage = _coverage_from_messages(messages, answer)
+        coverage = build_evidence_coverage(
+            messages,
+            answer,
+            audit=await _read_chat_coverage_audit(
+                self.chat_repository,
+                feedback.session_id,
+                messages,
+            ),
+        )
         draft = await self.engine.analyze(
             feedback=feedback,
             session=session,
@@ -195,38 +207,67 @@ def _previous_user_question(messages: tuple[ChatMessage, ...], answer: ChatMessa
     return prior[-1] if prior else ""
 
 
-def _coverage_from_messages(
-    messages: tuple[ChatMessage, ...], answer: ChatMessage
-) -> EvidenceCoverage:
-    source_records: list[dict[str, Any]] = []
-    requested: dict[str, dict[str, Any]] = {}
-    for message in messages:
-        # Source contexts are attached to the user's selected question. They
-        # are useful provenance, but they do not prove that the model read a
-        # source; never pull selections from later or unrelated turns into
-        # this answer's coverage.
-        if message.role is not ChatMessageRole.USER or message.created_at > answer.created_at:
+async def _read_chat_coverage_audit(
+    repository: ChatRepository,
+    session_id: str,
+    messages: tuple[ChatMessage, ...],
+) -> ChatCoverageAudit:
+    """Read optional audit records without making legacy trajectories fail.
+
+    P1 trajectories may predate model-call/tool-call persistence.  In that
+    case ``None`` is passed to the projection, which keeps selected context as
+    a request signal and leaves inspection status unknown/partial.
+    """
+
+    model_reader = getattr(repository, "read_model_calls", None)
+    model_calls: tuple[Any, ...] | None
+    if not callable(model_reader):
+        model_calls = None
+    else:
+        try:
+            collected: list[Any] = []
+            offset = 0
+            while True:
+                try:
+                    batch = await model_reader(session_id, limit=200, offset=offset)
+                except TypeError:
+                    batch = await model_reader(session_id)
+                values = tuple(batch or ())
+                collected.extend(values)
+                if len(values) < 200:
+                    break
+                offset += len(values)
+                if offset >= 10_000:
+                    break
+            model_calls = tuple(collected)
+        except Exception:  # noqa: BLE001
+            # Coverage must never turn a readable feedback record into a
+            # fabricated successful audit because the optional audit read failed.
+            model_calls = None
+
+    tool_reader = getattr(repository, "read_tool_call", None)
+    if not callable(tool_reader):
+        return ChatCoverageAudit(model_calls=model_calls, tool_calls=None)
+
+    tool_ids = {
+        request.tool_call_id
+        for message in messages
+        for request in message.tool_calls
+    }
+    tool_calls: dict[str, Any] = {}
+    tool_audit_error = False
+    for tool_call_id in tool_ids:
+        try:
+            record = await tool_reader(tool_call_id)
+        except Exception:  # noqa: BLE001
+            tool_audit_error = True
             continue
-        for source in message.source_contexts:
-            record = source.to_record()
-            key = str(record.get("source_ref") or record.get("resource_ref", {}).get("resource_id") or "")
-            if key and key not in {item.get("source_ref") for item in source_records}:
-                source_records.append(record)
-            document_id = str(record.get("document_id") or "")
-            if document_id:
-                requested.setdefault(document_id, {"document_id": document_id})
-    gaps: tuple[str, ...] = (
-        ("model Source-read audit is unavailable; selected context is only a coverage signal",)
-        if source_records
-        else ("no verifiable Source context was recorded",)
-    )
-    return EvidenceCoverage(
-        requested_scope=tuple(requested.values()),
-        inspected_sources=tuple(source_records),
-        omitted_candidates=(),
-        claim_support=(),
-        gaps=gaps,
-        coverage_status="partial" if source_records else "unknown",
+        if record is not None:
+            tool_calls[tool_call_id] = record
+    return ChatCoverageAudit(
+        model_calls=model_calls,
+        tool_calls=tool_calls,
+        tool_audit_error=tool_audit_error,
     )
 
 

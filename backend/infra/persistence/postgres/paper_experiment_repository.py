@@ -42,59 +42,13 @@ class PostgresPaperExperimentRepository:
         created_by: str | None = None,
         created_at: datetime | None = None,
     ) -> StoredPaperExperimentRevision:
-        # Rebuild at the trust boundary so even a mutated frozen instance cannot
-        # bypass cross-component domain validation.
-        validated = PaperExperimentRevision.from_mapping(revision.to_record())
-        timestamp = created_at or datetime.now(timezone.utc)
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
-
         async with self.session_factory.begin() as session:
-            existing = await session.scalar(
-                select(PaperExperimentRow).where(
-                    PaperExperimentRow.experiment_id == validated.experiment_id,
-                    PaperExperimentRow.experiment_version
-                    == validated.experiment_version,
-                )
-            )
-            if existing is not None:
-                stored = await _stored_revision(session, existing)
-                if stored.revision == validated:
-                    return stored
-                raise PaperExperimentRevisionConflictError(
-                    "paper experiment revisions are immutable"
-                )
-
-            row = PaperExperimentRow(
-                experiment_id=validated.experiment_id,
-                experiment_version=validated.experiment_version,
-                document_id=validated.document_id,
-                source_fingerprint=validated.source_fingerprint,
-                label=validated.label,
-                scope_description=validated.scope_description,
-                design_type=validated.design_type,
-                identity_status=validated.identity_status,
-                binding_status=validated.binding_status,
-                source_refs_json=[item.to_record() for item in validated.source_refs],
-                unresolved_issues_json=[
-                    dict(item) for item in validated.unresolved_issues
-                ],
-                created_at=timestamp,
+            return await _add_revision(
+                session,
+                revision,
                 created_by=created_by,
-                archived_at=None,
+                created_at=created_at,
             )
-            session.add(row)
-            try:
-                await session.flush()
-                await _add_components(session, row.id, validated)
-                await session.flush()
-            except IntegrityError as exc:
-                if _constraint_name(exc) == "uq_paper_experiment_identity_version":
-                    raise PaperExperimentRevisionConflictError(
-                        "paper experiment revision identity already exists"
-                    ) from exc
-                raise
-            return await _stored_revision(session, row)
 
     async def read_revision(
         self,
@@ -156,6 +110,64 @@ class PostgresPaperExperimentRepository:
             return tuple(
                 [await _stored_revision(session, row) for row in latest_rows]
             )
+
+
+async def _add_revision(
+    session: AsyncSession,
+    revision: PaperExperimentRevision,
+    *,
+    created_by: str | None = None,
+    created_at: datetime | None = None,
+) -> StoredPaperExperimentRevision:
+    # Rebuild at the trust boundary so even a mutated frozen instance cannot
+    # bypass cross-component domain validation.
+    validated = PaperExperimentRevision.from_mapping(revision.to_record())
+    timestamp = created_at or datetime.now(timezone.utc)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+    existing = await session.scalar(
+        select(PaperExperimentRow).where(
+            PaperExperimentRow.experiment_id == validated.experiment_id,
+            PaperExperimentRow.experiment_version == validated.experiment_version,
+        )
+    )
+    if existing is not None:
+        stored = await _stored_revision(session, existing)
+        if stored.revision == validated:
+            return stored
+        raise PaperExperimentRevisionConflictError(
+            "paper experiment revisions are immutable"
+        )
+
+    row = PaperExperimentRow(
+        experiment_id=validated.experiment_id,
+        experiment_version=validated.experiment_version,
+        document_id=validated.document_id,
+        source_fingerprint=validated.source_fingerprint,
+        label=validated.label,
+        scope_description=validated.scope_description,
+        design_type=validated.design_type,
+        identity_status=validated.identity_status,
+        binding_status=validated.binding_status,
+        source_refs_json=[item.to_record() for item in validated.source_refs],
+        unresolved_issues_json=[dict(item) for item in validated.unresolved_issues],
+        created_at=timestamp,
+        created_by=created_by,
+        archived_at=None,
+    )
+    session.add(row)
+    try:
+        await session.flush()
+        await _add_components(session, row.id, validated)
+        await session.flush()
+    except IntegrityError as exc:
+        if _constraint_name(exc) == "uq_paper_experiment_identity_version":
+            raise PaperExperimentRevisionConflictError(
+                "paper experiment revision identity already exists"
+            ) from exc
+        raise
+    return await _stored_revision(session, row)
 
 
 async def _add_components(

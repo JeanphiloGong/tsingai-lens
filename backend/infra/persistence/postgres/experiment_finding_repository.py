@@ -33,66 +33,8 @@ class PostgresExperimentFindingRepository(ExperimentFindingRepository):
         self.session_factory = session_factory
 
     async def add_finding(self, finding: Finding) -> Finding:
-        if not finding.selection_ids:
-            raise ValueError("experiment-backed Finding requires selections")
-        if finding.paper_contributions:
-            raise ValueError("experiment-backed Finding cannot copy legacy evidence")
-
         async with self.session_factory.begin() as session:
-            existing = await session.scalar(
-                select(ExperimentFindingRow).where(
-                    ExperimentFindingRow.finding_id == finding.finding_id
-                )
-            )
-            if existing is not None:
-                restored = await _finding_record(session, existing)
-                if restored == finding:
-                    return restored
-                raise ValueError("finding identity already exists")
-
-            selections, groups = await _validate_context(session, finding)
-            row = ExperimentFindingRow(
-                finding_id=finding.finding_id,
-                collection_id=finding.collection_id,
-                objective_id=finding.objective_id,
-                analysis_version=finding.analysis_version,
-                statement=finding.statement,
-                factors_json=list(finding.factors),
-                outcome=finding.outcome,
-                direction=finding.direction,
-                assertion_strength=finding.assertion_strength,
-                attribution_scope=finding.attribution_scope,
-                synthesis_status=finding.synthesis_status,
-                certainty=finding.certainty,
-                display_rank=finding.display_rank,
-                mechanisms_json=[item.to_record() for item in finding.mechanisms],
-                scientific_context_json=finding.scientific_context.to_record(),
-                limitations_json=list(finding.limitations),
-                origin=finding.origin,
-                source_analysis_version=finding.source_analysis_version,
-                parent_finding_id=finding.parent_finding_id,
-                created_by_user_id=finding.created_by_user_id,
-                created_by_tool_call_id=finding.created_by_tool_call_id,
-                created_at=finding.created_at,
-                warnings_json=list(finding.warnings),
-            )
-            session.add(row)
-            session.add_all(
-                FindingSelectionRow(
-                    finding_id=finding.finding_id,
-                    selection_id=selection.selection_id,
-                )
-                for selection in selections
-            )
-            session.add_all(
-                FindingComparisonGroupRow(
-                    finding_id=finding.finding_id,
-                    group_id=group.group_id,
-                )
-                for group in groups
-            )
-            await session.flush()
-            return finding
+            return await _add_finding(session, finding)
 
     async def read_finding(
         self,
@@ -130,6 +72,71 @@ class PostgresExperimentFindingRepository(ExperimentFindingRepository):
             for row in rows:
                 records.append(await _finding_record(session, row))
             return tuple(records)
+
+
+async def _add_finding(
+    session: AsyncSession,
+    finding: Finding,
+) -> Finding:
+    if not finding.selection_ids:
+        raise ValueError("experiment-backed Finding requires selections")
+    if finding.paper_contributions:
+        raise ValueError("experiment-backed Finding cannot copy legacy evidence")
+
+    existing = await session.scalar(
+        select(ExperimentFindingRow).where(
+            ExperimentFindingRow.finding_id == finding.finding_id
+        )
+    )
+    if existing is not None:
+        restored = await _finding_record(session, existing)
+        if restored == finding:
+            return restored
+        raise ValueError("finding identity already exists")
+
+    selections, groups = await _validate_context(session, finding)
+    row = ExperimentFindingRow(
+        finding_id=finding.finding_id,
+        collection_id=finding.collection_id,
+        objective_id=finding.objective_id,
+        analysis_version=finding.analysis_version,
+        statement=finding.statement,
+        factors_json=list(finding.factors),
+        outcome=finding.outcome,
+        direction=finding.direction,
+        assertion_strength=finding.assertion_strength,
+        attribution_scope=finding.attribution_scope,
+        synthesis_status=finding.synthesis_status,
+        certainty=finding.certainty,
+        display_rank=finding.display_rank,
+        mechanisms_json=[item.to_record() for item in finding.mechanisms],
+        scientific_context_json=finding.scientific_context.to_record(),
+        limitations_json=list(finding.limitations),
+        origin=finding.origin,
+        source_analysis_version=finding.source_analysis_version,
+        parent_finding_id=finding.parent_finding_id,
+        created_by_user_id=finding.created_by_user_id,
+        created_by_tool_call_id=finding.created_by_tool_call_id,
+        created_at=finding.created_at,
+        warnings_json=list(finding.warnings),
+    )
+    session.add(row)
+    session.add_all(
+        FindingSelectionRow(
+            finding_id=finding.finding_id,
+            selection_id=selection.selection_id,
+        )
+        for selection in selections
+    )
+    session.add_all(
+        FindingComparisonGroupRow(
+            finding_id=finding.finding_id,
+            group_id=group.group_id,
+        )
+        for group in groups
+    )
+    await session.flush()
+    return finding
 
 
 async def _validate_context(

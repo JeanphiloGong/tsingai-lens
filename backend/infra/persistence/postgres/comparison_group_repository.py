@@ -29,47 +29,7 @@ class PostgresComparisonGroupRepository(ComparisonGroupRepository):
         group: ComparisonGroup,
     ) -> ComparisonGroup:
         async with self.session_factory.begin() as session:
-            existing = await session.scalar(
-                select(ComparisonGroupRow).where(
-                    ComparisonGroupRow.group_id == group.group_id,
-                    ComparisonGroupRow.collection_id == collection_id,
-                )
-            )
-            if existing is not None:
-                restored = await _group_record(session, existing)
-                if restored == group:
-                    return restored
-                raise ValueError("comparison group identity already exists")
-            await _validate_group_context(session, collection_id, group)
-            row = ComparisonGroupRow(
-                group_id=group.group_id,
-                collection_id=collection_id,
-                objective_id=group.objective_id,
-                analysis_version=group.analysis_version,
-                outcome=group.outcome,
-                comparison_target=group.comparison_target,
-                comparison_basis_json=list(group.comparison_basis),
-                normalizations_json=[dict(item) for item in group.normalizations],
-                status=group.status,
-                limitations_json=list(group.limitations),
-            )
-            session.add(row)
-            # The member rows reference the group's natural key.  Flush the
-            # parent first because these tables intentionally use explicit
-            # foreign keys without an ORM relationship for persistence order.
-            await session.flush()
-            session.add_all(
-                ComparisonGroupMemberRow(
-                    group_id=group.group_id,
-                    selection_id=item.selection_id,
-                    role=item.role,
-                    comparability=item.comparability,
-                    reason=item.reason,
-                )
-                for item in group.members
-            )
-            await session.flush()
-            return group
+            return await _add_group(session, collection_id, group)
 
     async def read_group(
         self,
@@ -104,6 +64,52 @@ class PostgresComparisonGroupRepository(ComparisonGroupRepository):
                 )
             )
             return tuple([await _group_record(session, row) for row in rows])
+
+
+async def _add_group(
+    session: AsyncSession,
+    collection_id: str,
+    group: ComparisonGroup,
+) -> ComparisonGroup:
+    existing = await session.scalar(
+        select(ComparisonGroupRow).where(
+            ComparisonGroupRow.group_id == group.group_id,
+            ComparisonGroupRow.collection_id == collection_id,
+        )
+    )
+    if existing is not None:
+        restored = await _group_record(session, existing)
+        if restored == group:
+            return restored
+        raise ValueError("comparison group identity already exists")
+    await _validate_group_context(session, collection_id, group)
+    row = ComparisonGroupRow(
+        group_id=group.group_id,
+        collection_id=collection_id,
+        objective_id=group.objective_id,
+        analysis_version=group.analysis_version,
+        outcome=group.outcome,
+        comparison_target=group.comparison_target,
+        comparison_basis_json=list(group.comparison_basis),
+        normalizations_json=[dict(item) for item in group.normalizations],
+        status=group.status,
+        limitations_json=list(group.limitations),
+    )
+    session.add(row)
+    # The member rows reference the group's natural key. Flush the parent first.
+    await session.flush()
+    session.add_all(
+        ComparisonGroupMemberRow(
+            group_id=group.group_id,
+            selection_id=item.selection_id,
+            role=item.role,
+            comparability=item.comparability,
+            reason=item.reason,
+        )
+        for item in group.members
+    )
+    await session.flush()
+    return group
 
 
 async def _validate_group_context(

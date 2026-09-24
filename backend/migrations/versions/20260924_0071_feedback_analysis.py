@@ -2,6 +2,7 @@
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
 
@@ -14,8 +15,31 @@ depends_on = None
 _JSON_DOCUMENT = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
+def _create_table(name: str, *args, **kwargs) -> None:
+    """Reuse tables created by the historical current-ORM cutover."""
+    if name not in inspect(op.get_bind()).get_table_names():
+        op.create_table(name, *args, **kwargs)
+
+
+def _create_index(name: str, table_name: str, columns, **kwargs) -> None:
+    existing = {item["name"] for item in inspect(op.get_bind()).get_indexes(table_name)}
+    if name not in existing:
+        op.create_index(name, table_name, columns, **kwargs)
+
+
+def _drop_index(name: str, table_name: str) -> None:
+    existing = {item["name"] for item in inspect(op.get_bind()).get_indexes(table_name)}
+    if name in existing:
+        op.drop_index(name, table_name=table_name)
+
+
+def _drop_table(name: str) -> None:
+    if name in inspect(op.get_bind()).get_table_names():
+        op.drop_table(name)
+
+
 def upgrade():
-    op.create_table(
+    _create_table(
         "chat_model_calls",
         sa.Column("call_id", sa.String(length=64), nullable=False),
         sa.Column("session_id", sa.String(length=128), nullable=False),
@@ -63,24 +87,24 @@ def upgrade():
             name="chat_model_call_timestamps_valid",
         ),
     )
-    op.create_index(
+    _create_index(
         "ix_chat_model_calls_session_id", "chat_model_calls", ["session_id"]
     )
-    op.create_index(
+    _create_index(
         "ix_chat_model_calls_trigger_message_id",
         "chat_model_calls",
         ["trigger_message_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_chat_model_calls_response_message_id",
         "chat_model_calls",
         ["response_message_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_chat_model_calls_status", "chat_model_calls", ["status"]
     )
 
-    op.create_table(
+    _create_table(
         "analysis_jobs",
         sa.Column("job_id", sa.String(length=64), nullable=False),
         sa.Column("job_type", sa.String(length=64), nullable=False),
@@ -110,18 +134,18 @@ def upgrade():
             name="analysis_job_timestamps_valid",
         ),
     )
-    op.create_index(
+    _create_index(
         "ix_analysis_jobs_claim",
         "analysis_jobs",
         ["status", "available_at", "created_at"],
     )
-    op.create_index("ix_analysis_jobs_job_type", "analysis_jobs", ["job_type"])
-    op.create_index("ix_analysis_jobs_status", "analysis_jobs", ["status"])
-    op.create_index(
+    _create_index("ix_analysis_jobs_job_type", "analysis_jobs", ["job_type"])
+    _create_index("ix_analysis_jobs_status", "analysis_jobs", ["status"])
+    _create_index(
         "ix_analysis_jobs_available_at", "analysis_jobs", ["available_at"]
     )
 
-    op.create_table(
+    _create_table(
         "feedback_analysis_results",
         sa.Column("result_id", sa.String(length=64), nullable=False),
         sa.Column("job_id", sa.String(length=64), nullable=False),
@@ -173,38 +197,38 @@ def upgrade():
             name="feedback_analysis_input_digest_length",
         ),
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_analysis_results_feedback_id",
         "feedback_analysis_results",
         ["feedback_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_analysis_results_job_id",
         "feedback_analysis_results",
         ["job_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_analysis_results_session_id",
         "feedback_analysis_results",
         ["session_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_analysis_results_collection_id",
         "feedback_analysis_results",
         ["collection_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_analysis_results_anchor_message_id",
         "feedback_analysis_results",
         ["anchor_message_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_analysis_results_problem_type",
         "feedback_analysis_results",
         ["problem_type"],
     )
 
-    op.create_table(
+    _create_table(
         "feedback_cases",
         sa.Column("case_id", sa.String(length=64), nullable=False),
         sa.Column("collection_id", sa.String(length=64), nullable=False),
@@ -245,21 +269,21 @@ def upgrade():
             name="feedback_case_timestamps_valid",
         ),
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_cases_collection_status",
         "feedback_cases",
         ["collection_id", "status", "created_at"],
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_cases_collection_id", "feedback_cases", ["collection_id"]
     )
-    op.create_index("ix_feedback_cases_status", "feedback_cases", ["status"])
-    op.create_index(
+    _create_index("ix_feedback_cases_status", "feedback_cases", ["status"])
+    _create_index(
         "ix_feedback_cases_session_id",
         "feedback_cases",
         ["session_id"],
     )
-    op.create_index(
+    _create_index(
         "ix_feedback_cases_anchor_message_id",
         "feedback_cases",
         ["anchor_message_id"],
@@ -267,51 +291,51 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index("ix_feedback_cases_anchor_message_id", table_name="feedback_cases")
-    op.drop_index("ix_feedback_cases_session_id", table_name="feedback_cases")
-    op.drop_index("ix_feedback_cases_status", table_name="feedback_cases")
-    op.drop_index("ix_feedback_cases_collection_id", table_name="feedback_cases")
-    op.drop_index("ix_feedback_cases_collection_status", table_name="feedback_cases")
-    op.drop_table("feedback_cases")
+    _drop_index("ix_feedback_cases_anchor_message_id", table_name="feedback_cases")
+    _drop_index("ix_feedback_cases_session_id", table_name="feedback_cases")
+    _drop_index("ix_feedback_cases_status", table_name="feedback_cases")
+    _drop_index("ix_feedback_cases_collection_id", table_name="feedback_cases")
+    _drop_index("ix_feedback_cases_collection_status", table_name="feedback_cases")
+    _drop_table("feedback_cases")
 
-    op.drop_index(
+    _drop_index(
         "ix_feedback_analysis_results_problem_type",
         table_name="feedback_analysis_results",
     )
-    op.drop_index(
+    _drop_index(
         "ix_feedback_analysis_results_anchor_message_id",
         table_name="feedback_analysis_results",
     )
-    op.drop_index(
+    _drop_index(
         "ix_feedback_analysis_results_collection_id",
         table_name="feedback_analysis_results",
     )
-    op.drop_index(
+    _drop_index(
         "ix_feedback_analysis_results_session_id",
         table_name="feedback_analysis_results",
     )
-    op.drop_index(
+    _drop_index(
         "ix_feedback_analysis_results_feedback_id",
         table_name="feedback_analysis_results",
     )
-    op.drop_index(
+    _drop_index(
         "ix_feedback_analysis_results_job_id",
         table_name="feedback_analysis_results",
     )
-    op.drop_table("feedback_analysis_results")
+    _drop_table("feedback_analysis_results")
 
-    op.drop_index("ix_analysis_jobs_available_at", table_name="analysis_jobs")
-    op.drop_index("ix_analysis_jobs_status", table_name="analysis_jobs")
-    op.drop_index("ix_analysis_jobs_job_type", table_name="analysis_jobs")
-    op.drop_index("ix_analysis_jobs_claim", table_name="analysis_jobs")
-    op.drop_table("analysis_jobs")
+    _drop_index("ix_analysis_jobs_available_at", table_name="analysis_jobs")
+    _drop_index("ix_analysis_jobs_status", table_name="analysis_jobs")
+    _drop_index("ix_analysis_jobs_job_type", table_name="analysis_jobs")
+    _drop_index("ix_analysis_jobs_claim", table_name="analysis_jobs")
+    _drop_table("analysis_jobs")
 
-    op.drop_index(
+    _drop_index(
         "ix_chat_model_calls_response_message_id", table_name="chat_model_calls"
     )
-    op.drop_index(
+    _drop_index(
         "ix_chat_model_calls_trigger_message_id", table_name="chat_model_calls"
     )
-    op.drop_index("ix_chat_model_calls_status", table_name="chat_model_calls")
-    op.drop_index("ix_chat_model_calls_session_id", table_name="chat_model_calls")
-    op.drop_table("chat_model_calls")
+    _drop_index("ix_chat_model_calls_status", table_name="chat_model_calls")
+    _drop_index("ix_chat_model_calls_session_id", table_name="chat_model_calls")
+    _drop_table("chat_model_calls")

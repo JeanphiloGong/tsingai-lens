@@ -1,6 +1,7 @@
 """Persist optional cross-paper ComparisonGroups."""
 
 from alembic import op
+from sqlalchemy import inspect
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
@@ -10,8 +11,12 @@ down_revision = "20260924_0067"
 branch_labels = None
 depends_on = None
 
+_JSON_DOCUMENT = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
+
 
 def upgrade():
+    if "comparison_group" in inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "comparison_group",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
@@ -21,10 +26,10 @@ def upgrade():
         sa.Column("analysis_version", sa.Integer(), nullable=False),
         sa.Column("outcome", sa.String(length=300), nullable=False),
         sa.Column("comparison_target", sa.String(length=40), nullable=False),
-        sa.Column("comparison_basis_json", postgresql.JSONB(), nullable=False),
-        sa.Column("normalizations_json", postgresql.JSONB(), nullable=False),
+        sa.Column("comparison_basis_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("normalizations_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("status", sa.String(length=20), nullable=False),
-        sa.Column("limitations_json", postgresql.JSONB(), nullable=False),
+        sa.Column("limitations_json", _JSON_DOCUMENT, nullable=False),
         sa.ForeignKeyConstraint(
             ["collection_id", "objective_id", "analysis_version"],
             [

@@ -1,6 +1,7 @@
 """Add immutable PaperExperiment revisions and component tables."""
 
 from alembic import op
+from sqlalchemy import inspect
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
@@ -10,8 +11,15 @@ down_revision = "20260924_0065"
 branch_labels = None
 depends_on = None
 
+_JSON_DOCUMENT = sa.JSON().with_variant(postgresql.JSONB(), "postgresql")
+
 
 def upgrade():
+    # Revision 0038 builds the then-current ORM snapshot.  On databases that
+    # passed through that cutover these tables already exist; only older
+    # partial databases need the explicit table definitions below.
+    if "paper_experiment" in inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "paper_experiment",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
@@ -24,8 +32,8 @@ def upgrade():
         sa.Column("design_type", sa.String(length=40), nullable=False),
         sa.Column("identity_status", sa.String(length=20), nullable=False),
         sa.Column("binding_status", sa.String(length=20), nullable=False),
-        sa.Column("source_refs_json", postgresql.JSONB(), nullable=False),
-        sa.Column("unresolved_issues_json", postgresql.JSONB(), nullable=False),
+        sa.Column("source_refs_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("unresolved_issues_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_by", sa.String(length=100), nullable=True),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
@@ -77,16 +85,16 @@ def upgrade():
         sa.Column("position", sa.Integer(), nullable=False),
         sa.Column("variant_key", sa.String(length=100), nullable=False),
         sa.Column("variant_label", sa.String(length=300), nullable=False),
-        sa.Column("subject_attributes_json", postgresql.JSONB(), nullable=False),
+        sa.Column("subject_attributes_json", _JSON_DOCUMENT, nullable=False),
         sa.Column(
-            "intervention_attributes_json", postgresql.JSONB(), nullable=False
+            "intervention_attributes_json", _JSON_DOCUMENT, nullable=False
         ),
-        sa.Column("state_json", postgresql.JSONB(), nullable=False),
-        sa.Column("population_scope_json", postgresql.JSONB(), nullable=True),
-        sa.Column("source_refs_json", postgresql.JSONB(), nullable=False),
-        sa.Column("binding_source_refs_json", postgresql.JSONB(), nullable=False),
+        sa.Column("state_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("population_scope_json", _JSON_DOCUMENT, nullable=True),
+        sa.Column("source_refs_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("binding_source_refs_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("binding_status", sa.String(length=20), nullable=False),
-        sa.Column("notes_json", postgresql.JSONB(), nullable=False),
+        sa.Column("notes_json", _JSON_DOCUMENT, nullable=False),
         sa.CheckConstraint(
             "binding_status IN ('direct', 'derived', 'uncertain', 'conflict')",
             name="ck_experimental_variant_binding_status_valid",
@@ -122,11 +130,11 @@ def upgrade():
         sa.Column("position", sa.Integer(), nullable=False),
         sa.Column("test_key", sa.String(length=100), nullable=False),
         sa.Column("test_type", sa.String(length=200), nullable=False),
-        sa.Column("parameters_json", postgresql.JSONB(), nullable=False),
-        sa.Column("population_scope_json", postgresql.JSONB(), nullable=True),
-        sa.Column("source_refs_json", postgresql.JSONB(), nullable=False),
+        sa.Column("parameters_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("population_scope_json", _JSON_DOCUMENT, nullable=True),
+        sa.Column("source_refs_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("binding_status", sa.String(length=20), nullable=False),
-        sa.Column("notes_json", postgresql.JSONB(), nullable=False),
+        sa.Column("notes_json", _JSON_DOCUMENT, nullable=False),
         sa.CheckConstraint(
             "binding_status IN ('direct', 'derived', 'uncertain', 'conflict')",
             name="ck_test_condition_binding_status_valid",
@@ -168,13 +176,13 @@ def upgrade():
         sa.Column("value_text", sa.Text(), nullable=True),
         sa.Column("result_text", sa.Text(), nullable=True),
         sa.Column("unit", sa.String(length=100), nullable=True),
-        sa.Column("statistics_json", postgresql.JSONB(), nullable=False),
-        sa.Column("measurement_scope_json", postgresql.JSONB(), nullable=False),
+        sa.Column("statistics_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("measurement_scope_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("result_kind", sa.String(length=30), nullable=False),
-        sa.Column("source_refs_json", postgresql.JSONB(), nullable=False),
-        sa.Column("binding_source_refs_json", postgresql.JSONB(), nullable=False),
+        sa.Column("source_refs_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("binding_source_refs_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("binding_status", sa.String(length=20), nullable=False),
-        sa.Column("notes_json", postgresql.JSONB(), nullable=False),
+        sa.Column("notes_json", _JSON_DOCUMENT, nullable=False),
         sa.CheckConstraint(
             "value_numeric IS NOT NULL OR value_text IS NOT NULL "
             "OR result_text IS NOT NULL",
@@ -240,16 +248,16 @@ def upgrade():
         sa.Column("baseline_variant_key", sa.String(length=100), nullable=False),
         sa.Column("target_variant_key", sa.String(length=100), nullable=False),
         sa.Column("outcome", sa.String(length=300), nullable=False),
-        sa.Column("changed_variables_json", postgresql.JSONB(), nullable=False),
-        sa.Column("matched_conditions_json", postgresql.JSONB(), nullable=False),
+        sa.Column("changed_variables_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("matched_conditions_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("basis", sa.String(length=20), nullable=False),
         sa.Column("direction", sa.String(length=20), nullable=False),
         sa.Column("reported_statement", sa.Text(), nullable=True),
         sa.Column("attribution_scope", sa.String(length=30), nullable=False),
         sa.Column("status", sa.String(length=30), nullable=False),
-        sa.Column("reasons_json", postgresql.JSONB(), nullable=False),
-        sa.Column("source_refs_json", postgresql.JSONB(), nullable=False),
-        sa.Column("binding_source_refs_json", postgresql.JSONB(), nullable=False),
+        sa.Column("reasons_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("source_refs_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("binding_source_refs_json", _JSON_DOCUMENT, nullable=False),
         sa.Column("relation_status", sa.String(length=20), nullable=False),
         sa.CheckConstraint(
             "basis IN ('reported', 'derived')",
@@ -379,9 +387,9 @@ def upgrade():
         sa.Column("position", sa.Integer(), nullable=False),
         sa.Column("statement", sa.Text(), nullable=False),
         sa.Column("kind", sa.String(length=30), nullable=False),
-        sa.Column("measurement_keys_json", postgresql.JSONB(), nullable=False),
-        sa.Column("comparison_keys_json", postgresql.JSONB(), nullable=False),
-        sa.Column("source_refs_json", postgresql.JSONB(), nullable=False),
+        sa.Column("measurement_keys_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("comparison_keys_json", _JSON_DOCUMENT, nullable=False),
+        sa.Column("source_refs_json", _JSON_DOCUMENT, nullable=False),
         sa.CheckConstraint(
             "kind IN ('result_summary', 'mechanism_hypothesis', 'limitation')",
             name="ck_reported_interpretation_kind_valid",

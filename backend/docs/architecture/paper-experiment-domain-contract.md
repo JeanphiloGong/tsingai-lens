@@ -31,11 +31,19 @@ Collection. An Objective selects experiment content through
   conditions, and one test condition may apply to several variants.
 - A fully bound measurement references objects and test conditions in the same
   experiment revision and carries both its `variant_key` and `test_key`.
-  A partial revision may retain a real reported measurement with one or both
-  keys null when the source only gives a broad sample/test scope. It must keep
-  the verbatim reported labels, candidate references, binding status, and an
-  unresolved issue; it must not create an `unknown` pseudo-entity merely to
-  satisfy a foreign key.
+  `exact` is allowed only when both edges have result-level binding evidence:
+  the Draft supplies `variant_binding_source_labels` and
+  `test_binding_source_labels`
+  (one source may support both when it actually states both relationships),
+  and the resolver can resolve those labels to `SourceReference` records. A
+  numeric-value source, an entity-definition source, a category-level test
+  source, or a model-local key alone does not prove that this result belongs
+  to that concrete variant and protocol. A partial revision may retain a real
+  reported measurement with one or both keys null when the source only gives a
+  broad sample/test scope. It must keep the verbatim reported labels,
+  candidate references, binding evidence (when present), and an unresolved
+  issue; it must not create an `unknown` pseudo-entity merely to satisfy a
+  foreign key.
 - A selection fixes an experiment identity and version; it never means
   "latest".
 - Reported values remain separate from derived differences or trends.
@@ -44,6 +52,9 @@ Collection. An Objective selects experiment content through
 - Test identity and protocol completeness are separate. `tensile`, `XRD`, or
   `mechanical test` can be a category-level fact while missing method
   parameters keep the measurement out of a protocol-sensitive comparison.
+  A category-level test can therefore be retained for search and audit, but
+  it cannot provide an `exact` test edge; an exact edge requires
+  `protocol_completeness=complete` and result-level binding evidence.
 - A comparison group does not store another copy of measurement values.
 - A Finding can be traced through its selections to a fixed experiment revision
   and Source.
@@ -68,6 +79,28 @@ unique constraints, computes or verifies statuses, and only then writes a
 `PaperExperiment` revision. A model response that contains one of these
 service-owned fields is rejected; it is never silently copied into a formal
 record.
+
+Formal identity allocation has an explicit application handoff:
+`PaperExperimentModelOutput -> ReconciledPaperExperimentOutput -> revision`.
+`bind_model_output` accepts only the service-owned reconciled wrapper. The
+wrapper contains the accepted local scopes and any reconciliation audit issues;
+a raw model envelope cannot receive formal IDs directly. This is a code-level
+guard against assigning one experiment identity per `boundary-first` proposal.
+
+Identity allocation is downstream of boundary reconciliation. A low-level
+source/identity adapter must receive reconciled Drafts only; it must not assign
+one formal experiment identity per raw boundary proposal. Any caller that has
+not run the parent-first reconciliation step must stop before writing a
+revision.
+
+Draft-only scope details such as `reported_sample_label`,
+`reported_test_label`, `candidate_variant_keys`, `candidate_test_keys`, and
+`unresolved_issues` must survive that boundary. The write adapter maps them to
+the revision's `measurement_scope`/notes and embedded unresolved-issue records (and
+resolves source labels to `SourceReference` values); it must not discard them
+because the formal `variant_key` or `test_key` is null. If the target revision
+schema cannot represent one of these details yet, the adapter refuses the
+revision rather than silently dropping the evidence.
 
 ### Reported scope is not a binding
 
@@ -141,6 +174,12 @@ derives row-local variants and measurements. Methods/context extraction supplies
 test protocol facts. This avoids asking one table call to invent global sample
 and condition objects or exact sample--test edges.
 
+`reported interpretation extraction` is the single bounded stage that follows
+fact and table reconciliation. It records an author's explicit comparison,
+mechanistic statement, or limitation and links it to local candidate
+measurements or comparisons. It does not repair missing bindings, invent a
+causal explanation, or replace the deterministic binding and integrity gates.
+
 Boundary proposals are advisory and member arrays are hints, not the final set.
 The default is one parent study. A different table, outcome, or test does not by
 itself create a new experiment. Reconciliation may retain a physical split only
@@ -149,6 +188,25 @@ or experimental design. `selected_stratum` and `follow_up` scopes may overlap
 the parent, but they require an explicit selector; a `parent_series_key` alone is
 not evidence for a second scope. Shared variants and tests may belong to more
 than one proposed series.
+
+If a boundary call returns several scope proposals but no explicit parent or
+matrix proposal, the service creates a `synthetic_parent` as a service-derived,
+uncertain ownership container. It records that the model did not establish a
+paper-level parent; it does not claim that the paper reported a new physical
+experiment, does not create scientific comparisons, and is not counted as an
+additional experiment for boundary quality. The original proposals remain
+available for selector validation and audit rather than one selected scope
+being promoted to the whole paper.
+
+`selected_stratum` and `follow_up` are retained only when their
+`scope_selector` matches at least one canonical concrete variant or test. A
+selector that names an outcome only, points to a nonexistent level, or is
+supported only by `split_evidence` cannot establish membership. The service
+merges that proposal back into the parent, removes its local selector from the
+parent facts, and retains the original proposal and a targeted unresolved issue
+in the audit. This deterministic check is what limits boundary-first
+over-splitting; it also prevents a broad fact-first scope from silently
+absorbing unrelated rows.
 Conversely, a proposal that omits a measurement whose variant and concrete test
 are already explicit is completed deterministically. A measurement with either
 binding missing remains unresolved rather than being attached by proximity.
@@ -186,6 +244,42 @@ The minimum gate must cover experiment membership, concrete bindings for the
 selected records, conflict preservation, and comparison integrity; it must not
 force the extractor to delete real broad observations just to improve a compact
 boundary F1 score.
+
+`抽取失败` 不等于 `无法 exact 绑定`。这三个结果必须分别路由：
+
+| 观察到的问题 | 正确状态 | 后续动作 |
+| --- | --- | --- |
+| 原文事实缺失或表格行遗漏 | `partial`，并记录缺口 | 针对指定表格、脚注或 Methods 定向补读 |
+| 原文只给出宽泛 sample/test 范围 | `partial` / `unbound` | 保留原文范围、候选和未决项；不猜精确边 |
+| boundary proposal 过拆或过合 | 服务协调问题 | parent-first 合并无证据 split；仅在独立群体、分配或设计证据存在时 split |
+
+同一语义的不同数值不是“选一个最可信值”，而是 `conflict`：保留双方报告、
+各自 Source 和统计口径。只有 resolver 产生 `exact` 的样品边和测试边后，记录才
+能进入 strict revision、Objective Selection 或 Finding 的可比子集。这样模型可以
+负责完整恢复事实，服务负责安全绑定；两者不再被一个召回率或一个布尔状态混在一起。
+
+### Gate failure and bounded reread
+
+A failed strict gate is a routing result, not a request to regenerate the whole
+experiment. The service may persist a `partial` revision and creates a bounded
+reread task for the smallest missing source context:
+
+| Unresolved condition | Reread only | Success condition |
+| :--- | :--- | :--- |
+| Broad or ambiguous variant | The named row, headers, caption, footnote, or sample definition | One concrete variant candidate, or an explicit decision to remain unbound |
+| Category or partial test | Applicable Methods, footnotes, and protocol parameters | One concrete protocol with source-supported applicability |
+| Missing table row | The named table, continuation, and relevant columns | Every visible relevant row has a source-local record |
+| Conflicting reports | The two reported passages and their statistical scope | Both values and each Source remain preserved as a conflict |
+| Missing relationship | The relevant Results/Discussion passage | Only an author-stated relationship is added; no inferred causality |
+
+The reread merges into the existing partial revision and reruns the same
+canonicalization, reconciliation, and binding gates. It must not delete an
+unresolved fact, rename a formal entity, or use a model guess to turn a broad
+label into an exact edge. If bounded rereads remain inconclusive, the revision
+stays `partial`; an Objective-level selection may still use an exact compatible
+subset, while strict revision and Finding paths remain blocked for the
+unresolved records. This single route handles boundary over-splitting, merged
+experiments, and omitted conflicts without weakening the contract.
 
 ## HTTP compatibility matrix
 

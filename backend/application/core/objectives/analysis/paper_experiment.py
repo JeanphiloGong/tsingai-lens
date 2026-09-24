@@ -611,7 +611,9 @@ def _bind_unambiguous_document_context(
     ] = {}
     test_attributes_by_scope: dict[tuple[str, str], list[Any]] = {}
     reference_attributes_by_scope: dict[tuple[str, str], list[Any]] = {}
+    group_reference_attributes_by_scope: dict[tuple[str, str], list[Any]] = {}
     for unit in units:
+        scope = (unit.objective_id, unit.document_id)
         if (
             unit.selection_status == "failed"
             or unit.reported_result is not None
@@ -621,8 +623,23 @@ def _bind_unambiguous_document_context(
             # never promoted to a document-wide default for every result.
             or _objective_context_has_group_identity(unit)
         ):
+            if (
+                unit.selection_status != "failed"
+                and unit.reported_result is None
+                and unit.evidence_role in _OBJECTIVE_CONTEXT_ROLES
+                and _objective_context_has_group_identity(unit)
+            ):
+                for attribute in unit.scientific_context.material:
+                    if (
+                        attribute.context_scope == "background"
+                        and property_matching.is_density_normalization_reference(
+                            attribute
+                        )
+                    ):
+                        group_reference_attributes_by_scope.setdefault(
+                            scope, []
+                        ).append(attribute)
             continue
-        scope = (unit.objective_id, unit.document_id)
         scope_values = values_by_scope.setdefault(scope, {})
         context_refs = unit.source_refs or (
             {
@@ -676,6 +693,23 @@ def _bind_unambiguous_document_context(
                 entry["confidence"] = min(
                     float(entry["confidence"]), unit.confidence
                 )
+
+    # Group-scoped context is not promoted as ordinary material/process/test
+    # context. A repeated, identical normalization basis is the exception: it
+    # is needed to validate a shared relative-density test method, and remains
+    # source-grounded because every contributing group reported the same value.
+    for scope, attributes in group_reference_attributes_by_scope.items():
+        signatures = {
+            (
+                property_matching.normalize_property_label(attribute.name)
+                or _objective_column_key(attribute.name),
+                _objective_fact_scalar_key(attribute.value),
+                _objective_fact_text_key(attribute.unit),
+            )
+            for attribute in attributes
+        }
+        if len(signatures) == 1:
+            reference_attributes_by_scope.setdefault(scope, []).extend(attributes)
 
     unique_values_by_scope: dict[
         tuple[str, str],

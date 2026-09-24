@@ -285,6 +285,14 @@ def _group_context(
             "observation_role": "condition_context",
             "source_excerpt": f"Group {sample} was tested.",
             "scientific_context": {
+                "material": [
+                    {
+                        "name": "nominal material density",
+                        "value": 4.43,
+                        "unit": "g/cm3",
+                        "context_scope": "background",
+                    }
+                ],
                 "sample": [{"name": "sample", "value": sample}],
                 "test": test,
             },
@@ -313,6 +321,16 @@ def _density_result() -> SourceObservation:
                 "unit": "%",
                 "direction": "unknown",
                 "result_text": "Relative density was 99.1%.",
+            },
+            "scientific_context": {
+                "material": [
+                    {
+                        "name": "nominal material density",
+                        "value": 4.43,
+                        "unit": "g/cm3",
+                        "context_scope": "background",
+                    }
+                ]
             },
             "source_refs": [
                 {"source_kind": "table", "source_ref": "table-density"}

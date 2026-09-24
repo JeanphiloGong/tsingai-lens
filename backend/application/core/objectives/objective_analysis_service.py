@@ -11,12 +11,12 @@ from typing import Any, Callable, Mapping, Sequence
 from application.core.objectives.analysis.diagnostics import record_analysis_failure
 from application.core.objectives.analysis.evidence_materialization import (
     OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION,
-    materialize_evidence,
     rebind_persisted_contribution,
     rebind_persisted_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import (
     OBJECTIVE_EVIDENCE_ROUTING_VERSION,
+    EvidenceCandidate,
     route_sources,
 )
 from application.core.objectives.analysis.finding_synthesis import (
@@ -35,6 +35,7 @@ from application.core.objectives.analysis.source_extraction import (
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
+    PaperAnalysisFrame,
     ObjectiveSourceScreener,
     screen_sources,
 )
@@ -99,6 +100,78 @@ _OBJECTIVE_DOCUMENT_MAX_CONCURRENCY = 4
 # copy of the entire document.  Keep this bounded so context recovery cannot
 # inflate every result's lineage or analysis prompt.
 _OBJECTIVE_DOCUMENT_CONTEXT_LIMIT = 96
+
+
+def _transient_paper_contribution(
+    *,
+    collection_id: str,
+    analysis: ObjectiveAnalysis,
+    objective: ResearchObjective,
+    frame: PaperAnalysisFrame | None,
+    routes: tuple[EvidenceCandidate, ...],
+    audits: tuple[SourceReadAudit, ...],
+    experiments: tuple[PaperExperiment, ...],
+) -> PaperContribution:
+    """Describe one paper for runtime validation without persisting legacy facts.
+
+    The contribution is deliberately an in-memory coverage summary.  The
+    scientific records that survive the run are the experiment revisions and
+    their Objective selections; this object is only used to decide whether a
+    run may proceed to the writer.
+    """
+
+    document_id = (
+        experiments[0].document_id
+        if experiments
+        else next((item.document_id for item in audits), None)
+        or next((item.document_id for item in routes), None)
+        or (frame.document_id if frame is not None else "")
+    )
+    failed_audits = tuple(item for item in audits if item.failed)
+    warnings = tuple(
+        dict.fromkeys(
+            item.reason.strip()
+            for item in failed_audits
+            if item.reason and item.reason.strip()
+        )
+    )
+    if not experiments:
+        warnings = tuple(
+            dict.fromkeys(
+                (
+                    *warnings,
+                    "No source-grounded PaperExperiment was recovered for this paper.",
+                )
+            )
+        )
+    analysis_status = "failed" if failed_audits and not experiments else "analyzed"
+    return PaperContribution(
+        collection_id=collection_id,
+        objective_id=objective.objective_id,
+        analysis_version=analysis.analysis_version,
+        document_id=document_id,
+        analysis_status=analysis_status,
+        relevance=frame.relevance if frame is not None else "uncertain",
+        paper_role=frame.paper_role if frame is not None else "uncertain",
+        contribution_summary=(
+            f"Recovered {len(experiments)} PaperExperiment series."
+            if experiments
+            else None
+        ),
+        material_match=frame.material_match if frame is not None else (),
+        changed_variables=frame.changed_variables if frame is not None else (),
+        measured_property_scope=(
+            frame.measured_property_scope if frame is not None else ()
+        ),
+        test_environment_scope=(
+            frame.test_environment_scope if frame is not None else ()
+        ),
+        exclusion_reason=None,
+        warnings=warnings,
+        confidence=0.9 if experiments else 0.0,
+    )
+
+
 @dataclass(frozen=True)
 class ObjectiveAnalysisArtifacts:
     """Canonical values produced by one versioned Objective analysis run."""
@@ -231,39 +304,6 @@ class ObjectiveEvidenceAnalysisService:
         async def inspect_document(
             document_input: PreparedDocumentInput,
         ) -> ObjectiveDocumentEvidenceArtifacts:
-            input_fingerprint = self._document_evidence_input_fingerprint(
-                objective=active_objective,
-                document_input=document_input,
-                model_name=model_name,
-                extraction_version=_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION,
-            )
-            checkpoint = await self.objective_repository.read_document_evidence(
-                collection_id,
-                active_objective.objective_id,
-                document_input.document_id,
-                input_fingerprint,
-            )
-            if checkpoint is not None and checkpoint.status == "succeeded":
-                artifacts = self._rebind_document_evidence(
-                    checkpoint,
-                    analysis,
-                    objective=active_objective,
-                    objective_inputs=objective_inputs,
-                )
-                await report_document_completed(document_input.document_id)
-                return artifacts
-
-            running = ObjectiveDocumentEvidence.start(
-                collection_id=collection_id,
-                objective_id=active_objective.objective_id,
-                document_id=document_input.document_id,
-                input_fingerprint=input_fingerprint,
-                analysis_version=analysis.analysis_version,
-                extraction_version=_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION,
-                model_name=model_name,
-                started_at=datetime.now(timezone.utc),
-            )
-            await self.objective_repository.write_document_evidence(running)
             document_objective_inputs = self._objective_inputs_for_document(
                 collection_id,
                 objective_inputs,
@@ -293,47 +333,32 @@ class ObjectiveEvidenceAnalysisService:
                         objective_inputs=document_objective_inputs,
                         progress_callback=document_progress_callback,
                     )
-                checkpoint = running.succeed(
-                    contribution=artifacts.contribution,
-                    evidence_records=artifacts.evidence_records,
-                    completed_at=datetime.now(timezone.utc),
-                )
             except Exception as exc:  # noqa: BLE001
                 record_analysis_failure(
                     exc,
                     collection_id=collection_id,
                     objective_id=active_objective.objective_id,
                     document_id=document_input.document_id,
-                    stage="document_evidence_extraction",
+                    stage="document_experiment_extraction",
                 )
                 logger.error(
-                    "Objective document Evidence extraction failed "
+                    "Objective document experiment extraction failed "
                     "collection_id=%s objective_id=%s document_id=%s error_type=%s",
                     collection_id,
                     active_objective.objective_id,
                     document_input.document_id,
                     type(exc).__name__,
                 )
-                checkpoint = running.fail(
+                artifacts = ObjectiveDocumentEvidenceArtifacts(
                     contribution=self._failed_document_contribution(
                         collection_id=collection_id,
                         objective_id=active_objective.objective_id,
                         analysis_version=analysis.analysis_version,
                         document_id=document_input.document_id,
                     ),
-                    error_code="document_evidence_extraction_failed",
-                    error_message=analysis_error_message(
-                        "document_evidence_extraction_failed"
-                    ),
-                    completed_at=datetime.now(timezone.utc),
+                    evidence_records=(),
+                    experiments=(),
                 )
-            await self.objective_repository.write_document_evidence(checkpoint)
-            artifacts = self._rebind_document_evidence(
-                checkpoint,
-                analysis,
-                objective=active_objective,
-                objective_inputs=document_objective_inputs,
-            )
             await report_document_completed(document_input.document_id)
             return artifacts
 
@@ -349,18 +374,14 @@ class ObjectiveEvidenceAnalysisService:
             for item in document_artifacts
             for evidence in item.evidence_records
         )
-        findings = await to_thread(
-            self.finding_synthesis_service.synthesize,
-            collection_id=collection_id,
-            objective=active_objective,
-            analysis=analysis,
-            contributions=contributions,
-            evidence_records=evidence_records,
-        )
+        # Findings are synthesized only after immutable experiment revisions
+        # and Objective selections have been written.  Keeping this stage
+        # focused on Source reading prevents a second, legacy fact ledger from
+        # becoming the source of the published conclusion.
         return ObjectiveAnalysisArtifacts(
             contributions=contributions,
-            evidence_records=evidence_records,
-            findings=findings,
+            evidence_records=(),
+            findings=(),
             model_name=model_name,
             experiments=tuple(
                 experiment
@@ -435,29 +456,26 @@ class ObjectiveEvidenceAnalysisService:
             document_id=objective_inputs["documents"][0].document_id,
             source_facts=paper_evidence_drafts,
         )
-        evidence_records, contributions = materialize_evidence(
+        frame = next(
+            (
+                item
+                for item in screened_sources
+                if item.document_id == objective_inputs["documents"][0].document_id
+            ),
+            None,
+        )
+        contribution = _transient_paper_contribution(
             collection_id=collection_id,
             analysis=analysis,
             objective=objective,
-            technical_audits=tuple(read_audits),
-            paper_maps=objective_inputs["paper_maps"],
-            frames=screened_sources,
+            frame=frame,
             routes=source_inspection_routes,
-            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-            tables_by_document_id=objective_inputs["tables_by_document_id"],
-            figures_by_document_id=objective_inputs["figures_by_document_id"],
-            document_trees_by_document_id=objective_inputs[
-                "document_trees_by_document_id"
-            ],
+            audits=tuple(read_audits),
             experiments=experiments,
         )
-        if len(contributions) != 1:
-            raise RuntimeError(
-                "document Evidence extraction requires one paper contribution"
-            )
         return ObjectiveDocumentEvidenceArtifacts(
-            contribution=contributions[0],
-            evidence_records=evidence_records,
+            contribution=contribution,
+            evidence_records=(),
             experiments=experiments,
         )
 
@@ -794,7 +812,7 @@ class ObjectiveEvidenceAnalysisService:
             test_environment_scope=(),
             exclusion_reason=None,
             warnings=(
-                "Evidence extraction failed for this paper; retry the analysis.",
+                "PaperExperiment extraction failed for this paper; retry the analysis.",
             ),
             confidence=0,
         )

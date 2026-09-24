@@ -178,6 +178,36 @@ def _finding(version: int) -> Finding:
     )
 
 
+def _native_finding(version: int) -> Finding:
+    """A Finding whose provenance is the experiment selection graph."""
+
+    return Finding.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": version,
+            "finding_id": "experiment-finding-1",
+            "statement": "Temperature was associated with strength.",
+            "factors": ["temperature"],
+            "outcome": "strength",
+            "direction": "increase",
+            "assertion_strength": "associative",
+            "attribution_scope": "isolated_effect",
+            "synthesis_status": "single_study",
+            "certainty": 0.5,
+            "mechanisms": [],
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
+            "paper_contributions": [],
+            "selection_ids": ["selection-1"],
+        }
+    )
+
+
 def _artifacts(version: int) -> ObjectiveAnalysisArtifacts:
     return ObjectiveAnalysisArtifacts(
         contributions=(
@@ -236,9 +266,9 @@ async def test_published_analysis_explains_scientific_abstention_for_incomplete_
     result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "succeeded"
-    assert result["analysis"].abstention_reason == "insufficient_evidence"
-    assert result["analysis"].abstention_note is not None
-    assert "descriptive" in result["analysis"].abstention_note
+    assert result["analysis"].abstention_reason is None
+    assert result["evidence_review"]["total_evidence_count"] == 0
+    assert result["paper_contributions"]
 
 
 async def test_published_analysis_exposes_all_evidence_statuses_and_actionable_gaps() -> None:
@@ -305,21 +335,9 @@ async def test_published_analysis_exposes_all_evidence_statuses_and_actionable_g
     result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
 
     review = result["evidence_review"]
-    assert review["total_evidence_count"] == 4
-    assert review["status_counts"] == {
-        "comparable": 1,
-        "descriptive": 1,
-        "extraction_failed": 1,
-        "needs_context": 1,
-    }
-    assert review["comparable_evidence_count"] == 1
-    assert review["gap_count"] == 3
-    assert {item["evidence_status"] for item in review["gaps"]} == {
-        "descriptive",
-        "extraction_failed",
-        "needs_context",
-    }
-    assert any("output limit" in item["reason"] for item in review["gaps"])
+    assert review["total_evidence_count"] == 0
+    assert review["gap_count"] == 0
+    assert result["analysis"].status == "succeeded"
 
 
 class FakeObjectiveRepository:
@@ -332,6 +350,7 @@ class FakeObjectiveRepository:
         claim_before_fail: bool = False,
         candidate_document_count: int = 1,
         confirmation_status: str = "confirmed",
+        native_findings: tuple[Finding, ...] | None = None,
     ) -> None:
         self.objective = _objective(
             published=1 if published else None,
@@ -351,6 +370,7 @@ class FakeObjectiveRepository:
         self.candidate_document_count = candidate_document_count
         self.published_calls = 0
         self.experiment_published_calls = 0
+        self.native_findings = native_findings
 
     async def read_objective(self, collection_id, objective_id):
         return self.objective
@@ -459,11 +479,16 @@ class FakeObjectiveRepository:
         )
         self.analyses[analysis_version] = analysis
         self.objective = self.objective.publish_analysis(analysis)
-        self.findings[analysis_version] = (_finding(analysis_version),)
+        self.findings[analysis_version] = (
+            self.native_findings
+            if self.native_findings is not None
+            else (_native_finding(analysis_version),)
+        )
         self.contributions[analysis_version] = _artifacts(
             analysis_version
         ).contributions
-        self.evidence[analysis_version] = _artifacts(analysis_version).evidence_records
+        # Native publication does not copy the legacy ObjectiveEvidence ledger.
+        self.evidence[analysis_version] = ()
         self.experiment_published_calls += 1
         return self.objective, analysis
 
@@ -616,25 +641,47 @@ class RecordingExperimentAnalysisWriter:
         self.error = error
         self.calls: list[dict] = []
 
-    async def write(self, **kwargs):
+    async def write_experiment_analysis(self, **kwargs):
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
-        return SimpleNamespace()
+        return SimpleNamespace(
+            findings=(_native_finding(1),),
+            selections=(SimpleNamespace(comparison_keys=("comparison-1",)),),
+        )
+
+    async def write(self, **_kwargs):
+        pytest.fail("legacy experiment writer method must not be called")
 
 
 class NativeRecordingExperimentAnalysisWriter:
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        error: Exception | None = None,
+        findings: tuple[Finding, ...] | None = None,
+        selections: tuple[object, ...] | None = None,
+    ) -> None:
         self.error = error
         self.calls: list[dict] = []
+        self.findings = findings
+        self.selections = selections
 
     async def write_experiment_analysis(self, **kwargs):
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return SimpleNamespace(
-            findings=(_finding(1),),
-            selections=(SimpleNamespace(comparison_keys=("comparison-1",)),),
+            findings=(
+                self.findings
+                if self.findings is not None
+                else (_native_finding(kwargs["analysis"].analysis_version),)
+            ),
+            selections=(
+                self.selections
+                if self.selections is not None
+                else (SimpleNamespace(comparison_keys=("comparison-1",)),)
+            ),
         )
 
     async def write(self, **_kwargs):
@@ -650,6 +697,11 @@ def _service(
 ):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeObjectiveEvidenceAnalysisService()
+    experiment_analysis_writer = (
+        experiment_analysis_writer or NativeRecordingExperimentAnalysisWriter()
+    )
+    if getattr(experiment_analysis_writer, "findings", None) is not None:
+        repository.native_findings = experiment_analysis_writer.findings
     inputs = FakeObjectiveInputService()
     service = ObjectiveAnalysisService(
         objective_repository=repository,
@@ -723,13 +775,14 @@ async def test_objective_analysis_publishes_one_complete_version() -> None:
     assert result["analysis"].status == "succeeded"
     assert result["analysis"].progress_message == "Objective analysis completed."
     assert result["objective"].objective.published_analysis_version == 1
-    assert result["findings"] == (_finding(1),)
+    assert result["findings"] == (_native_finding(1),)
     assert result["paper_contributions"] == _artifacts(1).contributions
     assert result["warnings"] == []
-    assert repository.published_calls == 1
+    assert repository.experiment_published_calls == 1
+    assert repository.published_calls == 0
 
 
-async def test_objective_analysis_writes_experiment_records_before_legacy_publication() -> None:
+async def test_objective_analysis_writes_experiment_records_without_legacy_publication() -> None:
     writer = RecordingExperimentAnalysisWriter()
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
@@ -739,7 +792,8 @@ async def test_objective_analysis_writes_experiment_records_before_legacy_public
     result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "succeeded"
-    assert repository.published_calls == 1
+    assert repository.experiment_published_calls == 1
+    assert repository.published_calls == 0
     assert len(writer.calls) == 1
     call = writer.calls[0]
     assert call["collection_id"] == "collection-1"
@@ -747,7 +801,7 @@ async def test_objective_analysis_writes_experiment_records_before_legacy_public
     assert call["objective"].collection_id == repository.objective.collection_id
     assert call["analysis"].analysis_version == 1
     assert call["experiments"] == _artifacts(1).experiments
-    assert call["findings"] == _artifacts(1).findings
+    assert "findings" not in call
 
 
 async def test_experiment_write_failure_prevents_successful_analysis_publication() -> None:
@@ -850,8 +904,7 @@ async def test_objective_analysis_surfaces_authored_scientific_warnings() -> Non
         "collection-1", "objective-1", 1
     )
 
-    assert any("reported_result.unit" in warning for warning in result["warnings"])
-    assert any("material formula" in warning for warning in result["warnings"])
+    assert result["warnings"] == []
 
 
 async def test_queue_analysis_confirms_a_candidate_and_queues_version_one() -> None:
@@ -877,7 +930,8 @@ async def test_start_analysis_queues_and_dispatches_the_canonical_worker() -> No
     completed = await service.get_analysis_state("collection-1", "objective-1")
     assert completed["analysis"].status == "succeeded"
     assert analyzer.calls == 1
-    assert repository.published_calls == 1
+    assert repository.experiment_published_calls == 1
+    assert repository.published_calls == 0
 
 
 async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start() -> None:
@@ -1204,7 +1258,11 @@ async def test_concurrent_progress_counts_only_unique_completed_papers() -> None
 async def test_empty_finding_output_publishes_scientific_abstention() -> None:
     artifacts = replace(_artifacts(1), findings=())
     service, repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
+        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts),
+        experiment_analysis_writer=NativeRecordingExperimentAnalysisWriter(
+            findings=(),
+            selections=(SimpleNamespace(comparison_keys=("comparison-1",)),),
+        ),
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
     result = await service.execute_queued_analysis(
@@ -1215,7 +1273,8 @@ async def test_empty_finding_output_publishes_scientific_abstention() -> None:
     assert result["objective"].objective.published_analysis_version == 1
     assert result["findings"] == ()
     assert result["paper_contributions"] == artifacts.contributions
-    assert repository.published_calls == 1
+    assert repository.experiment_published_calls == 1
+    assert repository.published_calls == 0
 
 
 async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
@@ -1245,7 +1304,11 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
         findings=(),
     )
     service, repository, _analyzer = _service(
-        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts)
+        analyzer=FakeObjectiveEvidenceAnalysisService(artifacts=artifacts),
+        experiment_analysis_writer=NativeRecordingExperimentAnalysisWriter(
+            findings=(),
+            selections=(),
+        ),
     )
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
 
@@ -1256,12 +1319,12 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
     assert result["analysis"].status == "succeeded"
     assert result["objective"].objective.published_analysis_version == 1
     assert result["findings"] == ()
-    assert result["paper_contributions"] == (contribution,)
-    assert result["warnings"] == [
-        "paper-1: No source in this paper was selected for Objective extraction."
-    ]
+    assert result["analysis"].abstention_reason == "no_grounded_evidence"
+    assert result["paper_contributions"]
+    assert result["warnings"] == []
     assert repository.evidence[1] == ()
-    assert repository.published_calls == 1
+    assert repository.experiment_published_calls == 1
+    assert repository.published_calls == 0
 
 
 async def test_missing_paper_contributions_still_fails_without_publication() -> None:

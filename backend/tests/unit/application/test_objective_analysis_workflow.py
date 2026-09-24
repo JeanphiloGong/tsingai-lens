@@ -1648,7 +1648,7 @@ async def test_objective_analysis_does_not_mutate_active_objective_facts(
     assert artifacts.contributions
 
 
-async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
+async def test_document_experiment_retry_reruns_without_legacy_checkpoint(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1723,15 +1723,26 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         _ready_objective_facts_for_papers(paper_maps, objective),
     )
 
-    synthesis_calls: list[tuple[PaperContribution, ...]] = []
+    class _NativeExperimentWriter:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
 
-    class _FindingSynthesisRecorder:
-        def synthesize(self, **payload):
-            synthesis_calls.append(payload["contributions"])
-            return ()
+        async def write_experiment_analysis(self, **payload):
+            self.calls.append(payload)
+            return SimpleNamespace(findings=(), selections=())
 
-    service.finding_synthesis_service = _FindingSynthesisRecorder()
+        async def write(self, **_payload):
+            pytest.fail("legacy experiment writer must not be called")
+
+    native_writer = _NativeExperimentWriter()
+
+    class _LegacySynthesisGuard:
+        def synthesize(self, **_payload):
+            pytest.fail("legacy Finding synthesis must not be called")
+
+    service.finding_synthesis_service = _LegacySynthesisGuard()
     extraction_calls: list[str] = []
+    generated_artifacts = []
     paper_2_failures_remaining = 1
     first_inspection_started = Barrier(2)
 
@@ -1782,11 +1793,24 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         extract_document,
         raising=False,
     )
+    generate_artifacts = service.generate_objective_analysis_artifacts
+
+    async def capture_artifacts(*args, **kwargs):
+        artifacts = await generate_artifacts(*args, **kwargs)
+        generated_artifacts.append(artifacts)
+        return artifacts
+
+    monkeypatch.setattr(
+        service,
+        "generate_objective_analysis_artifacts",
+        capture_artifacts,
+    )
     analysis_service = ObjectiveAnalysisService(
         objective_repository=service.objective_repository,
         evidence_analysis_service=service,
         objective_input_service=service.objective_input_service,
         document_profile_service=service.objective_input_service.document_profile_service,
+        experiment_analysis_writer=native_writer,
     )
     progress_updates: list[dict[str, Any]] = []
     update_progress = service.objective_repository.update_analysis_progress
@@ -1794,13 +1818,6 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     async def record_progress(collection_id, objective_id, version, **progress):
         await asyncio.sleep(0)
         await update_progress(collection_id, objective_id, version, **progress)
-        if progress["phase"] == "objective_document_evidence_completed":
-            checkpoint = next(
-                item
-                for item in service.objective_repository._document_evidence.values()
-                if item.document_id == progress["current_document_id"]
-            )
-            assert checkpoint.status in {"succeeded", "failed"}
         progress_updates.append({"analysis_version": version, **progress})
 
     monkeypatch.setattr(
@@ -1831,33 +1848,21 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
         for update in progress_updates
         if update["phase"] == "objective_document_evidence_completed"
     ] == [1, 2]
-    assert [item.analysis_status for item in first["paper_contributions"]] == [
+    assert [item.analysis_status for item in generated_artifacts[0].contributions] == [
         "analyzed",
         "failed",
     ]
-    assert len(service.objective_repository._document_evidence) == 2
-    assert sorted(
-        checkpoint.status
-        for checkpoint in service.objective_repository._document_evidence.values()
-    ) == ["failed", "succeeded"]
-    failed_checkpoint = next(
-        checkpoint
-        for checkpoint in service.objective_repository._document_evidence.values()
-        if checkpoint.status == "failed"
-    )
-    assert failed_checkpoint.error_message == (
-        "Evidence could not be extracted from this paper. Retry the analysis."
-    )
+    assert service.objective_repository._document_evidence == {}
     failure_diagnostic = next(
         record
         for record in first["analysis"].diagnostics
         if record["trace_type"] == "objective_analysis_failure"
     )
-    assert failure_diagnostic["stage"] == "document_evidence_extraction"
+    assert failure_diagnostic["stage"] == "document_experiment_extraction"
     assert failure_diagnostic["error_type"] == "RuntimeError"
     assert failure_diagnostic["frames"][-1]["function"] == "extract_document"
     assert "provider unavailable" not in str(failure_diagnostic)
-    assert len(synthesis_calls) == 1
+    assert len(native_writer.calls) == 1
 
     second_queued = await analysis_service.queue_analysis(
         collection_id,
@@ -1873,7 +1878,12 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
 
     assert second["analysis"].status == "succeeded"
     assert second["objective"].objective.published_analysis_version == 2
-    assert sorted(extraction_calls) == ["paper-1", "paper-2", "paper-2"]
+    assert sorted(extraction_calls) == [
+        "paper-1",
+        "paper-1",
+        "paper-2",
+        "paper-2",
+    ]
     assert [
         update["processed_document_count"]
         for update in progress_updates
@@ -1883,13 +1893,13 @@ async def test_document_evidence_retry_reuses_success_and_reruns_only_failure(
     assert all(update["total_document_count"] == 2 for update in progress_updates)
     assert all(
         item.analysis_status == "analyzed"
-        for item in second["paper_contributions"]
+        for item in generated_artifacts[1].contributions
     )
     assert all(
         item.analysis_version == second["analysis"].analysis_version
-        for item in second["paper_contributions"]
+        for item in generated_artifacts[1].contributions
     )
-    assert len(synthesis_calls) == 2
+    assert len(native_writer.calls) == 2
 
 
 def test_document_evidence_fingerprint_covers_every_reuse_input(tmp_path) -> None:

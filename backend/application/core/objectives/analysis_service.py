@@ -792,51 +792,30 @@ class ObjectiveAnalysisService:
                         prompt_versions=usage.prompt_versions,
                         diagnostics=diagnostics.records,
                     )
-            if self.experiment_analysis_writer is not None:
-                native_writer = getattr(
-                    self.experiment_analysis_writer,
-                    "write_experiment_analysis",
-                    None,
+            if self.experiment_analysis_writer is None:
+                raise RuntimeError(
+                    "experiment analysis writer is required for objective publication"
                 )
-                if callable(native_writer):
-                    native_result = await native_writer(
-                        collection_id=collection_id,
-                        objective=objective,
-                        analysis=claimed,
-                        experiments=artifacts.experiments,
-                    )
-                    abstention_reason, abstention_note = _experiment_abstention(
-                        native_result
-                    )
-                    objective, completed = (
-                        await self.objective_repository.publish_experiment_analysis(
-                            collection_id,
-                            objective_id,
-                            analysis_version,
-                            abstention_reason=abstention_reason,
-                            abstention_note=abstention_note,
-                        )
-                    )
-                    return await self._result(
-                        collection_id,
-                        objective.objective_id,
-                        analysis=completed,
-                    )
-                await self.experiment_analysis_writer.write(
-                    collection_id=collection_id,
-                    objective=objective,
-                    analysis=claimed,
-                    experiments=artifacts.experiments,
-                    findings=artifacts.findings,
+            native_writer = getattr(
+                self.experiment_analysis_writer,
+                "write_experiment_analysis",
+                None,
+            )
+            if not callable(native_writer):
+                raise RuntimeError(
+                    "experiment analysis writer does not implement native publication"
                 )
-            abstention_reason, abstention_note = _scientific_abstention(artifacts)
-            objective, completed = await self.objective_repository.publish_analysis(
+            native_result = await native_writer(
+                collection_id=collection_id,
+                objective=objective,
+                analysis=claimed,
+                experiments=artifacts.experiments,
+            )
+            abstention_reason, abstention_note = _experiment_abstention(native_result)
+            objective, completed = await self.objective_repository.publish_experiment_analysis(
                 collection_id,
                 objective_id,
                 analysis_version,
-                contributions=artifacts.contributions,
-                evidence_records=artifacts.evidence_records,
-                findings=artifacts.findings,
                 abstention_reason=abstention_reason,
                 abstention_note=abstention_note,
             )

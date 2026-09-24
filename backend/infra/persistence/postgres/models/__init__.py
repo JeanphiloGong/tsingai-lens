@@ -23,6 +23,15 @@ from infra.persistence.postgres.models.objective import (
     ObjectiveResearchRecord,
 )
 from infra.persistence.postgres.models.objective_workspace import ObjectiveExperimentPlan
+from infra.persistence.postgres.models.paper_experiment import (
+    ExperimentComparisonMeasurementRow,
+    ExperimentComparisonRow,
+    ExperimentMeasurementResultRow,
+    ExperimentTestConditionRow,
+    ExperimentalVariantRow,
+    PaperExperimentRow,
+    ReportedInterpretationRow,
+)
 __all__ = [
     "AuthSession",
     "AuthUser",
@@ -36,10 +45,17 @@ __all__ = [
     "EvaluationGoldSetRecord",
     "EvaluationPredictionSnapshotRecord",
     "EvaluationRunRecord",
+    "ExperimentComparisonMeasurementRow",
+    "ExperimentComparisonRow",
+    "ExperimentMeasurementResultRow",
+    "ExperimentTestConditionRow",
+    "ExperimentalVariantRow",
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",
     "ObjectiveExperimentPlan",
     "ObjectiveResearchRecord",
+    "PaperExperimentRow",
     "PipelineRunRow",
+    "ReportedInterpretationRow",
 ]

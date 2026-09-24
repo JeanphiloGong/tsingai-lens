@@ -27,7 +27,6 @@ from application.chat.capabilities import (
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat import capability_policy, intent_policy
 from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
-from application.chat.model_calls import ModelCallObserver
 from application.chat.model import (
     RESEARCH_AGENT_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT,
@@ -164,8 +163,6 @@ class _RunProgress:
     limits: AgentRunLimits
     progress_callback: Callable[[dict[str, Any]], None] | None = None
     response_started_callback: Callable[[str, str], None] | None = None
-    model_call_observer: ModelCallObserver | None = None
-    session_id: str = ""
     response_message_id: str = ""
     response_created_at: str = ""
     started_at: float = field(default_factory=lambda: monotonic())
@@ -378,19 +375,13 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
     ) -> AgentRunResult:
         # Normalize the caller policy before creating any trajectory state. A
         # direct application caller must not leave a partial turn when it
         # supplies an unsupported mode; HTTP callers are already schema-bound.
         permission_mode = ToolPermissionMode(permission_mode)
-        progress = _RunProgress(
-            self.limits,
-            progress_callback=progress_callback,
-            response_started_callback=response_started_callback,
-            model_call_observer=model_call_observer,
-            session_id=context.session_id,
-        )
+        progress = _RunProgress(self.limits, progress_callback=progress_callback,
+                                response_started_callback=response_started_callback)
         messages = [
             *previous_messages,
             ChatMessage.user(
@@ -426,15 +417,9 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
-        model_call_observer: ModelCallObserver | None = None,
     ) -> AgentRunResult:
-        progress = _RunProgress(
-            self.limits,
-            progress_callback=progress_callback,
-            response_started_callback=response_started_callback,
-            model_call_observer=model_call_observer,
-            session_id=context.session_id,
-        )
+        progress = _RunProgress(self.limits, progress_callback=progress_callback,
+                                response_started_callback=response_started_callback)
         requested_count, executed_count = self._active_turn_action_counts(previous_messages)
         progress.requested_tool_calls = requested_count
         progress.executed_tool_calls = executed_count
@@ -831,19 +816,7 @@ class ResearchAgentRunner:
             output_limit = min(output_limit, 8192)
         if timeout <= 0:
             raise TimeoutError("research turn deadline reached")
-        model_context = replace(
-            model_context,
-            max_context_tokens=self.limits.max_context_tokens,
-            model_call_observer=progress.model_call_observer,
-            model_call_purpose=(
-                "compaction" if model_context.compacting
-                else "finalization" if finalizing else "decision"
-            ),
-            model_call_response_message_id=(
-                None if model_context.compacting else progress.response_message_id
-            ),
-            model_call_session_id=progress.session_id,
-        )
+        model_context = replace(model_context, max_context_tokens=self.limits.max_context_tokens)
         prompt = RESEARCH_COMPACTION_SYSTEM_PROMPT if model_context.compacting else RESEARCH_AGENT_SYSTEM_PROMPT
         request_tokens = self.context_builder.estimate_tokens({
             "messages": model_context.provider_messages(prompt),
@@ -1388,6 +1361,7 @@ class ResearchAgentRunner:
             if message.tool_result is not None
         }
         return len(requested_ids), len(requested_ids & completed_ids)
+
 
     @staticmethod
     def _active_user_request(messages: list[ChatMessage]) -> str:

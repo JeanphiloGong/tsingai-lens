@@ -3,22 +3,10 @@
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
 from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
 from infra.persistence.postgres.models.chat import (
-    ChatCorrectionCaseRow,
-    ChatModelCallRow,
     ChatMessageFeedbackRow,
     ChatMessageRow,
     ChatSessionRow,
     ChatToolCallRow,
-)
-from infra.persistence.postgres.models.chat_correction import (
-    ChatCorrectionReviewRow,
-    ChatCorrectionSampleRow,
-)
-from infra.persistence.postgres.models.chat_correction_dataset import (
-    ChatCorrectionDatasetManifestRow,
-)
-from infra.persistence.postgres.models.chat_correction_candidate import (
-    ChatCorrectionCandidateRow,
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
@@ -38,16 +26,10 @@ from infra.persistence.postgres.models.objective_workspace import ObjectiveExper
 __all__ = [
     "AuthSession",
     "AuthUser",
-    "ChatCorrectionCaseRow",
-    "ChatModelCallRow",
     "ChatMessageRow",
     "ChatMessageFeedbackRow",
     "ChatSessionRow",
     "ChatToolCallRow",
-    "ChatCorrectionReviewRow",
-    "ChatCorrectionSampleRow",
-    "ChatCorrectionDatasetManifestRow",
-    "ChatCorrectionCandidateRow",
     "Collection",
     "Document",
     "DocumentPreparationRow",

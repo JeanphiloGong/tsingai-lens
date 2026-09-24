@@ -3,19 +3,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import replace
 
-from application.chat.model_calls import ModelCallOutcome
-from application.repositories.chat_repository import (
-    ChatModelCall,
-    ChatResponseSnapshot,
-    ChatSessionBusyError,
-)
-from domain.chat import (
-    ChatCorrectionCase,
-    ChatMessage,
-    ChatSession,
-    ChatToolCall,
-    ChatToolResult,
-)
+from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
+from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 from domain.chat.permissions import change_permission, permission_record, permits_automatic
 
 
@@ -29,8 +18,6 @@ class MemoryChatRepository:
         self.results: dict[str, ChatToolResult] = {}
         self.active_sessions: set[str] = set()
         self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
-        self.model_calls: dict[str, ChatModelCall] = {}
-        self.correction_cases: dict[str, ChatCorrectionCase] = {}
         self.permissions = {}
         self.proposed_revisions = {}
 
@@ -78,87 +65,6 @@ class MemoryChatRepository:
 
     async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None:
         self.response_snapshots[session_id] = snapshot
-
-    async def start_model_call(self, call: ChatModelCall) -> ChatModelCall:
-        session = self.sessions.get(call.session_id)
-        if session is None:
-            raise FileNotFoundError(f"chat session not found: {call.session_id}")
-        existing = self.model_calls.get(call.call_id)
-        if existing is not None:
-            if existing.request_digest != call.request_digest or existing.request != call.request:
-                raise ValueError("model call identity cannot be reassigned")
-            return existing
-        self.model_calls[call.call_id] = call
-        return call
-
-    async def finish_model_call(self, *, session_id: str, call_id: str, outcome: ModelCallOutcome) -> ChatModelCall:
-        call = self.model_calls.get(call_id)
-        if call is None or call.session_id != session_id:
-            raise FileNotFoundError(f"chat model call not found: {call_id}")
-        if call.finished_at is not None:
-            if call.status != outcome.status:
-                raise ValueError("model call outcome cannot be reassigned")
-            return call
-        saved = replace(
-            call,
-            status=outcome.status,
-            finished_at=outcome.finished_at,
-            error_code=outcome.error_code,
-            provider_confirmed=outcome.status == "provider_succeeded",
-            prompt_tokens=outcome.prompt_tokens,
-            completion_tokens=outcome.completion_tokens,
-            total_tokens=outcome.total_tokens,
-        )
-        self.model_calls[call_id] = saved
-        return saved
-
-    async def read_model_calls(self, session_id: str, *, limit: int = 50, offset: int = 0) -> tuple[ChatModelCall, ...]:
-        calls = sorted(
-            (call for call in self.model_calls.values() if call.session_id == session_id),
-            key=lambda call: (call.started_at, call.call_id),
-        )
-        return tuple(calls[max(0, offset):max(0, offset) + max(1, min(limit, 200))])
-
-    async def read_model_call(self, session_id: str, call_id: str) -> ChatModelCall | None:
-        call = self.model_calls.get(call_id)
-        return call if call is not None and call.session_id == session_id else None
-
-    async def save_correction_case(self, case: ChatCorrectionCase) -> ChatCorrectionCase:
-        if case.session_id not in self.sessions:
-            raise FileNotFoundError(f"chat session not found: {case.session_id}")
-        existing = self.correction_cases.get(case.case_id)
-        if existing is not None:
-            if existing.to_record() != case.to_record():
-                raise ValueError("correction case identity cannot be reassigned")
-            return existing
-        for existing in self.correction_cases.values():
-            if (
-                existing.session_id == case.session_id
-                and existing.original_message_id == case.original_message_id
-                and existing.feedback_message_id == case.feedback_message_id
-                and existing.corrected_message_id == case.corrected_message_id
-            ):
-                if existing.to_record() != case.to_record():
-                    raise ValueError("correction case identity already exists")
-                return existing
-        self.correction_cases[case.case_id] = case
-        return case
-
-    async def read_correction_cases(
-        self, session_id: str, *, limit: int = 50, offset: int = 0
-    ) -> tuple[ChatCorrectionCase, ...]:
-        cases = sorted(
-            (case for case in self.correction_cases.values() if case.session_id == session_id),
-            key=lambda case: (case.created_at, case.case_id),
-        )
-        start = max(0, int(offset))
-        return tuple(cases[start : start + max(1, min(int(limit), 200))])
-
-    async def read_correction_case(
-        self, session_id: str, case_id: str
-    ) -> ChatCorrectionCase | None:
-        case = self.correction_cases.get(case_id)
-        return case if case is not None and case.session_id == session_id else None
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
         return (session,)

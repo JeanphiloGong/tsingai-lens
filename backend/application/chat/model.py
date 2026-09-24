@@ -10,13 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import ToolSpec
 from application.chat.context_builder import ChatModelContext
-from application.chat.model_calls import (
-    ModelCallInput,
-    ModelCallObserver,
-    ModelCallOutcome,
-    ModelCallPurpose,
-    ModelCallStatus,
-)
 
 
 RESEARCH_COMPACTION_SYSTEM_PROMPT = """You maintain a researcher's working notes while older tool operations leave the active context.
@@ -734,11 +727,6 @@ class ChatModel(Protocol):
 
 __all__ = [
     "ChatModel",
-    "ModelCallInput",
-    "ModelCallObserver",
-    "ModelCallOutcome",
-    "ModelCallPurpose",
-    "ModelCallStatus",
     "ModelResponseError",
     "ModelToolCall",
     "ModelTurn",

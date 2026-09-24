@@ -32,7 +32,6 @@
 	export let onRevise: (message: ChatMessage, content?: string) => Promise<boolean> = async () =>
 		false;
 	export let onSwitchVersion: (sessionId: string) => void = () => {};
-	export let onInspectModelCall: ((messageId: string) => void) | undefined = undefined;
 	export let running = false;
 	$: actionsDisabled =
 		revisionDisabled ||
@@ -297,7 +296,6 @@
 								incomplete={item.message.message_id === responseMessage?.message_id}
 								feedbackState={feedbackByMessage[item.message.message_id]}
 								{onFeedback}
-								{onInspectModelCall}
 								streamingText={sending ? streamingText : (responseSnapshot?.content ?? '')}
 								progress={sending
 									? progress

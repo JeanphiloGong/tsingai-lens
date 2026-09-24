@@ -663,15 +663,6 @@ The focused browser suite covers:
 19. Objective drafts and other reviewable research results kept visible as
     standalone artifacts while the underlying tool mechanics stay secondary.
 
-Correction candidates are a separate explicit review-queue action. The owner
-chooses a saved challenge (or lets the service inspect the latest possible
-boundary), starts one proposal run, and can inspect its status, IDs, digest,
-provider finish reason, and audit details. Only a `needs_review` proposal can
-be imported. Importing reruns the P2 trajectory validator and creates the P3
-sample; it never accepts a review, changes the conversation, or runs in a
-background worker. `ambiguous`, `no_candidate`, `invalid_proposal`, and
-`provider_failed` remain visible as distinct outcomes.
-
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.
 

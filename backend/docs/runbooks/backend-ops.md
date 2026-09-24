@@ -185,6 +185,14 @@ alembic current --check-heads
 For a fresh development database, run the same commands. Historical SQLite or
 JSON data is not imported by startup or by these migrations.
 
+Revision `20260924_0065` removes the retired Chat correction workflow: exact
+model-call records, cases, samples, reviews, datasets, and candidates. Back up
+those six tables before upgrading if their historical contents are needed.
+Ordinary Chat sessions, messages, usefulness feedback, and research artifacts
+are retained. Downgrading recreates the retired schema but cannot recover its
+deleted rows; data recovery requires the backup. Revisions `0060`-`0064` remain
+in migration history so existing databases can upgrade normally.
+
 Check the schema revision of an existing replay database before starting a
 real-model run. A missing `document_preparations` table with code at revision
 `20260908_0055` indicates an incomplete upgrade, not unavailable scientific

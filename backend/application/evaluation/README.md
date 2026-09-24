@@ -17,18 +17,6 @@ prepare Source documents, discover Objectives, or run Objective analyses.
 - `finding_review_import_service.py`
   Validates human accept, reject, correct, or skip decisions and writes them
   through `FindingFeedbackService`.
-- `chat_correction_review_service.py`
-  Rebuilds P2 Chat correction cases into exact-input samples and records
-  owner-scoped, append-only review decisions with digest and Source checks.
-- `chat_correction_dataset_service.py`
-  Freezes currently accepted Chat correction samples into owner-scoped,
-  source-backed manifests with paper-family/session-tree partition checks and
-  explicit exclusion records. It remains independent from the Finding dataset.
-- `chat_correction_candidate_service.py`
-  Runs an explicit, owner-scoped structured proposal over saved Chat evidence,
-  keeps provider outcomes separate from deterministic validation, and imports a
-  selected proposal through the existing P2/P3 services without creating a
-  review decision.
 
 ## Identity Contract
 

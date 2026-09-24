@@ -28,7 +28,28 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260923_0064"
+HEAD_REVISION = "20260924_0065"
+
+
+def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'retired-chat.sqlite'}")
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    retired = {
+        "chat_model_calls", "chat_correction_cases", "chat_correction_samples",
+        "chat_correction_reviews", "chat_correction_datasets", "chat_correction_candidates",
+    }
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260923_0064")
+        before = set(inspect(connection).get_table_names())
+        assert retired <= before
+        command.upgrade(config, "head")
+        assert set(inspect(connection).get_table_names()) == before - retired
+        command.downgrade(config, "20260923_0064")
+        assert set(inspect(connection).get_table_names()) == before
+        command.upgrade(config, "head")
+        assert set(inspect(connection).get_table_names()) == before - retired
+    engine.dispose()
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:

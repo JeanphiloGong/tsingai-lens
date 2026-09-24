@@ -13,10 +13,6 @@
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
-		fetchChatModelCall,
-		fetchChatModelCalls,
-		fetchChatCorrectionCases,
-		createChatCorrectionCase,
 		fetchChatTree,
 		appendChatProgress,
 		readPendingChatSourceContexts,
@@ -29,8 +25,6 @@
 		type ChatFeedbackState,
 		type ChatMessageFeedback,
 		type ChatMessage,
-		type ChatModelCall,
-		type ChatCorrectionCase,
 		type ChatProgress,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
@@ -48,11 +42,6 @@
 	import ConversationTree from './ConversationTree.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
-	import ModelCallInspector from './ModelCallInspector.svelte';
-	import CorrectionCasePanel from './CorrectionCasePanel.svelte';
-	import CorrectionReviewPage from './CorrectionReviewPage.svelte';
-	import CorrectionCandidatePanel from './CorrectionCandidatePanel.svelte';
-	import ChatCorrectionDatasetPage from './ChatCorrectionDatasetPage.svelte';
 	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
@@ -64,10 +53,7 @@
 		Clock3,
 		CircleAlert,
 		GitBranch,
-		ArrowRight,
-		Link2,
-		Archive,
-		Sparkles
+		ArrowRight
 	} from '@lucide/svelte';
 
 	export let embedded = false;
@@ -126,19 +112,6 @@
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
-	let inspectedModelCall: ChatModelCall | null = null;
-	let inspectedModelCallMessageId = '';
-	let modelCallLoading = false;
-	let modelCallError = '';
-	let modelCallController: AbortController | null = null;
-	let correctionCases: ChatCorrectionCase[] = [];
-	let correctionPanelOpen = false;
-	let correctionSaving = false;
-	let correctionError = '';
-	let correctionController: AbortController | null = null;
-	let reviewCase: ChatCorrectionCase | null = null;
-	let datasetPageOpen = false;
-	let candidatePanelOpen = false;
 	let updatesController: AbortController | null = null;
 
 	let deciding = false;
@@ -167,131 +140,9 @@
 		clearTimeout(historyTimer);
 		sessionController?.abort();
 		updatesController?.abort();
-		modelCallController?.abort();
-		correctionController?.abort();
 		treeController?.abort();
 		clearTimeout(treeTimer);
 	});
-
-	async function inspectModelCall(messageId: string) {
-		if (!session || modelCallLoading) return;
-		const ownerSessionId = session.session_id;
-		modelCallController?.abort();
-		const controller = new AbortController();
-		modelCallController = controller;
-		inspectedModelCallMessageId = messageId;
-		modelCallLoading = true;
-		modelCallError = '';
-		inspectedModelCall = null;
-		try {
-			const listed = await fetchChatModelCalls(ownerSessionId, { signal: controller.signal });
-			if (
-				controller.signal.aborted ||
-				modelCallController !== controller ||
-				session?.session_id !== ownerSessionId
-			)
-				return;
-			const summary = [...listed.items]
-				.reverse()
-				.find((item) => item.response_message_id === messageId);
-			if (!summary) {
-				modelCallError = $t('researchAgent.modelCall.unavailable');
-				return;
-			}
-			const modelCall = await fetchChatModelCall(
-				ownerSessionId,
-				summary.call_id,
-				controller.signal
-			);
-			if (
-				controller.signal.aborted ||
-				modelCallController !== controller ||
-				session?.session_id !== ownerSessionId
-			)
-				return;
-			inspectedModelCall = modelCall;
-		} catch (err) {
-			if (
-				controller.signal.aborted ||
-				modelCallController !== controller ||
-				session?.session_id !== ownerSessionId
-			)
-				return;
-			modelCallError = errorMessage(err);
-		} finally {
-			if (modelCallController === controller) {
-				modelCallLoading = false;
-				modelCallController = null;
-			}
-		}
-	}
-
-	function closeModelCallInspector() {
-		modelCallController?.abort();
-		modelCallController = null;
-		modelCallLoading = false;
-		inspectedModelCall = null;
-		inspectedModelCallMessageId = '';
-		modelCallError = '';
-	}
-
-	async function loadCorrectionCases(activeSession: ChatSession | null = session) {
-		if (!activeSession) {
-			correctionCases = [];
-			return;
-		}
-		correctionController?.abort();
-		const controller = new AbortController();
-		correctionController = controller;
-		const generation = sessionGeneration;
-		const ownerCollectionId = collectionId;
-		try {
-			const result = await fetchChatCorrectionCases(activeSession.session_id, {
-				signal: controller.signal
-			});
-			if (!isCurrentSession(generation, ownerCollectionId) || correctionController !== controller)
-				return;
-			correctionCases = result.items;
-		} catch (err) {
-			if (!controller.signal.aborted && isCurrentSession(generation, ownerCollectionId))
-				correctionError = errorMessage(err);
-		} finally {
-			if (correctionController === controller) correctionController = null;
-		}
-	}
-
-	async function saveCorrectionCase(input: {
-		original_message_id: string;
-		feedback_message_id: string;
-		corrected_message_id?: string | null;
-	}): Promise<boolean> {
-		if (!session || correctionSaving) return false;
-		const generation = sessionGeneration;
-		const ownerCollectionId = collectionId;
-		correctionSaving = true;
-		correctionError = '';
-		try {
-			const saved = await createChatCorrectionCase(
-				session.session_id,
-				input,
-				sessionController?.signal
-			);
-			if (!isCurrentSession(generation, ownerCollectionId)) return false;
-			correctionCases = [
-				...correctionCases.filter((item) => item.case_id !== saved.case_id),
-				saved
-			];
-			correctionPanelOpen = false;
-			notice = $t('researchAgent.correctionCase.saved');
-			return true;
-		} catch (err) {
-			if (!isCurrentSession(generation, ownerCollectionId)) return false;
-			correctionError = errorMessage(err);
-			return false;
-		} finally {
-			if (isCurrentSession(generation, ownerCollectionId)) correctionSaving = false;
-		}
-	}
 
 	function isCurrentSession(generation: number, ownerCollectionId: string) {
 		return (
@@ -355,13 +206,13 @@
 		};
 	}
 
-	function sessionStorageKey() {
-		return `lens.chatSession.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}${embedded ? ':documents' : ''}`;
-	}
-
 	function loadCollectionSession() {
 		sessionActivities = {};
 		void loadSession();
+	}
+
+	function sessionStorageKey() {
+		return `lens.chatSession.${encodeURIComponent(userId)}:${encodeURIComponent(collectionId)}${embedded ? ':documents' : ''}`;
 	}
 
 	function refreshPendingSources() {
@@ -523,16 +374,6 @@
 		sessionController?.abort();
 		updatesController?.abort();
 		updatesController = null;
-		closeModelCallInspector();
-		correctionController?.abort();
-		correctionController = null;
-		correctionCases = [];
-		correctionPanelOpen = false;
-		reviewCase = null;
-		datasetPageOpen = false;
-		candidatePanelOpen = false;
-		correctionSaving = false;
-		correctionError = '';
 		responseSnapshot = null;
 		sessionController = null;
 		session = null;
@@ -594,9 +435,6 @@
 				acceptTrajectory(trajectory);
 			}
 			session = nextSession;
-			// Case history is auxiliary UI state. Do not hold the message composer
-			// hostage to a slow or unavailable correction endpoint.
-			void loadCorrectionCases(nextSession);
 			const savedCheckpoint = window.localStorage.getItem(
 				`${sessionStorageKey()}:checkpoint:${session.session_id}`
 			);
@@ -941,7 +779,6 @@
 			responseSnapshot = null;
 			streamingText = '';
 			acceptTrajectory(trajectory);
-			await loadCorrectionCases(branch);
 			storeSessionId(branch.session_id);
 			upsertHistory(branch, content ?? message.content);
 			revising = false;
@@ -1337,19 +1174,6 @@
 					disabled={!session || sessionNavigationDisabled}
 					onClick={openTree}><GitBranch size={17} /></IconButton
 				>
-				<IconButton
-					label={$t('researchAgent.correctionCase.open')}
-					disabled={!session || sessionNavigationDisabled}
-					onClick={() => {
-						correctionError = '';
-						correctionPanelOpen = true;
-					}}><Link2 size={17} /></IconButton
-				>
-				<IconButton
-					label={$t('researchAgent.correctionCandidate.open')}
-					disabled={!session || sessionNavigationDisabled}
-					onClick={() => (candidatePanelOpen = true)}><Sparkles size={17} /></IconButton
-				>
 			</div>
 			{#if showHistory}
 				<nav class="embedded-history" aria-label={$t('researchAgent.historyTitle')}>
@@ -1390,28 +1214,6 @@
 
 		{#if session}
 			{#key session.session_id}<OperationPermissions sessionId={session.session_id} />{/key}
-			<div class="correction-toolbar">
-				<button
-					type="button"
-					disabled={sessionNavigationDisabled}
-					on:click={() => {
-						correctionError = '';
-						correctionPanelOpen = true;
-					}}><Link2 size={14} />{$t('researchAgent.correctionCase.open')}</button
-				>
-				<button
-					type="button"
-					disabled={sessionNavigationDisabled}
-					on:click={() => (datasetPageOpen = true)}
-					><Archive size={14} />{$t('researchAgent.correctionDataset.open')}</button
-				>
-				<button
-					type="button"
-					disabled={sessionNavigationDisabled}
-					on:click={() => (candidatePanelOpen = true)}
-					><Sparkles size={14} />{$t('researchAgent.correctionCandidate.open')}</button
-				>
-			</div>
 		{/if}
 		{#if error}
 			<div class="status status-error" role="alert">
@@ -1437,7 +1239,6 @@
 			onSwitchVersion={(id) => switchSession(id, true)}
 			{feedbackByMessage}
 			onFeedback={saveFeedback}
-			onInspectModelCall={inspectModelCall}
 			streamingText={checkpointId ? '' : streamingText}
 			responseSnapshot={checkpointId ? null : responseSnapshot}
 			pendingApproval={checkpointId ? null : pendingApproval}
@@ -1454,53 +1255,6 @@
 			onSend={sendMessage}
 			{decide}
 		/>
-		<ModelCallInspector
-			call={inspectedModelCall}
-			loading={modelCallLoading}
-			error={modelCallError}
-			onRetry={() => {
-				if (inspectedModelCallMessageId) void inspectModelCall(inspectedModelCallMessageId);
-			}}
-			onClose={closeModelCallInspector}
-		/>
-		{#if correctionPanelOpen && session}
-			<CorrectionCasePanel
-				{messages}
-				cases={correctionCases}
-				saving={correctionSaving}
-				error={correctionError}
-				onSave={saveCorrectionCase}
-				onReview={(item) => {
-					reviewCase = item;
-					correctionPanelOpen = false;
-				}}
-				onClose={() => {
-					correctionPanelOpen = false;
-					correctionError = '';
-				}}
-			/>
-		{/if}
-		{#if reviewCase && session}
-			<CorrectionReviewPage
-				sessionId={session.session_id}
-				caseItem={reviewCase}
-				onClose={() => (reviewCase = null)}
-			/>
-		{/if}
-		{#if datasetPageOpen && session}
-			<ChatCorrectionDatasetPage
-				collectionId={session.collection_id}
-				sessionId={session.session_id}
-				onClose={() => (datasetPageOpen = false)}
-			/>
-		{/if}
-		{#if candidatePanelOpen && session}
-			<CorrectionCandidatePanel
-				sessionId={session.session_id}
-				{messages}
-				onClose={() => (candidatePanelOpen = false)}
-			/>
-		{/if}
 		{#if checkpointId}
 			<div class="checkpoint-bar" role="status">
 				<GitBranch size={15} />
@@ -1607,30 +1361,6 @@
 {/if}
 
 <style>
-	.correction-toolbar {
-		display: flex;
-		justify-content: flex-end;
-		width: min(100%, 936px);
-		margin: 0 auto 4px;
-		padding: 0 18px;
-		box-sizing: border-box;
-	}
-	.correction-toolbar button {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		min-height: 30px;
-		padding: 0 9px;
-		border: 1px solid var(--border-default);
-		background: transparent;
-		color: var(--text-secondary);
-		font-size: 12px;
-		cursor: pointer;
-	}
-	.correction-toolbar button:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
-	}
 	.checkpoint-bar {
 		display: flex;
 		align-items: center;

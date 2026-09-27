@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -36,6 +36,38 @@ class PostgresPaperExperimentRepository:
         session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
         self.session_factory = session_factory
+
+    async def lock_document(
+        self,
+        document_id: str,
+        *,
+        transaction: RepositoryTransaction | None = None,
+    ) -> None:
+        """Serialize experiment identity resolution for one source document.
+
+        A reread can change the content hash while still resolving to the
+        same physical experiment.  Locking the document before per-identity
+        reads keeps those fallback resolutions serialized and gives concurrent
+        writers a deterministic document-level lock order.
+        """
+
+        if transaction is None:
+            return
+        normalized = str(document_id).strip()
+        if not normalized:
+            raise ValueError("paper experiment document lock requires document_id")
+        async with database_session_scope(
+            self.session_factory, transaction, write=False
+        ) as session:
+            await session.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(
+                            f"paper-experiment-document:{normalized}", 0
+                        )
+                    )
+                )
+            )
 
     async def add_revision(
         self,
@@ -94,6 +126,18 @@ class PostgresPaperExperimentRepository:
         async with database_session_scope(
             self.session_factory, transaction, write=False
         ) as session:
+            if transaction is not None:
+                # A row lock cannot serialize the first revision because no
+                # row exists yet.  The writer therefore takes a transaction-
+                # scoped advisory lock for the stable experiment identity
+                # before calculating the next version.
+                await session.execute(
+                    select(
+                        func.pg_advisory_xact_lock(
+                            func.hashtextextended(experiment_id, 0)
+                        )
+                    )
+                )
             row = await session.scalar(
                 select(PaperExperimentRow)
                 .where(PaperExperimentRow.experiment_id == experiment_id)
@@ -221,6 +265,9 @@ async def _add_components(
                 ],
                 binding_status=item.binding_status,
                 notes_json=list(item.notes),
+                identity_specificity=item.identity_specificity,
+                missing_dimensions_json=list(item.missing_dimensions),
+                identity_evidence_json=list(item.identity_evidence),
             )
             for position, item in enumerate(revision.variants)
         ]
@@ -241,6 +288,17 @@ async def _add_components(
                 source_refs_json=[value.to_record() for value in item.source_refs],
                 binding_status=item.binding_status,
                 notes_json=list(item.notes),
+                protocol_specificity=item.protocol_specificity,
+                test_identity_status=item.test_identity_status,
+                protocol_completeness=item.protocol_completeness,
+                missing_parameters_json=list(item.missing_parameters),
+                method=item.method,
+                standard=item.standard,
+                outcome_scope_json=list(item.outcome_scope),
+                binding_source_refs_json=[
+                    value.to_record() for value in item.binding_source_refs
+                ],
+                protocol_evidence_json=list(item.protocol_evidence),
             )
             for position, item in enumerate(revision.test_conditions)
         ]
@@ -427,6 +485,9 @@ async def _stored_revision(
                 "binding_source_refs": list(item.binding_source_refs_json),
                 "binding_status": item.binding_status,
                 "notes": list(item.notes_json),
+                "identity_specificity": item.identity_specificity,
+                "missing_dimensions": list(item.missing_dimensions_json),
+                "identity_evidence": list(item.identity_evidence_json),
             }
             for item in variants
         ],
@@ -439,6 +500,15 @@ async def _stored_revision(
                 "source_refs": list(item.source_refs_json),
                 "binding_status": item.binding_status,
                 "notes": list(item.notes_json),
+                "protocol_specificity": item.protocol_specificity,
+                "test_identity_status": item.test_identity_status,
+                "protocol_completeness": item.protocol_completeness,
+                "missing_parameters": list(item.missing_parameters_json),
+                "method": item.method,
+                "standard": item.standard,
+                "outcome_scope": list(item.outcome_scope_json),
+                "binding_source_refs": list(item.binding_source_refs_json),
+                "protocol_evidence": list(item.protocol_evidence_json),
             }
             for item in tests
         ],

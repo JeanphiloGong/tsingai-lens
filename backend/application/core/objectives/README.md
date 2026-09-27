@@ -356,7 +356,9 @@ revision referenced by each Selection.
 - `analysis/source_screening.py`: paper relevance and Source scope.
 - `analysis/evidence_routing.py`: likely Source selection.
 - `analysis/source_extraction.py`: Source-local extraction and grounding.
-- `analysis/paper_experiment.py`: within-paper experiment binding.
+- `analysis/paper_experiment_extraction.py` and
+  `analysis/paper_experiment_contract.py`: bounded Draft extraction,
+  reconciliation, and source binding for within-paper experiments.
 - `analysis/experiment_finding_synthesis.py`: cross-paper Finding synthesis.
 - `evidence_map.py`: read-only published Evidence graph projection.
 

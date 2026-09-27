@@ -30,7 +30,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260925_0077"
+HEAD_REVISION = "20260927_0078"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 
@@ -259,6 +259,163 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
 
         with pytest.raises(RuntimeError, match="irreversible"):
             command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_existing_paper_experiment_database_adds_binding_metadata(tmp_path) -> None:
+    """The V11 metadata migration upgrades old experiment tables in place."""
+
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "paper-experiment-binding-metadata.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260924_0066")
+        # Revision 0038 historically created PaperExperiment from the ORM
+        # snapshot that was current at that time.  The maintained ORM now
+        # contains the V11 fields, so an empty-database replay would otherwise
+        # make 0066 look already migrated.  Remove those fields here to model
+        # an actual pre-0078 database before exercising the migration.
+        for table_name, column_names in (
+            (
+                "experimental_variant",
+                (
+                    "identity_specificity",
+                    "missing_dimensions_json",
+                    "identity_evidence_json",
+                ),
+            ),
+            (
+                "test_condition",
+                (
+                    "protocol_specificity",
+                    "test_identity_status",
+                    "protocol_completeness",
+                    "missing_parameters_json",
+                    "method",
+                    "standard",
+                    "outcome_scope_json",
+                    "binding_source_refs_json",
+                    "protocol_evidence_json",
+                ),
+            ),
+        ):
+            for column_name in column_names:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{table_name}" DROP COLUMN "{column_name}"'
+                )
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.isdisjoint(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.isdisjoint(test_columns)
+
+        command.upgrade(config, "head")
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.issubset(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.issubset(test_columns)
+
+        command.downgrade(config, "20260925_0077")
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.isdisjoint(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.isdisjoint(test_columns)
+
+        # The logical V11 columns must be reproducible after a rollback.  This
+        # matters because the historical 0038 cutover can physically create
+        # them early from the current ORM metadata, while 0078 still owns the
+        # migration boundary for their persisted behavior.
+        command.upgrade(config, "head")
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.issubset(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.issubset(test_columns)
 
     engine.dispose()
 

@@ -69,6 +69,7 @@ class ExperimentCompatibilityProjection:
             selection_repository=selection_repository,
             group_repository=group_repository,
             finding_repository=finding_repository,
+            objective_repository=objective_repository,
         )
         self._objective_repository = objective_repository
 

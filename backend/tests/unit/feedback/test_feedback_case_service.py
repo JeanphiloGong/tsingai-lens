@@ -185,6 +185,24 @@ async def test_case_service_hides_a_case_from_another_collection_owner() -> None
         await service.read_for_user(case.case_id, "other-user")
 
 
+async def test_case_service_exports_candidate_analysis_with_lifecycle_marker() -> None:
+    case, result, feedback, messages = _fixture()
+    service = FeedbackCaseService(
+        case_repository=_Cases(case, result),
+        chat_repository=_Chat(feedback, messages),
+        collection_service=_Collections(),
+    )
+
+    records = await service.export_for_user(
+        user_id="user-1", collection_id="collection-1", status=None
+    )
+
+    assert len(records) == 1
+    assert records[0]["export_kind"] == "candidate_analysis"
+    assert records[0]["training_ready"] is False
+    assert records[0]["question"] == "Compare papers A and B."
+
+
 async def test_case_service_exposes_message_correction_signal_without_claiming_target() -> None:
     case, result, feedback, messages = _fixture()
     challenge = ChatMessage.user(

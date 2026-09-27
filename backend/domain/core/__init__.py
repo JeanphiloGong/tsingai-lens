@@ -51,6 +51,7 @@ from domain.core.paper_experiment import (
     RELATION_STATUSES,
     ReportedInterpretation,
     SourceReference,
+    outcome_labels_compatible,
 )
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
@@ -96,9 +97,7 @@ from domain.core.research_objective import (
     normalize_objective_terms,
 )
 from domain.core.research_process import (
-    PAPER_EXPERIMENT_STATUSES,
     SOURCE_OBSERVATION_STATUSES,
-    PaperExperiment,
     SourceObservation,
 )
 
@@ -142,9 +141,8 @@ __all__ = [
     "RELATION_STATUSES",
     "ReportedInterpretation",
     "SourceReference",
-    "PAPER_EXPERIMENT_STATUSES",
+    "outcome_labels_compatible",
     "SOURCE_OBSERVATION_STATUSES",
-    "PaperExperiment",
     "SourceObservation",
     "OBJECTIVE_ANALYSIS_STATUSES",
     "OBJECTIVE_ANALYSIS_ABSTENTION_REASONS",

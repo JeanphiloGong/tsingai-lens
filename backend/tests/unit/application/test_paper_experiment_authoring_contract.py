@@ -5,10 +5,14 @@ from copy import deepcopy
 import pytest
 
 from application.core.objectives.analysis.paper_experiment_contract import (
+    DraftReadiness,
     PaperExperimentModelOutput,
+    assess_draft_readiness,
     bind_model_output,
+    prepare_model_output,
     reconcile_model_output,
 )
+from domain.core.research_objective import ResearchObjective
 
 
 def _output_payload() -> dict:
@@ -180,6 +184,41 @@ def test_model_output_binds_sources_and_service_identity() -> None:
     assert revisions[0].variants[0].source_refs[0].source_ref == "methods-1"
 
 
+def test_source_label_binding_accepts_tuple_set_and_scalar_nested_values() -> None:
+    payload = _output_payload()
+    experiment = payload["experiments"][0]
+    experiment["variants"][0]["source_labels"] = {"methods"}
+    experiment["test_conditions"][0]["source_labels"] = ("methods",)
+    measurement = experiment["measurements"][0]
+    measurement["source_labels"] = ("table",)
+    measurement["variant_binding_source_labels"] = "methods"
+    measurement["test_binding_source_labels"] = {"methods"}
+
+    revision = bind_model_output(
+        _reconciled_output(payload),
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+
+    assert revision.variants[0].source_refs[0].source_ref == "methods-1"
+    assert revision.test_conditions[0].source_refs[0].source_ref == "methods-1"
+    assert revision.measurements[0].source_refs[0].source_ref == "table-2"
+    assert revision.measurements[0].binding_source_refs[0].source_ref == "methods-1"
+
+    invalid = _output_payload()
+    invalid["experiments"][0]["measurements"][0]["source_labels"] = "missing"
+    with pytest.raises(ValueError, match="unknown source label"):
+        bind_model_output(
+            _reconciled_output(invalid),
+            experiment_ids=["exp-1"],
+            experiment_versions=[1],
+            document_id="doc-1",
+            source_fingerprint="prep-1",
+        )
+
+
 def test_broad_measurement_scope_is_preserved_instead_of_being_dropped() -> None:
     payload = _output_payload()
     measurement = payload["experiments"][0]["measurements"][0]
@@ -224,6 +263,27 @@ def test_broad_measurement_scope_is_preserved_instead_of_being_dropped() -> None
     )
 
 
+def test_prepare_model_output_generates_response_local_series_key() -> None:
+    payload = _output_payload()
+    payload["experiments"][0].pop("series_key", None)
+    prepared = prepare_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        objective=ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-1",
+                "objective_id": "objective-1",
+                "question": "Does preheating affect elongation?",
+                "material_scope": ["316L"],
+                "variables": ["preheating"],
+                "outcomes": ["elongation"],
+                "seed_document_ids": ["doc-1"],
+                "confidence": 1.0,
+            }
+        ),
+    )
+    assert prepared.output.experiments[0].payload["series_key"].startswith("draft_")
+
+
 def test_missing_binding_without_labels_still_creates_a_targeted_issue() -> None:
     payload = _output_payload()
     payload["experiments"][0]["measurements"][0].update(
@@ -260,6 +320,157 @@ def test_raw_model_payload_gets_context_and_source_catalog_from_service() -> Non
     )
 
     assert revisions[0].measurements[0].source_refs[0].source_ref == "table-2"
+
+
+def test_raw_model_payload_preserves_reported_identifiers_in_population_scope() -> None:
+    payload = _raw_model_payload()
+    payload["experiments"][0]["variants"][0]["population_scope"] = {
+        "kind": "specimen",
+        "reported_identifiers": {
+            "sample_id": "S-01",
+            "batch_id": "B-7",
+        },
+    }
+    envelope = PaperExperimentModelOutput.from_model_mapping(
+        payload,
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+        source_labels=_output_payload()["source_labels"],
+    )
+
+    revision = bind_model_output(
+        reconcile_model_output(envelope, accepted_experiment_keys=("series-1",)),
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+
+    assert revision.variants[0].population_scope == {
+        "kind": "specimen",
+        "reported_identifiers": {
+            "sample_id": "S-01",
+            "batch_id": "B-7",
+        },
+    }
+
+
+def test_raw_model_payload_preserves_plural_reported_identifiers_in_scope() -> None:
+    payload = _raw_model_payload()
+    payload["experiments"][0]["variants"][0]["population_scope"] = {
+        "kind": "specimen_group",
+        "reported_identifiers": {
+            "sample_ids": ["S-01", "S-02"],
+            "batch_ids": ["B-7", "B-8"],
+        },
+    }
+    envelope = PaperExperimentModelOutput.from_model_mapping(
+        payload,
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+        source_labels=_output_payload()["source_labels"],
+    )
+
+    revision = bind_model_output(
+        reconcile_model_output(envelope, accepted_experiment_keys=("series-1",)),
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+
+    assert revision.variants[0].population_scope == {
+        "kind": "specimen_group",
+        "reported_identifiers": {
+            "sample_ids": ["S-01", "S-02"],
+            "batch_ids": ["B-7", "B-8"],
+        },
+    }
+
+
+def test_raw_model_payload_preserves_domain_specific_reported_identifiers() -> None:
+    payload = _raw_model_payload()
+    payload["experiments"][0]["variants"][0]["population_scope"] = {
+        "kind": "participant_group",
+        "reported_identifiers": {
+            "stimulus_id": "face-set-3",
+            "condition_id": "dual-task",
+        },
+    }
+    payload["experiments"][0]["measurements"][0]["measurement_scope"] = {
+        "reported_identifiers": {
+            "task_id": "reaction-time-1",
+        },
+    }
+
+    envelope = PaperExperimentModelOutput.from_model_mapping(
+        payload,
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+        source_labels=_output_payload()["source_labels"],
+    )
+
+    revision = bind_model_output(
+        reconcile_model_output(envelope, accepted_experiment_keys=("series-1",)),
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+
+    assert revision.variants[0].population_scope == {
+        "kind": "participant_group",
+        "reported_identifiers": {
+            "stimulus_id": "face-set-3",
+            "condition_id": "dual-task",
+        },
+    }
+    assert revision.measurements[0].measurement_scope["reported_identifiers"] == {
+        "task_id": "reaction-time-1",
+    }
+
+
+def test_raw_model_payload_rejects_formal_identity_inside_reported_identifiers() -> None:
+    payload = _raw_model_payload()
+    payload["experiments"][0]["variants"][0]["population_scope"] = {
+        "reported_identifiers": {
+            "experiment_id": "paper-exp-1",
+        },
+    }
+
+    with pytest.raises(ValueError, match="formal identity"):
+        PaperExperimentModelOutput.from_model_mapping(
+            payload,
+            document_id="doc-1",
+            source_fingerprint="prep-1",
+            source_labels=_output_payload()["source_labels"],
+        )
+
+
+def test_raw_model_payload_rejects_reported_identifier_as_component_field() -> None:
+    payload = _raw_model_payload()
+    payload["experiments"][0]["variants"][0]["sample_id"] = "S-01"
+
+    with pytest.raises(ValueError, match="formal identity"):
+        PaperExperimentModelOutput.from_model_mapping(
+            payload,
+            document_id="doc-1",
+            source_fingerprint="prep-1",
+            source_labels=_output_payload()["source_labels"],
+        )
+
+
+def test_raw_model_payload_rejects_domain_identifier_outside_scope_map() -> None:
+    payload = _raw_model_payload()
+    payload["experiments"][0]["variants"][0]["condition_id"] = "dual-task"
+
+    with pytest.raises(ValueError, match="formal identity"):
+        PaperExperimentModelOutput.from_model_mapping(
+            payload,
+            document_id="doc-1",
+            source_fingerprint="prep-1",
+            source_labels=_output_payload()["source_labels"],
+        )
 
 
 def test_raw_model_payload_cannot_echo_request_context() -> None:
@@ -452,6 +663,77 @@ def test_unresolved_physical_split_is_collapsed_before_identity_allocation() -> 
     assert any("collapsed" in str(item.get("description")) for item in reconciled.audit_issues)
 
 
+def test_unknown_only_boundary_candidates_are_not_merged_by_response_order() -> None:
+    payload = _output_payload()
+    first = deepcopy(payload["experiments"][0])
+    first["series_key"] = "unknown-1"
+    first["scope_kind"] = "unknown"
+    second = deepcopy(payload["experiments"][0])
+    second["series_key"] = "unknown-2"
+    second["scope_kind"] = "unknown"
+    payload["experiments"] = [first, second]
+
+    reconciled = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("unknown-1", "unknown-2"),
+    )
+
+    assert len(reconciled.output.experiments) == 2
+    assert reconciled.accepted_experiment_keys == ("unknown-1", "unknown-2")
+    assert not reconciled.audit_issues
+
+
+def test_unknown_candidate_is_not_absorbed_by_selected_scope_without_parent() -> None:
+    payload = _output_payload()
+    unknown = deepcopy(payload["experiments"][0])
+    unknown["series_key"] = "unknown-parent"
+    unknown["scope_kind"] = "unknown"
+    selected = deepcopy(payload["experiments"][0])
+    selected.update(
+        {
+            "series_key": "selected-p150",
+            "scope_kind": "selected_stratum",
+            "parent_series_key": "unknown-parent",
+            "scope_selector": {"test_scope_labels": ["tensile"]},
+        }
+    )
+    payload["experiments"] = [unknown, selected]
+
+    reconciled = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("unknown-parent", "selected-p150"),
+    )
+
+    assert len(reconciled.output.experiments) == 2
+    assert reconciled.accepted_experiment_keys == (
+        "unknown-parent",
+        "selected-p150",
+    )
+
+
+def test_explicit_parent_does_not_absorb_incompatible_unknown_scope() -> None:
+    payload = _output_payload()
+    parent = deepcopy(payload["experiments"][0])
+    parent["series_key"] = "parent"
+    parent["scope_kind"] = "parent"
+    unknown = deepcopy(payload["experiments"][0])
+    unknown["series_key"] = "unknown-other-population"
+    unknown["scope_kind"] = "unknown"
+    unknown["variants"][0]["variant_label"] = "Independent cohort"
+    payload["experiments"] = [parent, unknown]
+
+    reconciled = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("parent", "unknown-other-population"),
+    )
+
+    assert len(reconciled.output.experiments) == 2
+    assert reconciled.accepted_experiment_keys == (
+        "parent",
+        "unknown-other-population",
+    )
+
+
 def test_positive_split_requires_source_backed_evidence() -> None:
     payload = _output_payload()
     payload["experiments"][0].update(
@@ -501,6 +783,46 @@ def test_split_binding_sources_are_merged_and_mark_exact_revision_bound() -> Non
         item.source_ref for item in revision.measurements[0].binding_source_refs
     } == {"table-2", "methods-1"}
     assert revision.measurements[0].binding_status == "direct"
+
+
+def test_split_evidence_and_scope_metadata_survive_revision_binding() -> None:
+    payload = _output_payload()
+    experiment = payload["experiments"][0]
+    experiment.update(
+        {
+            "scope_kind": "physical_split",
+            "split_reason": "different population",
+            "split_evidence": [
+                {"source_label": "methods"},
+                {"source_label": "table"},
+            ],
+            "scope_selector": {"included_states": ["separate cohort"]},
+        }
+    )
+
+    revision = bind_model_output(
+        _reconciled_output(payload),
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+
+    assert {item.source_ref for item in revision.source_refs} == {
+        "methods-1",
+        "table-2",
+    }
+    boundary_issues = [
+        item
+        for item in revision.unresolved_issues
+        if item.get("target_ref") == "experiment"
+        and "boundary_scope" in item
+    ]
+    assert len(boundary_issues) == 1
+    assert boundary_issues[0]["boundary_scope"]["scope_kind"] == "physical_split"
+    assert {
+        item["source_ref"] for item in boundary_issues[0]["source_refs"]
+    } == {"methods-1", "table-2"}
 
 
 def test_model_exact_flag_cannot_promote_broad_variant_label_to_exact_binding() -> None:
@@ -579,6 +901,41 @@ def test_generic_method_label_cannot_promote_category_to_exact_binding() -> None
         {
             "test_type": "mechanical test",
             "method": "tensile",
+            "protocol_specificity": "exact",
+            "protocol_completeness": "complete",
+        }
+    )
+    for measurement in payload["experiments"][0]["measurements"]:
+        measurement.update(
+            {
+                "variant_binding_source_labels": ["table"],
+                "test_binding_source_labels": ["methods"],
+            }
+        )
+
+    revision = bind_model_output(
+        _reconciled_output(payload),
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+
+    assert revision.binding_status == "partial"
+    assert all(item.binding_status != "direct" for item in revision.measurements)
+
+
+@pytest.mark.parametrize("generic_standard", ["ASTM", "ISO"])
+def test_generic_standard_label_cannot_promote_category_to_exact_binding(
+    generic_standard: str,
+) -> None:
+    payload = _output_payload()
+    test_condition = payload["experiments"][0]["test_conditions"][0]
+    test_condition.update(
+        {
+            "test_type": "mechanical test",
+            "method": "test",
+            "standard": generic_standard,
             "protocol_specificity": "exact",
             "protocol_completeness": "complete",
         }
@@ -699,6 +1056,31 @@ def test_boundary_merge_keeps_conflicting_measurement_reports() -> None:
     assert any("conflict" in str(item.get("description")) for item in reconciled.audit_issues)
 
 
+def test_multiple_explicit_parents_are_retained_until_boundary_reconciliation() -> None:
+    payload = _output_payload()
+    first = payload["experiments"][0]
+    first["series_key"] = "parent-a"
+    first["scope_kind"] = "parent"
+    second = deepcopy(first)
+    second["series_key"] = "parent-b"
+    second["label"] = "Independent second series"
+    payload["experiments"] = [first, second]
+
+    reconciled = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("parent-a", "parent-b"),
+    )
+
+    assert reconciled.accepted_experiment_keys == ("parent-a", "parent-b")
+    assert [
+        item.payload.get("series_key") for item in reconciled.output.experiments
+    ] == ["parent-a", "parent-b"]
+    assert any(
+        "Multiple explicit parent experiment scopes" in str(item.get("description"))
+        for item in reconciled.audit_issues
+    )
+
+
 def test_boundary_reconciliation_maps_retained_split_to_its_own_accepted_key() -> None:
     payload = _output_payload()
     parent = payload["experiments"][0]
@@ -737,3 +1119,121 @@ def test_boundary_reconciliation_maps_retained_split_to_its_own_accepted_key() -
     assert [
         item.payload.get("series_key") for item in reconciled.output.experiments
     ] == ["parent", "physical-followup"]
+
+
+def test_all_physical_splits_are_retained_without_synthesizing_a_parent() -> None:
+    payload = _output_payload()
+    first = payload["experiments"][0]
+    first.update(
+        {
+            "series_key": "physical-1",
+            "scope_kind": "physical_split",
+            "split_reason": "different population",
+            "split_evidence": [{"source_label": "methods"}],
+            "source_labels": ["methods"],
+        }
+    )
+    second = deepcopy(first)
+    second.update(
+        {
+            "series_key": "physical-2",
+            "split_evidence": [{"source_label": "table"}],
+            "source_labels": ["table"],
+        }
+    )
+    payload["experiments"] = [first, second]
+
+    reconciled = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("physical-1", "physical-2"),
+    )
+
+    assert reconciled.accepted_experiment_keys == ("physical-1", "physical-2")
+    assert [
+        item.payload.get("series_key") for item in reconciled.output.experiments
+    ] == ["physical-1", "physical-2"]
+    assert all(
+        item.payload.get("scope_kind") == "physical_split"
+        and item.payload.get("synthetic_parent") is not True
+        for item in reconciled.output.experiments
+    )
+    assert [
+        item.payload.get("split_evidence") for item in reconciled.output.experiments
+    ] == [
+        [{"source_label": "methods"}],
+        [{"source_label": "table"}],
+    ]
+
+
+def test_physical_split_before_missing_parent_scope_is_not_promoted_to_parent() -> None:
+    payload = _output_payload()
+    physical = payload["experiments"][0]
+    physical.update(
+        {
+            "series_key": "physical-follow-up",
+            "scope_kind": "physical_split",
+            "split_reason": "different population",
+            "split_evidence": [{"source_label": "methods"}],
+            "source_labels": ["methods"],
+        }
+    )
+    selected = {
+        "series_key": "selected-p150",
+        "scope_kind": "selected_stratum",
+        "parent_series_key": "synthetic-parent",
+        "scope_selector": {
+            "selected_levels": [{"name": "preheat", "value": 150, "unit": "C"}]
+        },
+        "source_labels": ["table"],
+    }
+    payload["experiments"] = [physical, selected]
+
+    reconciled = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("physical-follow-up", "synthetic-parent"),
+    )
+
+    assert reconciled.accepted_experiment_keys == (
+        "synthetic-parent",
+        "physical-follow-up",
+    )
+    assert [
+        item.payload.get("series_key") for item in reconciled.output.experiments
+    ] == ["synthetic-parent", "physical-follow-up"]
+    parent, retained_split = reconciled.output.experiments
+    assert parent.payload.get("synthetic_parent") is True
+    assert retained_split.payload.get("scope_kind") == "physical_split"
+    assert retained_split.payload.get("split_reason") == "different population"
+
+
+def test_prepare_model_output_generates_local_series_key_when_model_omits_it() -> None:
+    payload = _output_payload()
+
+    payload["experiments"][0].pop("series_key", None)
+    prepared = prepare_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        objective=ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-1",
+                "objective_id": "objective-1",
+                "question": "Does preheating affect elongation?",
+                "material_scope": ["316L"],
+                "variables": ["preheating"],
+                "outcomes": ["elongation"],
+                "confidence": 1.0,
+            }
+        ),
+    )
+
+    assert prepared.output.experiments[0].payload["series_key"].startswith("draft_")
+
+
+def test_readiness_is_an_application_value_not_a_model_field() -> None:
+    readiness = DraftReadiness(
+        ready=False,
+        missing_context=("test protocol is incomplete",),
+        reason_codes=("unresolved_context",),
+    )
+
+    assert not readiness.ready
+    assert readiness.selected_measurement_keys == ()

@@ -290,6 +290,7 @@ The feedback workbench turns a saved Chat rating into a reviewable, source-
 grounded case. It does not rewrite the original messages or model-call audit:
 
 - `GET /api/v1/feedback-cases`
+- `GET /api/v1/feedback-cases/export`
 - `GET /api/v1/feedback-cases/{case_id}`
 - `PATCH /api/v1/feedback-cases/{case_id}/annotation`
 - `POST /api/v1/feedback-cases/{case_id}/review`
@@ -297,7 +298,7 @@ grounded case. It does not rewrite the original messages or model-call audit:
 - `POST /api/v1/dataset-snapshots`
 - `GET /api/v1/dataset-snapshots`
 - `GET /api/v1/dataset-snapshots/{dataset_id}`
-- `GET /api/v1/dataset-snapshots/{dataset_id}/download`
+- `GET /api/v1/dataset-snapshots/{dataset_id}/jsonl`
 
 The authenticated user must be able to access the case's Collection. The
 current validation phase has no separate annotator, reviewer, or dataset-admin
@@ -305,6 +306,17 @@ role, so one authorized Collection user may perform each step. The frontend
 chooses cases, Sources, labels, targets, and dataset uses; it carries business
 IDs and annotation digests automatically rather than asking the user to type
 them.
+
+`GET /api/v1/feedback-cases/export` is the immediate audit export. It requires
+`collection_id` and accepts optional `status` (or `all`) and `limit` (1..2000).
+The response is `application/x-ndjson`; each line is a
+`feedback-case-analysis.v1` projection containing the question, answer,
+feedback signals, requested and inspected Sources, omissions, the AI
+candidate, annotation, and review history. It is available before annotation
+and includes `training_ready` as a lifecycle hint, but it is never a training
+release. The browser downloads it without asking a user to copy a case,
+session, message, or Source ID. IDs remain in the file only as provenance so a
+later audit can return to the exact record.
 
 The flow is ordered:
 
@@ -697,9 +709,14 @@ fixed conditions, parameter levels, or measurements. Confirmed-Objective
 analysis may use it to prioritize Source inspection and surface coverage
 warnings, but only facts grounded in inspected Sources may populate Evidence.
 
-`ResearchObjective` is the only business aggregate root. Its identity is
-`(collection_id, objective_id)`. The analysis-state and command responses
-contain:
+`ResearchObjective` is the aggregate root for the research question and its
+analysis lifecycle. Its identity is `(collection_id, objective_id)`. Reusable
+paper-owned experiment content has a separate `PaperExperiment` revision
+boundary: it is identified by `(experiment_id, experiment_version)` and does
+not belong to one Objective. An Objective analysis connects the two through an
+explicit `ObjectiveExperimentSelection`; optional cross-paper groups and
+Findings are analysis-scoped records, not fields embedded in either aggregate.
+The Objective analysis-state and command responses contain:
 
 - question and material/process/property/comparison scope;
 - seed document IDs as question provenance and explicit exclusions as scope
@@ -953,6 +970,21 @@ revisions. The JSON projection preserves relations and source references; the
 CSV projection is a long table with one selected reported measurement per row.
 The export never uses a later experiment revision implicitly and never turns a
 derived difference into a reported measurement.
+
+Each CSV row keeps the selected measurement together with its experiment and
+Selection identity, variant label and subject/intervention/state/population
+context, applicable test method/protocol/population context, binding status,
+comparison keys, and Source references. Structured values remain JSON-encoded
+inside their CSV cells. The export does not infer missing conditions, pair
+different specimens merely because they share a group label, or silently
+average repeated measurements.
+
+A partial PaperExperiment revision that has no eligible Objective Selection is
+kept as an archive for later targeted rereading. It is intentionally absent
+from these Selection-based analysis projections, so an incomplete archive
+cannot appear as usable Evidence or a Finding. Such a revision remains
+discoverable through the PaperExperiment repository/document lineage rather
+than through an Objective analysis export.
 
 These are additive capabilities. Existing route paths, request parameters,
 authentication, task states, and response meanings remain frozen while the

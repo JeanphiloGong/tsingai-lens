@@ -131,6 +131,15 @@ class ExperimentalVariantRow(Base):
     )
     binding_status: Mapped[str] = mapped_column(String(20), nullable=False)
     notes_json: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    identity_specificity: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unknown", server_default="unknown"
+    )
+    missing_dimensions_json: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    identity_evidence_json: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
 
 
 class ExperimentTestConditionRow(Base):
@@ -173,6 +182,29 @@ class ExperimentTestConditionRow(Base):
     )
     binding_status: Mapped[str] = mapped_column(String(20), nullable=False)
     notes_json: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    protocol_specificity: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unknown", server_default="unknown"
+    )
+    test_identity_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unknown", server_default="unknown"
+    )
+    protocol_completeness: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unknown", server_default="unknown"
+    )
+    missing_parameters_json: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    method: Mapped[str | None] = mapped_column(Text, nullable=True)
+    standard: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    outcome_scope_json: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    binding_source_refs_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
+    protocol_evidence_json: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False, default=list, server_default="[]"
+    )
 
 
 class ExperimentMeasurementResultRow(Base):

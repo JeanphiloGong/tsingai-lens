@@ -36,10 +36,42 @@ def _revision() -> PaperExperimentRevision:
             "identity_status": "identified",
             "binding_status": "bound",
             "variants": [
-                {"variant_key": "A", "variant_label": "NP"},
-                {"variant_key": "B", "variant_label": "P150"},
+                {
+                    "variant_key": "A",
+                    "variant_label": "NP",
+                    "subject_attributes": [
+                        {"name": "material", "value": "316L"}
+                    ],
+                    "intervention_attributes": [
+                        {"name": "preheat", "value": "0 C"}
+                    ],
+                    "state": [{"name": "orientation", "value": "vertical"}],
+                    "population_scope": {"kind": "group", "n": 5},
+                },
+                {
+                    "variant_key": "B",
+                    "variant_label": "P150",
+                    "subject_attributes": [
+                        {"name": "material", "value": "316L"}
+                    ],
+                    "intervention_attributes": [
+                        {"name": "preheat", "value": "150 C"}
+                    ],
+                    "state": [{"name": "orientation", "value": "vertical"}],
+                    "population_scope": {"kind": "group", "n": 5},
+                },
             ],
-            "test_conditions": [{"test_key": "t1", "test_type": "tensile"}],
+            "test_conditions": [
+                {
+                    "test_key": "t1",
+                    "test_type": "tensile",
+                    "parameters": [{"name": "strain_rate", "value": "0.001 /s"}],
+                    "population_scope": {"kind": "group", "n": 5},
+                    "method": "uniaxial tensile",
+                    "standard": "ASTM E8",
+                    "outcome_scope": ["elongation"],
+                }
+            ],
             "measurements": [
                 {
                     "measurement_key": "a-elongation",
@@ -99,6 +131,14 @@ class _Experiments:
         )
 
 
+class _ObjectiveAnalyses:
+    def __init__(self, analysis=None):
+        self.analysis = analysis
+
+    async def read_analysis(self, collection_id, objective_id, analysis_version):
+        return self.analysis
+
+
 @pytest.mark.parametrize("export_kind", ["json", "csv"])
 async def test_query_service_exports_fixed_revision_data(export_kind: str) -> None:
     service = ExperimentQueryService(_Experiments(), _Selections(), _Groups(), _Findings())
@@ -112,6 +152,40 @@ async def test_query_service_exports_fixed_revision_data(export_kind: str) -> No
         ]
     else:
         payload = await service.export_csv("collection-1", "objective-1", 1)
-        assert "measurement_key" in payload.splitlines()[0]
+        header = payload.splitlines()[0]
+        assert "measurement_key" in header
+        assert "variant_intervention_attributes" in header
+        assert "test_parameters" in header
         assert "a-elongation" in payload
         assert "P150" in payload
+        assert "preheat" in payload
+        assert "strain_rate" in payload
+        assert "ASTM E8" in payload
+
+
+async def test_query_service_rejects_unknown_analysis_snapshot() -> None:
+    service = ExperimentQueryService(
+        _Experiments(),
+        _Selections(),
+        _Groups(),
+        _Findings(),
+        objective_repository=_ObjectiveAnalyses(),
+    )
+
+    with pytest.raises(FileNotFoundError, match="analysis snapshot not found"):
+        await service.export_json("collection-1", "objective-1", 99)
+
+
+async def test_query_service_rejects_incomplete_analysis_snapshot() -> None:
+    service = ExperimentQueryService(
+        _Experiments(),
+        _Selections(),
+        _Groups(),
+        _Findings(),
+        objective_repository=_ObjectiveAnalyses(
+            type("Analysis", (), {"status": "running"})()
+        ),
+    )
+
+    with pytest.raises(ValueError, match="analysis snapshot is not completed"):
+        await service.export_json("collection-1", "objective-1", 1)

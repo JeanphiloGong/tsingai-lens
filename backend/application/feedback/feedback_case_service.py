@@ -145,6 +145,53 @@ class FeedbackCaseService:
             tool_failure_results=tool_failure_results,
         )
 
+    async def export_for_user(
+        self,
+        *,
+        user_id: str,
+        collection_id: str,
+        status: str | None = None,
+        limit: int = 2000,
+    ) -> tuple[dict[str, Any], ...]:
+        """Project candidate analysis records for inspection outside the UI.
+
+        This export intentionally includes cases at every lifecycle state. It
+        is an audit/analysis export, not a training release: only the separate
+        dataset snapshot flow can turn an accepted case into model data.
+        """
+        if limit < 1 or limit > 2000:
+            raise ValueError("invalid export limit")
+        summaries_list: list[FeedbackCaseSummary] = []
+        offset = 0
+        while len(summaries_list) < limit:
+            page_size = min(200, limit - len(summaries_list))
+            page = await self.list_for_user(
+                user_id=user_id,
+                collection_id=collection_id,
+                status=status,
+                limit=page_size,
+                offset=offset,
+            )
+            summaries_list.extend(page)
+            if len(page) < page_size:
+                break
+            offset += len(page)
+        summaries = tuple(summaries_list)
+        records: list[dict[str, Any]] = []
+        exported_at = datetime.now(timezone.utc).isoformat()
+        for summary in summaries:
+            detail = await self.read_for_user(summary.case_id, user_id)
+            records.append(
+                {
+                    "schema_version": "feedback-case-analysis.v1",
+                    "export_kind": "candidate_analysis",
+                    "training_ready": detail["status"] == "accepted",
+                    "exported_at": exported_at,
+                    **detail,
+                }
+            )
+        return tuple(records)
+
     async def save_annotation_for_user(
         self,
         *,

@@ -25,6 +25,13 @@ class StoredPaperExperimentRevision:
 
 
 class PaperExperimentRepository(Protocol):
+    async def lock_document(
+        self,
+        document_id: str,
+        *,
+        transaction: RepositoryTransaction | None = None,
+    ) -> None: ...
+
     async def add_revision(
         self,
         revision: PaperExperimentRevision,

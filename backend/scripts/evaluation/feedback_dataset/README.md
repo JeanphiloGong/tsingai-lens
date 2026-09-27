@@ -50,3 +50,34 @@ preserved for diagnosis. The manifest is an audit ledger, not evidence that a
 training framework loaded weights. If a prediction or model artifact is
 unavailable, training and deployment remain outside this protocol, and the
 script never changes online Chat behavior.
+
+## Real-paper validation scenario
+
+The feedback workbench was exercised against two open-access papers instead of
+placeholder documents:
+
+- Martin et al. (2019), *Dynamics of pore formation during laser powder bed
+  fusion additive manufacturing*, DOI
+  `10.1038/s41467-019-10009-2`,
+  <https://www.nature.com/articles/s41467-019-10009-2.pdf>.
+- Pham et al. (2020), *The role of side-branching in microstructure
+  development in laser powder-bed fusion*, DOI
+  `10.1038/s41467-020-14453-3`,
+  <https://www.nature.com/articles/s41467-020-14453-3.pdf>.
+
+The review question is whether scan-velocity and scan-strategy findings can be
+compared across the two studies. The expected evidence boundary is concrete:
+Martin studies Ti-6Al-4V keyhole pore formation near scan-velocity changes;
+Pham studies FCC-alloy microstructure and side-branching under scan-strategy
+changes. The workbench must preserve those material, process-variable, outcome,
+page, DOI, and Source-quote differences instead of turning them into one
+performance trend.
+
+The live validation creates three candidate cases from the same conversation:
+a negative answer rating, a later natural-language correction, and a failed
+Source-read tool result. The first case was annotated and accepted for an
+`evaluation` snapshot. The queue export is an audit projection and may be
+downloaded before annotation; only the accepted snapshot is a dataset release.
+The PDF files are intentionally not committed to the repository. Re-download
+the two public URLs when rebuilding this scenario, then verify the collection
+contains two `ready` documents before inspecting feedback cases.

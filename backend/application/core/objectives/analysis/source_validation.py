@@ -2266,6 +2266,7 @@ def _objective_retain_source_grounded_context(
                     and value not in (None, "")
                     and _objective_test_context_name_is_source_grounded(
                         attribute.get("name"),
+                        method_value=value,
                         source_text=source_text,
                     )
                 )
@@ -2351,6 +2352,7 @@ def _objective_test_context_outcome_is_source_grounded(
 
     if not _objective_test_context_name_is_source_grounded(
         name,
+        method_value=outcome,
         source_text=source_text,
     ):
         return False

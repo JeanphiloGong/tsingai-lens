@@ -4,9 +4,7 @@ import pytest
 
 import domain.core as core_domain
 from domain.core import (
-    MeasurementResult,
     ObjectiveEvidence,
-    PaperExperiment,
     SourceObservation,
 )
 
@@ -192,65 +190,3 @@ def test_rejected_source_observation_can_record_read_failure_without_excerpt() -
 
     assert observation.status == "rejected"
     assert not observation.has_scientific_content
-
-
-def test_paper_experiment_owns_only_same_document_facts() -> None:
-    with pytest.raises(ValueError, match="belong to its document"):
-        PaperExperiment(
-            experiment_id="exp-1",
-            collection_id="col-1",
-            document_id="doc-1",
-            study_id="study-1",
-            measurements=(
-                MeasurementResult.from_mapping(
-                    {
-                        "result_id": "result-1",
-                        "document_id": "doc-2",
-                        "collection_id": "col-1",
-                        "property_normalized": "elongation",
-                        "result_type": "measured",
-                        "value_payload": {"value": 82},
-                        "traceability_status": "direct",
-                        "result_source_type": "table",
-                        "epistemic_status": "directly_observed",
-                    }
-                ),
-            ),
-        )
-
-
-def test_paper_experiment_round_trips_its_scientific_boundary() -> None:
-    experiment = PaperExperiment.from_mapping(
-        {
-            "experiment_id": "exp-1",
-            "collection_id": "col-1",
-            "document_id": "doc-1",
-            "study_id": "study-1",
-            "status": "incomplete",
-            "baselines": [
-                {
-                    "baseline_id": "legacy-base-1",
-                    "baseline_label": "as-built",
-                }
-            ],
-            "methods": [
-                {
-                    "method_id": "legacy-method-1",
-                    "document_id": "doc-1",
-                    "collection_id": "col-1",
-                    "method_role": "test",
-                    "method_name": "tensile testing",
-                    "method_payload": {"standard": "ASTM E8"},
-                    "confidence": 0.9,
-                    "epistemic_status": "normalized_from_evidence",
-                }
-            ],
-            "uncertainties": ["The paper does not report repetitions."],
-        }
-    )
-
-    payload = experiment.to_record()
-    assert payload["status"] == "incomplete"
-    assert "baselines" not in payload
-    assert "methods" not in payload
-    assert experiment.uncertainties == ("The paper does not report repetitions.",)

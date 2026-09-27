@@ -1942,7 +1942,7 @@ def _extract_source_round(
                 len(extractable_routes),
             )
             continue
-        source = _build_objective_route_source_payload(
+        source = build_route_source_payload(
             route=route,
             blocks=blocks_by_document_id.get(route.document_id, []),
             tables=tables_by_document_id.get(route.document_id, []),
@@ -1980,7 +1980,7 @@ def _extract_source_round(
             "evidence_route": _objective_evidence_prompt_route_record(route),
             "tree_position": tree_position,
             "document_state": prior_document_state,
-            "source": _objective_evidence_prompt_source(source),
+            "source": build_evidence_prompt_source(source),
         }
         if (
             resolved_paper_facts_extractor is None
@@ -1996,7 +1996,7 @@ def _extract_source_round(
             source=source,
             paper_facts_extractor=resolved_paper_facts_extractor,
         )
-        payload["source"] = _objective_evidence_prompt_source(source)
+        payload["source"] = build_evidence_prompt_source(source)
         context_bundle = (
             _build_objective_same_paper_context_bundle(
                 route=route,
@@ -3078,7 +3078,7 @@ def _collect_context_source_candidates(
                     "confidence": 0.8,
                 }
             )
-            frame_source = _build_objective_route_source_payload(
+            frame_source = build_route_source_payload(
                 route=frame_route,
                 blocks=blocks_by_document_id.get(document_id, []),
                 tables=tables_by_document_id.get(document_id, []),
@@ -4581,7 +4581,7 @@ def _objective_merge_table_repair_records(
 
 
 
-def _build_objective_route_source_payload(
+def build_route_source_payload(
     *,
     route: EvidenceCandidate,
     blocks: list[Any],
@@ -6589,7 +6589,7 @@ def _objective_evidence_prompt_route_record(
     }
 
 
-def _objective_evidence_prompt_source(
+def build_evidence_prompt_source(
     source: dict[str, Any],
 ) -> dict[str, Any]:
     source_kind = str(source.get("source_kind") or "")
@@ -6845,7 +6845,7 @@ def _build_objective_same_paper_context_bundle(
             )
             continue
         seen.add(source_key)
-        source = _build_objective_route_source_payload(
+        source = build_route_source_payload(
             route=candidate,
             blocks=blocks,
             tables=tables,
@@ -6862,7 +6862,7 @@ def _build_objective_same_paper_context_bundle(
                 }
             )
             continue
-        item = _objective_evidence_prompt_source(source)
+        item = build_evidence_prompt_source(source)
         item["role"] = candidate.role
         item["context_fields"] = list(candidate.context_fields)
         item_size = len(
@@ -7168,7 +7168,7 @@ def _objective_document_grounding_sources(
                     "confidence": 1.0,
                 }
             )
-            context_source = _build_objective_route_source_payload(
+            context_source = build_route_source_payload(
                 route=context_route,
                 blocks=blocks,
                 tables=tables,

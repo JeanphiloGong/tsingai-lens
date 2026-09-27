@@ -5,6 +5,7 @@
 		AlertTriangle,
 		CheckCircle2,
 		ChevronRight,
+		Download,
 		FileText,
 		MessageSquareWarning,
 		RefreshCw,
@@ -19,6 +20,7 @@
 	import {
 		fetchFeedbackCase,
 		fetchFeedbackCases,
+		downloadFeedbackCaseExport,
 		saveFeedbackAnnotation,
 		submitFeedbackReview,
 		type FeedbackCaseDetail,
@@ -39,6 +41,9 @@
 	let reviewError = '';
 	let reviewReason = '';
 	let reviewRequestKey = '';
+	let candidateExporting = false;
+	let candidateExportNotice = '';
+	let candidateExportError = '';
 	let annotationProblemType = 'source_missing';
 	let annotationSeverity = 'medium';
 	let annotationTarget = '';
@@ -59,6 +64,12 @@
 			.toLowerCase();
 		return matchesStatus && haystack.includes(filter.trim().toLowerCase());
 	});
+	$: caseStats = {
+		total: cases.length,
+		needsReview: cases.filter((item) => item.needs_human_review).length,
+		accepted: cases.filter((item) => item.status === 'accepted').length,
+		papers: new Set(cases.flatMap((item) => item.document_titles)).size
+	};
 
 	onMount(() => {
 		void loadCases();
@@ -77,6 +88,35 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function exportCandidateAnalysis() {
+		if (!collectionId || candidateExporting) return;
+		candidateExporting = true;
+		candidateExportNotice = '';
+		candidateExportError = '';
+		try {
+			await downloadFeedbackCaseExport(collectionId);
+			candidateExportNotice = $t('feedbackWorkbench.candidateExported');
+		} catch (err) {
+			candidateExportError = errorMessage(err);
+		} finally {
+			candidateExporting = false;
+		}
+	}
+
+	function scrollToAnnotation() {
+		if (typeof document === 'undefined') return;
+		document.getElementById('annotation-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
+
+	function nextActionLabel(status: string) {
+		if (status === 'needs_annotation' || status === 'rejected' || status === 'insufficient') {
+			return $t('feedbackWorkbench.nextAnnotate');
+		}
+		if (status === 'ready_for_review') return $t('feedbackWorkbench.nextReview');
+		if (status === 'accepted') return $t('feedbackWorkbench.nextAccepted');
+		return $t('feedbackWorkbench.nextInspect');
 	}
 
 	async function openCase(item: FeedbackCaseSummary) {
@@ -276,6 +316,20 @@
 		return [...new Set(locations)].join(' · ');
 	}
 
+	function sourceHref(source: Record<string, unknown>) {
+		const documentId = String(source.document_id ?? '').trim();
+		if (!documentId || !collectionId) return '';
+		const params = new URLSearchParams({ view: 'parsed-paper' });
+		const sourceRef = String(source.source_ref ?? source.source_id ?? '').trim();
+		if (sourceRef) params.set('source_ref', sourceRef);
+		return `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}?${params.toString()}`;
+	}
+
+	function sourceCitation(source: Record<string, unknown>) {
+		const doi = String(source.doi ?? '').trim();
+		return doi ? `DOI ${doi}` : '';
+	}
+
 	function sourceReason(source: Record<string, unknown>) {
 		const raw = String(source.reason ?? '').trim().split(':', 1)[0];
 		if (!raw) return '';
@@ -335,6 +389,10 @@
 			<p class="lede">{$t('feedbackWorkbench.lede')}</p>
 			</div>
 			<div class="header-actions">
+				<button class="export-button" type="button" on:click={exportCandidateAnalysis} disabled={candidateExporting}>
+					<Download size={16} />
+					{candidateExporting ? $t('feedbackWorkbench.candidateExporting') : $t('feedbackWorkbench.candidateExport')}
+				</button>
 				<a class="dataset-link" href={`/collections/${collectionId}/feedback/datasets`}>{$t('feedbackWorkbench.datasets')}</a>
 				<button
 					class="icon-button"
@@ -352,6 +410,19 @@
 	{#if error}
 		<div class="notice notice--error" role="alert"><AlertTriangle size={17} /><span>{error}</span></div>
 	{/if}
+	{#if candidateExportNotice}
+		<div class="notice notice--success" role="status"><CheckCircle2 size={17} /><span>{candidateExportNotice}</span></div>
+	{/if}
+	{#if candidateExportError}
+		<div class="notice notice--error" role="alert"><AlertTriangle size={17} /><span>{candidateExportError}</span></div>
+	{/if}
+
+	<div class="status-strip" aria-label={$t('feedbackWorkbench.queueSummary')}>
+		<div><strong>{caseStats.total}</strong><span>{$t('feedbackWorkbench.totalCases')}</span></div>
+		<div><strong>{caseStats.needsReview}</strong><span>{$t('feedbackWorkbench.needsReviewCount')}</span></div>
+		<div><strong>{caseStats.accepted}</strong><span>{$t('feedbackWorkbench.acceptedCount')}</span></div>
+		<div><strong>{caseStats.papers}</strong><span>{$t('feedbackWorkbench.paperCount')}</span></div>
+	</div>
 
 	<div class="workbench-grid">
 		<aside class="case-list" aria-label={$t('feedbackWorkbench.listLabel')}>
@@ -395,9 +466,11 @@
 							<span class="case-type">{problemLabel(item.problem_type)}</span>
 								<ChevronRight size={16} />
 							</div>
-							<strong>{item.question_preview || item.answer_preview || $t('feedbackWorkbench.unknown')}</strong>
+							<strong title={item.question_preview || item.answer_preview || $t('feedbackWorkbench.unknown')}>
+								{item.question_preview || item.answer_preview || $t('feedbackWorkbench.unknown')}
+							</strong>
 							{#if item.document_titles.length}
-								<span class="case-item__documents">{item.document_titles.join(' · ')}</span>
+								<span class="case-item__documents" title={item.document_titles.join(' · ')}>{item.document_titles.join(' · ')}</span>
 							{/if}
 							<div class="case-item__meta">
 								<span class="status-dot"></span>
@@ -424,6 +497,14 @@
 					<div>
 						<div class="detail-kicker"><span class="status-pill">{statusLabel(selected.status)}</span><span>{formatDate(selected.updated_at)}</span></div>
 						<h2>{$t('feedbackWorkbench.caseReview')}</h2>
+						<p class="detail-context">{$t('feedbackWorkbench.realScenario')}</p>
+					</div>
+					<div class="detail-next">
+						<span class="section-label">{$t('feedbackWorkbench.nextStep')}</span>
+						<strong>{nextActionLabel(selected.status)}</strong>
+						{#if selected.status === 'needs_annotation' || selected.status === 'rejected' || selected.status === 'insufficient'}
+							<button type="button" class="jump-button" on:click={scrollToAnnotation}>{$t('feedbackWorkbench.jumpToAnnotation')}</button>
+						{/if}
 					</div>
 				</div>
 
@@ -472,11 +553,11 @@
 					</section>
 				{/if}
 
-				<section class="detail-section">
-					<div class="section-heading"><h3>{$t('feedbackWorkbench.requestedScope')}</h3><span>{selected.requested_scope.length}</span></div>
-					{#if selected.requested_scope.length}
-						<div class="scope-list">{#each selected.requested_scope as source}<span class="scope-chip">{sourceTitle(source)}</span>{/each}</div>
-					{:else}<p class="muted">{$t('feedbackWorkbench.noRequestedScope')}</p>{/if}
+					<section class="detail-section">
+						<div class="section-heading"><h3>{$t('feedbackWorkbench.requestedScope')}</h3><span>{selected.requested_scope.length}</span></div>
+						{#if selected.requested_scope.length}
+							<div class="scope-list">{#each selected.requested_scope as source}{#if sourceHref(source)}<a class="scope-chip" href={sourceHref(source)}>{sourceTitle(source)}</a>{:else}<span class="scope-chip">{sourceTitle(source)}</span>{/if}{/each}</div>
+						{:else}<p class="muted">{$t('feedbackWorkbench.noRequestedScope')}</p>{/if}
 				</section>
 
 				<section class="detail-section">
@@ -484,14 +565,14 @@
 					{#if selected.inspected_sources.length}
 						<div class="source-list">
 							{#each selected.inspected_sources as source}
-								<article class="source-row"><div class="source-icon"><FileText size={16} /></div><div><strong>{sourceTitle(source)}</strong>{#if sourceLocator(source)}<span>{sourceLocator(source)}</span>{/if}{#if source.quote}<p>{String(source.quote)}</p>{:else}<p class="muted">{$t('feedbackWorkbench.noQuote')}</p>{/if}</div></article>
+								<article class="source-row"><div class="source-icon"><FileText size={16} /></div><div><strong>{#if sourceHref(source)}<a class="source-link" href={sourceHref(source)}>{sourceTitle(source)}</a>{:else}{sourceTitle(source)}{/if}</strong>{#if sourceLocator(source)}<span>{sourceLocator(source)}</span>{/if}{#if sourceCitation(source)}<span>{sourceCitation(source)}</span>{/if}{#if source.quote}<p>{String(source.quote)}</p>{:else}<p class="muted">{$t('feedbackWorkbench.noQuote')}</p>{/if}</div></article>
 							{/each}
 						</div>
 					{:else}<p class="muted">{$t('feedbackWorkbench.inspectedNone')}</p>{/if}
 				</section>
 
 				{#if selected.omitted_candidates.length}
-					<section class="detail-section detail-section--warning"><div class="section-heading"><h3>{$t('feedbackWorkbench.omittedCandidates')}</h3><span>{selected.omitted_candidates.length}</span></div>{#each selected.omitted_candidates as source}<div class="omitted"><XCircle size={16} /><span><strong>{sourceTitle(source)}{sourceLocator(source) ? ` · ${sourceLocator(source)}` : ''}</strong>{#if sourceReason(source)}<small>{$t('feedbackWorkbench.omissionReason', { reason: sourceReason(source) })}</small>{/if}</span></div>{/each}</section>
+						<section class="detail-section detail-section--warning"><div class="section-heading"><h3>{$t('feedbackWorkbench.omittedCandidates')}</h3><span>{selected.omitted_candidates.length}</span></div>{#each selected.omitted_candidates as source}<div class="omitted"><XCircle size={16} /><span><strong>{#if sourceHref(source)}<a class="source-link" href={sourceHref(source)}>{sourceTitle(source)}</a>{:else}{sourceTitle(source)}{/if}{sourceLocator(source) ? ` · ${sourceLocator(source)}` : ''}</strong>{#if sourceReason(source)}<small>{$t('feedbackWorkbench.omissionReason', { reason: sourceReason(source) })}</small>{/if}</span></div>{/each}</section>
 				{/if}
 
 				<section class="detail-section">
@@ -526,7 +607,7 @@
 					{/if}
 
 					{#if selected.status === 'needs_annotation' || selected.status === 'ready_for_review' || selected.status === 'rejected' || selected.status === 'insufficient'}
-						<section class="detail-section annotation-panel">
+						<section id="annotation-panel" class="detail-section annotation-panel">
 							<div class="section-heading"><h3>{$t('feedbackWorkbench.annotationTitle')}</h3><span>{$t('feedbackWorkbench.annotationHint')}</span></div>
 							{#if annotationError}<div class="inline-error" role="alert"><AlertTriangle size={15} />{annotationError}</div>{/if}
 							{#if annotationSaved}<div class="inline-success" role="status"><CheckCircle2 size={15} />{$t('feedbackWorkbench.annotationSaved')}</div>{/if}
@@ -568,6 +649,9 @@
 	.workbench { padding: 4px 0 48px; }
 	.workbench-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
 	.header-actions { display: flex; align-items: center; gap: 10px; }
+	.export-button { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 12px; border: 1px solid var(--brand-border); border-radius: 7px; background: var(--brand-primary); color: #fff; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+	.export-button:hover { filter: brightness(.96); }
+	.export-button:disabled { opacity: .6; cursor: default; }
 	.dataset-link { padding: 8px 11px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-primary); background: var(--surface-raised); font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
 	.dataset-link:hover { border-color: var(--accent-primary); }
 	.eyebrow { margin: 0 0 4px; color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -580,7 +664,12 @@
 	.spin { animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 	.notice { display: flex; align-items: center; gap: 8px; padding: 12px 14px; margin-bottom: 16px; border: 1px solid var(--danger-border); background: var(--danger-bg); color: var(--danger-text); border-radius: 8px; font-size: 13px; }
-	.workbench-grid { display: grid; grid-template-columns: minmax(260px, 330px) minmax(0, 1fr); gap: 18px; align-items: start; }
+	.notice--success { border-color: var(--success-border); background: var(--success-bg); color: var(--success-text); }
+	.status-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-bottom: 18px; border: 1px solid var(--border-default); border-radius: 8px; overflow: hidden; background: var(--border-default); }
+	.status-strip div { display: grid; gap: 3px; padding: 12px 14px; background: var(--surface-card); }
+	.status-strip strong { font-size: 20px; line-height: 1; }
+	.status-strip span { color: var(--text-secondary); font-size: 11px; }
+		.workbench-grid { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
 	.case-list, .case-detail { min-width: 0; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface-card); box-shadow: var(--shadow-xs); }
 	.case-list { overflow: hidden; }
 	.list-toolbar { display: grid; gap: 10px; padding: 14px; border-bottom: 1px solid var(--border-default); background: var(--bg-subtle); }
@@ -593,8 +682,8 @@
 	.case-item:hover, .case-item.selected { background: var(--brand-soft); }
 	.case-item__topline, .case-item__meta, .detail-kicker, .section-heading, .analysis-grid { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 	.case-type { color: var(--brand-primary); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
-	.case-item strong { display: block; overflow: hidden; margin: 8px 0 5px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-	.case-item__documents { display: block; overflow: hidden; color: var(--text-tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+		.case-item strong { display: -webkit-box; overflow: hidden; margin: 8px 0 5px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }
+		.case-item__documents { display: -webkit-box; overflow: hidden; color: var(--text-tertiary); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 	.case-item__meta { justify-content: flex-start; margin-top: 9px; color: var(--text-secondary); font-size: 11px; }
 	.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning-text); }
 	.empty-state, .detail-placeholder { display: grid; place-items: center; gap: 8px; min-height: 220px; padding: 28px; color: var(--text-secondary); text-align: center; }
@@ -603,8 +692,12 @@
 	.loader { width: 22px; height: 22px; border: 2px solid var(--border-default); border-top-color: var(--brand-primary); border-radius: 50%; animation: spin .8s linear infinite; }
 	.detail-placeholder { min-height: 520px; }
 	.placeholder-icon { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px; color: var(--brand-primary); background: var(--brand-soft); }
-	.detail-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 22px 24px 18px; border-bottom: 1px solid var(--border-default); }
+	.detail-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding: 22px 24px 18px; border-bottom: 1px solid var(--border-default); }
 	.detail-header h2 { margin: 8px 0 0; font-size: 22px; }
+	.detail-context { max-width: 620px; margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+	.detail-next { display: grid; gap: 5px; min-width: 170px; padding: 11px 12px; border: 1px solid var(--brand-border); border-radius: 7px; background: var(--brand-soft); }
+	.detail-next strong { font-size: 13px; }
+	.jump-button { width: fit-content; padding: 0; border: 0; background: transparent; color: var(--brand-primary); font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
 	.detail-kicker { justify-content: flex-start; color: var(--text-secondary); font-size: 12px; }
 	.status-pill { padding: 4px 8px; border-radius: 999px; color: var(--warning-text); background: var(--warning-bg); font-weight: 700; }
 	.prompt-answer { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 20px 24px; background: var(--bg-subtle); border-bottom: 1px solid var(--border-default); }
@@ -628,7 +721,8 @@
 	.signal__facts dt { color: var(--text-secondary); font-size: 11px; }
 	.signal__facts dd { margin: 2px 0 0; font-weight: 700; overflow-wrap: anywhere; }
 	.scope-list { display: flex; flex-wrap: wrap; gap: 8px; }
-	.scope-chip { padding: 6px 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
+		.scope-chip { display: inline-flex; max-width: 100%; box-sizing: border-box; padding: 6px 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-subtle); color: var(--text-primary); font-size: 12px; line-height: 1.4; text-decoration: none; overflow-wrap: anywhere; }
+	.scope-chip:hover, .source-link:hover { border-color: var(--brand-border); color: var(--brand-primary); }
 	.coverage-badge { color: var(--text-secondary) !important; }
 	.coverage-badge--complete { color: var(--success-text) !important; }
 	.coverage-badge--partial { color: var(--warning-text) !important; }
@@ -639,6 +733,7 @@
 	.source-row strong, .source-row span { display: block; }
 	.source-row strong { font-size: 13px; }
 	.source-row span { margin-top: 2px; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
+	.source-link { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 30%, transparent); text-underline-offset: 2px; }
 	.source-row p { margin: 8px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 	.support-row { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--border-default); font-size: 13px; }
 	.support-row span { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
@@ -657,7 +752,7 @@
 	.annotation-summary-field { display: grid; gap: 6px; margin-top: 14px; }
 	.annotation-summary-field p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 		.technical-note { margin: 16px 0 0; color: var(--danger-text); font-size: 12px; line-height: 1.5; }
-		.annotation-panel { background: var(--bg-subtle); }
+		.annotation-panel { background: var(--bg-subtle); scroll-margin-top: 16px; }
 		.annotation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
 		.field-block, .annotation-grid label { display: grid; gap: 6px; margin-top: 12px; }
 		.field-label { color: var(--text-secondary); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
@@ -688,5 +783,6 @@
 		.review-history__row p { grid-column: 1 / -1; margin: 2px 0 0; color: var(--text-secondary); line-height: 1.45; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@media (max-width: 840px) { .workbench-grid { grid-template-columns: 1fr; } .case-list { order: 0; } .case-detail { order: 1; } .detail-placeholder { min-height: 260px; } }
-		@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer, .annotation-grid, .annotation-summary-grid, .signal__facts { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .annotation-actions { align-items: stretch; flex-direction: column; } }
+		@media (max-width: 840px) { .detail-next { min-width: 150px; } }
+		@media (max-width: 600px) { .workbench-header { gap: 12px; flex-direction: column; } .header-actions { width: 100%; flex-wrap: wrap; } .export-button { flex: 1 1 auto; } .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prompt-answer, .annotation-grid, .annotation-summary-grid, .signal__facts { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .detail-header { flex-direction: column; } .detail-next { width: 100%; box-sizing: border-box; } .annotation-actions { align-items: stretch; flex-direction: column; } }
 </style>

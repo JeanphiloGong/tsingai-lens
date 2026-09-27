@@ -4,7 +4,7 @@
 	import { ArrowLeft, Download, Eye, RefreshCw, Save, TriangleAlert } from '@lucide/svelte';
 	import { errorMessage } from '../../../../_shared/api';
 	import { t } from '../../../../_shared/i18n';
-	import { fetchFeedbackCases, fetchFeedbackCase, type FeedbackCaseDetail, type FeedbackCaseSummary } from '../../../../_shared/feedbackCases';
+	import { downloadFeedbackCaseExport, fetchFeedbackCases, fetchFeedbackCase, type FeedbackCaseDetail, type FeedbackCaseSummary } from '../../../../_shared/feedbackCases';
 	import {
 		createDatasetSnapshot,
 		downloadDatasetSnapshot,
@@ -32,6 +32,8 @@
 	let notice = '';
 	let detailLoading = '';
 	let expandedSnapshot = '';
+	let candidateExporting = false;
+	let candidateExportNotice = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: selectedCases = acceptedCases.filter((item) => selectedIds.includes(item.case_id));
@@ -62,6 +64,21 @@
 			error = errorMessage(err);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function exportCandidateAnalysis() {
+		if (!collectionId || candidateExporting) return;
+		candidateExporting = true;
+		candidateExportNotice = '';
+		error = '';
+		try {
+			await downloadFeedbackCaseExport(collectionId);
+			candidateExportNotice = $t('datasetSnapshots.candidateExported');
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			candidateExporting = false;
 		}
 	}
 
@@ -208,13 +225,24 @@
 			<h1 id="datasets-title">{$t('datasetSnapshots.title')}</h1>
 			<p class="lede">{$t('datasetSnapshots.lede')}</p>
 		</div>
-		<button class="icon-button" type="button" title={$t('datasetSnapshots.refresh')} aria-label={$t('datasetSnapshots.refresh')} on:click={load} disabled={loading}>
-			<span class:spin={loading}><RefreshCw size={17} /></span>
-		</button>
+		<div class="page-actions">
+			<button class="export-button" type="button" on:click={exportCandidateAnalysis} disabled={candidateExporting}>
+				<Download size={16} />{candidateExporting ? $t('datasetSnapshots.candidateExporting') : $t('datasetSnapshots.candidateExport')}
+			</button>
+			<button class="icon-button" type="button" title={$t('datasetSnapshots.refresh')} aria-label={$t('datasetSnapshots.refresh')} on:click={load} disabled={loading}>
+				<span class:spin={loading}><RefreshCw size={17} /></span>
+			</button>
+		</div>
 	</header>
 
 	{#if error}<div class="notice notice--error" role="alert"><TriangleAlert size={17} /><span>{error}</span></div>{/if}
 	{#if notice}<div class="notice notice--success" role="status"><Save size={17} /><span>{notice}</span></div>{/if}
+	{#if candidateExportNotice}<div class="notice notice--success" role="status"><Download size={17} /><span>{candidateExportNotice}</span></div>{/if}
+
+	<div class="candidate-callout">
+		<div><strong>{$t('datasetSnapshots.candidateExportTitle')}</strong><p>{$t('datasetSnapshots.candidateExportHelp')}</p></div>
+		<span class="candidate-badge">{$t('datasetSnapshots.candidateOnly')}</span>
+	</div>
 
 	<div class="builder-grid">
 		<section class="builder-panel" aria-labelledby="builder-title">
@@ -295,6 +323,7 @@
 	.page-header, .section-heading, .snapshot-title, .snapshot-meta, .back-link { display: flex; align-items: center; }
 	.page-header, .section-heading { justify-content: space-between; gap: 18px; }
 	.page-header { margin-bottom: 24px; align-items: flex-start; }
+	.page-actions { display: flex; align-items: center; gap: 9px; }
 	.back-link { width: fit-content; gap: 6px; color: var(--text-secondary); text-decoration: none; font-size: 13px; margin-bottom: 12px; }
 	.back-link:hover { color: var(--text-primary); }
 	.eyebrow { margin: 0 0 7px; color: var(--accent-primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -306,6 +335,8 @@
 	.icon-button, .download-button, .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--border-subtle); border-radius: 6px; cursor: pointer; }
 	.icon-button { width: 36px; height: 36px; background: var(--surface-raised); color: var(--text-secondary); }
 	.primary-button { min-height: 40px; padding: 0 15px; background: var(--accent-primary); color: white; font-weight: 700; }
+	.export-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 11px; border: 1px solid var(--brand-border); border-radius: 6px; background: var(--brand-primary); color: #fff; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+	.export-button:disabled { opacity: .6; cursor: not-allowed; }
 	.download-button, .detail-button { padding: 7px 10px; background: var(--surface-raised); color: var(--text-primary); font-size: 12px; }
 	.detail-button { border: 1px solid var(--border-subtle); border-radius: 6px; cursor: pointer; }
 	button:disabled { opacity: .55; cursor: not-allowed; }
@@ -313,6 +344,10 @@
 	.notice { display: flex; align-items: center; gap: 9px; margin: 0 0 18px; padding: 11px 13px; border-radius: 6px; font-size: 13px; }
 	.notice--error { border: 1px solid color-mix(in srgb, #d35d5d 35%, transparent); background: color-mix(in srgb, #d35d5d 9%, transparent); color: #a33434; }
 	.notice--success { border: 1px solid color-mix(in srgb, #2b9a72 35%, transparent); background: color-mix(in srgb, #2b9a72 9%, transparent); color: #19704f; }
+	.candidate-callout { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; padding: 14px 16px; border: 1px solid var(--brand-border); border-radius: 8px; background: var(--brand-soft); }
+	.candidate-callout strong { font-size: 13px; }
+	.candidate-callout p { margin: 5px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+	.candidate-badge { flex: 0 0 auto; padding: 4px 7px; border-radius: 4px; background: var(--surface-card); color: var(--brand-primary); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
 	.builder-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(340px, .85fr); gap: 20px; align-items: start; }
 	.builder-panel, .history-panel { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-raised); padding: 20px; }
 	.section-heading { margin-bottom: 18px; }
@@ -355,5 +390,5 @@
 	.spin { display: inline-flex; animation: spin 1s linear infinite; }
 	@keyframes spin { to { transform: rotate(360deg); } }
 	@media (max-width: 860px) { .datasets { padding: 22px 16px 40px; } .builder-grid { grid-template-columns: 1fr; } }
-	@media (max-width: 520px) { .page-header { gap: 10px; } h1 { font-size: 28px; } .builder-panel, .history-panel { padding: 15px; } .case-option { grid-template-columns: 18px minmax(0, 1fr); } .case-option select { grid-column: 2; width: fit-content; } .snapshot-meta { align-items: flex-start; flex-direction: column; } .snapshot-actions { flex-wrap: wrap; } }
+	@media (max-width: 520px) { .page-header { gap: 10px; } h1 { font-size: 28px; } .page-actions { width: 100%; justify-content: flex-end; } .candidate-callout { flex-direction: column; } .builder-panel, .history-panel { padding: 15px; } .case-option { grid-template-columns: 18px minmax(0, 1fr); } .case-option select { grid-column: 2; width: fit-content; } .snapshot-meta { align-items: flex-start; flex-direction: column; } .snapshot-actions { flex-wrap: wrap; } }
 </style>

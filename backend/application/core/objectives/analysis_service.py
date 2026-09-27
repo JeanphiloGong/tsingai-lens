@@ -167,6 +167,35 @@ def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
     if findings:
         return None, None
     if not selections:
+        # A partial archive is intentionally written without an Objective
+        # selection: its bindings are not strong enough for a Finding.  It is
+        # still source-grounded research state, so reporting it as
+        # ``no_grounded_evidence`` would erase the distinction between
+        # "nothing was recovered" and "something was recovered but needs
+        # context".
+        revisions = tuple(getattr(result, "revisions", ()) or ())
+        if any(
+            getattr(
+                getattr(revision, "revision", revision),
+                "measurements",
+                (),
+            )
+            or getattr(
+                getattr(revision, "revision", revision),
+                "comparisons",
+                (),
+            )
+            or getattr(
+                getattr(revision, "revision", revision),
+                "reported_interpretations",
+                (),
+            )
+            for revision in revisions
+        ):
+            return (
+                "insufficient_evidence",
+                "Source-grounded experiment content was archived, but its partial bindings were not sufficient for an Objective selection or Finding.",
+            )
         return (
             "no_grounded_evidence",
             "No Objective-relevant experiment selection was recovered from the prepared Sources.",
@@ -800,7 +829,8 @@ class ObjectiveAnalysisService:
                     "collection_id": collection_id,
                     "objective": objective,
                     "analysis": claimed,
-                    "experiments": artifacts.experiments,
+                    "experiment_outputs": artifacts.experiment_outputs,
+                    "partial_experiment_outputs": artifacts.partial_experiment_outputs,
                 }
                 if transaction is not None:
                     writer_kwargs["transaction"] = transaction

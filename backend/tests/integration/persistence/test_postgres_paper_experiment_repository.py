@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -83,11 +84,17 @@ def _revision(version: int = 1) -> PaperExperimentRevision:
                     "variant_key": "np",
                     "variant_label": "NP",
                     "binding_status": "direct",
+                    "identity_specificity": "partial",
+                    "missing_dimensions": ["preheat temperature"],
+                    "identity_evidence": ["table-1", "methods-2"],
                 },
                 {
                     "variant_key": "p150",
                     "variant_label": "P150",
                     "binding_status": "direct",
+                    "identity_specificity": "exact",
+                    "missing_dimensions": [],
+                    "identity_evidence": ["table-1"],
                 },
             ],
             "test_conditions": [
@@ -95,6 +102,23 @@ def _revision(version: int = 1) -> PaperExperimentRevision:
                     "test_key": "tensile",
                     "test_type": "tensile test",
                     "binding_status": "direct",
+                    "protocol_specificity": "partial",
+                    "test_identity_status": "identified",
+                    "protocol_completeness": "partial",
+                    "missing_parameters": ["strain rate"],
+                    "method": "uniaxial tensile test",
+                    "standard": "ASTM E8",
+                    "outcome_scope": ["elongation", "yield_strength"],
+                    "binding_source_refs": [
+                        {
+                            "document_id": "paper-experiment-doc",
+                            "source_fingerprint": "prepared-1",
+                            "source_kind": "block",
+                            "source_ref": "methods-2",
+                            "quote": "Tensile tests were performed ...",
+                        }
+                    ],
+                    "protocol_evidence": ["methods-2"],
                 }
             ],
             "measurements": [
@@ -158,6 +182,20 @@ async def test_repository_round_trips_complete_revision(
 
     assert stored.revision_id > 0
     assert stored.revision == expected
+    stored_variant = stored.revision.variants[0]
+    assert stored_variant.identity_specificity == "partial"
+    assert stored_variant.missing_dimensions == ("preheat temperature",)
+    assert stored_variant.identity_evidence == ("table-1", "methods-2")
+    stored_test = stored.revision.test_conditions[0]
+    assert stored_test.protocol_specificity == "partial"
+    assert stored_test.test_identity_status == "identified"
+    assert stored_test.protocol_completeness == "partial"
+    assert stored_test.missing_parameters == ("strain rate",)
+    assert stored_test.method == "uniaxial tensile test"
+    assert stored_test.standard == "ASTM E8"
+    assert stored_test.outcome_scope == ("elongation", "yield_strength")
+    assert stored_test.protocol_evidence == ("methods-2",)
+    assert len(stored_test.binding_source_refs) == 1
     assert (
         await paper_experiment_repository.read_revision("experiment-1", 1)
     ) == stored
@@ -181,6 +219,71 @@ async def test_new_version_does_not_replace_old_revision(
     assert (
         await paper_experiment_repository.read_latest_revision("experiment-1")
     ).revision == second.revision
+
+
+async def test_latest_revision_allocation_serializes_shared_write_transactions(
+    paper_experiment_repository,
+    postgres_session_factory,
+) -> None:
+    """The first revision must not race when two writers see an empty head."""
+
+    from infra.persistence.postgres.experiment_analysis_transaction import (
+        PostgresExperimentAnalysisTransactionFactory,
+    )
+
+    transaction_factory = PostgresExperimentAnalysisTransactionFactory(
+        postgres_session_factory
+    )
+    async with transaction_factory.begin() as first_transaction:
+        assert (
+            await paper_experiment_repository.read_latest_revision(
+                "experiment-concurrent", transaction=first_transaction
+            )
+        ) is None
+
+        async def read_second_head():
+            async with transaction_factory.begin() as transaction:
+                return await paper_experiment_repository.read_latest_revision(
+                    "experiment-concurrent", transaction=transaction
+                )
+
+        task = asyncio.create_task(read_second_head())
+        await asyncio.sleep(0.05)
+        assert not task.done()
+
+    assert await asyncio.wait_for(task, timeout=2) is None
+
+
+async def test_document_identity_resolution_lock_is_shared_and_transaction_scoped(
+    paper_experiment_repository,
+    postgres_session_factory,
+) -> None:
+    """Rereads of one paper cannot resolve identities concurrently."""
+
+    from infra.persistence.postgres.experiment_analysis_transaction import (
+        PostgresExperimentAnalysisTransactionFactory,
+    )
+
+    transaction_factory = PostgresExperimentAnalysisTransactionFactory(
+        postgres_session_factory
+    )
+    async with transaction_factory.begin() as first_transaction:
+        await paper_experiment_repository.lock_document(
+            "paper-experiment-doc", transaction=first_transaction
+        )
+
+        async def acquire_second_lock():
+            async with transaction_factory.begin() as transaction:
+                await paper_experiment_repository.lock_document(
+                    "paper-experiment-doc", transaction=transaction
+                )
+                return True
+
+        task = asyncio.create_task(acquire_second_lock())
+        await asyncio.sleep(0.05)
+        assert not task.done()
+
+    assert await asyncio.wait_for(task, timeout=2) is True
 
 
 async def test_same_version_is_idempotent_but_conflicting_version_is_rejected(

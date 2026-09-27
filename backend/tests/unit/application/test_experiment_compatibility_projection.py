@@ -199,6 +199,11 @@ class _Experiments:
         )
 
 
+class _ObjectiveRepository:
+    async def read_analysis(self, collection_id, objective_id, analysis_version):
+        return None
+
+
 def _service() -> ExperimentCompatibilityProjection:
     return ExperimentCompatibilityProjection(
         paper_experiment_repository=_Experiments(),
@@ -239,6 +244,21 @@ async def test_projection_returns_no_legacy_evidence_for_unknown_finding() -> No
 
     assert evidence == ()
     assert total == 0
+
+
+async def test_projection_rejects_unknown_analysis_snapshot() -> None:
+    service = ExperimentCompatibilityProjection(
+        paper_experiment_repository=_Experiments(),
+        selection_repository=_Selections(),
+        group_repository=_Groups(),
+        finding_repository=_Findings(),
+        objective_repository=_ObjectiveRepository(),
+    )
+
+    with pytest.raises(FileNotFoundError, match="analysis snapshot not found"):
+        await service.list_findings(
+            "collection-1", "objective-1", 99, offset=0, limit=50
+        )
 
 
 async def test_projection_builds_the_existing_evidence_map_contract() -> None:

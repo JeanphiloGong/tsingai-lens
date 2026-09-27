@@ -666,6 +666,7 @@ async def build_application_runtime(
                 selection_repository=objective_experiment_selection_repository,
                 group_repository=comparison_group_repository,
                 finding_repository=experiment_finding_repository,
+                objective_repository=objective_repository,
             )
 
         if overrides.chat_session_service is None:
@@ -1103,7 +1104,7 @@ def create_app(
     )
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.12.23",
+        version="0.13.0",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

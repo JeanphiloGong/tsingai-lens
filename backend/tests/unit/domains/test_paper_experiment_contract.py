@@ -114,6 +114,100 @@ def test_comparison_must_use_same_outcome_measurements() -> None:
         PaperExperimentRevision.from_mapping(payload)
 
 
+def test_comparison_accepts_unit_annotation_difference_in_outcome_labels() -> None:
+    payload = _experiment_payload()
+    payload["measurements"][0]["outcome"] = "elongation (%)"
+    payload["comparisons"] = [
+        {
+            "comparison_key": "a-to-b",
+            "baseline_variant_key": "A",
+            "target_variant_key": "B",
+            "outcome": "elongation",
+            "baseline_measurement_keys": ["a-elongation"],
+            "target_measurement_keys": ["b-elongation"],
+        }
+    ]
+
+    revision = PaperExperimentRevision.from_mapping(payload)
+
+    assert revision.comparisons[0].outcome == "elongation"
+
+
+@pytest.mark.parametrize(
+    ("measurement_outcome", "comparison_outcome"),
+    [
+        ("hardness (HV)", "hardness"),
+        ("yield strength (MPa)", "yield strength"),
+        ("energy density (J/mm3)", "energy density"),
+    ],
+)
+def test_comparison_accepts_common_unit_annotations(
+    measurement_outcome: str,
+    comparison_outcome: str,
+) -> None:
+    payload = _experiment_payload()
+    payload["measurements"][0]["outcome"] = measurement_outcome
+    payload["measurements"][1]["outcome"] = measurement_outcome
+    payload["comparisons"] = [
+        {
+            "comparison_key": "a-to-b",
+            "baseline_variant_key": "A",
+            "target_variant_key": "B",
+            "outcome": comparison_outcome,
+            "baseline_measurement_keys": ["a-elongation"],
+            "target_measurement_keys": ["b-elongation"],
+        }
+    ]
+
+    revision = PaperExperimentRevision.from_mapping(payload)
+
+    assert revision.comparisons[0].outcome == comparison_outcome
+
+
+def test_non_unit_qualifier_is_not_dropped_from_outcome_label() -> None:
+    payload = _experiment_payload()
+    payload["measurements"][0]["outcome"] = "strength (tensile)"
+    payload["measurements"][1]["outcome"] = "strength (tensile)"
+    payload["comparisons"] = [
+        {
+            "comparison_key": "a-to-b",
+            "baseline_variant_key": "A",
+            "target_variant_key": "B",
+            "outcome": "strength",
+            "baseline_measurement_keys": ["a-elongation"],
+            "target_measurement_keys": ["b-elongation"],
+        }
+    ]
+
+    with pytest.raises(ValueError, match="share the comparison outcome"):
+        PaperExperimentRevision.from_mapping(payload)
+
+
+@pytest.mark.parametrize(
+    ("measurement_outcome", "comparison_outcome"),
+    [("tensile strength", "strength"), ("test temperature", "temperature")],
+)
+def test_comparison_rejects_different_outcomes_with_shared_tokens(
+    measurement_outcome: str,
+    comparison_outcome: str,
+) -> None:
+    payload = _experiment_payload()
+    payload["measurements"][0]["outcome"] = measurement_outcome
+    payload["comparisons"] = [
+        {
+            "comparison_key": "a-to-b",
+            "baseline_variant_key": "A",
+            "target_variant_key": "B",
+            "outcome": comparison_outcome,
+            "baseline_measurement_keys": ["a-elongation"],
+            "target_measurement_keys": ["b-elongation"],
+        }
+    ]
+
+    with pytest.raises(ValueError, match="share the comparison outcome"):
+        PaperExperimentRevision.from_mapping(payload)
+
+
 def test_reported_result_can_preserve_non_numeric_text_and_unresolved_issue() -> None:
     payload = _experiment_payload()
     payload["measurements"].append(

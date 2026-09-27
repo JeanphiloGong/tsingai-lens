@@ -1,7 +1,8 @@
 # Benchmark Scripts
 
 This directory owns backend-local benchmark scripts for Core LLM connectivity,
-Paper Map prompts, Source parsing, and Source retrieval.
+Paper Map prompts, Source parsing, Source retrieval, and Objective question
+proposals.
 
 These scripts should be the canonical repo-local benchmark entrypoints. They
 should replace ad hoc date-folder probes that depend on brittle `../backend`
@@ -26,18 +27,6 @@ path assumptions or a fixed `backend/.env` location.
 - `source_parser_benchmark.py`
   Offline Source parser benchmark for the active Docling path and optional
   MinerU CLI comparison without changing production parser behavior
-- `paper_experiment_chain_probe.py`
-  Opt-in live acceptance probe for the complete PaperExperiment chain. It
-  parses one SHA-256-pinned real PDF with Docling, calls the configured live
-  model for every model-backed step, and verifies source-grounded measurements,
-  strategy-local comparisons, Evidence/Finding lineage, and complete model
-  traces. It never writes collection data.
-- `paper_experiment_material_suite_probe.py`
-  Case-driven live acceptance probe for multiple real materials. It reuses the
-  production PaperExperiment path, accepts per-paper Objectives and expected
-  paper roles from a local JSON manifest, and reports experimental, review, and
-  incomplete-input behavior without writing collection data. Keep real PDF
-  paths and manifests outside the repository.
 - `_common.py`
   Shared runtime resolution, env-file precedence, JSON summary helpers, and
   response-text utilities used by the benchmark entrypoints
@@ -69,10 +58,6 @@ python scripts/benchmarks/paper_map_prompt_probe.py \
   --variant current_provider_parse \
   --variant compact_provider_parse
 python scripts/benchmarks/source_parser_benchmark.py --help
-python scripts/benchmarks/paper_experiment_chain_probe.py \
-  --pdf /path/to/reviewed-cao-2017-ti64.pdf \
-  --summary-output /tmp/paper-experiment-live.json \
-  --env-file .env
 python scripts/benchmarks/objective_question_probe.py \
   --scenario-file /path/to/local/scenarios.json \
   --execution live --repeat 2 --output /path/to/local/results.json
@@ -104,3 +89,18 @@ the repository.
 
 Keep only benchmark and probe utilities here. Do not turn this directory into a
 second generic scripts bucket for unrelated operational helpers.
+
+## PaperExperiment validation boundary
+
+There is no standalone PaperExperiment chain or material-suite benchmark in
+this directory. The production path is owned by the Objective analysis service:
+it extracts a bounded Draft, reconciles candidate boundaries, resolves Source
+labels, and writes an immutable revision. Use the focused application tests and
+the external/date-folder evaluation artifacts for live-provider checks; do not
+document a deleted probe as a canonical entry point.
+
+Live evaluation must report raw model output separately from deterministic
+canonicalization. In particular, broad sample/test labels are valid partial
+facts, while exact result binding, boundary decisions, and conflict retention
+are service gates. A valid JSON response or a large measurement count is not a
+strict-analysis pass.

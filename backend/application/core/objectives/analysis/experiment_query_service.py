@@ -51,11 +51,13 @@ class ExperimentQueryService:
         selection_repository: ObjectiveExperimentSelectionRepository,
         group_repository: ComparisonGroupRepository,
         finding_repository: ExperimentFindingRepository,
+        objective_repository: Any | None = None,
     ) -> None:
         self.paper_experiment_repository = paper_experiment_repository
         self.selection_repository = selection_repository
         self.group_repository = group_repository
         self.finding_repository = finding_repository
+        self.objective_repository = objective_repository
 
     async def read_analysis_bundle(
         self,
@@ -65,6 +67,11 @@ class ExperimentQueryService:
     ) -> ExperimentAnalysisBundle:
         if analysis_version < 1:
             raise ValueError("analysis_version must be positive")
+        await self._validate_analysis_snapshot(
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
         selections = await self.selection_repository.list_selections(
             collection_id,
             objective_id,
@@ -102,6 +109,37 @@ class ExperimentQueryService:
                 revisions_by_identity[key] for key in sorted(revisions_by_identity)
             ),
         )
+
+    async def _validate_analysis_snapshot(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> None:
+        """Reject empty or in-flight snapshots when the runtime can inspect them.
+
+        The repository dependency is optional so small in-memory projections can
+        remain useful in isolation.  The production wiring supplies the
+        Objective repository, which makes the HTTP export a fixed analysis
+        snapshot rather than an unscoped query that can return an empty 200 for
+        a typo or a running analysis.
+        """
+
+        reader = getattr(self.objective_repository, "read_analysis", None)
+        if not callable(reader):
+            return
+        analysis = await reader(collection_id, objective_id, analysis_version)
+        if analysis is None:
+            raise FileNotFoundError(
+                "analysis snapshot not found: "
+                f"{collection_id}/{objective_id}/v{analysis_version}"
+            )
+        status = str(getattr(analysis, "status", "") or "").strip().casefold()
+        if status and status != "succeeded":
+            raise ValueError(
+                "analysis snapshot is not completed: "
+                f"{collection_id}/{objective_id}/v{analysis_version}"
+            )
 
     async def export_json(
         self,
@@ -142,6 +180,11 @@ class ExperimentQueryService:
             for revision in (item.revision for item in bundle.revisions)
             for variant in revision.variants
         }
+        tests_by_identity = {
+            (revision.experiment_id, revision.experiment_version, test.test_key): test
+            for revision in (item.revision for item in bundle.revisions)
+            for test in revision.test_conditions
+        }
         rows: list[dict[str, str]] = []
         for selection in bundle.selections:
             revision = revision_by_identity.get(
@@ -160,6 +203,22 @@ class ExperimentQueryService:
                         measurement.variant_key,
                     )
                 )
+                test = tests_by_identity.get(
+                    (
+                        revision.experiment_id,
+                        revision.experiment_version,
+                        measurement.test_key,
+                    )
+                )
+                comparison_keys = tuple(
+                    comparison.comparison_key
+                    for comparison in revision.comparisons
+                    if measurement.measurement_key
+                    in (
+                        *comparison.baseline_measurement_keys,
+                        *comparison.target_measurement_keys,
+                    )
+                )
                 rows.append(
                     {
                         "collection_id": collection_id,
@@ -171,6 +230,99 @@ class ExperimentQueryService:
                         "measurement_key": measurement.measurement_key,
                         "variant_key": measurement.variant_key or "",
                         "variant_label": variant.variant_label if variant else "",
+                        "variant_subject_attributes": json.dumps(
+                            [item.to_record() for item in variant.subject_attributes]
+                            if variant
+                            else [],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "variant_intervention_attributes": json.dumps(
+                            [item.to_record() for item in variant.intervention_attributes]
+                            if variant
+                            else [],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "variant_state": json.dumps(
+                            [item.to_record() for item in variant.state]
+                            if variant
+                            else [],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "variant_population_scope": json.dumps(
+                            dict(variant.population_scope)
+                            if variant and variant.population_scope is not None
+                            else {},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "variant_binding_status": variant.binding_status if variant else "",
+                        "variant_source_refs": json.dumps(
+                            [item.to_record() for item in variant.source_refs]
+                            if variant
+                            else [],
+                            ensure_ascii=False,
+                        ),
+                        "variant_binding_source_refs": json.dumps(
+                            [item.to_record() for item in variant.binding_source_refs]
+                            if variant
+                            else [],
+                            ensure_ascii=False,
+                        ),
+                        "test_key": measurement.test_key or "",
+                        "test_type": test.test_type if test else "",
+                        "test_parameters": json.dumps(
+                            [item.to_record() for item in test.parameters]
+                            if test
+                            else [],
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "test_population_scope": json.dumps(
+                            dict(test.population_scope)
+                            if test and test.population_scope is not None
+                            else {},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        "test_method": test.method if test and test.method else "",
+                        "test_standard": test.standard if test and test.standard else "",
+                        "test_outcome_scope": json.dumps(
+                            list(test.outcome_scope) if test else [],
+                            ensure_ascii=False,
+                        ),
+                        "test_protocol_specificity": (
+                            test.protocol_specificity if test else ""
+                        ),
+                        "test_identity_status": (
+                            test.test_identity_status if test else ""
+                        ),
+                        "test_protocol_completeness": (
+                            test.protocol_completeness if test else ""
+                        ),
+                        "test_missing_parameters": json.dumps(
+                            list(test.missing_parameters) if test else [],
+                            ensure_ascii=False,
+                        ),
+                        "test_binding_status": test.binding_status if test else "",
+                        "test_source_refs": json.dumps(
+                            [item.to_record() for item in test.source_refs]
+                            if test
+                            else [],
+                            ensure_ascii=False,
+                        ),
+                        "test_binding_source_refs": json.dumps(
+                            [item.to_record() for item in test.binding_source_refs]
+                            if test
+                            else [],
+                            ensure_ascii=False,
+                        ),
+                        "test_protocol_evidence": json.dumps(
+                            list(test.protocol_evidence) if test else [],
+                            ensure_ascii=False,
+                        ),
                         "outcome": measurement.outcome,
                         "value": "" if measurement.value is None else str(measurement.value),
                         "unit": measurement.unit or "",
@@ -184,6 +336,19 @@ class ExperimentQueryService:
                         "source_refs": json.dumps(
                             [item.to_record() for item in measurement.source_refs],
                             ensure_ascii=False,
+                        ),
+                        "binding_source_refs": json.dumps(
+                            [item.to_record() for item in measurement.binding_source_refs],
+                            ensure_ascii=False,
+                        ),
+                        "binding_status": measurement.binding_status,
+                        "result_kind": measurement.result_kind,
+                        "notes": json.dumps(list(measurement.notes), ensure_ascii=False),
+                        "comparison_keys": json.dumps(
+                            list(comparison_keys), ensure_ascii=False
+                        ),
+                        "selection_comparison_keys": json.dumps(
+                            list(selection.comparison_keys), ensure_ascii=False
                         ),
                     }
                 )
@@ -199,6 +364,28 @@ class ExperimentQueryService:
             "measurement_key",
             "variant_key",
             "variant_label",
+            "variant_subject_attributes",
+            "variant_intervention_attributes",
+            "variant_state",
+            "variant_population_scope",
+            "variant_binding_status",
+            "variant_source_refs",
+            "variant_binding_source_refs",
+            "test_key",
+            "test_type",
+            "test_parameters",
+            "test_population_scope",
+            "test_method",
+            "test_standard",
+            "test_outcome_scope",
+            "test_protocol_specificity",
+            "test_identity_status",
+            "test_protocol_completeness",
+            "test_missing_parameters",
+            "test_binding_status",
+            "test_source_refs",
+            "test_binding_source_refs",
+            "test_protocol_evidence",
             "outcome",
             "value",
             "unit",
@@ -206,6 +393,12 @@ class ExperimentQueryService:
             "statistics",
             "measurement_scope",
             "source_refs",
+            "binding_source_refs",
+            "binding_status",
+            "result_kind",
+            "notes",
+            "comparison_keys",
+            "selection_comparison_keys",
         )
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()

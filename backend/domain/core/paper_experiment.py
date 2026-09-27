@@ -8,7 +8,9 @@ selects the parts it needs.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Mapping
+import unicodedata
 
 from domain.core.scientific_fact import ScientificAttribute, ScientificVariable
 
@@ -48,6 +50,68 @@ def _strings(value: Any) -> tuple[str, ...]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def outcome_labels_compatible(left: Any, right: Any) -> bool:
+    """Compare labels while allowing a display-unit annotation only.
+
+    A table header may call a result ``elongation (%)`` while the prose calls
+    it ``elongation``.  That is a presentation difference, not a new outcome.
+    In contrast, ``strength`` and ``tensile strength`` are distinct labels
+    unless the paper provides an explicit alias; a token-subset comparison
+    would silently collapse those outcomes.
+    """
+
+    unit_tokens = {
+        "%", "pa", "kpa", "mpa", "gpa", "hz", "nm", "um", "mm", "cm",
+        "m", "s", "ms", "min", "h", "c", "f", "k", "j", "w", "n",
+        "kg", "g", "mol", "wt", "vol", "ppm", "ppb", "rad", "deg",
+        "bar", "mbar", "hv", "hb", "hbs", "hbd",
+    }
+
+    def normalize(value: Any) -> str:
+        text = unicodedata.normalize("NFKC", _text(value)).casefold().strip()
+
+        def remove_unit_group(inner: str, original: str) -> str:
+            inner = inner.strip()
+            if not inner:
+                return " "
+            if "%" in inner or "°" in inner:
+                return " "
+            tokens = re.findall(r"[^\W_]+", inner, flags=re.UNICODE)
+            if not tokens:
+                return original
+            normalized_tokens = {
+                re.sub(r"\d+$", "", token) if not token.isnumeric() else token
+                for token in tokens
+            }
+            # Numeric values plus recognised unit tokens are display metadata,
+            # e.g. ``(MPa)``, ``(10 mm/s)``, ``(J/mm3)`` or ``(deg)``.
+            if all(
+                token.isnumeric() or token in unit_tokens
+                for token in normalized_tokens
+            ):
+                return " "
+            return original
+
+        text = re.sub(
+            r"\(([^()]*)\)|\[([^\[\]]*)\]",
+            lambda match: remove_unit_group(
+                match.group(1) or match.group(2) or "",
+                match.group(0),
+            ),
+            text,
+        )
+        # The bracket callback above uses a synthetic match; remove a trailing
+        # standalone percent/unit marker as well (``elongation %``).
+        tokens = re.findall(r"[^\W_]+|%", text, flags=re.UNICODE)
+        while tokens and tokens[-1] in unit_tokens | {"%"}:
+            tokens.pop()
+        return " ".join(tokens)
+
+    left_label = normalize(left)
+    right_label = normalize(right)
+    return bool(left_label and right_label and left_label == right_label)
 
 
 def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
@@ -613,7 +677,13 @@ class PaperExperimentRevision:
             references = (*comparison.baseline_measurement_keys, *comparison.target_measurement_keys)
             if any(key not in measurement_by_key for key in references):
                 raise ValueError("comparison references a measurement outside its experiment")
-            if any(measurement_by_key[key].outcome != comparison.outcome for key in references):
+            if any(
+                not outcome_labels_compatible(
+                    measurement_by_key[key].outcome,
+                    comparison.outcome,
+                )
+                for key in references
+            ):
                 raise ValueError("comparison measurements must share the comparison outcome")
         for interpretation in self.reported_interpretations:
             if any(key not in measurement_by_key for key in interpretation.measurement_keys):
@@ -716,4 +786,5 @@ __all__ = [
     "RELATION_STATUSES",
     "ReportedInterpretation",
     "SourceReference",
+    "outcome_labels_compatible",
 ]

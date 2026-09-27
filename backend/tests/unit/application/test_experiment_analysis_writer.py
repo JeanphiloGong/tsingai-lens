@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import pytest
 
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
+    stable_draft_experiment_id,
 )
 from application.repositories.experiment_analysis_repository import (
     ExperimentAnalysisWrite,
@@ -14,11 +16,12 @@ from application.repositories.experiment_analysis_repository import (
 from application.repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
-from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
-from domain.core.research_process import SourceObservation
-from application.core.objectives.analysis.paper_experiment import (
-    assemble_paper_experiment,
+from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentModelOutput,
+    ReconciledPaperExperimentOutput,
+    reconcile_model_output,
 )
+from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
 
 
 pytestmark = pytest.mark.anyio
@@ -69,143 +72,327 @@ def _analysis(version: int = 1) -> ObjectiveAnalysis:
     )
 
 
-def _observation(
-    observation_id: str,
+def _draft_output(
     document_id: str,
-    value: float,
-    label: str,
     *,
-    derived_from: tuple[str, ...] = (),
-    comparison: dict | None = None,
-    changed_variables: tuple[dict, ...] = (),
-    direction: str = "increase",
-    attribution_scope: str = "association_only",
-) -> SourceObservation:
-    return SourceObservation.from_mapping(
+    include_speed: bool = False,
+    source_fingerprint: str | None = None,
+    test_method: str = "uniaxial tensile test",
+    test_standard: str = "ASTM E8/E8M",
+) -> ReconciledPaperExperimentOutput:
+    """Build a service-owned Draft handoff without formal database identity."""
+
+    fingerprint = source_fingerprint or f"prepared-{document_id}"
+    variants = [
         {
-            "observation_id": observation_id,
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "document_id": document_id,
-            "source_kind": "table",
-            "source_ref": f"{document_id}-table",
-            "observation_role": "direct_result",
-            "source_excerpt": f"{label}: elongation {value}%",
-            "source_refs": [
-                {
-                    "source_kind": "table",
-                    "source_ref": f"{document_id}-table",
-                    "source_excerpt": f"{label}: elongation {value}%",
-                }
+            "variant_key": "np",
+            "variant_label": "NP",
+            "identity_specificity": "exact",
+            "subject_attributes": [{"name": "material", "value": "316L"}],
+            "intervention_attributes": [{"name": "preheat", "value": 0, "unit": "C"}],
+            "source_labels": ["methods"],
+            "binding_source_labels": ["methods"],
+        },
+        {
+            "variant_key": "p150",
+            "variant_label": "P150",
+            "identity_specificity": "exact",
+            "subject_attributes": [{"name": "material", "value": "316L"}],
+            "intervention_attributes":[{"name": "preheat", "value": 150, "unit": "C"}],
+            "source_labels": ["methods"],
+            "binding_source_labels": ["methods"],
+        },
+    ]
+    measurements = [
+        {
+            "measurement_key": "np-elongation",
+            "variant_key": "np",
+            "test_key": "tensile",
+            "outcome": "elongation",
+            "value": 72,
+            "unit": "%",
+            "source_labels": ["table"],
+            "variant_binding_source_labels": ["table"],
+            "test_binding_source_labels": ["methods"],
+        },
+        {
+            "measurement_key": "p150-elongation",
+            "variant_key": "p150",
+            "test_key": "tensile",
+            "outcome": "elongation",
+            "value": 82,
+            "unit": "%",
+            "source_labels": ["table"],
+            "variant_binding_source_labels": ["table"],
+            "test_binding_source_labels": ["methods"],
+        },
+    ]
+    comparisons = [
+        {
+            "comparison_key": "preheat-comparison",
+            "baseline_variant_key": "np",
+            "target_variant_key": "p150",
+            "outcome": "elongation",
+            "baseline_measurement_keys": ["np-elongation"],
+            "target_measurement_keys": ["p150-elongation"],
+            "changed_variables": [
+                {"name": "preheat", "baseline_value": 0, "target_value": 150, "unit": "C"}
             ],
-            "confidence": 0.9,
-            "status": "validated",
-            "changed_variables": list(changed_variables),
-            "comparison": comparison,
-            "derived_from_observation_ids": list(derived_from),
-            "attribution_scope": attribution_scope,
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "316L"}],
-                "sample": [{"name": "group", "value": label}],
-                "process": [{"name": "preheat", "value": label}],
-                "test": [{"name": "method", "value": "tensile"}],
-            },
-            "reported_result": {
-                "outcome": "elongation",
-                "value": value,
-                "unit": "%",
-                "direction": direction,
-                "result_text": f"{label}: elongation {value}%",
-            },
+            "source_labels": ["table"],
+            "binding_source_labels": ["table"],
         }
-    )
+    ]
+    if include_speed:
+        variants.extend(
+            [
+                {
+                    "variant_key": "s800",
+                    "variant_label": "S800",
+                    "identity_specificity": "exact",
+                    "subject_attributes": [{"name": "material", "value": "316L"}],
+                    "intervention_attributes": [{"name": "scan speed", "value": 800, "unit": "mm/s"}],
+                    "source_labels": ["methods"],
+                    "binding_source_labels": ["methods"],
+                },
+                {
+                    "variant_key": "s1000",
+                    "variant_label": "S1000",
+                    "identity_specificity": "exact",
+                    "subject_attributes": [{"name": "material", "value": "316L"}],
+                    "intervention_attributes": [{"name": "scan speed", "value": 1000, "unit": "mm/s"}],
+                    "source_labels": ["methods"],
+                    "binding_source_labels": ["methods"],
+                },
+            ]
+        )
+        measurements.extend(
+            [
+                {
+                    "measurement_key": "s800-elongation",
+                    "variant_key": "s800",
+                    "test_key": "tensile",
+                    "outcome": "elongation",
+                    "value": 20,
+                    "unit": "%",
+                    "source_labels": ["table"],
+                    "variant_binding_source_labels": ["table"],
+                    "test_binding_source_labels": ["methods"],
+                },
+                {
+                    "measurement_key": "s1000-elongation",
+                    "variant_key": "s1000",
+                    "test_key": "tensile",
+                    "outcome": "elongation",
+                    "value": 18,
+                    "unit": "%",
+                    "source_labels": ["table"],
+                    "variant_binding_source_labels": ["table"],
+                    "test_binding_source_labels": ["methods"],
+                },
+            ]
+        )
+        comparisons.append(
+            {
+                "comparison_key": "speed-comparison",
+                "baseline_variant_key": "s800",
+                "target_variant_key": "s1000",
+                "outcome": "elongation",
+                "baseline_measurement_keys": ["s800-elongation"],
+                "target_measurement_keys": ["s1000-elongation"],
+                "changed_variables": [
+                    {"name": "scan speed", "baseline_value": 800, "target_value": 1000, "unit": "mm/s"}
+                ],
+                "source_labels": ["table"],
+                "binding_source_labels": ["table"],
+            }
+        )
+    payload = {
+        "document_id": document_id,
+        "source_fingerprint": fingerprint,
+        "source_labels": {
+            "methods": {
+                "document_id": document_id,
+                "source_fingerprint": fingerprint,
+                "source_kind": "section",
+                "source_ref": f"{document_id}-methods",
+                "quote": "All variants use the same tensile protocol.",
+            },
+            "table": {
+                "document_id": document_id,
+                "source_fingerprint": fingerprint,
+                "source_kind": "table",
+                "source_ref": f"{document_id}-table",
+                "quote": "NP 72%; P150 82%.",
+            },
+        },
+        "experiments": [
+            {
+                "series_key": "series-1",
+                "label": "Preheat tensile series",
+                "scope_description": "Variants compared under one tensile protocol.",
+                "design_type": "parallel",
+                "scope_kind": "parent",
+                "experimental_variants": variants,
+                "test_conditions": [
+                    {
+                        "test_key": "tensile",
+                        "test_type": "tensile test",
+                        "method": test_method,
+                        "standard": test_standard,
+                        "protocol_specificity": "exact",
+                        "test_identity_status": "identified",
+                        "protocol_completeness": "complete",
+                        "outcome_scope": ["elongation"],
+                        "source_labels": ["methods"],
+                        "binding_source_labels": ["methods"],
+                    }
+                ],
+                "measurements": measurements,
+                "comparisons": comparisons,
+                "source_labels": ["methods", "table"],
+            }
+        ],
+    }
+    output = PaperExperimentModelOutput.from_mapping(payload)
+    return reconcile_model_output(output, accepted_experiment_keys=("series-1",))
 
 
 def _comparison_experiment(document_id: str):
-    baseline_id = f"{document_id}-np"
-    target_id = f"{document_id}-p150"
-    baseline = _observation(baseline_id, document_id, 72, "NP", direction="unknown")
-    target = _observation(target_id, document_id, 82, "P150", direction="unknown")
-    comparison = _observation(
-        f"{document_id}-comparison",
-        document_id,
-        82,
-        "P150",
-        derived_from=(baseline_id, target_id),
-        comparison={
-            "baseline_label": "NP",
-            "target_label": "P150",
-            "axis_names": ["preheat"],
-            "comparable": True,
+    return _draft_output(document_id)
+
+
+def _partial_archive_without_variants(
+    document_id: str,
+) -> ReconciledPaperExperimentOutput:
+    """A source-grounded report whose physical experiment boundary is unknown."""
+
+    fingerprint = f"prepared-{document_id}"
+    payload = {
+        "document_id": document_id,
+        "source_fingerprint": fingerprint,
+        "source_labels": {
+            "table": {
+                "document_id": document_id,
+                "source_fingerprint": fingerprint,
+                "source_kind": "table",
+                "source_ref": f"{document_id}-table",
+                "quote": "The paper reports an elongation value, but the sample row is not identified.",
+            }
         },
-        changed_variables=(
+        "experiments": [
             {
-                "name": "preheat",
-                "baseline_value": 0,
-                "target_value": 150,
-                "unit": "C",
-            },
-        ),
-        direction="increase",
-        attribution_scope="isolated_effect",
+                "series_key": "unresolved-series",
+                "label": "Unresolved reported result",
+                "scope_description": "A reported result retained pending boundary reconciliation.",
+                "design_type": "unknown",
+                "scope_kind": "unknown",
+                "experimental_variants": [],
+                "test_conditions": [],
+                "measurements": [
+                    {
+                        "measurement_key": "reported-elongation",
+                        "outcome": "elongation",
+                        "value": 72,
+                        "unit": "%",
+                        "result_text": "72%",
+                        "source_labels": ["table"],
+                    }
+                ],
+                "comparisons": [],
+                "source_labels": ["table"],
+                "unresolved_issues": [
+                    {
+                        "target_ref": "measurements/reported-elongation",
+                        "description": "The sample and test bindings are not identified.",
+                    }
+                ],
+            }
+        ],
+    }
+    output = PaperExperimentModelOutput.from_mapping(payload)
+    return reconcile_model_output(
+        output,
+        accepted_experiment_keys=("unresolved-series",),
     )
-    return assemble_paper_experiment(
-        collection_id="collection-1",
-        document_id=document_id,
-        source_facts=(baseline, target, comparison),
-    )
+
+
+def test_formal_identity_remains_strict_without_physical_variants():
+    with pytest.raises(
+        ValueError, match="without physical variants"
+    ):
+        stable_draft_experiment_id(
+            document_id="paper-a",
+            payload={"scope_kind": "parent", "experimental_variants": []},
+        )
 
 
 def _multi_factor_comparison_experiment(document_id: str):
-    preheat = _comparison_experiment(document_id)
-    speed_baseline_id = f"{document_id}-s800"
-    speed_target_id = f"{document_id}-s1000"
-    speed_baseline = _observation(
-        speed_baseline_id,
-        document_id,
-        20,
-        "S800",
-        direction="unknown",
+    return _draft_output(document_id, include_speed=True)
+
+
+def _mixed_valid_invalid_comparison_experiment(document_id: str):
+    """Keep one comparable slice while forcing a second slice out of context."""
+
+    base = _multi_factor_comparison_experiment(document_id)
+    draft = base.output.experiments[0]
+    measurements = [dict(item) for item in draft.payload["measurements"]]
+    for measurement in measurements:
+        if measurement["measurement_key"] == "s1000-elongation":
+            # A unit mismatch is a source-level fact we can preserve, but it
+            # cannot be finalized as a comparison with the percent baseline.
+            measurement["unit"] = "MPa"
+    experiment_payload = {
+        **draft.payload,
+        "measurements": measurements,
+        "source_labels": list(draft.source_labels),
+        "unresolved_issues": list(draft.unresolved_issues),
+    }
+    output = PaperExperimentModelOutput.from_mapping(
+        {
+            "document_id": base.output.document_id,
+            "source_fingerprint": base.output.source_fingerprint,
+            "source_labels": base.output.source_labels,
+            "experiments": [experiment_payload],
+            "unresolved_issues": list(base.output.unresolved_issues),
+        }
     )
-    speed_target = _observation(
-        speed_target_id,
-        document_id,
-        18,
-        "S1000",
-        direction="unknown",
+    return reconcile_model_output(
+        output,
+        accepted_experiment_keys=base.accepted_experiment_keys,
     )
-    speed_comparison = _observation(
-        f"{document_id}-speed-comparison",
-        document_id,
-        18,
-        "S1000",
-        derived_from=(speed_baseline_id, speed_target_id),
-        comparison={
-            "baseline_label": "S800",
-            "target_label": "S1000",
-            "axis_names": ["scan speed"],
-            "comparable": True,
-        },
-        changed_variables=(
-            {
-                "name": "scan speed",
-                "baseline_value": 800,
-                "target_value": 1000,
-                "unit": "mm/s",
-            },
-        ),
-        direction="decrease",
-        attribution_scope="isolated_effect",
+
+
+def _physical_split_experiment(
+    document_id: str,
+    *,
+    distinct_boundary: bool = True,
+) -> ReconciledPaperExperimentOutput:
+    """Build retained physical splits with identical variant/test content."""
+
+    base = _draft_output(document_id)
+    first = deepcopy(base.output.experiments[0].payload)
+    first.update(
+        {
+            "series_key": "split-a",
+            "scope_kind": "physical_split",
+            "split_reason": "different population assignment",
+            "split_evidence": [{"source_label": "methods"}],
+        }
     )
-    return assemble_paper_experiment(
-        collection_id="collection-1",
-        document_id=document_id,
-        source_facts=(
-            *preheat.source_observations,
-            speed_baseline,
-            speed_target,
-            speed_comparison,
-        ),
+    second = deepcopy(first)
+    second["series_key"] = "split-b"
+    if distinct_boundary:
+        second["split_reason"] = "different population and intervention assignment"
+        second["split_evidence"] = [{"source_label": "table"}]
+    payload = {
+        "document_id": base.output.document_id,
+        "source_fingerprint": base.output.source_fingerprint,
+        "source_labels": base.output.source_labels,
+        "experiments": [first, second],
+    }
+    return reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(payload),
+        accepted_experiment_keys=("split-a", "split-b"),
     )
 
 
@@ -214,8 +401,15 @@ class _RevisionRepository:
         self.records: dict[tuple[str, int], StoredPaperExperimentRevision] = {}
         self.next_id = 1
         self.transaction_handles: list[object | None] = []
+        self.latest_revision_calls: list[str] = []
+        self.document_lock_calls: list[str] = []
+
+    async def lock_document(self, document_id, *, transaction=None):
+        self.document_lock_calls.append(document_id)
+        self.transaction_handles.append(transaction)
 
     async def read_latest_revision(self, experiment_id, *, transaction=None):
+        self.latest_revision_calls.append(experiment_id)
         self.transaction_handles.append(transaction)
         values = [
             record
@@ -223,6 +417,21 @@ class _RevisionRepository:
             if identity == experiment_id
         ]
         return max(values, key=lambda item: item.revision.experiment_version) if values else None
+
+    async def list_latest_for_document(self, document_id, *, transaction=None):
+        self.transaction_handles.append(transaction)
+        latest_by_identity: dict[str, StoredPaperExperimentRevision] = {}
+        for record in self.records.values():
+            if record.revision.document_id != document_id:
+                continue
+            previous = latest_by_identity.get(record.revision.experiment_id)
+            if (
+                previous is None
+                or record.revision.experiment_version
+                > previous.revision.experiment_version
+            ):
+                latest_by_identity[record.revision.experiment_id] = record
+        return tuple(latest_by_identity.values())
 
     async def add_revision(
         self, revision, *, created_by=None, created_at=None, transaction=None
@@ -290,13 +499,13 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(experiment,),
+        experiment_outputs=(experiment,),
     )
     second = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(experiment,),
+        experiment_outputs=(experiment,),
     )
 
     assert len(first.revisions) == len(second.revisions) == 1
@@ -318,13 +527,48 @@ async def test_writer_passes_one_transaction_to_every_graph_repository():
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(_comparison_experiment("paper-a"),),
+        experiment_outputs=(_comparison_experiment("paper-a"),),
         transaction=transaction,
     )
 
     handles = revisions.transaction_handles + analyses.transaction_handles
     assert handles
     assert all(handle is transaction for handle in handles)
+
+
+async def test_writer_acquires_multi_draft_identities_in_deterministic_order():
+    writer, revisions, _ = _writer()
+    drafts = [_draft_output("paper-a"), _draft_output("paper-b")]
+    identities = [
+        stable_draft_experiment_id(
+            document_id=item.output.document_id,
+            payload=item.output.experiments[0].payload,
+        )
+        for item in drafts
+    ]
+    ordered_inputs = tuple(
+        item
+        for _, item in sorted(
+            zip(identities, drafts, strict=True),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+    )
+
+    result = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=ordered_inputs,
+        allow_finding=False,
+        transaction=object(),
+    )
+
+    assert revisions.document_lock_calls == sorted(revisions.document_lock_calls)
+    assert revisions.latest_revision_calls == sorted(identities)
+    assert [item.revision.document_id for item in result.revisions] == [
+        item.output.document_id for item in ordered_inputs
+    ]
 
 
 async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
@@ -334,7 +578,7 @@ async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(_comparison_experiment("paper-a"),),
+        experiment_outputs=(_comparison_experiment("paper-a"),),
     )
 
     assert result.groups == ()
@@ -355,7 +599,7 @@ async def test_writer_keeps_different_factor_sets_in_separate_selections():
         collection_id="collection-1",
         objective=_objective(variables=("preheat", "scan speed")),
         analysis=_analysis(),
-        experiments=(_multi_factor_comparison_experiment("paper-a"),),
+        experiment_outputs=(_multi_factor_comparison_experiment("paper-a"),),
     )
 
     revision = result.revisions[0].revision
@@ -372,13 +616,39 @@ async def test_writer_keeps_different_factor_sets_in_separate_selections():
     assert all(len(item.comparison_keys) == 1 for item in result.selections)
 
 
+async def test_writer_keeps_valid_selection_when_another_comparison_is_partial():
+    writer, _, _ = _writer()
+
+    result = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(variables=("preheat", "scan speed")),
+        analysis=_analysis(),
+        experiment_outputs=(_mixed_valid_invalid_comparison_experiment("paper-a"),),
+    )
+
+    revision = result.revisions[0].revision
+    comparisons = {item.comparison_key: item for item in revision.comparisons}
+    assert comparisons["preheat-comparison"].status == "ready"
+    assert comparisons["preheat-comparison"].relation_status == "direct"
+    assert comparisons["speed-comparison"].status == "insufficient_context"
+    assert comparisons["speed-comparison"].direction == "unknown"
+    assert comparisons["speed-comparison"].relation_status == "uncertain"
+    assert len(result.selections) == 1
+    assert result.selections[0].comparison_keys == ("preheat-comparison",)
+    assert len(result.findings) == 1
+    assert any(
+        "speed-comparison" in message
+        for message in result.post_bind_diagnostics["paper-a"]
+    )
+
+
 async def test_writer_creates_conditional_group_for_cross_paper_finding():
     writer, _, analyses = _writer()
     result = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(
+        experiment_outputs=(
             _comparison_experiment("paper-a"),
             _comparison_experiment("paper-b"),
         ),
@@ -394,21 +664,20 @@ async def test_writer_creates_conditional_group_for_cross_paper_finding():
 
 async def test_changed_source_fingerprint_creates_successor_without_overwrite():
     writer, revisions, _ = _writer()
-    experiment = _comparison_experiment("paper-a")
+    experiment = _draft_output("paper-a", source_fingerprint="prepared-v1")
 
     await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(experiment,),
-        source_fingerprints={"paper-a": "prepared-v1"},
+        experiment_outputs=(experiment,),
     )
+    revised_experiment = _draft_output("paper-a", source_fingerprint="prepared-v2")
     await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(experiment,),
-        source_fingerprints={"paper-a": "prepared-v2"},
+        experiment_outputs=(revised_experiment,),
     )
 
     versions = sorted(
@@ -422,13 +691,180 @@ async def test_changed_source_fingerprint_creates_successor_without_overwrite():
     ) == ["prepared-v1", "prepared-v2"]
 
 
+async def test_parent_identity_stays_stable_when_test_protocol_changes():
+    writer, revisions, _ = _writer()
+
+    await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(_draft_output("paper-a"),),
+    )
+    await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(
+            _draft_output(
+                "paper-a",
+                test_method="strain-controlled tensile test",
+                test_standard="ISO 6892-1",
+            ),
+        ),
+    )
+
+    stored = tuple(revisions.records.values())
+    assert len(stored) == 2
+    assert len({item.revision.experiment_id for item in stored}) == 1
+    assert sorted(item.revision.experiment_version for item in stored) == [1, 2]
+
+
+async def test_parent_identity_is_reused_when_reread_adds_variant_context():
+    writer, revisions, _ = _writer()
+
+    await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(_draft_output("paper-a", source_fingerprint="prepared-v1"),),
+    )
+
+    reread = _draft_output("paper-a", source_fingerprint="prepared-v2")
+    reread_payload = deepcopy(reread.output.experiments[0].payload)
+    reread_payload["experimental_variants"][0]["state"] = [
+        {"name": "build orientation", "value": "vertical"}
+    ]
+    reread = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(
+            {
+                "document_id": "paper-a",
+                "source_fingerprint": "prepared-v2",
+                "source_labels": reread.output.source_labels,
+                "experiments": [reread_payload],
+            }
+        ),
+        accepted_experiment_keys=("series-1",),
+    )
+
+    result = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(reread,),
+    )
+
+    stored = tuple(revisions.records.values())
+    assert len(stored) == 2
+    assert len({item.revision.experiment_id for item in stored}) == 1
+    assert sorted(item.revision.experiment_version for item in stored) == [1, 2]
+    assert result.revisions[0].revision.experiment_id == stored[0].revision.experiment_id
+
+
+async def test_parent_identity_is_reused_for_objective_variant_subset():
+    writer, revisions, _ = _writer()
+
+    await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(_draft_output("paper-a"),),
+    )
+
+    subset = _draft_output("paper-a")
+    subset_payload = deepcopy(subset.output.experiments[0].payload)
+    subset_payload["experimental_variants"] = [
+        item
+        for item in subset_payload["experimental_variants"]
+        if item["variant_key"] == "p150"
+    ]
+    subset_payload["measurements"] = [
+        item
+        for item in subset_payload["measurements"]
+        if item["variant_key"] == "p150"
+    ]
+    subset_payload["comparisons"] = []
+    subset = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(
+            {
+                "document_id": "paper-a",
+                "source_fingerprint": "prepared-paper-a-subset",
+                "source_labels": {
+                    **subset.output.source_labels,
+                    "table": {
+                        **subset.output.source_labels["table"],
+                        "source_fingerprint": "prepared-paper-a-subset",
+                    },
+                    "methods": {
+                        **subset.output.source_labels["methods"],
+                        "source_fingerprint": "prepared-paper-a-subset",
+                    },
+                },
+                "experiments": [subset_payload],
+            }
+        ),
+        accepted_experiment_keys=("series-1",),
+    )
+
+    await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(subset,),
+        allow_finding=False,
+    )
+
+    stored = tuple(revisions.records.values())
+    assert len(stored) == 2
+    assert len({item.revision.experiment_id for item in stored}) == 1
+    assert sorted(item.revision.experiment_version for item in stored) == [1, 2]
+
+
+async def test_physical_split_identity_uses_source_backed_boundary_discriminator():
+    writer, revisions, _ = _writer()
+
+    result = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(_physical_split_experiment("paper-a"),),
+    )
+
+    assert len(result.revisions) == 2
+    assert len({item.revision.experiment_id for item in result.revisions}) == 2
+    assert sorted(item.revision.experiment_version for item in revisions.records.values()) == [1, 1]
+
+
+def test_physical_split_identity_ignores_response_local_source_labels():
+    first = _physical_split_experiment("paper-a").output.experiments[0].payload
+    second = deepcopy(first)
+    second["split_evidence"] = [{"source_label": "S999"}]
+
+    assert stable_draft_experiment_id(document_id="paper-a", payload=first) == stable_draft_experiment_id(
+        document_id="paper-a", payload=second
+    )
+
+
+async def test_identical_physical_split_identity_requires_manual_reconciliation():
+    writer, _, _ = _writer()
+
+    with pytest.raises(ValueError, match="experiment identity collision"):
+        await writer.write_experiment_analysis(
+            collection_id="collection-1",
+            objective=_objective(),
+            analysis=_analysis(),
+            experiment_outputs=(
+                _physical_split_experiment("paper-a", distinct_boundary=False),
+            ),
+        )
+
+
 async def test_writer_does_not_fabricate_finding_without_matching_experiment():
     writer, _, analyses = _writer()
     result = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
-        experiments=(),
+        experiment_outputs=(),
     )
 
     assert result.revisions == ()
@@ -436,3 +872,39 @@ async def test_writer_does_not_fabricate_finding_without_matching_experiment():
     assert result.groups == ()
     assert result.findings == ()
     assert analyses.graphs[0].findings == ()
+
+
+async def test_partial_archive_without_variants_is_retained_without_selection_or_finding():
+    writer, revisions, analyses = _writer()
+
+    result = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(),
+        partial_experiment_outputs=(_partial_archive_without_variants("paper-a"),),
+    )
+
+    assert len(result.revisions) == 1
+    revision = result.revisions[0].revision
+    assert revision.experiment_id.startswith("pexp_partial_")
+    assert revision.identity_status == "unknown"
+    assert revision.binding_status == "partial"
+    assert revision.variants == ()
+    assert len(revision.measurements) == 1
+    assert result.selections == ()
+    assert result.groups == ()
+    assert result.findings == ()
+
+    # The archive identity is deterministic, so a retry reuses the same
+    # immutable revision instead of creating a duplicate partial record.
+    second = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(),
+        partial_experiment_outputs=(_partial_archive_without_variants("paper-a"),),
+    )
+    assert second.revisions[0].revision_id == result.revisions[0].revision_id
+    assert len(revisions.records) == 1
+    assert analyses.graphs[-1].findings == ()

@@ -12,12 +12,25 @@ import pytest
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
     ObjectiveAnalysisService,
+    _experiment_abstention,
 )
 from application.core.objectives.analysis.diagnostics import (
     record_analysis_diagnostic,
 )
 from application.core.objectives.objective_analysis_service import (
+    ObjectiveExperimentAnalysisService,
     ObjectiveExperimentAnalysisArtifacts,
+    _used_draft_source_labels,
+)
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentExtractionResult,
+    build_source_bundle,
+)
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentDraft,
+    PaperExperimentModelOutput,
+    ReconciledPaperExperimentOutput,
 )
 from domain.core import (
     DocumentProfile,
@@ -230,8 +243,229 @@ def _artifacts(version: int) -> ObjectiveExperimentAnalysisArtifacts:
                 }
             ),
         ),
-        experiments=(),
+        experiment_outputs=(),
     )
+
+
+def test_boundary_source_labels_are_counted_from_nested_split_evidence() -> None:
+    output = ReconciledPaperExperimentOutput(
+        output=PaperExperimentModelOutput(
+            document_id="paper-1",
+            source_fingerprint="fingerprint-paper-1",
+            experiments=(
+                PaperExperimentDraft(
+                    payload={
+                        "series_key": "split-a",
+                        "scope_kind": "physical_split",
+                        "split_evidence": [
+                            {
+                                "source_label": "S001",
+                                "reason": "independent population",
+                            }
+                        ],
+                    }
+                ),
+            ),
+            source_labels={
+                "S001": {
+                    "source_kind": "block",
+                    "source_ref": "source-1",
+                }
+            },
+        ),
+        accepted_experiment_keys=("split-a",),
+    )
+
+    assert _used_draft_source_labels(output) == {"S001"}
+
+
+class RecordingPaperExperimentExtractor:
+    def __init__(self, result: PaperExperimentExtractionResult) -> None:
+        self.result = result
+        self.calls = []
+
+    def extract(self, *, objective, bundle):
+        self.calls.append({"objective": objective, "bundle": bundle})
+        return self.result
+
+
+def _document_extraction_service(result: PaperExperimentExtractionResult):
+    extractor = RecordingPaperExperimentExtractor(result)
+    return (
+        ObjectiveExperimentAnalysisService(
+            collection_service=object(),
+            paper_map_repository=object(),
+            objective_repository=object(),
+            objective_input_service=object(),
+            objective_source_screener=object(),
+            paper_experiment_extractor=extractor,
+        ),
+        extractor,
+    )
+
+
+def _paper_frame() -> PaperAnalysisFrame:
+    return PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "objective-1",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["Alloy A"],
+            "changed_variables": ["temperature"],
+            "measured_property_scope": ["strength"],
+        }
+    )
+
+
+def _document_objective_inputs() -> dict:
+    return {
+        "documents": (SimpleNamespace(document_id="paper-1"),),
+        "paper_maps": (),
+        "profiles_by_document_id": {"paper-1": None},
+        "blocks_by_document_id": {"paper-1": ()},
+        "tables_by_document_id": {"paper-1": ()},
+        "table_cells_by_document_id": {"paper-1": ()},
+        "figures_by_document_id": {"paper-1": ()},
+        "document_trees_by_document_id": {"paper-1": None},
+    }
+
+
+def _route(source_ref: str):
+    return SimpleNamespace(
+        document_id="paper-1",
+        source_kind="block",
+        source_ref=source_ref,
+        extractable=True,
+    )
+
+
+def _bundle_for_refs(*source_refs: str, omitted=()):
+    built = build_source_bundle(
+        document_id="paper-1",
+        source_fingerprint="fingerprint-paper-1",
+        source_payloads=tuple(
+            {
+                "source_kind": "block",
+                "source_ref": source_ref,
+                "text": f"Source text for {source_ref}",
+            }
+            for source_ref in source_refs
+        ),
+    )
+    return replace(built, omitted_source_refs=tuple(omitted))
+
+
+def _patch_document_source_flow(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    routes,
+    bundle,
+) -> None:
+    import application.core.objectives.objective_analysis_service as service_module
+
+    monkeypatch.setattr(service_module, "screen_sources", lambda **_kwargs: (_paper_frame(),))
+    monkeypatch.setattr(service_module, "route_sources", lambda **_kwargs: tuple(routes))
+    monkeypatch.setattr(service_module, "build_bundle_from_routes", lambda **_kwargs: bundle)
+
+
+def test_document_source_accounting_uses_authoritative_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = PaperExperimentExtractionResult(
+        output=None,
+        readiness=None,
+        attempts=(),
+        status="abstained",
+    )
+    service, _extractor = _document_extraction_service(result)
+    bundle = _bundle_for_refs("results-1")
+    _patch_document_source_flow(
+        monkeypatch,
+        routes=(_route("results-1"),),
+        bundle=bundle,
+    )
+
+    artifacts = service._reconstruct_document_experiments(
+        collection_id="collection-1",
+        analysis=_analysis(1, "running"),
+        objective=_objective(),
+        objective_inputs=_document_objective_inputs(),
+        progress_callback=None,
+    )
+
+    assert artifacts.contribution.evidence_disposition == "no_grounded_evidence"
+    assert artifacts.contribution.routed_source_count == 1
+    assert artifacts.contribution.uninspected_source_count == 0
+    assert tuple(
+        (item.source_kind, item.source_ref)
+        for item in artifacts.contribution.inspected_source_refs
+    ) == (("text_window", "results-1"),)
+
+
+def test_document_provider_failure_marks_bundle_sources_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = PaperExperimentExtractionResult(
+        output=None,
+        readiness=None,
+        attempts=(),
+        status="technical_failure",
+        diagnostics=("provider_technical_failure",),
+    )
+    service, _extractor = _document_extraction_service(result)
+    bundle = _bundle_for_refs("results-1")
+    _patch_document_source_flow(
+        monkeypatch,
+        routes=(_route("results-1"),),
+        bundle=bundle,
+    )
+
+    artifacts = service._reconstruct_document_experiments(
+        collection_id="collection-1",
+        analysis=_analysis(1, "running"),
+        objective=_objective(),
+        objective_inputs=_document_objective_inputs(),
+        progress_callback=None,
+    )
+
+    assert artifacts.contribution.evidence_disposition == "extraction_failed"
+    assert artifacts.contribution.analysis_status == "failed"
+    assert artifacts.contribution.failed_source_count == 1
+    assert artifacts.contribution.uninspected_source_count == 0
+    assert artifacts.contribution.inspected_source_refs == ()
+
+
+def test_document_omitted_source_remains_uninspected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = PaperExperimentExtractionResult(
+        output=None,
+        readiness=None,
+        attempts=(),
+        status="abstained",
+        omitted_source_refs=("results-2",),
+    )
+    service, _extractor = _document_extraction_service(result)
+    bundle = _bundle_for_refs("results-1", omitted=("results-2",))
+    _patch_document_source_flow(
+        monkeypatch,
+        routes=(_route("results-1"), _route("results-2")),
+        bundle=bundle,
+    )
+
+    artifacts = service._reconstruct_document_experiments(
+        collection_id="collection-1",
+        analysis=_analysis(1, "running"),
+        objective=_objective(),
+        objective_inputs=_document_objective_inputs(),
+        progress_callback=None,
+    )
+
+    assert artifacts.contribution.evidence_disposition == "coverage_incomplete"
+    assert artifacts.contribution.routed_source_count == 2
+    assert artifacts.contribution.uninspected_source_count == 1
+    assert artifacts.contribution.failed_source_count == 0
 
 
 class FakeObjectiveRepository:
@@ -763,6 +997,48 @@ async def test_experiment_abstention_still_reads_experiment_projection() -> None
     assert findings["items"][0]["finding_id"] == "projected-finding"
 
 
+def test_partial_experiment_archive_is_insufficient_not_no_grounded_evidence() -> None:
+    result = SimpleNamespace(
+        findings=(),
+        selections=(),
+        revisions=(
+            SimpleNamespace(
+                measurements=(SimpleNamespace(measurement_key="m1"),),
+                comparisons=(),
+                reported_interpretations=(),
+            ),
+        ),
+    )
+
+    reason, note = _experiment_abstention(result)
+
+    assert reason == "insufficient_evidence"
+    assert note is not None
+    assert "partial bindings" in note
+
+
+def test_partial_stored_experiment_archive_unwraps_revision_payload() -> None:
+    result = SimpleNamespace(
+        findings=(),
+        selections=(),
+        revisions=(
+            SimpleNamespace(
+                revision=SimpleNamespace(
+                    measurements=(SimpleNamespace(measurement_key="m1"),),
+                    comparisons=(),
+                    reported_interpretations=(),
+                ),
+            ),
+        ),
+    )
+
+    reason, note = _experiment_abstention(result)
+
+    assert reason == "insufficient_evidence"
+    assert note is not None
+    assert "partial bindings" in note
+
+
 async def test_objective_analysis_publishes_one_complete_version() -> None:
     service, repository, _analyzer = _service()
     queued = await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
@@ -799,7 +1075,8 @@ async def test_objective_analysis_writes_experiment_records_without_legacy_publi
     assert call["objective"].objective_id == repository.objective.objective_id
     assert call["objective"].collection_id == repository.objective.collection_id
     assert call["analysis"].analysis_version == 1
-    assert call["experiments"] == _artifacts(1).experiments
+    assert call["experiment_outputs"] == _artifacts(1).experiment_outputs
+    assert call["partial_experiment_outputs"] == _artifacts(1).partial_experiment_outputs
     assert "findings" not in call
 
 
@@ -1310,7 +1587,7 @@ async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
     )
     artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(contribution,),
-        experiments=(),
+        experiment_outputs=(),
     )
     service, repository, _analyzer = _service(
         analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts),
@@ -1380,7 +1657,7 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
     )
     artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(failed_contribution,),
-        experiments=(),
+        experiment_outputs=(),
     )
     service, repository, _analyzer = _service(
         analyzer=FakeObjectiveExperimentAnalysisService(artifacts=artifacts)

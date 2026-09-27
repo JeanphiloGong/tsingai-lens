@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
@@ -11,6 +12,9 @@ from application.core.document_profiles.extraction import DocumentProfileModelOu
 from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionModelOutput,
     EvidenceExtractionsModelOutput,
+)
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentDraftEnvelope,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
@@ -42,6 +46,10 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
         postprocess_response: Any = None,
         **options: Any,
     ) -> Any:
+        if response_model is PaperExperimentDraftEnvelope:
+            return response_model.model_validate(
+                self._paper_experiment_draft(json.loads(user_prompt))
+            )
         if response_model.__name__ != "PaperFrameBatchModelOutput":
             return super().complete(
                 system_prompt=system_prompt,
@@ -103,6 +111,183 @@ class _FourPaperResearchModel(FakeDomainModelExtractor):
             if validated is not None:
                 response = validated
         return response
+
+    @staticmethod
+    def _paper_experiment_draft(payload: dict[str, Any]) -> dict[str, Any]:
+        """Return the new Draft contract for the four-paper fixture.
+
+        The production extractor supplies request-local Source labels. The
+        fixture therefore derives all references from those labels and never
+        emits formal IDs or validation state.
+        """
+
+        sources = [
+            source
+            for source in payload.get("sources") or ()
+            if isinstance(source, dict)
+        ]
+        labels = [
+            str(source.get("source_label") or "").strip()
+            for source in sources
+            if str(source.get("source_label") or "").strip()
+        ]
+        if not labels:
+            return {"experiments": [], "source_labels": [], "unresolved_issues": []}
+
+        def source_text(source: dict[str, Any]) -> str:
+            return " ".join(
+                str(source.get(field) or "")
+                for field in ("text", "quote", "caption_text", "table_markdown")
+            ).casefold()
+
+        result_source = next(
+            (
+                source
+                for source in sources
+                if "decreased porosity from" in source_text(source)
+            ),
+            sources[-1],
+        )
+        method_source = next(
+            (
+                source
+                for source in sources
+                if "measured by x-ray computed tomography" in source_text(source)
+                or "porosity was measured" in source_text(source)
+            ),
+            sources[0],
+        )
+        result_label = str(result_source.get("source_label") or labels[-1]).strip()
+        method_label = str(method_source.get("source_label") or labels[0]).strip()
+        combined_text = " ".join(source_text(source) for source in sources)
+        stress_relaxed = "stress-relief" in combined_text or "stress-relieved" in combined_text
+        state = "stress-relieved" if stress_relaxed else "as-built"
+
+        import re
+
+        match = re.search(
+            r"decreased porosity from\s+(\d+(?:\.\d+)?)%\s+to\s+(\d+(?:\.\d+)?)%",
+            combined_text,
+        )
+        baseline_value, target_value = (
+            (float(match.group(1)), float(match.group(2))) if match else (None, None)
+        )
+        if baseline_value is None or target_value is None:
+            return {"experiments": [], "source_labels": labels, "unresolved_issues": []}
+
+        outcome = str(
+            (payload.get("objective") or {}).get("outcomes", ["porosity"])[0]
+            if isinstance(payload.get("objective"), dict)
+            else "porosity"
+        )
+        variable = str(
+            (payload.get("objective") or {}).get(
+                "variables", ["laser exposure condition"]
+            )[0]
+            if isinstance(payload.get("objective"), dict)
+            else "laser exposure condition"
+        )
+        experiment = {
+            "series_key": "series-main",
+            "label": f"LPBF exposure condition ({state})",
+            "scope_description": (
+                "Low and high laser exposure conditions measured for one "
+                f"{state} Ti-6Al-4V sample state."
+            ),
+            "design_type": "parallel",
+            "scope_kind": "parent",
+            "experimental_variants": [
+                {
+                    "variant_key": "variant-low",
+                    "variant_label": "low exposure",
+                    "subject_attributes": [
+                        {"name": "material", "value": "Ti-6Al-4V"},
+                    ],
+                    "state": [
+                        {"name": "sample state", "value": state},
+                    ],
+                    "intervention_attributes": [
+                        {"name": variable, "value": "low exposure"}
+                    ],
+                    "identity_specificity": "exact",
+                    "source_labels": [result_label],
+                    "binding_source_labels": [result_label],
+                },
+                {
+                    "variant_key": "variant-high",
+                    "variant_label": "high exposure",
+                    "subject_attributes": [
+                        {"name": "material", "value": "Ti-6Al-4V"},
+                    ],
+                    "state": [
+                        {"name": "sample state", "value": state},
+                    ],
+                    "intervention_attributes": [
+                        {"name": variable, "value": "high exposure"}
+                    ],
+                    "identity_specificity": "exact",
+                    "source_labels": [result_label],
+                    "binding_source_labels": [result_label],
+                },
+            ],
+            "test_conditions": [
+                {
+                    "test_key": "test-ct",
+                    "test_type": "X-ray computed tomography",
+                    "method": "X-ray computed tomography",
+                    "protocol_specificity": "exact",
+                    "protocol_completeness": "complete",
+                    "outcome_scope": [outcome],
+                    "source_labels": [method_label],
+                    "binding_source_labels": [method_label],
+                }
+            ],
+            "measurements": [
+                {
+                    "measurement_key": "measurement-low",
+                    "variant_key": "variant-low",
+                    "test_key": "test-ct",
+                    "outcome": outcome,
+                    "value": baseline_value,
+                    "unit": "%",
+                    "source_labels": [result_label],
+                    "variant_binding_source_labels": [result_label],
+                    "test_binding_source_labels": [method_label],
+                },
+                {
+                    "measurement_key": "measurement-high",
+                    "variant_key": "variant-high",
+                    "test_key": "test-ct",
+                    "outcome": outcome,
+                    "value": target_value,
+                    "unit": "%",
+                    "source_labels": [result_label],
+                    "variant_binding_source_labels": [result_label],
+                    "test_binding_source_labels": [method_label],
+                },
+            ],
+            "comparisons": [
+                {
+                    "comparison_key": "comparison-exposure",
+                    "outcome": outcome,
+                    "baseline_variant_key": "variant-low",
+                    "target_variant_key": "variant-high",
+                    "baseline_measurement_keys": ["measurement-low"],
+                    "target_measurement_keys": ["measurement-high"],
+                    "changed_variables": [{"name": variable}],
+                    "source_labels": [result_label],
+                    "binding_source_labels": [result_label],
+                }
+            ],
+            "reported_interpretations": [],
+            "source_labels": labels,
+            "unresolved_issues": [],
+        }
+        return {
+            "experiments": [experiment],
+            "source_labels": labels,
+            "unresolved_issues": [],
+        }
 
     def extract_document_profile(
         self,

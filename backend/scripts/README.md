@@ -46,10 +46,13 @@ changes; ordinary follow-up questions never enter this queue. It does not
 modify Chat messages or create a training target. Use `--interval <seconds>`
 for an explicit polling loop; no hidden FastAPI background task is started.
 
-The PaperExperiment live chain acceptance probe is maintained at
-[`benchmarks/paper_experiment_chain_probe.py`](benchmarks/paper_experiment_chain_probe.py).
-It is opt-in because it uses a real PDF and an online model; see the benchmark
-README for its runtime contract and invocation.
+The PaperExperiment Draft path is exercised by the Objective analysis
+application service, not by a standalone script in this directory. The service
+builds a bounded Source bundle, calls the configured provider, reconciles
+candidate boundaries, and writes an immutable revision only after deterministic
+binding checks. Live-provider validation artifacts live outside the production
+script surface; do not add a probe link here unless the script exists and its
+input, model, and output contract are documented.
 
 ## Expert Gold Evaluation
 
@@ -190,3 +193,7 @@ cd backend
   --destination /tmp/source-table-preview \
   --reparse-inputs
 ```
+
+For PaperExperiment quality, report raw model Draft counts separately from
+service reconciliation and binding. A partial revision is an auditable archive,
+not proof that the paper is ready for Objective selection or Finding synthesis.

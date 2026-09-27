@@ -15,15 +15,51 @@ export type FeedbackCaseSummary = {
 	coverage_status: string;
 };
 
+export type ChatMessageFeedbackSignal = {
+	signal_type: 'chat_message_feedback';
+	feedback_id: string;
+	rating: string;
+	reason: string | null;
+	comment: string | null;
+	created_at: string;
+};
+
+export type NaturalLanguageCorrectionSignal = {
+	signal_type: 'natural_language_correction';
+	signal_id: string;
+	anchor_message_id: string;
+	trigger_message_id: string;
+	content: string;
+	problem_type: string;
+	confidence: number;
+	suggested_target: null;
+	resolution: 'unresolved_candidate';
+	created_at: string;
+};
+
+export type ToolFailureSignal = {
+	signal_type: 'tool_failure';
+	signal_id: string;
+	tool_call_id: string;
+	assistant_message_id: string;
+	result_message_id: string;
+	tool_name: string;
+	error_code: string;
+	problem_type: 'tool_failure';
+	confidence: number;
+	suggested_target: null;
+	resolution: 'unresolved_candidate';
+	created_at: string;
+};
+
+export type FeedbackSourceSignal =
+	| ChatMessageFeedbackSignal
+	| NaturalLanguageCorrectionSignal
+	| ToolFailureSignal;
+
 export type FeedbackCaseDetail = FeedbackCaseSummary & {
 	session_id: string;
-	source_signals: Array<{
-		feedback_id: string;
-		rating: string;
-		reason: string | null;
-		comment: string | null;
-		created_at: string;
-	}>;
+	source_signals: FeedbackSourceSignal[];
 	question: string;
 	answer: string;
 	requested_scope: Array<Record<string, unknown>>;

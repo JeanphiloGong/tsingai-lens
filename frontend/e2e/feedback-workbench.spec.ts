@@ -8,7 +8,11 @@ function json(body: unknown, status = 200) {
 	return { status, contentType: 'application/json', body: JSON.stringify(body) };
 }
 
-async function mockFeedbackApis(page: Page) {
+type MockFeedbackApisOptions = {
+	sourceSignals?: Array<Record<string, unknown>>;
+};
+
+async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {}) {
 	let status = 'needs_annotation';
 	let annotation: Record<string, unknown> | null = null;
 	let reviewDecisions: Record<string, unknown>[] = [];
@@ -76,7 +80,7 @@ async function mockFeedbackApis(page: Page) {
 					collection_id: collectionId,
 					session_id: 'session_feedback',
 					status: datasetMode ? 'accepted' : status,
-					source_signals: [],
+					source_signals: options.sourceSignals ?? [],
 					question: 'Compare Paper A and Paper B.',
 					answer: 'Paper B has no preheating information.',
 					requested_scope: [{ document_id: 'doc_a', title: 'Paper A' }],
@@ -231,5 +235,64 @@ test('dataset history uses case context instead of internal identifiers', async 
 	expect(body).not.toContain(caseId);
 	expect(body).not.toContain('dataset_feedback');
 	expect(body).not.toContain('abcdef123456');
+	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('feedback workbench presents each source signal with its own meaning', async ({ page }) => {
+	await mockFeedbackApis(page, {
+		sourceSignals: [
+			{
+				signal_type: 'chat_message_feedback',
+				feedback_id: 'feedback_private',
+				rating: 'not_helpful',
+				reason: 'source_missing',
+				comment: 'Paper B was not checked.',
+				created_at: '2026-09-25T00:00:00Z'
+			},
+			{
+				signal_type: 'natural_language_correction',
+				signal_id: 'signal_correction_private',
+				anchor_message_id: 'answer_feedback',
+				trigger_message_id: 'challenge_private',
+				content: 'You did not inspect Figure 3 in Paper B.',
+				problem_type: 'source_missing',
+				confidence: 0.91,
+				suggested_target: null,
+				resolution: 'unresolved_candidate',
+				created_at: '2026-09-25T00:01:00Z'
+			},
+			{
+				signal_type: 'tool_failure',
+				signal_id: 'signal_tool_private',
+				tool_call_id: 'tool_call_private',
+				assistant_message_id: 'assistant_private',
+				result_message_id: 'result_private',
+				tool_name: 'inspect_document_sources',
+				error_code: 'source_unavailable',
+				problem_type: 'tool_failure',
+				confidence: 1,
+				suggested_target: null,
+				resolution: 'unresolved_candidate',
+				created_at: '2026-09-25T00:02:00Z'
+			}
+		]
+	});
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`/collections/${collectionId}/feedback`);
+	await page.getByRole('button', { name: /Compare Paper A and Paper B/ }).click();
+
+	const correction = page.locator('[data-signal-type="natural_language_correction"]');
+	await expect(correction).toContainText('User correction');
+	await expect(correction).toContainText('You did not inspect Figure 3 in Paper B.');
+
+	const failure = page.locator('[data-signal-type="tool_failure"]');
+	await expect(failure).toContainText('Tool failure');
+	await expect(failure).toContainText('inspect document sources');
+	await expect(failure).toContainText('source unavailable');
+
+	const body = await page.locator('body').textContent();
+	expect(body).not.toContain('signal_correction_private');
+	expect(body).not.toContain('tool_call_private');
 	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });

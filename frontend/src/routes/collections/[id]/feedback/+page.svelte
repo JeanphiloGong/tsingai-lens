@@ -6,8 +6,12 @@
 		CheckCircle2,
 		ChevronRight,
 		FileText,
+		MessageSquareWarning,
 		RefreshCw,
 		Search,
+		ThumbsDown,
+		ThumbsUp,
+		Wrench,
 		XCircle
 	} from '@lucide/svelte';
 	import { ApiError, errorMessage } from '../../../_shared/api';
@@ -430,10 +434,41 @@
 
 				{#if selected.source_signals.length}
 					<section class="detail-section">
-						<div class="section-heading"><h3>{$t('feedbackWorkbench.feedbackSignal')}</h3><span>{selected.source_signals.length} {selected.source_signals.length === 1 ? $t('feedbackWorkbench.record') : $t('feedbackWorkbench.records')}</span></div>
-						{#each selected.source_signals as signal}
-							<div class="signal"><span class:signal--negative={signal.rating === 'not_helpful'}>{signal.rating === 'not_helpful' ? $t('feedbackWorkbench.notHelpful') : $t('feedbackWorkbench.helpful')}</span><strong>{problemLabel(signal.reason)}</strong>{#if signal.comment}<p>{signal.comment}</p>{/if}</div>
-						{/each}
+						<div class="section-heading">
+							<h3>{$t('feedbackWorkbench.feedbackSignal')}</h3>
+							<span>{selected.source_signals.length} {selected.source_signals.length === 1 ? $t('feedbackWorkbench.record') : $t('feedbackWorkbench.records')}</span>
+						</div>
+						<div class="signal-list">
+							{#each selected.source_signals as signal (signal.signal_type === 'chat_message_feedback' ? signal.feedback_id : signal.signal_id)}
+								<article class="signal" data-signal-type={signal.signal_type}>
+									<div class="signal__heading">
+										{#if signal.signal_type === 'chat_message_feedback'}
+											<span class="signal__badge" class:signal__badge--negative={signal.rating === 'not_helpful'}>
+												{#if signal.rating === 'not_helpful'}<ThumbsDown size={14} aria-hidden="true" />{:else}<ThumbsUp size={14} aria-hidden="true" />{/if}
+												{signal.rating === 'not_helpful' ? $t('feedbackWorkbench.notHelpful') : $t('feedbackWorkbench.helpful')}
+											</span>
+											<strong>{problemLabel(signal.reason)}</strong>
+										{:else if signal.signal_type === 'natural_language_correction'}
+											<span class="signal__badge signal__badge--correction"><MessageSquareWarning size={14} aria-hidden="true" />{$t('feedbackWorkbench.userCorrection')}</span>
+											<strong>{problemLabel(signal.problem_type)}</strong>
+										{:else}
+											<span class="signal__badge signal__badge--negative"><Wrench size={14} aria-hidden="true" />{$t('feedbackWorkbench.toolFailureSignal')}</span>
+											<strong>{label(signal.tool_name)}</strong>
+										{/if}
+									</div>
+									{#if signal.signal_type === 'chat_message_feedback' && signal.comment}
+										<p class="signal__body">{signal.comment}</p>
+									{:else if signal.signal_type === 'natural_language_correction'}
+										<blockquote class="signal__body">{signal.content}</blockquote>
+									{:else if signal.signal_type === 'tool_failure'}
+										<dl class="signal__facts">
+											<div><dt>{$t('feedbackWorkbench.tool')}</dt><dd>{label(signal.tool_name)}</dd></div>
+											<div><dt>{$t('feedbackWorkbench.recordedFailure')}</dt><dd>{label(signal.error_code)}</dd></div>
+										</dl>
+									{/if}
+								</article>
+							{/each}
+						</div>
 					</section>
 				{/if}
 
@@ -580,10 +615,18 @@
 	.section-heading { margin-bottom: 12px; }
 	.section-heading h3 { margin: 0; font-size: 15px; }
 	.section-heading > span { color: var(--text-secondary); font-size: 12px; }
-	.signal { display: flex; align-items: baseline; flex-wrap: wrap; gap: 9px; padding: 10px 0; border-top: 1px solid var(--border-default); font-size: 13px; }
-	.signal > span { color: var(--success-text); font-weight: 700; }
-	.signal > span.signal--negative { color: var(--danger-text); }
-	.signal p { flex-basis: 100%; margin: 2px 0 0; color: var(--text-secondary); }
+	.signal-list { display: grid; }
+	.signal { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border-default); font-size: 13px; }
+	.signal__heading { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; min-width: 0; }
+	.signal__heading strong { min-width: 0; overflow-wrap: anywhere; }
+	.signal__badge { display: inline-flex; align-items: center; gap: 5px; color: var(--success-text); font-weight: 700; }
+	.signal__badge--negative { color: var(--danger-text); }
+	.signal__badge--correction { color: var(--warning-text); }
+	.signal__body { margin: 0; padding-left: 20px; border-left: 2px solid var(--border-default); color: var(--text-secondary); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+	.signal__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; margin: 0; }
+	.signal__facts div { min-width: 0; }
+	.signal__facts dt { color: var(--text-secondary); font-size: 11px; }
+	.signal__facts dd { margin: 2px 0 0; font-weight: 700; overflow-wrap: anywhere; }
 	.scope-list { display: flex; flex-wrap: wrap; gap: 8px; }
 	.scope-chip { padding: 6px 9px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--bg-subtle); font-size: 12px; }
 	.coverage-badge { color: var(--text-secondary) !important; }
@@ -645,5 +688,5 @@
 		.review-history__row p { grid-column: 1 / -1; margin: 2px 0 0; color: var(--text-secondary); line-height: 1.45; }
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@media (max-width: 840px) { .workbench-grid { grid-template-columns: 1fr; } .case-list { order: 0; } .case-detail { order: 1; } .detail-placeholder { min-height: 260px; } }
-		@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer, .annotation-grid, .annotation-summary-grid { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .annotation-actions { align-items: stretch; flex-direction: column; } }
+		@media (max-width: 600px) { .workbench-header { gap: 12px; } .prompt-answer, .annotation-grid, .annotation-summary-grid, .signal__facts { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .annotation-actions { align-items: stretch; flex-direction: column; } }
 </style>

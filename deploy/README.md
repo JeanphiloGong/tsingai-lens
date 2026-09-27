@@ -1,7 +1,8 @@
 # TsingAI-Lens Deploy Bundle
 
 This directory is the minimal self-hosted runtime bundle for Lens. It runs the
-published Lens images with one internal PostgreSQL service.
+published Lens images with one internal PostgreSQL service and three internal
+analysis Worker services.
 
 This is the repository's only Docker Compose entrypoint. For source-tree
 development, use the module-local instructions in
@@ -214,6 +215,37 @@ Application startup never creates or changes database schema.
 ./scripts/lens ps
 ```
 
+`./scripts/lens up` starts the backend, frontend, PostgreSQL, and the three
+analysis Workers together. The Workers are long-running processes built from
+the backend image; they do not expose HTTP ports and are not started by a Chat
+request. The backend only records a pending `analysis_jobs` row, and the
+matching Worker claims it and writes the analysis result.
+
+The expected service names are:
+
+```text
+postgres
+backend
+frontend
+feedback-analysis-worker
+correction-signal-analysis-worker
+tool-failure-analysis-worker
+```
+
+Inspect a particular Worker when a job remains pending:
+
+```bash
+./scripts/lens logs feedback-analysis-worker
+./scripts/lens logs correction-signal-analysis-worker
+./scripts/lens logs tool-failure-analysis-worker
+```
+
+Stopping a Worker leaves newly created jobs in `pending`; starting the service
+again lets it continue polling. Docker's `restart: unless-stopped` restarts a
+Worker container after a process failure. The current Worker scripts do not
+provide automatic retry or stale-`running` recovery; those are separate task
+reliability features.
+
 Open:
 
 ```text
@@ -239,7 +271,8 @@ http://localhost:8080
 Command mapping:
 
 - `doctor` checks Docker, Compose, password shape, PostgreSQL readiness,
-  Alembic head state, the data directory, and frontend/backend reachability.
+  Alembic head state, the data directory, all three analysis Workers, and
+  frontend/backend reachability.
 - `up` runs `docker compose up -d`.
 - `down` runs `docker compose down`.
 - `logs` follows `docker compose logs`.
@@ -257,11 +290,15 @@ Back up PostgreSQL and file-backed runtime data before changing versions. See
 cp -a data/backend data/backend.backup.$(date +%Y%m%d%H%M%S)
 ```
 
-Edit `LENS_VERSION` in `.env`, stop the application, pull the new images,
-migrate with the new backend image, and start Lens again:
+Edit `LENS_VERSION` in `.env`, stop the application and Workers, pull the new
+images, migrate with the new backend image, and start Lens again:
 
 ```bash
-docker compose --env-file .env -f compose.yml stop frontend backend
+docker compose --env-file .env -f compose.yml stop \
+  frontend backend \
+  feedback-analysis-worker \
+  correction-signal-analysis-worker \
+  tool-failure-analysis-worker
 docker compose --env-file .env -f compose.yml pull
 docker compose --env-file .env -f compose.yml up -d postgres
 docker compose --env-file .env -f compose.yml run --rm backend alembic upgrade head
@@ -288,13 +325,17 @@ version still owns file-backed structured state.
 ## Restore
 
 Restore only from a trusted, non-empty archive. This procedure stops the
-backend, replaces the `lens` database, verifies the Alembic head, and then
-starts the backend again:
+backend and Workers, replaces the `lens` database, verifies the Alembic head,
+and then starts the application services again:
 
 ```bash
 lens_backup_file=../lens-backups/lens-YYYYMMDDHHMMSS.dump
 test -s "$lens_backup_file"
-docker compose --env-file .env -f compose.yml stop backend
+docker compose --env-file .env -f compose.yml stop \
+  frontend backend \
+  feedback-analysis-worker \
+  correction-signal-analysis-worker \
+  tool-failure-analysis-worker
 docker compose --env-file .env -f compose.yml exec -T postgres \
   psql --set=ON_ERROR_STOP=1 --username=lens --dbname=postgres \
   --command='DROP DATABASE IF EXISTS lens WITH (FORCE)' \
@@ -304,7 +345,7 @@ docker compose --env-file .env -f compose.yml exec -T postgres \
   --username=lens --dbname=lens < "$lens_backup_file"
 docker compose --env-file .env -f compose.yml run --rm backend \
   alembic current --check-heads
-docker compose --env-file .env -f compose.yml start backend
+docker compose --env-file .env -f compose.yml up -d
 ./scripts/lens doctor
 ```
 

@@ -120,6 +120,18 @@ if [ "$COMPOSE_READY" -eq 1 ]; then
       warn "backend container is not running; Alembic state was not checked"
     fi
 
+    for worker in \
+      feedback-analysis-worker \
+      correction-signal-analysis-worker \
+      tool-failure-analysis-worker
+    do
+      if printf '%s\n' "$RUNNING_SERVICES" | grep -qx "$worker"; then
+        pass "$worker container is running"
+      else
+        fail "$worker container is not running"
+      fi
+    done
+
     if printf '%s\n' "$RUNNING_SERVICES" | grep -qx frontend; then
       if fetch_url "http://localhost:$LENS_HTTP_PORT" >/dev/null 2>&1; then
         pass "frontend is reachable on port $LENS_HTTP_PORT"

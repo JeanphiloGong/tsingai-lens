@@ -37,6 +37,12 @@
 		).join(' · ');
 	}
 
+	function resourceOperation(activity: ActivityItem) {
+		return activityOperations(activity).find(
+			(operation) => (operation.resultMessage?.tool_result?.resource_refs.length ?? 0) > 0
+		);
+	}
+
 	function operationArguments(operation: ToolActivityOperation) {
 		return (
 			operation.requestMessage?.tool_calls.find(
@@ -179,7 +185,7 @@
 						{#if operation.resultMessage?.tool_result?.warnings.length}
 							<ResultWarnings warnings={operation.resultMessage.tool_result.warnings} />
 						{/if}
-						{#if operation.resultMessage && operation.resultMessage.tool_result?.resource_refs.length}
+						{#if operation === resourceOperation(item) && operation.resultMessage && operation.resultMessage.tool_result?.resource_refs.length}
 							<ResultResources message={operation.resultMessage} />
 						{/if}
 					</div>

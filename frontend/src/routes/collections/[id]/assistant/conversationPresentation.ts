@@ -178,6 +178,10 @@ const reviewableResultTools = new Set([
 	'start_research_process'
 ]);
 
+// Capability discovery is an implementation detail of the agent loop. It is
+// useful for execution, but it is not a research action the user performed.
+const hiddenPresentationTools = new Set(['discover_research_tools']);
+
 export type ToolActivityOperation = {
 	toolCallId: string;
 	toolName: string | null;
@@ -258,7 +262,9 @@ export function buildChatPresentation(
 	const flushActivity = () => {
 		if (!activityMessages.length) return;
 		const operations = operationsFrom(activityMessages).filter(
-			(operation) => operation.toolCallId !== pendingApprovalToolCallId
+			(operation) =>
+				operation.toolCallId !== pendingApprovalToolCallId &&
+				!hiddenPresentationTools.has(operation.toolName ?? '')
 		);
 		if (!operations.length) {
 			activityMessages = [];

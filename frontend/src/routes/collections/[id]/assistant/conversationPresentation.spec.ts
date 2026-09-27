@@ -242,6 +242,30 @@ describe('buildChatPresentation', () => {
 		expect(items[0]).toMatchObject({ kind: 'activity', status: 'in_progress' });
 	});
 
+	it('does not expose capability discovery as a user research operation', () => {
+		const items = buildChatPresentation([
+			message('discover-call', 'assistant', {
+				toolCallId: 'discover',
+				toolName: 'discover_research_tools'
+			}),
+			message('discover-result', 'tool', {
+				toolResult: result('discover')
+			}),
+			message('read-call', 'assistant', {
+				toolCallId: 'read',
+				toolName: 'inspect_document_sources'
+			}),
+			message('read-result', 'tool', { toolResult: result('read') })
+		]);
+
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({ kind: 'activity' });
+		if (items[0].kind !== 'activity') return;
+		expect(items[0].operations.map((operation) => operation.toolName)).toEqual([
+			'inspect_document_sources'
+		]);
+	});
+
 	it('compresses consecutive routine tool calls into one research activity group', () => {
 		const items = buildChatPresentation([
 			message('user_1', 'user', { content: 'Which findings support this question?' }),

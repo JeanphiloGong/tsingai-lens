@@ -111,9 +111,20 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 		});
 	}
 	if (name === 'read_source') {
-		const sourceRef = result.data.source_ref;
+		const document = result.data.document;
+		const documentTitle =
+			(typeof result.data.document_title === 'string' && result.data.document_title.trim()) ||
+			(typeof result.data.title === 'string' && result.data.title.trim()) ||
+			(document && typeof document === 'object' && 'title' in document && typeof document.title === 'string'
+				? document.title.trim()
+				: '');
+		const location =
+			(typeof result.data.heading_path === 'string' && result.data.heading_path.trim()) ||
+			(typeof result.data.source_kind === 'string' && result.data.source_kind.trim()) ||
+			'';
+		const page = typeof result.data.page === 'number' ? ` · p. ${result.data.page}` : '';
 		return translate('researchAgent.capability.sourceReadSummary', {
-			source: typeof sourceRef === 'string' && sourceRef.trim() ? sourceRef : '--'
+			source: [documentTitle, location].filter(Boolean).join(' · ') + page || translate('researchAgent.capability.sourcePassage')
 		});
 	}
 	if (name === 'inspect_table') {

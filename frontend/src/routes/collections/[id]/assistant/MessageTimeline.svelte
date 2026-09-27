@@ -74,6 +74,7 @@
 	export let streamingText = '';
 	export let responseSnapshot: ChatResponseSnapshot | null = null;
 	export let pendingApproval: ChatToolCall | null = null;
+	export let collectionId = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
 	export let loading = false;
@@ -327,7 +328,7 @@
 			{/if}
 
 			{#if pendingApproval}
-				<ApprovalPanel call={pendingApproval} {deciding} onDecide={decide} />
+				<ApprovalPanel call={pendingApproval} {collectionId} {deciding} onDecide={decide} />
 			{/if}
 			{#if showRecoveryRow || showReadingRow}
 				<AssistantMessage

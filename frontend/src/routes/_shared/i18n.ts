@@ -13,6 +13,7 @@ const translations: Record<Language, Translations> = {
 	en: {
 		agentReview: {
 			details: 'Exact action details',
+			researchObjective: 'Research question',
 			statement: 'Proposed conclusion',
 			question: 'Research question',
 			reported_result: 'Reported result',
@@ -553,7 +554,8 @@ const translations: Record<Language, Translations> = {
 				unknown: 'Research capability',
 				paperCount: '{papers} papers · {objectives} objectives',
 				documentSourceCount: '{count} matching paper sources',
-				sourceReadSummary: 'Read Source {source}',
+				sourceReadSummary: 'Read {source}',
+				sourcePassage: 'a source passage',
 				sourceContinuation:
 					'This Source is bounded; ask the Agent to continue from the returned offset before treating it as complete.',
 				tableContinuation:
@@ -600,6 +602,7 @@ const translations: Record<Language, Translations> = {
 				findingStatement: 'Finding statement',
 				assertionStrength: 'Assertion strength',
 				supportingEvidence: 'Supporting Evidence',
+				supportingEvidenceCount: '{count} linked evidence records',
 				sourceExcerpt: 'Source excerpt',
 				authoringNote: 'Author note',
 				scopeCount: '{likely} likely relevant · {review} need inspection · {excluded} out of scope',
@@ -656,6 +659,7 @@ const translations: Record<Language, Translations> = {
 					'Inspect the selected papers, extract source-backed facts, and compare the result for this research question.',
 				objectiveConfirmationBody:
 					'Confirm this reviewed research question without starting its analysis.',
+				selectedObjective: 'The selected research question could not be loaded.',
 				findingFeedbackBody:
 					'Review the exact assessment that will be recorded for this published research conclusion.',
 				findingCurationBody:
@@ -3040,6 +3044,7 @@ const translations: Record<Language, Translations> = {
 	zh: {
 		agentReview: {
 			details: '查看完整操作详情',
+			researchObjective: '研究问题',
 			statement: '拟议结论',
 			question: '研究问题',
 			reported_result: '实验结果',
@@ -3558,7 +3563,8 @@ const translations: Record<Language, Translations> = {
 				unknown: '研究能力',
 				paperCount: '{papers} 篇论文 · {objectives} 个研究目标',
 				documentSourceCount: '{count} 个匹配的论文原文来源',
-				sourceReadSummary: '已读取 Source：{source}',
+				sourceReadSummary: '已读取{source}',
+				sourcePassage: '原文片段',
 				sourceContinuation: '当前 Source 受长度限制；如需完整内容，请让 Agent 从返回位置继续读取。',
 				tableContinuation:
 					'当前表格显示的是受限制的行窗口；如需完整表格，请让 Agent 继续读取后续行。',
@@ -3601,6 +3607,7 @@ const translations: Record<Language, Translations> = {
 				findingStatement: 'Finding 表述',
 				assertionStrength: '结论强度',
 				supportingEvidence: '支撑 Evidence',
+				supportingEvidenceCount: '已关联 {count} 条证据',
 				sourceExcerpt: '原文摘录',
 				authoringNote: '作者备注',
 				scopeCount: '{likely} 篇可能相关 · {review} 篇需检查 · {excluded} 篇不在范围内',
@@ -3653,6 +3660,7 @@ const translations: Record<Language, Translations> = {
 				startResearchBody: '整理论文、判断论文类型与用途、建立轻量论文地图并归纳候选研究问题。',
 				objectiveAnalysisBody: '检查选定论文、提取可回溯的事实，并围绕这个研究问题比较结果。',
 				objectiveConfirmationBody: '确认已经审阅的研究问题；本次操作不会启动分析。',
+				selectedObjective: '暂时无法读取已选择的研究问题。',
 				findingFeedbackBody: '请核对即将记录到这条已发布研究发现上的审阅判断。',
 				findingCurationBody:
 					'请核对完整的修订后研究发现；其身份、论文范围、证据和原文来源关系不会改变。',

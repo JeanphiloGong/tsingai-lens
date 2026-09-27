@@ -1320,6 +1320,7 @@
 			<div class="status status-notice" role="status">{notice}</div>
 		{/if}
 		<MessageTimeline
+			{collectionId}
 			sessionId={activeSessionId}
 			messages={visibleMessages}
 			{branches}

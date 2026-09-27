@@ -194,6 +194,19 @@ function installApi({
 		if (path === '/api/v1/chat-sessions' && method === 'GET') {
 			return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
 		}
+		if (path === '/api/v1/collections/col_123/objectives' && method === 'GET') {
+			return Promise.resolve(
+				jsonResponse({
+					collection_id: 'col_123',
+					objectives: [
+						{
+							objective_id: 'obj_energy_1',
+							question: 'How does laser energy affect Ti-6Al-4V strength?'
+						}
+					]
+				})
+			);
+		}
 		if (path === '/api/v1/chat-sessions' && method === 'POST') {
 			return Promise.resolve(jsonResponse(session, 201));
 		}
@@ -2623,7 +2636,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Evidence draft completed' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('table_2')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('table_2')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('P150 elongation was 82%.')).toBeInTheDocument();
 	});
 
@@ -2880,7 +2893,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('Finding authoring', { exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText(statement, { exact: true })).toBeInTheDocument();
-		await expect.element(browserPage.getByText('evidence_1', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('evidence_1', { exact: true })).not.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
@@ -3283,6 +3296,14 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByText('Research question confirmation', { exact: true }))
 			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('How does laser energy affect Ti-6Al-4V strength?', { exact: true })
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('obj_energy_1', { exact: true }))
+			.not.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(

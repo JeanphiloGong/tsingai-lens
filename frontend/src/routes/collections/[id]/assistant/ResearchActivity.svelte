@@ -69,10 +69,12 @@
 			(textValue(args.document_id) ? $t('researchAgent.progress.currentPaper') : '');
 		const source =
 			textValue(data.heading_path) ||
-			textValue(data.source_ref) ||
 			textValue(args.heading_path) ||
-			textValue(args.source_ref) ||
-			textValue(args.table_ref);
+			textValue(data.source_kind) ||
+			textValue(args.source_kind) ||
+			(textValue(data.source_ref) || textValue(args.source_ref) || textValue(args.table_ref)
+				? $t('researchAgent.capability.sourcePassage')
+				: '');
 		const page = data.page ?? args.page;
 		const location = [
 			source,

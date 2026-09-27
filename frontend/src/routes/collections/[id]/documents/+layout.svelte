@@ -346,8 +346,8 @@
 							<a
 								href={source.resource_ref.href ||
 									`/collections/${collectionId}/documents/${source.document_id}?source_ref=${encodeURIComponent(source.source_ref)}`}
-								><strong>{source.document_title}</strong><span
-									>{source.heading_path || source.source_ref}</span
+									><strong>{source.document_title}</strong><span
+										>{source.heading_path || $t('researchAgent.progress.sourceKind.passage')}</span
 								>
 								<p>{source.quote}</p></a
 							><IconButton

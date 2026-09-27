@@ -2,10 +2,14 @@
 	import { Check, X, FileCheck2, ChevronDown } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import type { ChatToolCall } from '../../../_shared/chatSessions';
+	import { fetchCollectionObjectives } from '../../../_shared/researchView';
 	import { capabilityName, formatValue } from './capabilityPresentation';
 	export let call: ChatToolCall;
+	export let collectionId = '';
 	export let deciding = false;
 	export let onDecide: (decision: 'approved' | 'rejected') => void;
+	let loadedObjectiveId = '';
+	let objectiveQuestion = '';
 	const reviewFields = [
 		'statement',
 		'question',
@@ -18,7 +22,40 @@
 		(key) => call.arguments[key] != null && formatValue(call.arguments[key]) !== ''
 	);
 	function approvalArguments(call: ChatToolCall) {
-		return Object.entries(call.arguments).filter(([key]) => !review.includes(key));
+		return Object.entries(call.arguments).filter(
+			([key]) => !review.includes(key) && !isInternalReferenceKey(key)
+		);
+	}
+
+	function isInternalReferenceKey(key: string) {
+		return (
+			key === 'objective_id' ||
+			key === 'source_ref' ||
+			key === 'source_refs' ||
+			key === 'tool_call_id' ||
+			key === 'call_id' ||
+			key.endsWith('_id') ||
+			key.endsWith('_ids')
+		);
+	}
+
+	$: approvalObjectiveId =
+		typeof call.arguments.objective_id === 'string' ? call.arguments.objective_id.trim() : '';
+	$: if (approvalObjectiveId && collectionId && approvalObjectiveId !== loadedObjectiveId) {
+		loadedObjectiveId = approvalObjectiveId;
+		void loadObjectiveQuestion(approvalObjectiveId, collectionId);
+	}
+
+	async function loadObjectiveQuestion(objectiveId: string, ownerCollectionId: string) {
+		try {
+			const result = await fetchCollectionObjectives(ownerCollectionId);
+			if (objectiveId !== approvalObjectiveId || ownerCollectionId !== collectionId) return;
+			objectiveQuestion =
+				result.objectives.find((objective) => objective.objective_id === objectiveId)?.question ??
+				'';
+		} catch {
+			objectiveQuestion = '';
+		}
 	}
 
 	function approvalBody(call: ChatToolCall) {
@@ -107,6 +144,14 @@
 					<p>{formatValue(call.arguments[key])}</p>
 				</div>
 			{/each}
+		</div>
+	{/if}
+	{#if approvalObjectiveId}
+		<div class="review-content">
+			<div>
+				<h4>{$t('agentReview.researchObjective')}</h4>
+				<p>{objectiveQuestion || $t('researchAgent.approval.selectedObjective')}</p>
+			</div>
 		</div>
 	{/if}
 	{#if approvalArguments(call).length}

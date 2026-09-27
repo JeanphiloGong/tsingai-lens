@@ -181,6 +181,7 @@ registered write action, so clients do not need to maintain that authoritative
 list.
 
 - `POST /api/v1/chat-sessions`
+- `GET /api/v1/chat-sessions?collection_id={collection_id}`
 - `GET /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
@@ -195,6 +196,11 @@ record ordinary user and assistant conversation, model tool intent, and bounded
 structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
+
+The collection-scoped list returns the authenticated user's saved sessions,
+ordered by most recently updated, with `limit` and `offset` pagination. It is
+the source for restoring Chat history on another device; browser local storage
+may remember the active session but is not the authoritative history index.
 
 Message editing and answer regeneration preserve the original trajectory.
 `POST /chat-sessions/{session_id}/branches` accepts a saved user `message_id`,

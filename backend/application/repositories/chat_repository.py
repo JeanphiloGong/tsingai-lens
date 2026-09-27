@@ -77,6 +77,10 @@ class ChatRepository(Protocol):
 
     async def read_session(self, session_id: str) -> ChatSession | None: ...
 
+    async def list_sessions(
+        self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatSession, ...]: ...
+
     async def read_messages(
         self, session_id: str
     ) -> tuple[ChatMessage, ...]: ...

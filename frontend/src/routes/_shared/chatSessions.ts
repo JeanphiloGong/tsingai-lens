@@ -236,6 +236,19 @@ export async function createChatSession(collectionId: string, signal?: AbortSign
 	})) as ChatSession;
 }
 
+export async function listChatSessions(
+	collectionId: string,
+	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+) {
+	const params = new URLSearchParams({ collection_id: collectionId });
+	if (options.limit !== undefined) params.set('limit', String(options.limit));
+	if (options.offset !== undefined) params.set('offset', String(options.offset));
+	return (await requestJson(`${chatSessionPath()}?${params.toString()}`, {
+		signal: options.signal,
+		method: 'GET'
+	})) as { items: ChatSession[]; limit: number; offset: number };
+}
+
 export async function fetchChatSession(sessionId: string, signal?: AbortSignal) {
 	return (await requestJson(chatSessionPath(sessionId), {
 		signal,

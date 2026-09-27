@@ -51,6 +51,12 @@ class ChatSessionResponse(BaseModel):
     fork_content: str | None = None
 
 
+class ChatSessionListResponse(BaseModel):
+    items: list[ChatSessionResponse]
+    limit: int
+    offset: int
+
+
 class ChatBranchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

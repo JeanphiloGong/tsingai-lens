@@ -31,6 +31,7 @@ from controllers.schemas.chat.session import (
     ChatModelCallSummaryResponse,
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
+    ChatSessionListResponse,
     ChatSessionResponse,
     ChatToolCallResponse,
     ChatToolDecisionRequest,
@@ -94,6 +95,29 @@ def _session_not_found(exc: ChatSessionNotFoundError) -> dict[str, str]:
         "message": str(exc),
         "session_id": exc.session_id,
     }
+
+
+@router.get("", response_model=ChatSessionListResponse, summary="List owned Chat sessions")
+async def list_chat_sessions(
+    request: Request,
+    collection_id: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> ChatSessionListResponse:
+    try:
+        sessions = await request.app.state.chat_session_service.list_sessions_for_user(
+            collection_id=collection_id,
+            user_id=await current_user_id(request),
+            limit=limit,
+            offset=offset,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ChatSessionListResponse(
+        items=[ChatSessionResponse.model_validate(item.to_record()) for item in sessions],
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(

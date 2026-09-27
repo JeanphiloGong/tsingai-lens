@@ -211,6 +211,22 @@ class PostgresChatRepository:
             row = await session.get(ChatSessionRow, session_id)
             return _session_record(row) if row is not None else None
 
+    async def list_sessions(
+        self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatSession, ...]:
+        async with self.session_factory() as session:
+            rows = await session.scalars(
+                select(ChatSessionRow)
+                .where(
+                    ChatSessionRow.user_id == user_id,
+                    ChatSessionRow.collection_id == collection_id,
+                )
+                .order_by(ChatSessionRow.updated_at.desc(), ChatSessionRow.session_id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            return tuple(_session_record(row) for row in rows)
+
     async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
         async with self.session_factory() as session:
             rows = tuple(

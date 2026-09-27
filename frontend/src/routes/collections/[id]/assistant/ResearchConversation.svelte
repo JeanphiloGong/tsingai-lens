@@ -9,6 +9,7 @@
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
+		listChatSessions,
 		branchChatMessage,
 		clearPendingChatSourceContexts,
 		decideChatToolCall,
@@ -311,6 +312,47 @@
 		]);
 	}
 
+	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
+		try {
+			const response = await listChatSessions(ownerCollectionId, {
+				limit: 12,
+				signal: sessionController?.signal
+			});
+			const stored = readHistory();
+			const serverHistory = await Promise.all(
+				response.items.map(async (item) => {
+					let items: ChatMessage[] = [];
+					if (item.session_id === session?.session_id) {
+						items = messages;
+					} else {
+						try {
+							items = (await fetchChatTrajectory(item.session_id, sessionController?.signal)).items;
+						} catch {
+							// Keep a server session visible even when its activity check is temporarily unavailable.
+						}
+					}
+					const previous = stored.find((entry) => entry.session_id === item.session_id);
+					return {
+						session_id: item.session_id,
+						title: items.length
+							? titleFromMessages(items)
+							: previous?.title || $t('researchAgent.untitledSession'),
+						created_at: item.created_at,
+						updated_at: item.updated_at
+					};
+				})
+			);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			const serverIds = new Set(serverHistory.map((entry) => entry.session_id));
+			writeHistory([
+				...serverHistory,
+				...stored.filter((entry) => !serverIds.has(entry.session_id))
+			]);
+		} catch {
+			// The existing local history remains usable when the list request is unavailable.
+		}
+	}
+
 	async function refreshHistoryActivities(all = false) {
 		if (!session || loading || historyLoading || destroyed) return;
 		const generation = sessionGeneration;
@@ -452,6 +494,7 @@
 			onSourcesChanged();
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
+			await refreshServerHistory(generation, activeCollectionId);
 			scheduleRecovery();
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;

@@ -191,6 +191,9 @@ function installApi({
 	fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 		const path = requestPath(input);
 		const method = requestMethod(input, init);
+		if (path === '/api/v1/chat-sessions' && method === 'GET') {
+			return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
+		}
 		if (path === '/api/v1/chat-sessions' && method === 'POST') {
 			return Promise.resolve(jsonResponse(session, 201));
 		}
@@ -498,7 +501,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
 				const method = requestMethod(input, init);
-				if (path === '/api/v1/chat-sessions') {
+				if (path === '/api/v1/chat-sessions' && method === 'GET') {
+					return jsonResponse({ items: [], limit: 12, offset: 0 });
+				}
+				if (path === '/api/v1/chat-sessions' && method === 'POST') {
 					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
 				}
 				const id = path.split('/')[4];

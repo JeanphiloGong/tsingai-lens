@@ -233,6 +233,22 @@ class ChatSessionService:
         )
         return session
 
+    async def list_sessions_for_user(
+        self,
+        *,
+        collection_id: str,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[ChatSession, ...]:
+        await self.collection_service.get_collection_for_user(collection_id, user_id)
+        return await self.repository.list_sessions(
+            user_id=user_id,
+            collection_id=collection_id,
+            limit=limit,
+            offset=offset,
+        )
+
     async def list_messages_for_user(
         self,
         session_id: str,

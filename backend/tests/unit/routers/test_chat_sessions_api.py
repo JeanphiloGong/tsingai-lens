@@ -20,6 +20,7 @@ from application.pipeline import PipelineRunService
 from controllers.chat import sessions as sessions_controller
 from controllers.schemas.chat.session import (
     ChatSessionCreateRequest,
+    ChatSessionListResponse,
     ChatToolDecisionRequest,
     ChatTurnRequest,
 )
@@ -85,6 +86,18 @@ class _Service:
         if session_id != "chat-1" or user_id != "user-1":
             raise ChatSessionNotFoundError(session_id)
         return self.session
+
+    async def list_sessions_for_user(
+        self,
+        *,
+        collection_id: str,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        assert collection_id == "col-1"
+        assert user_id == "user-1"
+        return (self.session,)
 
     async def list_messages_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
@@ -218,6 +231,18 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert turn.messages[-1].content.startswith("你好")
     assert [item.role for item in messages.items] == ["user", "assistant"]
     assert messages.pending_approval.tool_call_id == "call-1"
+
+
+def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
+    response = asyncio.run(
+        sessions_controller.list_chat_sessions(
+            _request(_Service()), collection_id="col-1", limit=12, offset=0
+        )
+    )
+
+    assert isinstance(response, ChatSessionListResponse)
+    assert response.limit == 12
+    assert [item.session_id for item in response.items] == ["chat-1"]
 
 
 def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:

@@ -11,12 +11,22 @@ python backend/scripts/evaluation/feedback_dataset/prepare.py \
 ```
 
 `prepare.py` verifies the snapshot and writes `snapshot.json`, `prepared.json`,
-`train.jsonl`, and `eval.jsonl`. It checks the manifest, provenance and content
-digests, row digests, dataset-specific fields, and train/eval isolation by paper
-family and session tree. `prepared.json` also carries a digest over its revision,
-seed, tokenizer, counts, and file names; changing those values makes the
-directory unusable until it is prepared again. Context overflow is an error;
-Source or target text is never silently truncated. The token accounting format is
+`train.jsonl`, and `eval.jsonl`. Snapshot rows are deliberately model-facing:
+they contain the question/messages, target or preference pair, and readable
+evidence (`document_title`, `quote`, and optional location fields). They do not
+contain `case_id`, `session_id`, `source_ref`, `source_refs`, review digests, or
+other storage identities. The private provenance ledger in `snapshot.json`
+retains those identities for audit and split isolation.
+
+During preparation the script derives an experiment-only `row_id` from each
+clean row's canonical digest. That identifier appears only in the prepared
+`train.jsonl`/`eval.jsonl` files and prediction protocol; it is not part of the
+downloaded dataset. The script checks the manifest, provenance and content
+digests, dataset-specific fields, and train/eval isolation by paper family and
+session tree. `prepared.json` also carries a digest over its revision, seed,
+tokenizer, counts, and file names; changing those values makes the directory
+unusable until it is prepared again. Context overflow is an error; Source or
+target text is never silently truncated. The token accounting format is
 `lens-whitespace-v1`; it documents prompt/target loss masks but is not a model
 tokenizer or a claim that training has happened.
 
@@ -73,11 +83,12 @@ changes. The workbench must preserve those material, process-variable, outcome,
 page, DOI, and Source-quote differences instead of turning them into one
 performance trend.
 
-The live validation creates three candidate cases from the same conversation:
+The live validation creates three internal candidate cases from the same conversation:
 a negative answer rating, a later natural-language correction, and a failed
 Source-read tool result. The first case was annotated and accepted for an
-`evaluation` snapshot. The queue export is an audit projection and may be
-downloaded before annotation; only the accepted snapshot is a dataset release.
+`evaluation` snapshot. Candidate analysis remains an internal workbench input;
+it is not a user dataset export. Only the accepted snapshot is a dataset
+release.
 The PDF files are intentionally not committed to the repository. Re-download
 the two public URLs when rebuilding this scenario, then verify the collection
 contains two `ready` documents before inspecting feedback cases.

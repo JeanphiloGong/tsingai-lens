@@ -57,37 +57,38 @@ def _run_cli(script_name: str, *arguments: object) -> subprocess.CompletedProces
 def _snapshot(*, dataset_type: str = "evaluation", rows: list[dict] | None = None) -> dict:
     rows = rows or [
         {
-            "row_id": "row-1",
-            "case_id": "case-1",
             "split": "train",
             "record_type": dataset_type,
             "input": "Which source supports the claim?",
             "reference": "Source A supports the claim.",
-            "evidence": ["source-a"],
+            "evidence": [
+                {
+                    "document_title": "Paper A",
+                    "quote": "Source A supports the claim.",
+                    "heading_path": "Results",
+                }
+            ],
             "criteria": ["must cite source"],
-            "source_refs": ["source-a"],
-            "paper_family_keys": ["family-a"],
-            "session_tree_id": "tree-a",
         },
         {
-            "row_id": "row-2",
-            "case_id": "case-2",
             "split": "eval",
             "record_type": dataset_type,
             "input": "What did source B report?",
             "reference": "Source B reports a lower value.",
-            "evidence": ["source-b"],
+            "evidence": [
+                {
+                    "document_title": "Paper B",
+                    "quote": "Source B reports a lower value.",
+                    "page": 4,
+                }
+            ],
             "criteria": ["must preserve uncertainty"],
-            "source_refs": ["source-b"],
-            "paper_family_keys": ["family-b"],
-            "session_tree_id": "tree-b",
         },
     ]
     if dataset_type == "sft":
         for row in rows:
             row.pop("input", None)
             row.pop("reference", None)
-            row.pop("evidence", None)
             row.pop("criteria", None)
             row["messages"] = [{"role": "user", "content": "Answer the source question."}]
             row["target"] = "The reviewed answer."
@@ -95,42 +96,39 @@ def _snapshot(*, dataset_type: str = "evaluation", rows: list[dict] | None = Non
         for row in rows:
             row.pop("input", None)
             row.pop("reference", None)
-            row.pop("evidence", None)
             row.pop("criteria", None)
             row["prompt"] = [{"role": "user", "content": "Answer the source question."}]
             row["chosen"] = "The reviewed answer."
             row["rejected"] = "The original answer."
-    for row in rows:
-        basis = dict(row)
-        basis.pop("content_digest", None)
-        basis.pop("row_id", None)
-        row["content_digest"] = _digest(basis)
+
     encoded = "".join(
         json.dumps(row, ensure_ascii=True, sort_keys=True, separators=(",", ":")) + "\n"
         for row in rows
     ).encode("utf-8")
+    lineage = [
+        {
+            "case_id": f"case-{index + 1}",
+            "split": row["split"],
+            "source_refs": [f"source-{index + 1}"],
+            "paper_families": {f"family-{index + 1}": f"family-{index + 1}"},
+            "paper_family_keys": [f"family-{index + 1}"],
+            "session_tree_id": f"tree-{index + 1}",
+            "record_type": dataset_type,
+            "row_digest": _digest(row),
+        }
+        for index, row in enumerate(rows)
+    ]
     provenance = {
         "schema_version": "feedback-dataset-provenance.v1",
         "collection_id": "collection-1",
         "dataset_type": dataset_type,
-        "paper_families": {"paper-a": "family-a", "paper-b": "family-b"},
-        "items": [
-            {
-                "case_id": row["case_id"],
-                "split": row["split"],
-                "source_refs": row["source_refs"],
-                "paper_families": {
-                    row["paper_family_keys"][0]: row["paper_family_keys"][0]
-                },
-                "session_tree_id": row["session_tree_id"],
-            }
-            for row in rows
-        ],
+        "paper_families": {f"paper-{index + 1}": f"family-{index + 1}" for index in range(len(rows))},
+        "items": lineage,
     }
     provenance_digest = _digest(provenance)
     exclusions: list[dict] = []
     digest_basis = {
-        "schema_version": "feedback-dataset.v1",
+        "schema_version": "feedback-dataset.v2",
         "owner_id": "user-1",
         "collection_id": "collection-1",
         "dataset_type": dataset_type,
@@ -164,6 +162,35 @@ def _snapshot(*, dataset_type: str = "evaluation", rows: list[dict] | None = Non
     }
 
 
+def _refresh_snapshot_digests(snapshot: dict) -> None:
+    provenance = snapshot["provenance"]
+    provenance_digest = _digest(provenance)
+    snapshot["provenance_digest"] = provenance_digest
+    digest_basis = {
+        "schema_version": snapshot["manifest"]["schema_version"],
+        "owner_id": snapshot["owner_id"],
+        "collection_id": snapshot["collection_id"],
+        "dataset_type": snapshot["dataset_type"],
+        "rows": snapshot["rows"],
+        "exclusions": snapshot["exclusions"],
+        "provenance_digest": provenance_digest,
+    }
+    manifest_digest = _digest(digest_basis)
+    snapshot["manifest_digest"] = manifest_digest
+    snapshot["manifest"].update(
+        {
+            **digest_basis,
+            "manifest_digest": manifest_digest,
+            "provenance_digest": provenance_digest,
+        }
+    )
+
+
+def _eval_row_id(prepared_dir: Path) -> str:
+    line = (prepared_dir / "eval.jsonl").read_text(encoding="utf-8").splitlines()[0]
+    return str(json.loads(line)["row_id"])
+
+
 def test_prepare_materializes_split_files_and_loss_mask(tmp_path, prepare_module):
     snapshot_path = tmp_path / "snapshot.json"
     output_dir = tmp_path / "prepared"
@@ -187,11 +214,51 @@ def test_prepare_materializes_split_files_and_loss_mask(tmp_path, prepare_module
     assert json.loads((output_dir / "prepared.json").read_text(encoding="utf-8"))["revision"] == "abc123"
 
 
-def test_prepare_rejects_cross_split_session_tree_leakage(tmp_path, prepare_module):
+def test_prepare_generates_private_row_ids_for_clean_snapshot_rows(tmp_path, prepare_module):
+    snapshot_path = tmp_path / "snapshot.json"
+    output_dir = tmp_path / "prepared"
+    snapshot = _snapshot(dataset_type="sft")
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+
+    prepare_module.prepare_snapshot(
+        snapshot_path=snapshot_path,
+        output_dir=output_dir,
+        revision="abc123",
+        seed=7,
+    )
+
+    public_row = json.loads((output_dir / "snapshot.json").read_text(encoding="utf-8"))["rows"][0]
+    prepared_row = json.loads((output_dir / "train.jsonl").read_text(encoding="utf-8"))
+    assert "row_id" not in public_row
+    assert "case_id" not in public_row
+    assert "source_refs" not in public_row
+    assert prepared_row["row_id"].startswith("row_")
+    assert prepared_row["evidence"][0]["document_title"] == "Paper A"
+
+
+def test_prepare_rejects_internal_identity_in_public_row(tmp_path, prepare_module):
     rows = _snapshot()["rows"]
-    rows[1]["session_tree_id"] = rows[0]["session_tree_id"]
+    rows[0]["source_refs"] = ["source-leak"]
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text(json.dumps(_snapshot(rows=rows)), encoding="utf-8")
+
+    with pytest.raises(prepare_module.SnapshotValidationError, match="row_internal_field:source_refs"):
+        prepare_module.prepare_snapshot(
+            snapshot_path=snapshot_path,
+            output_dir=tmp_path / "prepared",
+            revision="abc123",
+            seed=7,
+        )
+
+
+def test_prepare_rejects_cross_split_session_tree_leakage(tmp_path, prepare_module):
+    snapshot = _snapshot()
+    snapshot["provenance"]["items"][1]["session_tree_id"] = snapshot["provenance"]["items"][0][
+        "session_tree_id"
+    ]
+    _refresh_snapshot_digests(snapshot)
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
 
     with pytest.raises(prepare_module.SnapshotValidationError, match="split_leakage"):
         prepare_module.prepare_snapshot(
@@ -256,10 +323,11 @@ def test_experiment_keeps_partial_prediction_run_not_run(
         revision="abc123",
         seed=7,
     )
+    eval_row_id = _eval_row_id(prepared_dir)
     baseline = tmp_path / "baseline.jsonl"
     baseline.write_text(
         json.dumps(
-            {"row_id": "row-2", "prediction": "Source B reports a lower value."}
+            {"row_id": eval_row_id, "prediction": "Source B reports a lower value."}
         )
         + "\n",
         encoding="utf-8",
@@ -289,14 +357,15 @@ def test_experiment_compares_predictions_on_same_eval_rows(
         revision="abc123",
         seed=7,
     )
+    eval_row_id = _eval_row_id(prepared_dir)
     baseline = tmp_path / "baseline.jsonl"
     candidate = tmp_path / "candidate.jsonl"
     baseline.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "Source B reports a lower value."}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."}) + "\n",
         encoding="utf-8",
     )
     candidate.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "wrong"}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
         encoding="utf-8",
     )
 
@@ -325,14 +394,15 @@ def test_experiment_run_manifest_is_deterministic_and_records_input_artifacts(
         revision="abc123",
         seed=7,
     )
+    eval_row_id = _eval_row_id(prepared_dir)
     baseline = tmp_path / "baseline.jsonl"
     candidate = tmp_path / "candidate.jsonl"
     baseline.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "Source B reports a lower value."}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."}) + "\n",
         encoding="utf-8",
     )
     candidate.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "wrong"}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
         encoding="utf-8",
     )
 
@@ -373,14 +443,15 @@ def test_experiment_run_id_changes_when_prediction_bytes_change(
         revision="abc123",
         seed=7,
     )
+    eval_row_id = _eval_row_id(prepared_dir)
     baseline = tmp_path / "baseline.jsonl"
     candidate = tmp_path / "candidate.jsonl"
     baseline.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "Source B reports a lower value."}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."}) + "\n",
         encoding="utf-8",
     )
     candidate.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "wrong"}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
         encoding="utf-8",
     )
     first = experiment_module.run_experiment(
@@ -390,7 +461,7 @@ def test_experiment_run_id_changes_when_prediction_bytes_change(
         experiment_predictions=candidate,
     )
     candidate.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "a different wrong answer"}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "a different wrong answer"}) + "\n",
         encoding="utf-8",
     )
     second = experiment_module.run_experiment(
@@ -582,6 +653,7 @@ def test_cli_prepare_to_experiment_round_trip(tmp_path):
     )
     assert prepared.returncode == 0, prepared.stderr
     assert json.loads(prepared.stdout)["status"] == "ready"
+    eval_row_id = _eval_row_id(prepared_dir)
 
     not_run_report = tmp_path / "not-run.json"
     not_run = _run_cli("experiment.py", prepared_dir, not_run_report)
@@ -592,12 +664,12 @@ def test_cli_prepare_to_experiment_round_trip(tmp_path):
     baseline = tmp_path / "baseline.jsonl"
     candidate = tmp_path / "candidate.jsonl"
     baseline.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "Source B reports a lower value."})
+        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."})
         + "\n",
         encoding="utf-8",
     )
     candidate.write_text(
-        json.dumps({"row_id": "row-2", "prediction": "wrong"}) + "\n",
+        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
         encoding="utf-8",
     )
     complete_report = tmp_path / "complete.json"

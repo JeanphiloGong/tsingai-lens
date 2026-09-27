@@ -44,8 +44,8 @@ class DatasetSnapshot:
         for row in self.rows:
             if not isinstance(row, dict) or row.get("split") not in _SPLITS:
                 raise ValueError("snapshot rows require train or eval split")
-            if not row.get("row_id") or not row.get("case_id"):
-                raise ValueError("snapshot rows require stable identities")
+            if row.get("record_type") not in _DATASET_TYPES:
+                raise ValueError("snapshot rows require a dataset record type")
         object.__setattr__(self, "rows", tuple(dict(row) for row in self.rows))
         object.__setattr__(self, "exclusions", tuple(dict(item) for item in self.exclusions))
         object.__setattr__(self, "provenance", dict(self.provenance))

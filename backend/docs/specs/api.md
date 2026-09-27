@@ -290,7 +290,6 @@ The feedback workbench turns a saved Chat rating into a reviewable, source-
 grounded case. It does not rewrite the original messages or model-call audit:
 
 - `GET /api/v1/feedback-cases`
-- `GET /api/v1/feedback-cases/export`
 - `GET /api/v1/feedback-cases/{case_id}`
 - `PATCH /api/v1/feedback-cases/{case_id}/annotation`
 - `POST /api/v1/feedback-cases/{case_id}/review`
@@ -307,16 +306,12 @@ chooses cases, Sources, labels, targets, and dataset uses; it carries business
 IDs and annotation digests automatically rather than asking the user to type
 them.
 
-`GET /api/v1/feedback-cases/export` is the immediate audit export. It requires
-`collection_id` and accepts optional `status` (or `all`) and `limit` (1..2000).
-The response is `application/x-ndjson`; each line is a
-`feedback-case-analysis.v1` projection containing the question, answer,
-feedback signals, requested and inspected Sources, omissions, the AI
-candidate, annotation, and review history. It is available before annotation
-and includes `training_ready` as a lifecycle hint, but it is never a training
-release. The browser downloads it without asking a user to copy a case,
-session, message, or Source ID. IDs remain in the file only as provenance so a
-later audit can return to the exact record.
+Candidate analysis is available only through the case list/detail workbench and
+is an internal review signal. There is no candidate-analysis download endpoint
+and no default “approve everything” export. A case becomes downloadable only
+after the current annotation is reviewed and included in an immutable
+`DatasetSnapshot`; the snapshot JSONL contains model-facing fields and readable
+evidence, while audit identities remain in the snapshot's private provenance.
 
 The flow is ordered:
 

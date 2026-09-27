@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
-
-from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 
 from application.feedback.feedback_case_service import FeedbackCaseService
 from controllers.dependencies.auth import current_user_id
@@ -69,43 +67,6 @@ async def list_feedback_cases(
         offset=offset,
     )
 
-
-@router.get("/export")
-async def export_feedback_cases(
-    request: Request,
-    collection_id: str = Query(..., min_length=1, max_length=64),
-    status: str | None = Query(default=None, min_length=1, max_length=32),
-    limit: int = Query(default=2000, ge=1, le=2000),
-) -> Response:
-    """Download readable candidate analysis records as newline-delimited JSON."""
-    if status == "all":
-        status = None
-    try:
-        records = await _service(request).export_for_user(
-            user_id=await current_user_id(request),
-            collection_id=collection_id,
-            status=status,
-            limit=limit,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "feedback_case_export_invalid", "message": str(exc)},
-        ) from exc
-    payload = "".join(
-        json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        + "\n"
-        for record in records
-    ).encode("utf-8")
-    return Response(
-        content=payload,
-        media_type="application/x-ndjson",
-        headers={
-            "Content-Disposition": 'attachment; filename="feedback-analysis.jsonl"',
-        },
-    )
 
 
 @router.get("/{case_id}", response_model=FeedbackCaseDetailResponse)

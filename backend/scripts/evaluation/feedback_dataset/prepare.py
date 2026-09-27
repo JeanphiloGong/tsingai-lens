@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import json
@@ -20,6 +21,27 @@ TOKENIZER_VERSION = 1
 DATASET_TYPES = {"evaluation", "sft", "preference"}
 SPLITS = {"train", "eval"}
 TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
+
+# Snapshot rows are the public, model-facing artifact.  These fields belong in
+# the private provenance ledger or in the prepared experiment directory, never
+# in a downloaded training row.
+_INTERNAL_ROW_FIELDS = frozenset(
+    {
+        "row_id",
+        "case_id",
+        "session_id",
+        "review_id",
+        "annotation_digest",
+        "source_ref",
+        "source_refs",
+        "document_id",
+        "document_ids",
+        "paper_family_keys",
+        "paper_families",
+        "session_tree_id",
+        "content_digest",
+    }
+)
 
 
 class SnapshotValidationError(ValueError):
@@ -92,11 +114,11 @@ def prepare_snapshot(
     if not revision_value:
         revision_value = "unknown"
 
-    prepared_rows = [
-        _prepare_row(row, dataset_type=str(snapshot["dataset_type"]), max_input_tokens=max_input_tokens)
-        for row in validated.rows
-    ]
-    prepared_rows.sort(key=lambda row: (str(row["split"]), str(row["row_id"])))
+    prepared_rows = _materialize_prepared_rows(
+        validated.rows,
+        dataset_type=str(snapshot["dataset_type"]),
+        max_input_tokens=max_input_tokens,
+    )
     split_rows = {
         split: [row for row in prepared_rows if row["split"] == split]
         for split in ("train", "eval")
@@ -191,15 +213,11 @@ def load_prepared(prepared_dir: str | Path) -> dict[str, Any]:
         "rows_digest"
     ):
         raise SnapshotValidationError("prepared_rows_digest_mismatch")
-    expected_rows = [
-        _prepare_row(
-            row,
-            dataset_type=str(snapshot["dataset_type"]),
-            max_input_tokens=max_input_tokens,
-        )
-        for row in validated.rows
-    ]
-    expected_rows.sort(key=lambda row: (str(row["split"]), str(row["row_id"])))
+    expected_rows = _materialize_prepared_rows(
+        validated.rows,
+        dataset_type=str(snapshot["dataset_type"]),
+        max_input_tokens=max_input_tokens,
+    )
     if sorted(all_rows, key=lambda row: (str(row.get("split")), str(row.get("row_id")))) != expected_rows:
         raise SnapshotValidationError("prepared_snapshot_rows_mismatch")
     result = dict(prepared)
@@ -275,34 +293,26 @@ def _validate_snapshot(snapshot: dict[str, Any], *, max_input_tokens: int) -> _V
         raise SnapshotValidationError("content_digest_mismatch")
 
     validated_rows: list[dict[str, Any]] = []
-    row_ids: set[str] = set()
-    case_ids: set[tuple[str, str]] = set()
     for raw in rows:
         if not isinstance(raw, dict):
             raise SnapshotValidationError("row_invalid")
         row = dict(raw)
-        row_id = str(row.get("row_id") or "").strip()
-        case_id = str(row.get("case_id") or "").strip()
         split = row.get("split")
-        if not row_id or row_id in row_ids:
-            raise SnapshotValidationError("row_id_invalid")
-        if not case_id or (case_id, str(split)) in case_ids:
-            raise SnapshotValidationError("case_split_duplicate")
         if split not in SPLITS:
             raise SnapshotValidationError("split_invalid")
-        row_ids.add(row_id)
-        case_ids.add((case_id, str(split)))
-        expected_row_digest = row.get("content_digest")
-        row_basis = dict(row)
-        row_basis.pop("content_digest", None)
-        row_basis.pop("row_id", None)
-        if expected_row_digest != _digest(row_basis):
-            raise SnapshotValidationError(f"row_content_digest_mismatch:{row_id}")
+        forbidden = _first_internal_field(row)
+        if forbidden is not None:
+            raise SnapshotValidationError(f"row_internal_field:{forbidden}")
+        row_digest = _digest(row)
         if row.get("record_type") != dataset_type:
-            raise SnapshotValidationError(f"row_type_mismatch:{row_id}")
-        _validate_row_shape(row, dataset_type=dataset_type, row_id=row_id, max_input_tokens=max_input_tokens)
+            raise SnapshotValidationError(f"row_type_mismatch:{row_digest[:16]}")
+        _validate_row_shape(
+            row,
+            dataset_type=dataset_type,
+            row_id=f"row_{row_digest[:16]}",
+            max_input_tokens=max_input_tokens,
+        )
         validated_rows.append(row)
-    _validate_split_isolation(validated_rows)
     _validate_provenance(provenance, validated_rows, snapshot=snapshot)
     return _ValidatedSnapshot(snapshot=snapshot, rows=tuple(validated_rows))
 
@@ -310,9 +320,7 @@ def _validate_snapshot(snapshot: dict[str, Any], *, max_input_tokens: int) -> _V
 def _validate_row_shape(
     row: dict[str, Any], *, dataset_type: str, row_id: str, max_input_tokens: int
 ) -> None:
-    source_refs = row.get("source_refs")
-    if not isinstance(source_refs, list) or any(not str(item).strip() for item in source_refs):
-        raise SnapshotValidationError(f"source_refs_invalid:{row_id}")
+    _validate_evidence(row.get("evidence"), row_id=row_id)
     if dataset_type == "evaluation":
         input_text = _text(row.get("input"))
         if not input_text:
@@ -340,8 +348,14 @@ def _validate_row_shape(
         raise SnapshotValidationError(f"context_overflow:{row_id}")
 
 
-def _prepare_row(row: dict[str, Any], *, dataset_type: str, max_input_tokens: int) -> dict[str, Any]:
-    prepared = dict(row)
+def _prepare_row(
+    row: dict[str, Any],
+    *,
+    row_id: str,
+    dataset_type: str,
+    max_input_tokens: int,
+) -> dict[str, Any]:
+    prepared = {"row_id": row_id, **row}
     if dataset_type == "evaluation":
         prepared["input_tokens"] = tokenize(_text(row["input"]))
         prepared["token_count"] = len(prepared["input_tokens"])
@@ -360,16 +374,83 @@ def _prepare_row(row: dict[str, Any], *, dataset_type: str, max_input_tokens: in
         prepared["rejected_tokens"] = rejected_tokens
         prepared["token_count"] = len(prompt_tokens) + max(len(chosen_tokens), len(rejected_tokens))
     if prepared["token_count"] > max_input_tokens and dataset_type != "preference":
-        raise SnapshotValidationError(f"context_overflow:{row['row_id']}")
+        raise SnapshotValidationError(f"context_overflow:{row_id}")
     return prepared
 
 
-def _validate_split_isolation(rows: Iterable[dict[str, Any]]) -> None:
+def _materialize_prepared_rows(
+    rows: Iterable[dict[str, Any]], *, dataset_type: str, max_input_tokens: int
+) -> list[dict[str, Any]]:
+    """Add experiment-only identities after the public row has been validated."""
+
+    assignments = _assign_internal_row_ids(rows)
+    prepared = [
+        _prepare_row(
+            row,
+            row_id=row_id,
+            dataset_type=dataset_type,
+            max_input_tokens=max_input_tokens,
+        )
+        for row, row_id in assignments
+    ]
+    return sorted(prepared, key=lambda row: (str(row["split"]), str(row["row_id"])))
+
+
+def _assign_internal_row_ids(
+    rows: Iterable[dict[str, Any]],
+) -> list[tuple[dict[str, Any], str]]:
+    canonical = [(dict(row), _digest(row)) for row in rows]
+    canonical.sort(key=lambda item: (str(item[0].get("split")), item[1], _canonical_json(item[0])))
+    totals = Counter((str(row.get("split")), digest) for row, digest in canonical)
+    occurrences: Counter[tuple[str, str]] = Counter()
+    assignments: list[tuple[dict[str, Any], str]] = []
+    for row, digest in canonical:
+        key = (str(row.get("split")), digest)
+        occurrences[key] += 1
+        suffix = f"_{occurrences[key]:04d}" if totals[key] > 1 else ""
+        assignments.append((row, f"row_{digest[:32]}{suffix}"))
+    return assignments
+
+
+def _validate_evidence(value: Any, *, row_id: str) -> None:
+    if not isinstance(value, list):
+        raise SnapshotValidationError(f"evidence_invalid:{row_id}")
+    for item in value:
+        if not isinstance(item, dict):
+            raise SnapshotValidationError(f"evidence_item_invalid:{row_id}")
+        if not _text(item.get("document_title")) or not _text(item.get("quote")):
+            raise SnapshotValidationError(f"evidence_content_missing:{row_id}")
+        forbidden = _first_internal_field(item)
+        if forbidden is not None:
+            raise SnapshotValidationError(f"evidence_internal_field:{forbidden}")
+
+
+def _first_internal_field(value: Any) -> str | None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if str(key) in _INTERNAL_ROW_FIELDS:
+                return str(key)
+            nested = _first_internal_field(child)
+            if nested is not None:
+                return nested
+    elif isinstance(value, list):
+        for child in value:
+            nested = _first_internal_field(child)
+            if nested is not None:
+                return nested
+    return None
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _validate_split_isolation(provenance_items: Iterable[dict[str, Any]]) -> None:
     seen: dict[str, set[str]] = {}
-    for row in rows:
-        split = str(row["split"])
-        values = list(row.get("paper_family_keys") or [])
-        session_tree_id = row.get("session_tree_id")
+    for item in provenance_items:
+        split = str(item["split"])
+        values = list(item.get("paper_family_keys") or [])
+        session_tree_id = item.get("session_tree_id")
         if session_tree_id:
             values.append(f"session:{session_tree_id}")
         for value in values:
@@ -393,25 +474,26 @@ def _validate_provenance(
     items = provenance.get("items")
     if not isinstance(items, list):
         raise SnapshotValidationError("provenance_items_invalid")
-    by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    by_key: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
             raise SnapshotValidationError("provenance_item_invalid")
-        key = (str(item.get("case_id") or ""), str(item.get("split") or ""))
-        if not key[0] or key[1] not in SPLITS or key in by_key:
+        if (
+            not str(item.get("case_id") or "")
+            or str(item.get("split") or "") not in SPLITS
+            or not str(item.get("row_digest") or "")
+            or len(str(item.get("row_digest"))) != 64
+        ):
             raise SnapshotValidationError("provenance_item_identity_invalid")
-        by_key[key] = item
-    row_keys = {(str(row["case_id"]), str(row["split"])) for row in rows}
-    for row in rows:
-        key = (str(row["case_id"]), str(row["split"]))
-        item = by_key.get(key)
-        if item is None:
-            raise SnapshotValidationError(f"provenance_item_missing:{row['row_id']}")
-        if list(item.get("source_refs") or []) != list(row.get("source_refs") or []):
-            raise SnapshotValidationError(f"provenance_sources_mismatch:{row['row_id']}")
-        if item.get("session_tree_id") != row.get("session_tree_id"):
-            raise SnapshotValidationError(f"provenance_session_tree_mismatch:{row['row_id']}")
-    if set(by_key) != row_keys:
+        if item.get("record_type") != snapshot.get("dataset_type"):
+            raise SnapshotValidationError("provenance_record_type_mismatch")
+        by_key.append(item)
+    expected = Counter((_digest(row), str(row["split"])) for row in rows)
+    actual = Counter((str(item["row_digest"]), str(item["split"])) for item in by_key)
+    if actual != expected:
+        raise SnapshotValidationError("provenance_row_digest_mismatch")
+    _validate_split_isolation(by_key)
+    if len(by_key) != len(rows):
         raise SnapshotValidationError("provenance_item_extra")
 
 

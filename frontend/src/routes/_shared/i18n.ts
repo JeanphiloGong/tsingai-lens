@@ -2870,9 +2870,6 @@ const translations: Record<Language, Translations> = {
 			lede: 'Review what the model saw before deciding what needs a human label.',
 			refresh: 'Refresh cases',
 			datasets: 'Dataset exports',
-			candidateExport: 'Export candidate analysis',
-			candidateExporting: 'Exporting…',
-			candidateExported: 'Candidate analysis downloaded. It is not a training release.',
 			queueSummary: 'Feedback queue summary',
 			totalCases: 'Total cases',
 			needsReviewCount: 'Needs review',
@@ -3010,12 +3007,10 @@ const translations: Record<Language, Translations> = {
 		datasetSnapshots: {
 			eyebrow: 'Dataset release', title: 'Dataset snapshots',
 			lede: 'Freeze reviewed cases into a reproducible export. Later edits do not change an existing snapshot.',
-			candidateExport: 'Export candidate analysis', candidateExporting: 'Exporting…', candidateExported: 'Candidate analysis downloaded.',
-			candidateExportTitle: 'Need the analysis now?', candidateExportHelp: 'Download every case with its question, answer, real-paper sources, AI candidate, and lifecycle state. Review it before using any data for training.', candidateOnly: 'Candidate only',
 			back: 'Back to feedback workbench', refresh: 'Refresh datasets', step: 'Release a fixed set',
 			chooseCases: 'Choose accepted cases', datasetType: 'Dataset use',
 			type: { evaluation: 'Evaluation', sft: 'Supervised training', preference: 'Preference comparison' },
-			typeHelp: { evaluation: 'Keeps the question, reference, evidence, and review criteria.', sft: 'Requires a reviewed target and supporting sources.', preference: 'Uses the reviewed target as chosen and the original answer as rejected.' },
+			typeHelp: { evaluation: 'Keeps the question, readable paper excerpts, reference, and review criteria.', sft: 'Requires a reviewed target and readable supporting excerpts.', preference: 'Uses the reviewed target as chosen, the original answer as rejected, and includes supporting excerpts.' },
 			loading: 'Loading accepted cases…', noAccepted: 'No accepted cases are ready.', noAcceptedDetail: 'Complete annotation and review for a case before selecting it here.',
 			untitledCase: 'Untitled case', noDocuments: 'No paper scope recorded', splitFor: 'Split for {case}', selectedCase: 'Selected case', selectedPaper: 'Selected paper', familyFor: 'Paper family for {document}',
 			paperFamilies: 'Paper families', paperFamiliesHint: 'Cases sharing a family cannot cross train and eval.',
@@ -3029,7 +3024,7 @@ const translations: Record<Language, Translations> = {
 			reasonCaseNotAccessible: 'Case is no longer accessible', reasonAnnotationStale: 'Annotation has changed', reasonReviewNotAccepted: 'Review was not accepted',
 			reasonDatasetUseNotAuthorized: 'Dataset use was not approved', reasonAnswerMissing: 'Answer is missing', reasonInputMissing: 'Question is missing',
 			reasonPaperFamilyMissing: 'Paper family is missing', reasonSourceNotInCase: 'Supporting source is unavailable', reasonTargetMissing: 'Reference target is missing',
-			reasonSupportSourceMissing: 'Supporting source is missing', reasonPreferencePairMissing: 'Preference pair is incomplete', reasonOther: 'Could not include this selection'
+			reasonSupportSourceMissing: 'Supporting source is missing', reasonEvidenceContentMissing: 'Readable evidence content is missing', reasonPreferencePairMissing: 'Preference pair is incomplete', reasonOther: 'Could not include this selection'
 		},
 		error: {
 			unexpected: 'Unexpected error.',
@@ -5774,9 +5769,6 @@ const translations: Record<Language, Translations> = {
 			lede: '先核对模型实际看到的内容，再决定是否需要人工标注。',
 			refresh: '刷新案例',
 			datasets: '数据集导出',
-			candidateExport: '导出候选分析',
-			candidateExporting: '正在导出…',
-			candidateExported: '候选分析已下载；它还不是训练数据发布包。',
 			queueSummary: '反馈队列摘要',
 			totalCases: '全部案例',
 			needsReviewCount: '待处理',
@@ -5914,12 +5906,10 @@ const translations: Record<Language, Translations> = {
 		datasetSnapshots: {
 			eyebrow: '数据集发布', title: '数据集快照',
 			lede: '把已审核案例冻结为可复现的导出文件。之后的修改不会改变已有快照。',
-			candidateExport: '导出候选分析', candidateExporting: '正在导出…', candidateExported: '候选分析已下载。',
-			candidateExportTitle: '现在就要查看分析？', candidateExportHelp: '下载所有案例的问题、回答、真实论文来源、AI 候选和生命周期状态。审核前可以先检查内容，不能把它直接当作训练数据。', candidateOnly: '仅作候选',
 			back: '返回反馈工作台', refresh: '刷新数据集', step: '发布固定数据集',
 			chooseCases: '选择已接受案例', datasetType: '数据用途',
 			type: { evaluation: '评测', sft: '监督训练', preference: '偏好比较' },
-			typeHelp: { evaluation: '保留问题、参考目标、证据和审核标准。', sft: '必须有已审核目标和支持性 Source。', preference: '使用已审核目标作为 chosen，原回答作为 rejected。' },
+			typeHelp: { evaluation: '保留问题、可读的论文摘录、参考目标和审核标准。', sft: '必须有已审核目标和可读的支持性摘录。', preference: '使用已审核目标作为 chosen，原回答作为 rejected，并附带支持性摘录。' },
 			loading: '正在加载已接受案例…', noAccepted: '当前没有可发布的已接受案例。', noAcceptedDetail: '先完成案例标注和审核，再从这里选择。',
 			untitledCase: '未命名案例', noDocuments: '没有记录文献范围', splitFor: '为 {case} 选择分区', selectedCase: '所选案例', selectedPaper: '所选论文', familyFor: '为 {document} 设置论文家族',
 			paperFamilies: '论文家族', paperFamiliesHint: '同一家族不能同时出现在 train 和 eval。',
@@ -5933,7 +5923,7 @@ const translations: Record<Language, Translations> = {
 			reasonCaseNotAccessible: '案例当前不可访问', reasonAnnotationStale: '标注已经变化', reasonReviewNotAccepted: '审核未接受',
 			reasonDatasetUseNotAuthorized: '未批准该数据用途', reasonAnswerMissing: '缺少回答', reasonInputMissing: '缺少问题',
 			reasonPaperFamilyMissing: '缺少论文家族', reasonSourceNotInCase: '支持性来源不可用', reasonTargetMissing: '缺少参考目标',
-			reasonSupportSourceMissing: '缺少支持性来源', reasonPreferencePairMissing: '偏好对不完整', reasonOther: '无法纳入此选择'
+			reasonSupportSourceMissing: '缺少支持性来源', reasonEvidenceContentMissing: '缺少可读的证据内容', reasonPreferencePairMissing: '偏好对不完整', reasonOther: '无法纳入此选择'
 		},
 		error: {
 			unexpected: '发生未知错误。',

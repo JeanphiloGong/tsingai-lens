@@ -147,9 +147,9 @@ This node owns the Collection route family.
   then shows the question, answer, inspected Sources, omitted candidates, and
   AI candidate analysis without exposing internal signal or message IDs. The
   same route owns human annotation and review actions; dataset snapshot and
-  download actions remain under `feedback/datasets`. The queue also exposes an
-  immediate candidate-analysis JSONL export; this is an audit projection that
-  can be downloaded before annotation and is never treated as training data.
+  download actions remain under `feedback/datasets`. Candidate analysis stays
+  inside the workbench as an internal review signal; only an accepted case in
+  an immutable dataset snapshot can be downloaded as model-facing JSONL.
   The validation scenario uses two open-access Nature Communications papers:
   Martin et al. (2019), DOI `10.1038/s41467-019-10009-2`, on keyhole pore
   formation at scan-velocity changes, and Pham et al. (2020), DOI

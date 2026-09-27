@@ -57,19 +57,6 @@ class _Service:
             "updated_at": "2026-09-24T00:00:00+00:00",
         }
 
-    async def export_for_user(self, **kwargs):
-        assert kwargs["user_id"] == "user-1"
-        return (
-            {
-                "schema_version": "feedback-case-analysis.v1",
-                "export_kind": "candidate_analysis",
-                "training_ready": False,
-                "case_id": "case-1",
-                "status": "needs_annotation",
-                "question": "Question",
-            },
-        )
-
 
 def test_feedback_case_routes_return_summary_and_detail_without_client_ids():
     request = _request(_Service())
@@ -88,20 +75,6 @@ def test_feedback_case_detail_hides_unauthorized_case():
     with pytest.raises(HTTPException) as error:
         asyncio.run(feedback_cases.get_feedback_case("case-1", _request(_Service(), "other-user")))
     assert error.value.status_code == 404
-
-
-def test_feedback_case_export_returns_ndjson_without_requiring_manual_ids():
-    response = asyncio.run(
-        feedback_cases.export_feedback_cases(
-            _request(_Service()), collection_id="collection-1", status="all", limit=2000
-        )
-    )
-    assert response.media_type == "application/x-ndjson"
-    assert response.headers["content-disposition"] == (
-        'attachment; filename="feedback-analysis.jsonl"'
-    )
-    assert response.body.endswith(b"\n")
-    assert b'"export_kind":"candidate_analysis"' in response.body
 
 
 def test_feedback_case_list_hides_unauthorized_collection():

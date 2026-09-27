@@ -24,7 +24,16 @@ def _snapshot() -> DatasetSnapshot:
         owner_id="user-1",
         collection_id="collection-1",
         dataset_type="evaluation",
-        rows=({"row_id": "row-1", "case_id": "case-1", "split": "eval"},),
+        rows=(
+            {
+                "record_type": "evaluation",
+                "split": "eval",
+                "input": "Question",
+                "reference": "Answer",
+                "evidence": [],
+                "criteria": [],
+            },
+        ),
         exclusions=(),
         provenance={"items": []},
         manifest={"empty": False},
@@ -52,7 +61,7 @@ class _Service:
         return self.snapshot
 
     async def jsonl_for_user(self, **kwargs):
-        return self.snapshot, b'{"row_id":"row-1"}\n'
+        return self.snapshot, b'{"record_type":"evaluation","split":"eval"}\n'
 
 
 def test_dataset_routes_create_list_detail_and_download() -> None:

@@ -307,7 +307,9 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     assert snapshot.rows[0]["record_type"] == "preference"
     assert snapshot.rows[0]["chosen"] == annotation.target
     assert snapshot.rows[0]["rejected"] == chain.answer.content
-    assert snapshot.rows[0]["source_refs"] == ["source-b-caption"]
+    assert snapshot.rows[0]["evidence"][0]["document_title"] == "Paper B"
+    assert snapshot.rows[0]["evidence"][0]["quote"].startswith("Figure 3")
+    assert snapshot.provenance["items"][0]["source_refs"] == ["source-b-caption"]
     assert snapshot.provenance["items"][0]["case_id"] == case.case_id
 
     persisted_snapshot = await chain.snapshots.read(snapshot.dataset_id)

@@ -18,7 +18,6 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 	let reviewDecisions: Record<string, unknown>[] = [];
 	let reviewAttempts = 0;
 	const reviewKeys: string[] = [];
-	let candidateExportCalls = 0;
 	let datasetMode = false;
 
 	await page.route('**/*', async (route) => {
@@ -48,15 +47,6 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 			return route.fulfill(
 				json({ collection_id: collectionId, name: 'Feedback fixture', status: 'ready', documents: [] })
 			);
-		}
-		if (path === '/api/v1/feedback-cases/export' && request.method() === 'GET') {
-			candidateExportCalls += 1;
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/x-ndjson',
-				headers: { 'Content-Disposition': 'attachment; filename="feedback-analysis.jsonl"' },
-				body: '{"export_kind":"candidate_analysis","training_ready":false}\n'
-			});
 		}
 		if (path === '/api/v1/feedback-cases' && request.method() === 'GET') {
 			datasetMode = new URL(request.url()).searchParams.get('status') === 'accepted';
@@ -196,21 +186,9 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 
 	return {
 		getReviewKeys: () => reviewKeys,
-		getReviewAttempts: () => reviewAttempts,
-		getCandidateExportCalls: () => candidateExportCalls
+		getReviewAttempts: () => reviewAttempts
 	};
 }
-
-test('candidate analysis export is available before annotation and names its lifecycle', async ({ page }) => {
-	const api = await mockFeedbackApis(page);
-	await page.goto(`/collections/${collectionId}/feedback`);
-
-	await expect(page.getByRole('button', { name: /Compare Paper A and Paper B/ })).toBeVisible();
-	const exportButton = page.getByRole('button', { name: 'Export candidate analysis' });
-	await exportButton.click();
-	await expect(page.locator('.notice--success')).toContainText('Candidate analysis downloaded.');
-	expect(api.getCandidateExportCalls()).toBe(1);
-});
 
 test('feedback workbench carries a retry key and keeps the reviewer out of technical IDs', async ({ page }) => {
 	const api = await mockFeedbackApis(page);
@@ -218,6 +196,7 @@ test('feedback workbench carries a retry key and keeps the reviewer out of techn
 	await page.goto(`/collections/${collectionId}/feedback`);
 
 	await expect(page.getByRole('heading', { name: 'Feedback workbench' })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Export candidate analysis' })).toHaveCount(0);
 	await page.getByRole('button', { name: /Compare Paper A and Paper B/ }).click();
 	await expect(page.getByRole('heading', { name: 'Human annotation' })).toBeVisible();
 

@@ -1,4 +1,4 @@
-import { downloadBlob, requestJson } from './api';
+import { requestJson } from './api';
 
 export type FeedbackCaseSummary = {
 	case_id: string;
@@ -187,17 +187,4 @@ export async function fetchFeedbackReviewDecisions(collectionId: string, caseId:
 	return (await requestJson(path(collectionId, caseId).split('?')[0] + '/review-decisions', {
 		method: 'GET'
 	})) as { items: FeedbackReviewDecision[] };
-}
-
-export async function downloadFeedbackCaseExport(
-	collectionId: string,
-	options: { status?: string; limit?: number } = {}
-) {
-	const params = new URLSearchParams({ collection_id: collectionId });
-	if (options.status) params.set('status', options.status);
-	if (options.limit !== undefined) params.set('limit', String(options.limit));
-	await downloadBlob(
-		`/feedback-cases/export?${params.toString()}`,
-		'feedback-analysis.jsonl'
-	);
 }

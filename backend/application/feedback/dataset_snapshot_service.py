@@ -94,7 +94,7 @@ class DatasetSnapshotService:
 
         # Selection order is a UI detail. Canonical ordering keeps repeated
         # exports of the same reviewed material on the same digest.
-        rows.sort(key=lambda item: (str(item.get("split")), str(item.get("row_id"))))
+        rows.sort(key=lambda item: (str(item.get("split")), _digest(item)))
         exclusions.sort(
             key=lambda item: (
                 str(item.get("case_id")),
@@ -109,7 +109,7 @@ class DatasetSnapshotService:
                 str(item.get("split")),
             )
         )
-        _ensure_split_isolation(rows)
+        _ensure_split_isolation(rows, provenance_items)
         provenance = {
             "schema_version": "feedback-dataset-provenance.v1",
             "collection_id": collection_id,
@@ -119,7 +119,7 @@ class DatasetSnapshotService:
         }
         provenance_digest = _digest(provenance)
         digest_basis = {
-            "schema_version": "feedback-dataset.v1",
+            "schema_version": "feedback-dataset.v2",
             "owner_id": owner_id,
             "collection_id": collection_id,
             "dataset_type": dataset_type,
@@ -266,37 +266,30 @@ class DatasetSnapshotService:
         )
         if any(source_ref not in allowed_source_refs for source_ref in source_refs):
             raise DatasetSnapshotError("source_not_in_case")
+        evidence = _readable_evidence(
+            coverage,
+            support_source_refs=source_refs,
+            messages=messages,
+        )
         if dataset_type in {"sft", "preference"}:
             if not annotation.target:
                 raise DatasetSnapshotError("target_missing")
             if not source_refs:
                 raise DatasetSnapshotError("support_source_missing")
+            if not evidence:
+                raise DatasetSnapshotError("evidence_content_missing")
         target = annotation.target.strip() if annotation.target else None
         if dataset_type == "preference" and (not target or target == answer_text):
             raise DatasetSnapshotError("preference_pair_missing")
         session_tree_id = session.root_session_id or session.session_id
         family_values = tuple(sorted({paper_families[item] for item in document_ids}))
-        base: dict[str, Any] = {
-            "case_id": case.case_id,
-            "session_id": case.session_id,
-            "collection_id": collection_id,
-            "anchor_message_id": case.anchor_message_id,
-            "annotation_digest": annotation.annotation_digest,
-            "review_id": current.decision_id,
-            "review_digest": current.annotation_digest,
-            "source_refs": list(source_refs),
-            "paper_families": {item: paper_families[item] for item in sorted(document_ids)},
-            "paper_family_keys": list(family_values),
-            "session_tree_id": session_tree_id,
-            "split": selection.split,
-        }
+        base: dict[str, Any] = {"split": selection.split, "evidence": evidence}
         if dataset_type == "evaluation":
             row = {
                 **base,
                 "record_type": "evaluation",
                 "input": question,
                 "reference": target,
-                "evidence": list(source_refs),
                 "criteria": [annotation.reason, *_as_texts(coverage.get("gaps"))],
             }
         elif dataset_type == "sft":
@@ -315,8 +308,7 @@ class DatasetSnapshotService:
                 "rejected": answer_text,
                 "comparison_reason": annotation.reason,
             }
-        row["content_digest"] = _digest(row)
-        row["row_id"] = f"row_{row['content_digest'][:32]}"
+        row_digest = _digest(row)
         provenance = {
             "case_id": case.case_id,
             "annotation_digest": annotation.annotation_digest,
@@ -328,6 +320,9 @@ class DatasetSnapshotService:
             "source_refs": list(source_refs),
             "document_ids": sorted(document_ids),
             "paper_families": {item: paper_families[item] for item in sorted(document_ids)},
+            "paper_family_keys": list(family_values),
+            "record_type": dataset_type,
+            "row_digest": row_digest,
         }
         return _Candidate(row=row, provenance=provenance)
 
@@ -497,18 +492,136 @@ def _coverage_source_refs(
     return refs
 
 
+def _readable_evidence(
+    coverage: dict[str, Any],
+    *,
+    support_source_refs: tuple[str, ...],
+    messages: tuple[Any, ...] = (),
+) -> list[dict[str, Any]]:
+    """Materialize human-readable evidence without leaking storage identities.
+
+    ``source_ref`` and ``document_id`` remain in provenance, where they are
+    useful for audit and repeatability.  Model-facing rows carry the title,
+    locator and quoted text needed to consume the sample without another
+    database lookup.
+    """
+
+    allowed = set(support_source_refs)
+    document_titles = _coverage_document_titles(coverage)
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for field in ("claim_support", "inspected_sources"):
+        for value in coverage.get(field) or ():
+            if not isinstance(value, dict):
+                continue
+            source_ref = str(
+                value.get("source_ref")
+                or value.get("source_id")
+                or value.get("table_ref")
+                or ""
+            ).strip()
+            if allowed and source_ref not in allowed:
+                continue
+            quote = str(value.get("quote") or value.get("content") or value.get("table_markdown") or "").strip()
+            if not quote:
+                continue
+            document_id = str(value.get("document_id") or "").strip()
+            title = str(
+                value.get("document_title")
+                or value.get("title")
+                or document_titles.get(document_id)
+                or ""
+            ).strip()
+            if not title:
+                continue
+            source_kind = str(value.get("source_kind") or "").strip()
+            heading_path = str(value.get("heading_path") or "").strip()
+            page = value.get("page")
+            key = (title, heading_path, quote)
+            if key in seen:
+                continue
+            seen.add(key)
+            item: dict[str, Any] = {
+                "document_title": title,
+                "quote": quote,
+            }
+            if source_kind:
+                item["source_kind"] = source_kind
+            if heading_path:
+                item["heading_path"] = heading_path
+            if page not in (None, ""):
+                item["page"] = page
+            if value.get("quote_truncated") is not None:
+                item["quote_truncated"] = bool(value.get("quote_truncated"))
+            records.append(item)
+    if allowed:
+        for message in messages:
+            for source in getattr(message, "source_contexts", ()):
+                source_ref = str(getattr(source, "source_ref", "")).strip()
+                if source_ref not in allowed:
+                    continue
+                quote = str(getattr(source, "quote", "")).strip()
+                if not quote:
+                    continue
+                document_id = str(getattr(source, "document_id", "")).strip()
+                title = str(
+                    getattr(source, "document_title", "")
+                    or document_titles.get(document_id)
+                    or ""
+                ).strip()
+                if not title:
+                    continue
+                heading_path = str(getattr(source, "heading_path", "")).strip()
+                key = (title, heading_path, quote)
+                if key in seen:
+                    continue
+                seen.add(key)
+                item = {
+                    "document_title": title,
+                    "quote": quote,
+                }
+                source_kind = str(getattr(source, "source_kind", "")).strip()
+                if source_kind:
+                    item["source_kind"] = source_kind
+                if heading_path:
+                    item["heading_path"] = heading_path
+                page = getattr(source, "page", None)
+                if page not in (None, ""):
+                    item["page"] = page
+                if getattr(source, "quote_truncated", None) is not None:
+                    item["quote_truncated"] = bool(source.quote_truncated)
+                records.append(item)
+    return records
+
+
+def _coverage_document_titles(coverage: dict[str, Any]) -> dict[str, str]:
+    titles: dict[str, str] = {}
+    for field in ("requested_scope", "inspected_sources", "omitted_candidates", "claim_support"):
+        for value in coverage.get(field) or ():
+            if not isinstance(value, dict):
+                continue
+            document_id = str(value.get("document_id") or "").strip()
+            title = str(value.get("document_title") or value.get("title") or "").strip()
+            if document_id and title:
+                titles.setdefault(document_id, title)
+    return titles
+
+
 def _as_texts(values: Any) -> list[str]:
     return [str(value) for value in values or () if str(value).strip()]
 
 
-def _ensure_split_isolation(rows: list[dict[str, Any]]) -> None:
+def _ensure_split_isolation(
+    rows: list[dict[str, Any]], provenance_items: list[dict[str, Any]]
+) -> None:
+    del rows  # The split invariants are represented by the private provenance.
     for field in ("paper_family_keys", "session_tree_id"):
         seen: dict[str, set[str]] = {}
-        for row in rows:
-            values = row.get(field) if field == "paper_family_keys" else [row.get(field)]
+        for item in provenance_items:
+            values = item.get(field) if field == "paper_family_keys" else [item.get(field)]
             for value in values or ():
                 if value:
-                    seen.setdefault(str(value), set()).add(str(row["split"]))
+                    seen.setdefault(str(value), set()).add(str(item["split"]))
         leaked = sorted(key for key, splits in seen.items() if len(splits) > 1)
         if leaked:
             raise DatasetSnapshotError("dataset_split_leakage:" + ",".join(leaked))

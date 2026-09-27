@@ -5,7 +5,6 @@
 		AlertTriangle,
 		CheckCircle2,
 		ChevronRight,
-		Download,
 		FileText,
 		MessageSquareWarning,
 		RefreshCw,
@@ -20,7 +19,6 @@
 	import {
 		fetchFeedbackCase,
 		fetchFeedbackCases,
-		downloadFeedbackCaseExport,
 		saveFeedbackAnnotation,
 		submitFeedbackReview,
 		type FeedbackCaseDetail,
@@ -41,9 +39,6 @@
 	let reviewError = '';
 	let reviewReason = '';
 	let reviewRequestKey = '';
-	let candidateExporting = false;
-	let candidateExportNotice = '';
-	let candidateExportError = '';
 	let annotationProblemType = 'source_missing';
 	let annotationSeverity = 'medium';
 	let annotationTarget = '';
@@ -87,21 +82,6 @@
 			error = errorMessage(err);
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function exportCandidateAnalysis() {
-		if (!collectionId || candidateExporting) return;
-		candidateExporting = true;
-		candidateExportNotice = '';
-		candidateExportError = '';
-		try {
-			await downloadFeedbackCaseExport(collectionId);
-			candidateExportNotice = $t('feedbackWorkbench.candidateExported');
-		} catch (err) {
-			candidateExportError = errorMessage(err);
-		} finally {
-			candidateExporting = false;
 		}
 	}
 
@@ -389,10 +369,6 @@
 			<p class="lede">{$t('feedbackWorkbench.lede')}</p>
 			</div>
 			<div class="header-actions">
-				<button class="export-button" type="button" on:click={exportCandidateAnalysis} disabled={candidateExporting}>
-					<Download size={16} />
-					{candidateExporting ? $t('feedbackWorkbench.candidateExporting') : $t('feedbackWorkbench.candidateExport')}
-				</button>
 				<a class="dataset-link" href={`/collections/${collectionId}/feedback/datasets`}>{$t('feedbackWorkbench.datasets')}</a>
 				<button
 					class="icon-button"
@@ -410,13 +386,6 @@
 	{#if error}
 		<div class="notice notice--error" role="alert"><AlertTriangle size={17} /><span>{error}</span></div>
 	{/if}
-	{#if candidateExportNotice}
-		<div class="notice notice--success" role="status"><CheckCircle2 size={17} /><span>{candidateExportNotice}</span></div>
-	{/if}
-	{#if candidateExportError}
-		<div class="notice notice--error" role="alert"><AlertTriangle size={17} /><span>{candidateExportError}</span></div>
-	{/if}
-
 	<div class="status-strip" aria-label={$t('feedbackWorkbench.queueSummary')}>
 		<div><strong>{caseStats.total}</strong><span>{$t('feedbackWorkbench.totalCases')}</span></div>
 		<div><strong>{caseStats.needsReview}</strong><span>{$t('feedbackWorkbench.needsReviewCount')}</span></div>
@@ -649,9 +618,6 @@
 	.workbench { padding: 4px 0 48px; }
 	.workbench-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
 	.header-actions { display: flex; align-items: center; gap: 10px; }
-	.export-button { display: inline-flex; align-items: center; gap: 7px; min-height: 38px; padding: 0 12px; border: 1px solid var(--brand-border); border-radius: 7px; background: var(--brand-primary); color: #fff; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
-	.export-button:hover { filter: brightness(.96); }
-	.export-button:disabled { opacity: .6; cursor: default; }
 	.dataset-link { padding: 8px 11px; border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-primary); background: var(--surface-raised); font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
 	.dataset-link:hover { border-color: var(--accent-primary); }
 	.eyebrow { margin: 0 0 4px; color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -784,5 +750,5 @@
 	.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 	@media (max-width: 840px) { .workbench-grid { grid-template-columns: 1fr; } .case-list { order: 0; } .case-detail { order: 1; } .detail-placeholder { min-height: 260px; } }
 		@media (max-width: 840px) { .detail-next { min-width: 150px; } }
-		@media (max-width: 600px) { .workbench-header { gap: 12px; flex-direction: column; } .header-actions { width: 100%; flex-wrap: wrap; } .export-button { flex: 1 1 auto; } .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prompt-answer, .annotation-grid, .annotation-summary-grid, .signal__facts { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .detail-header { flex-direction: column; } .detail-next { width: 100%; box-sizing: border-box; } .annotation-actions { align-items: stretch; flex-direction: column; } }
+		@media (max-width: 600px) { .workbench-header { gap: 12px; flex-direction: column; } .header-actions { width: 100%; flex-wrap: wrap; } .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .prompt-answer, .annotation-grid, .annotation-summary-grid, .signal__facts { grid-template-columns: 1fr; } .detail-header, .prompt-answer, .detail-section { padding-left: 16px; padding-right: 16px; } .detail-header { flex-direction: column; } .detail-next { width: 100%; box-sizing: border-box; } .annotation-actions { align-items: stretch; flex-direction: column; } }
 </style>

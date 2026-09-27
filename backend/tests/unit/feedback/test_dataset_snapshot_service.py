@@ -108,6 +108,20 @@ def _fixture(*, target: str | None = "A corrected answer"):
                 {"document_id": "doc-a", "document_title": "Paper A"},
                 {"document_id": "doc-b", "document_title": "Paper B"},
             ],
+            "evidence_coverage": {
+                "inspected_sources": [
+                    {
+                        "document_id": "doc-b",
+                        "document_title": "Paper B",
+                        "source_kind": "figure_caption",
+                        "source_ref": "source-b-caption",
+                        "page": 4,
+                        "heading_path": "Results > Figure 3",
+                        "quote": "Figure 3 caption records preheating at 200 C.",
+                    }
+                ],
+                "coverage_status": "partial",
+            },
             "gaps": ["B figure caption was omitted"],
             "source_refs": ["source-b-caption"],
         },
@@ -163,6 +177,8 @@ def test_evaluation_snapshot_freezes_rows_and_digest() -> None:
     )
     assert snapshot.row_count == 1
     assert snapshot.rows[0]["reference"] is None
+    assert snapshot.rows[0]["evidence"][0]["document_title"] == "Paper B"
+    assert snapshot.rows[0]["evidence"][0]["quote"].startswith("Figure 3")
     assert snapshot.manifest["empty"] is False
     payload = jsonl_bytes_for_rows(snapshot.rows)
     assert hashlib.sha256(payload).hexdigest() == snapshot.content_digest
@@ -212,6 +228,96 @@ def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
     assert preference.rows[0]["record_type"] == "preference"
     assert preference.rows[0]["chosen"] == "A corrected answer"
     assert preference.rows[0]["rejected"] == "B has no preheating."
+
+
+def test_download_rows_keep_readable_evidence_but_hide_internal_ids() -> None:
+    service, _ = _fixture()
+    snapshot = asyncio.run(
+        service.create_for_user(
+            owner_id="user-1",
+            collection_id="collection-1",
+            dataset_type="sft",
+            selections=(DatasetSelection("case-1", "train"),),
+            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+        )
+    )
+
+    _, payload = asyncio.run(
+        service.jsonl_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
+    )
+    row = json.loads(payload.decode().splitlines()[0])
+
+    assert row["evidence"][0] == {
+        "document_title": "Paper B",
+        "source_kind": "figure_caption",
+        "page": 4,
+        "heading_path": "Results > Figure 3",
+        "quote": "Figure 3 caption records preheating at 200 C.",
+    }
+    assert "case_id" not in row
+    assert "session_id" not in row
+    assert "source_refs" not in row
+    assert "review_id" not in row
+
+
+def test_sft_is_excluded_when_support_source_has_no_readable_content() -> None:
+    service, _ = _fixture()
+    service.case_repository.case = FeedbackCase(
+        **{
+            **service.case_repository.case.to_record(),
+            "context_snapshot": {
+                "requested_scope": [{"document_id": "doc-b", "document_title": "Paper B"}],
+                "source_refs": ["source-b-caption"],
+            },
+        }
+    )
+    snapshot = asyncio.run(
+        service.create_for_user(
+            owner_id="user-1",
+            collection_id="collection-1",
+            dataset_type="sft",
+            selections=(DatasetSelection("case-1", "train"),),
+            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+        )
+    )
+
+    assert snapshot.row_count == 0
+    assert snapshot.exclusions[0]["reason"] == "evidence_content_missing"
+
+
+def test_sft_is_excluded_when_evidence_has_no_readable_document_title() -> None:
+    service, _ = _fixture()
+    service.case_repository.case = FeedbackCase(
+        **{
+            **service.case_repository.case.to_record(),
+            "context_snapshot": {
+                "requested_scope": [{"document_id": "doc-b"}],
+                "source_refs": ["source-b-caption"],
+                "evidence_coverage": {
+                    "inspected_sources": [
+                        {
+                            "document_id": "doc-b",
+                            "source_ref": "source-b-caption",
+                            "quote": "A quote without a document title.",
+                        }
+                    ]
+                },
+            },
+        }
+    )
+
+    snapshot = asyncio.run(
+        service.create_for_user(
+            owner_id="user-1",
+            collection_id="collection-1",
+            dataset_type="sft",
+            selections=(DatasetSelection("case-1", "train"),),
+            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+        )
+    )
+
+    assert snapshot.row_count == 0
+    assert snapshot.exclusions[0]["reason"] == "evidence_content_missing"
 
 
 def test_selection_order_is_canonical_for_digest() -> None:
@@ -309,6 +415,15 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
         suggested_target=None,
         evidence_coverage=EvidenceCoverage(
             requested_scope=({"document_id": "doc-a"}, {"document_id": "doc-b"}),
+            inspected_sources=(
+                {
+                    "document_id": "doc-b",
+                    "document_title": "Paper B",
+                    "source_ref": "suggested-ref",
+                    "source_kind": "figure_caption",
+                    "quote": "The caption records the preheating condition.",
+                },
+            ),
             coverage_status="partial",
         ),
         model="test-model",

@@ -193,6 +193,7 @@ class CreatePaperExperimentRevisionCapability:
             prepared=prepared,
             collection_id=context.collection_id,
             created_by=context.user_id,
+            created_by_tool_call_id=context.tool_call_id,
         )
         revision = result.revisions[0]
         refs = [

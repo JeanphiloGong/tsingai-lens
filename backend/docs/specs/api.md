@@ -850,6 +850,17 @@ running, or failed, the list still belongs to `published_analysis`, not that
 newer version. The analysis command and analysis-status route share this
 response contract.
 
+PaperContribution is analysis-level coverage metadata, not a PaperExperiment
+field or scientific evidence for a Finding. Finding and experiment authoring
+copy the source analysis coverage into the new version, including excluded and
+failed papers with no experiment revision. This preserves the original input
+processing record; it does not assert that every paper supports the new Finding.
+The metadata is saved in the same publication transaction as the experiment
+graph. Finding synthesis consumes only fixed experiment revisions and their
+Selections and ComparisonGroups; it never consumes PaperContribution.
+Authored experiment graph snapshots retain the source analysis version and
+user identity; Agent publication also retains the committing tool-call ID.
+
 Each analysis-level contribution exposes `evidence_disposition`,
 `routed_source_count`, `extracted_source_count`,
 `comparable_evidence_count`, `failed_source_count`, and an optional

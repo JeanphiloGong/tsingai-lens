@@ -1237,9 +1237,9 @@ class ObjectiveAnalysis:
                     "system-generated analysis cannot have authoring provenance"
                 )
         elif self.origin == "agent_authored":
-            if self.scientific_record_source != "authored_snapshot":
+            if self.scientific_record_source not in {"authored_snapshot", "experiment_graph"}:
                 raise ValueError(
-                    "authored analysis requires authored_snapshot"
+                    "authored analysis requires authored_snapshot or experiment_graph"
                 )
             if not _text(self.created_by_user_id) or not _text(
                 self.created_by_tool_call_id
@@ -1253,9 +1253,9 @@ class ObjectiveAnalysis:
             ):
                 raise ValueError("authored analysis source must be an older version")
         else:
-            if self.scientific_record_source != "authored_snapshot":
+            if self.scientific_record_source not in {"authored_snapshot", "experiment_graph"}:
                 raise ValueError(
-                    "authored analysis requires authored_snapshot"
+                    "authored analysis requires authored_snapshot or experiment_graph"
                 )
             if self.source_analysis_version is None:
                 raise ValueError("authored analysis requires source_analysis_version")

@@ -253,11 +253,12 @@ async def test_write_rebinds_contributions_and_fails_running_snapshot_on_publish
             prepared=prepared,
             collection_id="collection-1",
             created_by="user-1",
+            created_by_tool_call_id="call-1",
         )
 
     assert transactions.events == ["begin", "rollback"]
     assert writer.transaction is transactions.handle
-    assert "contributions" not in repository.published
+    assert repository.published["contributions"][0].analysis_version == 2
     assert repository.published["transaction"] is transactions.handle
     assert repository.failed["expected_status"] == "running"
 

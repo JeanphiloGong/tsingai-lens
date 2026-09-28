@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
@@ -86,11 +86,15 @@ class FindingAuthoringService:
         )
         if not chosen or len(chosen) != len(selected_ids):
             raise ValueError("Finding references an unknown experiment selection")
+        coverage = await self.objective_repository.list_contributions(
+            collection_id, objective_id, source_analysis_version
+        )
         _objective, queued = await self.objective_repository.queue_analysis(
             collection_id, objective_id, document_inputs=source_analysis.document_inputs,
             pipeline_version=source_analysis.pipeline_version, model_name=source_analysis.model_name,
             prompt_versions=dict(source_analysis.prompt_versions), origin="human_authored",
             created_by_user_id=created_by_user_id,
+            source_analysis_version=source_analysis_version,
         )
         claimed = await self.objective_repository.claim_analysis(
             collection_id, objective_id, queued.analysis_version
@@ -112,6 +116,10 @@ class FindingAuthoringService:
                     collection_id,
                     objective_id,
                     claimed.analysis_version,
+                    contributions=tuple(
+                        replace(item, analysis_version=claimed.analysis_version)
+                        for item in coverage
+                    ),
                     transaction=transaction,
                 )
         except Exception as exc:

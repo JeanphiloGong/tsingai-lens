@@ -275,11 +275,17 @@ class PostgresObjectiveRepository:
         origin: str = "system_generated",
         created_by_user_id: str | None = None,
         created_by_tool_call_id: str | None = None,
+        source_analysis_version: int | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         now = datetime.now(timezone.utc)
         async with self.session_factory.begin() as session:
             row = await self._locked_objective(session, collection_id, objective_id)
             objective = self._objective_from_row(row)
+            if (
+                source_analysis_version is not None
+                and objective.published_analysis_version != source_analysis_version
+            ):
+                raise ValueError("source analysis version is stale")
             if objective.confirmation_status == "candidate":
                 objective = objective.confirm()
             active_row = await session.scalar(
@@ -300,6 +306,7 @@ class PostgresObjectiveRepository:
                     )
                 if (
                     active.origin != origin
+                    or active.source_analysis_version != source_analysis_version
                     or active.created_by_user_id != created_by_user_id
                     or active.created_by_tool_call_id != created_by_tool_call_id
                 ):
@@ -334,6 +341,7 @@ class PostgresObjectiveRepository:
                 ),
                 created_by_user_id=created_by_user_id,
                 created_by_tool_call_id=created_by_tool_call_id,
+                source_analysis_version=source_analysis_version,
             )
             objective = objective.queue_analysis(version)
             self._write_objective(row, objective, now=now)

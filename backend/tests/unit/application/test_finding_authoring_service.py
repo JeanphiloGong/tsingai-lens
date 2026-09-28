@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from application.core.objectives.finding_authoring_service import FindingAuthoringService
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.research_objective import ObjectiveAnalysis, PaperContribution, ResearchObjective
+from domain.core.research_objective import (
+    ObjectiveAnalysis, ObjectiveFactSet, PaperContribution, PreparedDocumentInput,
+    ResearchObjective,
+)
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from application.core.objectives.paper_experiment_authoring_service import (
+    PaperExperimentAuthoringService,
+)
 
 
 pytestmark = pytest.mark.anyio
@@ -155,6 +163,7 @@ async def test_selection_version_copies_contributions_and_uses_one_transaction()
     assert writer.call["selections"][0].selection_id == "selection-1"
     assert repository.published["transaction"] is transactions.handle
     assert repository.published["contributions"][0].analysis_version == 2
+    assert "contributions" not in writer.call
     assert result.finding is not None
 
 
@@ -177,3 +186,89 @@ async def test_selection_version_rolls_back_and_marks_running_snapshot_failed():
 
     assert transactions.events == ["begin", "rollback"]
     assert repository.failed["expected_status"] == "running"
+
+
+@pytest.mark.parametrize("origin", ["human_authored", "agent_authored"])
+async def test_authored_publication_preserves_coverage_with_real_repository(origin):
+    repository = MemoryObjectiveRepository()
+    objective = replace(_objective(), active_analysis_version=None)
+    await repository.replace(
+        "collection-1", ObjectiveFactSet(research_objectives=(objective,))
+    )
+    inputs = tuple(
+        PreparedDocumentInput(document_id=paper, preparation_fingerprint=paper)
+        for paper in ("paper-1", "paper-2", "paper-3")
+    )
+    await repository.queue_analysis(
+        "collection-1", "objective-1", document_inputs=inputs,
+        pipeline_version="test", model_name=None, prompt_versions={},
+    )
+    await repository.claim_analysis("collection-1", "objective-1", 1)
+    coverage = tuple(
+        PaperContribution.from_mapping({
+            "collection_id": "collection-1", "objective_id": "objective-1",
+            "analysis_version": 1, "document_id": paper,
+            "analysis_status": status,
+            "warnings": [] if status == "analyzed" else [reason],
+        })
+        for paper, status, reason in (
+            ("paper-1", "analyzed", ""),
+            ("paper-2", "excluded", "Outside the material scope"),
+            ("paper-3", "failed", "Source extraction failed"),
+        )
+    )
+    objective, source = await repository.publish_experiment_analysis(
+        "collection-1", "objective-1", 1, contributions=coverage,
+    )
+    transactions = _Transactions()
+    writer = _Writer()
+    if origin == "human_authored":
+        service = FindingAuthoringService(
+            collection_service=_Collection(), objective_repository=repository,
+            experiment_query_service=_Query(), experiment_analysis_writer=writer,
+            experiment_analysis_transaction_factory=transactions,
+        )
+        await service.create_selection_version(
+            collection_id="collection-1", objective_id="objective-1",
+            source_analysis_version=1, selection_ids=("selection-1",),
+            created_by_user_id="user-1",
+        )
+    else:
+        async def write_experiment(**kwargs):
+            writer.call = kwargs
+            return SimpleNamespace(revisions=(), selections=(), groups=(), findings=())
+
+        writer.write_single_experiment_revision = write_experiment
+        service = PaperExperimentAuthoringService(
+            collection_service=_Collection(), source_artifact_repository=None,
+            objective_repository=repository, experiment_analysis_writer=writer,
+            experiment_analysis_transaction_factory=transactions,
+        )
+        await service.write(
+            prepared=SimpleNamespace(objective=objective, analysis=source, output=None),
+            collection_id="collection-1", created_by="user-1",
+            created_by_tool_call_id="call-1",
+        )
+
+    published = await repository.read_analysis("collection-1", "objective-1", 2)
+    assert published.status == "succeeded"
+    assert published.origin == origin
+    assert published.scientific_record_source == "experiment_graph"
+    assert published.source_analysis_version == 1
+    assert published.created_by_user_id == "user-1"
+    assert published.created_by_tool_call_id == (
+        "call-1" if origin == "agent_authored" else None
+    )
+    with pytest.raises(ValueError, match="source analysis version is stale"):
+        await repository.queue_analysis(
+            "collection-1", "objective-1", document_inputs=inputs,
+            pipeline_version="test", model_name=None, prompt_versions={},
+            origin=origin, source_analysis_version=1, created_by_user_id="user-1",
+            created_by_tool_call_id="call-2" if origin == "agent_authored" else None,
+        )
+    assert await repository.list_contributions("collection-1", "objective-1", 2) == tuple(
+        replace(item, analysis_version=2) for item in coverage
+    )
+    assert await repository.list_contributions("collection-1", "objective-1", 1) == coverage
+    assert "contributions" not in writer.call
+    assert transactions.events == ["begin", "commit"]

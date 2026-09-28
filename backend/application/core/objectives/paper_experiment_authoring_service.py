@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from typing import Any, Mapping
@@ -200,11 +200,16 @@ class PaperExperimentAuthoringService:
         prepared: PreparedPaperExperimentDraft,
         collection_id: str,
         created_by: str,
+        created_by_tool_call_id: str,
     ) -> ExperimentAnalysisWriteResult:
         if self.experiment_analysis_transaction_factory is None:
             raise RuntimeError(
                 "PaperExperiment authoring requires a shared analysis transaction"
             )
+        coverage = await self.objective_repository.list_contributions(
+            collection_id, prepared.objective.objective_id,
+            prepared.analysis.analysis_version,
+        )
         _objective, queued = await self.objective_repository.queue_analysis(
             collection_id,
             prepared.objective.objective_id,
@@ -214,6 +219,8 @@ class PaperExperimentAuthoringService:
             prompt_versions=dict(prepared.analysis.prompt_versions),
             origin="agent_authored",
             created_by_user_id=created_by,
+            created_by_tool_call_id=created_by_tool_call_id,
+            source_analysis_version=prepared.analysis.analysis_version,
         )
         claimed = await self.objective_repository.claim_analysis(
             collection_id,
@@ -237,6 +244,10 @@ class PaperExperimentAuthoringService:
                     collection_id,
                     prepared.objective.objective_id,
                     claimed.analysis_version,
+                    contributions=tuple(
+                        replace(item, analysis_version=claimed.analysis_version)
+                        for item in coverage
+                    ),
                     transaction=transaction,
                 )
         except Exception as exc:

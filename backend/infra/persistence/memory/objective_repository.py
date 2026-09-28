@@ -235,10 +235,16 @@ class MemoryObjectiveRepository:
         origin: str = "system_generated",
         created_by_user_id: str | None = None,
         created_by_tool_call_id: str | None = None,
+        source_analysis_version: int | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id)
         now = datetime.now(timezone.utc)
         objective = self._require_objective(*key)
+        if (
+            source_analysis_version is not None
+            and objective.published_analysis_version != source_analysis_version
+        ):
+            raise ValueError("source analysis version is stale")
         if objective.confirmation_status == "candidate":
             objective = objective.confirm()
         existing = next(
@@ -256,6 +262,7 @@ class MemoryObjectiveRepository:
                 )
             if (
                 existing.origin != origin
+                or existing.source_analysis_version != source_analysis_version
                 or existing.created_by_user_id != created_by_user_id
                 or existing.created_by_tool_call_id != created_by_tool_call_id
             ):
@@ -292,6 +299,7 @@ class MemoryObjectiveRepository:
             ),
             created_by_user_id=created_by_user_id,
             created_by_tool_call_id=created_by_tool_call_id,
+            source_analysis_version=source_analysis_version,
         )
         objective = objective.queue_analysis(version)
         self._objectives[key] = objective

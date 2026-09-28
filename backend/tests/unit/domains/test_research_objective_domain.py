@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from datetime import datetime, timezone
 
 import pytest
@@ -413,15 +415,19 @@ def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> No
     assert authored.scientific_record_source == "authored_snapshot"
 
 
-def test_objective_analysis_rejects_record_source_that_conflicts_with_origin() -> None:
-    with pytest.raises(ValueError, match="authored analysis requires authored_snapshot"):
-        _analysis(
-            analysis_version=2,
-            origin="human_authored",
-            scientific_record_source="experiment_graph",
-            source_analysis_version=1,
-            created_by_user_id="researcher-1",
-        )
+def test_authored_experiment_graph_requires_source_provenance() -> None:
+    analysis = _analysis(
+        analysis_version=2,
+        origin="human_authored",
+        scientific_record_source="experiment_graph",
+        source_analysis_version=1,
+        created_by_user_id="researcher-1",
+    )
+    assert analysis.source_analysis_version == 1
+    with pytest.raises(ValueError, match="requires source_analysis_version"):
+        replace(analysis, source_analysis_version=None)
+    with pytest.raises(ValueError, match="requires created_by_user_id"):
+        replace(analysis, created_by_user_id=None)
 
 
 def test_research_objective_requires_newer_analysis_version() -> None:

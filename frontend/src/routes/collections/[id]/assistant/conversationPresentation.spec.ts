@@ -4,8 +4,27 @@ import {
 	buildChatPresentation,
 	getChatSessionActivity,
 	getRecoveredChatProgress,
-	getCurrentReadings
+	getCurrentReadings,
+	sanitizeStreamingCitationText
 } from './conversationPresentation';
+
+describe('sanitizeStreamingCitationText', () => {
+	it('hides complete and split citation markers until the persisted answer arrives', () => {
+		expect(
+			sanitizeStreamingCitationText(
+				'The result [[cite:tbl_doc_abc_table_3]] is bounded by `blk_doc_abc_results_1`.'
+			)
+		).toBe('The result  is bounded by .');
+		expect(sanitizeStreamingCitationText('The result [[cite:tbl_doc_abc')).toBe('The result ');
+		expect(sanitizeStreamingCitationText('The result blk_doc_abc_')).toBe('The result ');
+	});
+
+	it('keeps ordinary research prose intact', () => {
+		expect(sanitizeStreamingCitationText('The tensile strength is 334.2 MPa.')).toBe(
+			'The tensile strength is 334.2 MPa.'
+		);
+	});
+});
 
 function message(
 	messageId: string,

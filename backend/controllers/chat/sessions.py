@@ -17,6 +17,7 @@ from application.chat.session_service import (
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
+from application.chat.inline_citations import format_message_citations
 from application.repositories.chat_repository import ChatSessionBusyError
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
@@ -282,8 +283,9 @@ def _snapshot_response(snapshot: Any) -> ChatResponseSnapshotResponse:
 def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListResponse:
     pending = trajectory["pending_approval"]
     response = trajectory.get("response")
+    visible_messages = format_message_citations(trajectory["messages"])
     return ChatMessageListResponse(
-        items=[_message_response(item) for item in trajectory["messages"]],
+        items=[_message_response(item) for item in visible_messages],
         feedback=[ChatMessageFeedbackResponse.model_validate(item) for item in trajectory["feedback"]],
         branches=trajectory["branches"],
         branch_draft=_message_response(trajectory["branch_draft"]) if trajectory["branch_draft"] else None,

@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 from application.chat.agent_runner import AgentRunResult, AgentRunStatus, ResearchAgentRunner
+from application.chat.inline_citations import format_message_citations, format_inline_citations
 from application.chat.capabilities import AgentContext
 from application.chat.intent_policy import _write_request_scope
 from application.core.objectives.evidence_authoring_service import (
@@ -414,6 +415,7 @@ class ChatSessionService:
         for owner in family:
             trajectory = trajectories[owner.session_id]
             messages = trajectory["messages"]
+            visible_messages = format_message_citations(messages)
             positions = [index for index, item in enumerate(messages) if item.role.value == "user"]
             previous_id = None
             finished_calls = {item.tool_result.tool_call_id for item in messages
@@ -428,7 +430,7 @@ class ChatSessionService:
                     previous_id = node_id
                     continue
                 end = positions[turn_index + 1] if turn_index + 1 < len(positions) else len(messages)
-                answer = next((item.content for item in reversed(messages[position + 1:end])
+                answer = next((item.content for item in reversed(visible_messages[position + 1:end])
                                if item.role.value == "assistant" and not item.tool_calls and item.content.strip()), "")
                 status = "completed" if answer else "incomplete"
                 if end == len(messages):
@@ -440,7 +442,7 @@ class ChatSessionService:
                     elif response is not None:
                         status = response.status if response.status != "completed" or answer else "incomplete"
                     if response is not None and response.content:
-                        answer = response.content
+                        answer = format_inline_citations(response.content, messages=messages)
                 nodes.append({"message": message, "parent_message_id": previous_id,
                               "answer": answer, "status": status, "can_branch": not busy})
                 previous_id = node_id

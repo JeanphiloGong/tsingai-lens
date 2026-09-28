@@ -265,6 +265,54 @@ async def test_research_read_returns_to_the_same_agent_loop_without_nested_revie
     assert result.messages[-1].content == "The inspected results report improved elongation."
 
 
+async def test_final_answer_binds_source_marker_to_a_readable_inline_link() -> None:
+    source_ref = "blk_doc_abc_results_1"
+    capability = _Capability(
+        "read_source",
+        ToolRisk.READ,
+        result_data={
+            "document_id": "paper-1",
+            "document_title": "P006.pdf",
+            "source_ref": source_ref,
+            "source_kind": "text_window",
+            "heading_path": "Results",
+            "page": 8,
+            "source_digest": "a" * 64,
+            "content_truncated": False,
+            "complete_source": True,
+            "content": "The inspected results report improved elongation.",
+        },
+        resource_refs=(
+            ChatResourceRef(
+                resource_type="source",
+                resource_id=f"paper-1:{source_ref}",
+                href=(
+                    "/collections/col-1/documents/paper-1?view=parsed-paper&"
+                    f"source_ref={source_ref}&page=8"
+                ),
+            ),
+        ),
+    )
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(content=f"The inspected results report improved elongation. [[cite:{source_ref}]]"),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((capability,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Read the source and summarize the result.",
+    )
+
+    answer = result.messages[-1].content
+    assert source_ref not in answer.split("](", 1)[0]
+    assert "P006.pdf" in answer
+    assert f"source_ref={source_ref}" in answer
+
+
 async def test_validated_tool_arguments_are_reused_for_execution() -> None:
     _CountingArguments.validation_count = 0
     capability = _Capability(

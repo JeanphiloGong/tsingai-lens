@@ -1,5 +1,25 @@
 import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
 
+const completeCitationMarker = /\[\[cite:[^\]\r\n]+\]\]/g;
+const completeInternalSourceId =
+	/(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+(?![A-Za-z0-9_-])/g;
+const quotedInternalSourceId =
+	/`(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+`/g;
+const partialCitationMarker = /\[\[cite:[^\]\r\n]*$/;
+const partialInternalSourceId =
+	/(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9_-]*$/;
+
+/** Keep transient model markers and source identities out of the live answer. */
+export function sanitizeStreamingCitationText(content: string): string {
+	const text = String(content ?? '')
+		.replace(completeCitationMarker, '')
+		.replace(quotedInternalSourceId, '')
+		.replace(completeInternalSourceId, '')
+		.replace(partialCitationMarker, '')
+		.replace(partialInternalSourceId, '');
+	return text;
+}
+
 export type ChatSessionActivity = 'running' | 'approval' | 'recovering' | 'idle' | 'unavailable';
 
 export function getChatSessionActivity(

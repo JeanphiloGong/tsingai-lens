@@ -25,6 +25,7 @@ from application.chat.capabilities import (
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
+from application.chat.inline_citations import format_inline_citations
 from application.chat import capability_policy, intent_policy
 from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
 from domain.chat.model_call import ModelCallObserver
@@ -489,7 +490,16 @@ class ResearchAgentRunner:
                 content += "\n\n" + str(result.data.get("curated_finding", {}).get("statement", ""))
             if result.data.get("note"):
                 content += "\n\n" + ("记录原因：" if chinese else "Recorded reason: ") + str(result.data["note"])
-            messages.append(self._assistant(context, content, progress))
+            messages.append(
+                self._assistant(
+                    context,
+                    content,
+                    progress,
+                    messages=messages,
+                    calls=calls,
+                    results=results,
+                )
+            )
             await self._checkpoint(checkpoint, messages, calls, results)
             if text_delta_callback is not None:
                 text_delta_callback(content)
@@ -649,6 +659,9 @@ class ResearchAgentRunner:
                             context,
                             self._failure_answer(messages, calls, results),
                             progress,
+                            messages=messages,
+                            calls=calls,
+                            results=results,
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -699,6 +712,9 @@ class ResearchAgentRunner:
                             context,
                             self._failure_answer(messages, calls, results),
                             progress,
+                            messages=messages,
+                            calls=calls,
+                            results=results,
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -722,7 +738,16 @@ class ResearchAgentRunner:
             if not turn.tool_calls:
                 progress.trace(context, phase="model", capability_names=tool_names)
                 reason = progress.stop_before_model() or AgentCompletionReason.MODEL_ANSWER
-                messages.append(self._assistant(context, turn.content, progress))
+                messages.append(
+                    self._assistant(
+                        context,
+                        turn.content,
+                        progress,
+                        messages=messages,
+                        calls=calls,
+                        results=results,
+                    )
+                )
                 await self._checkpoint(checkpoint, messages, calls, results)
                 progress.trace(context, phase="terminal", termination_reason=reason.value, final_answer=True)
                 return self._result(
@@ -1168,13 +1193,29 @@ class ResearchAgentRunner:
                 "Research Agent final answer failed exception_type=%s",
                 type(exc).__name__,
             )
-            messages.append(self._assistant(context, self._failure_answer(
-                messages, calls, results,
-            ), progress))
+            messages.append(
+                self._assistant(
+                    context,
+                    self._failure_answer(messages, calls, results),
+                    progress,
+                    messages=messages,
+                    calls=calls,
+                    results=results,
+                )
+            )
             progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
             await self._checkpoint(checkpoint, messages, calls, results)
             return self._result(AgentRunStatus.FAILED, messages, calls, results, "final_answer_unavailable")
-        messages.append(self._assistant(context, turn.content, progress))
+        messages.append(
+            self._assistant(
+                context,
+                turn.content,
+                progress,
+                messages=messages,
+                calls=calls,
+                results=results,
+            )
+        )
         progress.trace(context, phase="finalize", termination_reason=reason.value, final_answer=True)
         await self._checkpoint(checkpoint, messages, calls, results)
         return self._result(
@@ -1604,11 +1645,24 @@ class ResearchAgentRunner:
         )
 
     @staticmethod
-    def _assistant(context: AgentContext, content: str, progress: _RunProgress) -> ChatMessage:
+    def _assistant(
+        context: AgentContext,
+        content: str,
+        progress: _RunProgress,
+        *,
+        messages: list[ChatMessage] | tuple[ChatMessage, ...] = (),
+        calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
+        results: list[ChatToolResult] | tuple[ChatToolResult, ...] = (),
+    ) -> ChatMessage:
         return ChatMessage.assistant(
             message_id=progress.response_message_id,
             session_id=context.session_id,
-            content=content,
+            content=format_inline_citations(
+                content,
+                calls=calls,
+                results=results,
+                messages=messages,
+            ),
             created_at=progress.response_created_at,
         )
 

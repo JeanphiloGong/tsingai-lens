@@ -53,12 +53,14 @@
 
 <script lang="ts">
 	import { t } from '../../../_shared/i18n';
+	import { sanitizeStreamingCitationText } from './conversationPresentation';
 	export let content = '';
 	export let streaming = false;
-	$: html = renderMessage(content, streaming, $t('researchAgent.responseTable'));
+	$: visibleContent = streaming ? sanitizeStreamingCitationText(content) : content;
+	$: html = renderMessage(visibleContent, streaming, $t('researchAgent.responseTable'));
 </script>
 
-{#if content}
+{#if visibleContent}
 	<div class="assistant-copy" class:streaming data-testid="message-content">
 		<!-- HTML input is disabled; only Markdown and untrusted-mode KaTeX emit markup. -->
 		<!-- eslint-disable-next-line svelte/no-at-html-tags -->

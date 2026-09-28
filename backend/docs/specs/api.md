@@ -385,6 +385,26 @@ the durable trajectory checkpoints have succeeded. A terminal `error` event
 contains only a stable code and sanitized message. Partial text is never a
 completed Chat message or a scientific result.
 
+Assistant answer content uses inline Source citations. A source-backed sentence,
+comparison-table value, or paper-specific limitation is followed at the point of
+the claim by a Markdown link whose visible label is `P006.pdf · Table 3 · p. 8`.
+The server converts the model-only `[[cite:<source_ref>]]` marker after checking that
+the referenced Source was returned by a successful, complete `read_source`,
+`inspect_table`, or complete `inspect_document_sources` result. Search matches,
+truncated windows, and headings can be shown as inspection previews but are not
+supporting citation links. Ambiguous locators must be document-qualified; an
+unresolved internal locator is removed from user-visible prose.
+
+The human-readable link label is part of the response contract. Internal block,
+table, and figure IDs remain available in the private trajectory and in the link
+target for exact reader navigation, but never appear as visible labels or as a
+separate Source-ID list at the start or end of an answer. Existing stored answers
+are projected through the same conversion when a trajectory is read, so older
+answers do not require a data rewrite. During `text_delta` streaming, incomplete
+citation markers and internal IDs are withheld from the transient display; the
+final `turn` event and saved assistant message are authoritative for the complete
+inline links.
+
 `GET /messages` includes a nullable `response` snapshot: `response_id`, monotonic
 `sequence`, start/update timestamps, current `message_id` and
 `message_created_at`, exact partial `content`, latest `progress`,

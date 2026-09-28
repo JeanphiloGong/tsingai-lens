@@ -822,6 +822,68 @@ class ExperimentAnalysisWriter:
             post_bind_diagnostics=prepared.post_bind_diagnostics,
         )
 
+    async def write_single_experiment_revision(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        analysis: ObjectiveAnalysis,
+        experiment_output: ReconciledPaperExperimentOutput,
+        create_selection: bool,
+        created_by: str | None = None,
+        transaction: RepositoryTransaction | None = None,
+    ) -> ExperimentAnalysisWriteResult:
+        """Write one Agent-authored experiment graph and synthesize its Findings.
+
+        Agent authoring deliberately shares the same preparation, identity,
+        binding, and repository transaction as automatic analysis.  The only
+        difference is the graph scope: one reconciled output and, when the
+        Objective has an active analysis, its explicit Selection.
+        """
+
+        prepared = await self._prepare_experiment_selections(
+            collection_id=collection_id,
+            objective=objective,
+            analysis=analysis,
+            experiment_outputs=(experiment_output,),
+            partial_experiment_outputs=(),
+            include_selections=create_selection,
+            created_by=created_by,
+            transaction=transaction,
+        )
+        synthesis = (
+            self.finding_synthesis_service.synthesize(
+                collection_id=collection_id,
+                objective=objective,
+                analysis_version=analysis.analysis_version,
+                revisions=prepared.revisions,
+                selections=prepared.selections,
+            )
+            if create_selection and prepared.selections
+            else _EmptySynthesis()
+        )
+        stored = await _repository_call(
+            self.experiment_analysis_repository.write_graph,
+            ExperimentAnalysisWrite(
+                collection_id=collection_id,
+                objective_id=objective.objective_id,
+                analysis_version=analysis.analysis_version,
+                revisions=prepared.revisions,
+                selections=prepared.selections,
+                groups=synthesis.groups,
+                findings=synthesis.findings,
+                created_by=created_by,
+            ),
+            transaction=transaction,
+        )
+        return ExperimentAnalysisWriteResult(
+            revisions=stored.revisions,
+            selections=stored.selections,
+            groups=stored.groups,
+            findings=stored.findings,
+            post_bind_diagnostics=prepared.post_bind_diagnostics,
+        )
+
     async def _prepare_experiment_selections(
         self,
         *,

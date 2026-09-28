@@ -519,6 +519,25 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
     assert len(analyses.graphs) == 2
 
 
+async def test_single_experiment_writer_commits_revision_and_selection_only():
+    writer, revisions, analyses = _writer()
+    result = await writer.write_single_experiment_revision(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_output=_comparison_experiment("paper-a"),
+        create_selection=True,
+        created_by="agent-user",
+    )
+
+    assert len(result.revisions) == 1
+    assert len(result.selections) == 1
+    assert result.groups == ()
+    assert len(result.findings) == 1
+    assert len(revisions.records) == 1
+    assert len(analyses.graphs[0].findings) == 1
+
+
 async def test_writer_passes_one_transaction_to_every_graph_repository():
     writer, revisions, analyses = _writer()
     transaction = object()

@@ -472,12 +472,13 @@ class MemoryObjectiveRepository:
         analysis = self._require_analysis(*key)
         if analysis.status != "running":
             raise ValueError("only running objective analysis can be published")
-        input_documents = {item.document_id for item in analysis.document_inputs}
-        contribution_documents = {item.document_id for item in contributions}
-        if contribution_documents != input_documents:
-            raise ValueError("paper contributions must cover every analysis input")
-        if any(item.key[:3] != key for item in contributions):
-            raise ValueError("paper contribution belongs to another analysis")
+        if contributions:
+            input_documents = {item.document_id for item in analysis.document_inputs}
+            contribution_documents = {item.document_id for item in contributions}
+            if contribution_documents != input_documents:
+                raise ValueError("paper contributions must cover every analysis input")
+            if any(item.key[:3] != key for item in contributions):
+                raise ValueError("paper contribution belongs to another analysis")
         analysis = replace(analysis, scientific_record_source="experiment_graph")
         analysis = analysis.succeed(
             completed_at=datetime.now(timezone.utc),
@@ -489,7 +490,8 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
         self._touch_objective(objective_key, datetime.now(timezone.utc))
-        self._contributions[key] = contributions
+        if contributions:
+            self._contributions[key] = contributions
         return objective, analysis
 
     async def publish_authored_analysis(

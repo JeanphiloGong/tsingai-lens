@@ -851,17 +851,6 @@ class ExperimentAnalysisWriter:
             created_by=created_by,
             transaction=transaction,
         )
-        synthesis = (
-            self.finding_synthesis_service.synthesize(
-                collection_id=collection_id,
-                objective=objective,
-                analysis_version=analysis.analysis_version,
-                revisions=prepared.revisions,
-                selections=prepared.selections,
-            )
-            if create_selection and prepared.selections
-            else _EmptySynthesis()
-        )
         stored = await _repository_call(
             self.experiment_analysis_repository.write_graph,
             ExperimentAnalysisWrite(
@@ -870,6 +859,60 @@ class ExperimentAnalysisWriter:
                 analysis_version=analysis.analysis_version,
                 revisions=prepared.revisions,
                 selections=prepared.selections,
+                groups=(),
+                findings=(),
+                created_by=created_by,
+            ),
+            transaction=transaction,
+        )
+        return ExperimentAnalysisWriteResult(
+            revisions=stored.revisions,
+            selections=stored.selections,
+            groups=stored.groups,
+            findings=stored.findings,
+            post_bind_diagnostics=prepared.post_bind_diagnostics,
+        )
+
+    async def write_selection_finding_revision(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        analysis: ObjectiveAnalysis,
+        revisions: Sequence[StoredPaperExperimentRevision],
+        selections: Sequence[ObjectiveExperimentSelection],
+        created_by: str | None = None,
+        transaction: RepositoryTransaction | None = None,
+    ) -> ExperimentAnalysisWriteResult:
+        """Copy fixed selections into a new snapshot and synthesize its Finding."""
+        selection_map = {
+            item.selection_id: f"{item.selection_id}:v{analysis.analysis_version}"
+            for item in selections
+        }
+        copied = tuple(
+            replace(
+                item,
+                selection_id=selection_map[item.selection_id],
+                analysis_version=analysis.analysis_version,
+            )
+            for item in selections
+        )
+        source_revisions = tuple(item.revision for item in revisions)
+        synthesis = self.finding_synthesis_service.synthesize(
+            collection_id=collection_id,
+            objective=objective,
+            analysis_version=analysis.analysis_version,
+            revisions=source_revisions,
+            selections=copied,
+        )
+        stored = await _repository_call(
+            self.experiment_analysis_repository.write_graph,
+            ExperimentAnalysisWrite(
+                collection_id=collection_id,
+                objective_id=objective.objective_id,
+                analysis_version=analysis.analysis_version,
+                revisions=source_revisions,
+                selections=copied,
                 groups=synthesis.groups,
                 findings=synthesis.findings,
                 created_by=created_by,
@@ -881,7 +924,6 @@ class ExperimentAnalysisWriter:
             selections=stored.selections,
             groups=stored.groups,
             findings=stored.findings,
-            post_bind_diagnostics=prepared.post_bind_diagnostics,
         )
 
     async def _prepare_experiment_selections(

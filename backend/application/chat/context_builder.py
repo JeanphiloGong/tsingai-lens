@@ -201,8 +201,11 @@ class ChatContextBuilder:
         omitted = tuple(
             message for message in messages if message.message_id not in selected_ids
         )
+        summary_messages = omitted + tuple(
+            message for message in selected_messages if message.source_contexts
+        )
         summary = self._rollover_summary(
-            omitted, min(self.max_summary_chars, self.max_chars - char_count)
+            summary_messages, min(self.max_summary_chars, self.max_chars - char_count)
         )
         if token_count + self.estimate_tokens(summary) > max_input_tokens:
             summary = ""
@@ -267,12 +270,17 @@ class ChatContextBuilder:
                 })
             for source in message.source_contexts:
                 entries.append({
+                    "source_context": True,
                     "document_id": source.document_id, "source_ref": source.source_ref,
                     "source_digest": source.source_digest,
                     "resource": source.resource_ref.to_record(),
                 })
         if not entries:
             return ""
+        # User-selected Sources are the durable context needed to resume a
+        # pending authoring decision; retain them before lower-priority tool
+        # arguments when the bounded rollover budget is tight.
+        entries.sort(key=lambda entry: 0 if entry.get("source_context") else 1)
         kept = []
         summary = ""
         for entry in entries:

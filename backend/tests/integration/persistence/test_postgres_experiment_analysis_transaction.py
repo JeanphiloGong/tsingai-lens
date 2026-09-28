@@ -205,6 +205,31 @@ async def test_shared_transaction_rolls_back_graph_and_objective_publication(
     assert restored.status == "running"
 
 
+async def test_experiment_graph_publication_does_not_require_paper_contributions(
+    objective_repository,
+) -> None:
+    _, analysis = await _queue_and_claim(objective_repository)
+
+    await objective_repository.publish_experiment_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+    )
+
+    published = await objective_repository.read_analysis(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+    )
+    assert published is not None
+    assert published.status == "succeeded"
+    assert await objective_repository.list_contributions(
+        COLLECTION_ID,
+        OBJECTIVE_ID,
+        analysis.analysis_version,
+    ) == ()
+
+
 async def test_finding_failure_rolls_back_revisions_selections_groups_and_finding(
     objective_repository,
 ) -> None:

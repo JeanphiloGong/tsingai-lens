@@ -21,6 +21,7 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
 )
 from application.repositories.objective_repository import ObjectiveRepository
 from application.repositories.source_artifact_repository import SourceArtifactRepository
+from application.repositories.transaction import RepositoryTransactionFactory
 from application.source.collection_service import CollectionService
 from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
 
@@ -104,11 +105,13 @@ class PaperExperimentAuthoringService:
         source_artifact_repository: SourceArtifactRepository,
         objective_repository: ObjectiveRepository,
         experiment_analysis_writer: ExperimentAnalysisWriter,
+        experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.source_artifact_repository = source_artifact_repository
         self.objective_repository = objective_repository
         self.experiment_analysis_writer = experiment_analysis_writer
+        self.experiment_analysis_transaction_factory = experiment_analysis_transaction_factory
 
     async def prepare(
         self,
@@ -140,6 +143,8 @@ class PaperExperimentAuthoringService:
         )
         if analysis is None:
             raise ValueError("active Objective analysis could not be loaded")
+        if analysis.status != "succeeded":
+            raise ValueError("active Objective analysis is not a completed snapshot")
         document = await self.source_artifact_repository.read_document(
             collection_id, document_id
         )
@@ -196,14 +201,55 @@ class PaperExperimentAuthoringService:
         collection_id: str,
         created_by: str,
     ) -> ExperimentAnalysisWriteResult:
-        return await self.experiment_analysis_writer.write_single_experiment_revision(
-            collection_id=collection_id,
-            objective=prepared.objective,
-            analysis=prepared.analysis,
-            experiment_output=prepared.output,
-            create_selection=True,
-            created_by=created_by,
+        if self.experiment_analysis_transaction_factory is None:
+            raise RuntimeError(
+                "PaperExperiment authoring requires a shared analysis transaction"
+            )
+        _objective, queued = await self.objective_repository.queue_analysis(
+            collection_id,
+            prepared.objective.objective_id,
+            document_inputs=prepared.analysis.document_inputs,
+            pipeline_version=prepared.analysis.pipeline_version,
+            model_name=prepared.analysis.model_name,
+            prompt_versions=dict(prepared.analysis.prompt_versions),
+            origin="agent_authored",
+            created_by_user_id=created_by,
         )
+        claimed = await self.objective_repository.claim_analysis(
+            collection_id,
+            prepared.objective.objective_id,
+            queued.analysis_version,
+        )
+        if claimed is None:
+            raise ValueError("agent experiment analysis snapshot could not be claimed")
+        try:
+            async with self.experiment_analysis_transaction_factory.begin() as transaction:
+                result = await self.experiment_analysis_writer.write_single_experiment_revision(
+                    collection_id=collection_id,
+                    objective=prepared.objective,
+                    analysis=claimed,
+                    experiment_output=prepared.output,
+                    create_selection=True,
+                    created_by=created_by,
+                    transaction=transaction,
+                )
+                await self.objective_repository.publish_experiment_analysis(
+                    collection_id,
+                    prepared.objective.objective_id,
+                    claimed.analysis_version,
+                    transaction=transaction,
+                )
+        except Exception as exc:
+            await self.objective_repository.fail_analysis(
+                collection_id,
+                prepared.objective.objective_id,
+                claimed.analysis_version,
+                error_code="authored_experiment_publish_failed",
+                error_message=str(exc),
+                expected_status="running",
+            )
+            raise
+        return result
 
 
 __all__ = ["PaperExperimentAuthoringService", "PreparedPaperExperimentDraft"]

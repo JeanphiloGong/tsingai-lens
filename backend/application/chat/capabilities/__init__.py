@@ -4,12 +4,6 @@ from application.chat.capabilities.contracts import (
     CapabilityHandler,
     ToolSpec,
 )
-from application.chat.capabilities.agent_objective_analysis import (
-    AgentEvidenceDraftArguments,
-    AgentPaperSummaryArguments,
-    PublishAgentObjectiveAnalysisArguments,
-    PublishAgentObjectiveAnalysisCapability,
-)
 from application.chat.capabilities.collection_context import (
     BrowseCollectionPapersArguments,
     BrowseCollectionPapersCapability,
@@ -43,12 +37,6 @@ from application.chat.capabilities.paper_experiment_authoring import (
     CreatePaperExperimentRevisionCapability,
     ProposePaperExperimentDraftArguments,
     ProposePaperExperimentDraftCapability,
-)
-from application.chat.capabilities.evidence_authoring import (
-    CreateEvidenceDraftArguments,
-    CreateEvidenceDraftCapability,
-    CreateEvidenceVersionArguments,
-    CreateEvidenceVersionCapability,
 )
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
@@ -109,13 +97,9 @@ from application.chat.capabilities.registry import CapabilityRegistry
 
 __all__ = [
     "AgentContext",
-    "AgentEvidenceDraftArguments",
-    "AgentPaperSummaryArguments",
     "CapabilityExecutionContext",
     "CapabilityHandler",
     "CapabilityRegistry",
-    "CreateEvidenceDraftArguments",
-    "CreateEvidenceDraftCapability",
     "BrowseCollectionPapersArguments",
     "BrowseCollectionPapersCapability",
     "AssessObjectiveQualityArguments",
@@ -128,8 +112,6 @@ __all__ = [
     "CreateFindingDraftCapability",
     "CreatePaperExperimentRevisionArguments",
     "CreatePaperExperimentRevisionCapability",
-    "CreateEvidenceVersionArguments",
-    "CreateEvidenceVersionCapability",
     "CreateObjectiveCandidateArguments",
     "CreateObjectiveCandidateCapability",
     "CreateResearchPlanArguments",
@@ -163,8 +145,6 @@ __all__ = [
     "ProposeResearchPlanCapability",
     "PreviewResearchScopeArguments",
     "PreviewResearchScopeCapability",
-    "PublishAgentObjectiveAnalysisArguments",
-    "PublishAgentObjectiveAnalysisCapability",
     "ProposePaperExperimentDraftArguments",
     "ProposePaperExperimentDraftCapability",
     "QueryPublishedFindingsArguments",

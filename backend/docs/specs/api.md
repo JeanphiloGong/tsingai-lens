@@ -931,10 +931,10 @@ browser.
 }
 ```
 
-A successful command returns `201` with the fixed analysis and canonical
-Finding matching the requested selection/group sets. Unknown selections,
-groups, or an unaggregated combination are rejected; rerun experiment
-aggregation to create the Finding.
+A successful command returns `201` with a new immutable analysis snapshot and
+the canonical Finding synthesized from the requested selection/group set.
+Unknown selections, groups, or an unaggregated combination are rejected; the
+source snapshot remains unchanged.
 
 A researcher may instead submit one of `no_comparable_evidence`,
 `no_grounded_evidence`, or `insufficient_evidence` as `abstention_reason`, with

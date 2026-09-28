@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -15,7 +16,7 @@ from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
 from domain.chat import ChatMessage, ChatToolResult
-from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
+from domain.core.research_objective import ObjectiveAnalysis, PaperContribution, ResearchObjective
 
 
 pytestmark = pytest.mark.anyio
@@ -128,6 +129,137 @@ class _ObjectiveRepository:
 
     async def read_analysis(self, collection_id, objective_id, analysis_version=None):
         return _analysis()
+
+    async def queue_analysis(self, *args, **kwargs):
+        return _objective(), _analysis()
+
+    async def claim_analysis(self, *args, **kwargs):
+        return _analysis()
+
+    async def publish_experiment_analysis(self, *args, **kwargs):
+        return _objective(), _analysis()
+
+
+class _WriteRepository(_ObjectiveRepository):
+    def __init__(self, *, fail_publish: bool = False):
+        self.fail_publish = fail_publish
+        self.published = None
+        self.failed = None
+
+    async def queue_analysis(self, *args, **kwargs):
+        return _objective(), ObjectiveAnalysis.from_mapping(
+            {
+                "collection_id": "collection-1",
+                "objective_id": "objective-1",
+                "analysis_version": 2,
+                "document_inputs": [
+                    {"document_id": "paper-1", "preparation_fingerprint": "prep-1"}
+                ],
+                "pipeline_version": "test",
+                "status": "queued",
+                "processed_document_count": 0,
+                "total_document_count": 1,
+            }
+        )
+
+    async def claim_analysis(self, *args, **kwargs):
+        return ObjectiveAnalysis.from_mapping(
+            {
+                "collection_id": "collection-1",
+                "objective_id": "objective-1",
+                "analysis_version": 2,
+                "document_inputs": [
+                    {"document_id": "paper-1", "preparation_fingerprint": "prep-1"}
+                ],
+                "pipeline_version": "test",
+                "status": "running",
+                "processed_document_count": 0,
+                "total_document_count": 1,
+            }
+        )
+
+    async def list_contributions(self, *args, **kwargs):
+        return (
+            PaperContribution.from_mapping(
+                {
+                    "collection_id": "collection-1",
+                    "objective_id": "objective-1",
+                    "analysis_version": 1,
+                    "document_id": "paper-1",
+                    "analysis_status": "analyzed",
+                    "relevance": "relevant",
+                    "paper_role": "primary",
+                    "confidence": 0.9,
+                }
+            ),
+        )
+
+    async def publish_experiment_analysis(self, *args, **kwargs):
+        self.published = kwargs
+        if self.fail_publish:
+            raise RuntimeError("publish failed")
+        return _objective(), _analysis()
+
+    async def fail_analysis(self, *args, **kwargs):
+        self.failed = kwargs
+        return _analysis()
+
+
+class _Writer:
+    async def write_single_experiment_revision(self, **kwargs):
+        self.transaction = kwargs.get("transaction")
+        return SimpleNamespace(revisions=(), selections=(), groups=(), findings=())
+
+
+class _TransactionFactory:
+    def __init__(self):
+        self.handle = object()
+        self.events = []
+
+    @asynccontextmanager
+    async def begin(self):
+        self.events.append("begin")
+        try:
+            yield self.handle
+        except Exception:
+            self.events.append("rollback")
+            raise
+        else:
+            self.events.append("commit")
+
+
+@pytest.mark.anyio
+async def test_write_rebinds_contributions_and_fails_running_snapshot_on_publish_error():
+    repository = _WriteRepository(fail_publish=True)
+    writer = _Writer()
+    transactions = _TransactionFactory()
+    service = PaperExperimentAuthoringService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=_SourceRepository(),
+        objective_repository=repository,
+        experiment_analysis_writer=writer,
+        experiment_analysis_transaction_factory=transactions,
+    )
+    prepared = await service.prepare(
+        collection_id="collection-1",
+        user_id="user-1",
+        objective_id="objective-1",
+        document_id="paper-1",
+        raw_draft=_draft(),
+    )
+
+    with pytest.raises(RuntimeError, match="publish failed"):
+        await service.write(
+            prepared=prepared,
+            collection_id="collection-1",
+            created_by="user-1",
+        )
+
+    assert transactions.events == ["begin", "rollback"]
+    assert writer.transaction is transactions.handle
+    assert "contributions" not in repository.published
+    assert repository.published["transaction"] is transactions.handle
+    assert repository.failed["expected_status"] == "running"
 
 
 @pytest.mark.anyio

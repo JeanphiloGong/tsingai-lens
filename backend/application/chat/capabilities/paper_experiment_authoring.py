@@ -121,7 +121,7 @@ class CreatePaperExperimentRevisionCapability:
             "create one immutable PaperExperiment revision and its Objective "
             "Selection. Submit the stored draft ID and digest. The service "
             "reloads the prepared Source, resolves formal identities, and writes "
-            "the revision and selection atomically. This does not create a Finding."
+            "the revision and selection atomically. Finding creation is a separate approved action."
         ),
         risk=ToolRisk.WRITE,
         input_model=CreatePaperExperimentRevisionArguments,

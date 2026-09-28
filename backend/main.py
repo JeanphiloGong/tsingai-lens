@@ -458,6 +458,7 @@ async def build_application_runtime(
                 source_artifact_repository=source_artifact_repository,
                 objective_repository=objective_repository,
                 experiment_analysis_writer=experiment_analysis_writer,
+                experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
             )
         experiment_compatibility_projection = overrides.experiment_compatibility_projection
         if (
@@ -661,6 +662,8 @@ async def build_application_runtime(
             collection_service=collection_service,
             objective_repository=objective_repository,
             experiment_query_service=experiment_query_service,
+            experiment_analysis_writer=experiment_analysis_writer,
+            experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
         )
 
         if overrides.chat_session_service is None:

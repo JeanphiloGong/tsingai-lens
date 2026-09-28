@@ -1,291 +1,179 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+
 import pytest
 
-from application.core.objectives.finding_authoring_service import (
-    FindingAuthoringService,
-)
-from tests.unit.services.test_evaluation_services import (
-    _published_objective_repository,
-)
+from application.core.objectives.finding_authoring_service import FindingAuthoringService
+from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
+from domain.core.research_objective import ObjectiveAnalysis, PaperContribution, ResearchObjective
 
 
 pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture
-def anyio_backend() -> str:
+def anyio_backend():
     return "asyncio"
 
 
-class _CollectionService:
-    async def get_collection_for_user(
-        self, collection_id: str, user_id: str
-    ) -> dict:
-        if collection_id != "col-gold" or user_id != "user-researcher":
-            raise FileNotFoundError("collection not found")
+def _objective() -> ResearchObjective:
+    return ResearchObjective.from_mapping({
+        "collection_id": "collection-1",
+        "objective_id": "objective-1",
+        "question": "Does treatment change outcome?",
+        "variables": ["treatment"],
+        "outcomes": ["outcome"],
+        "confirmation_status": "confirmed",
+        "active_analysis_version": 1,
+    })
+
+
+def _analysis(version: int, status: str) -> ObjectiveAnalysis:
+    return ObjectiveAnalysis.from_mapping({
+        "collection_id": "collection-1",
+        "objective_id": "objective-1",
+        "analysis_version": version,
+        "document_inputs": [{"document_id": "paper-1", "preparation_fingerprint": "p1"}],
+        "pipeline_version": "test",
+        "status": status,
+        "processed_document_count": 1,
+        "total_document_count": 1,
+    })
+
+
+def _selection() -> ObjectiveExperimentSelection:
+    return ObjectiveExperimentSelection(
+        selection_id="selection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        experiment_id="experiment-1",
+        experiment_version=1,
+        outcome="outcome",
+        comparison_keys=("comparison-1",),
+    )
+
+
+class _Collection:
+    async def get_collection_for_user(self, collection_id, user_id):
         return {"collection_id": collection_id}
 
 
-def _service(repository) -> FindingAuthoringService:
-    return FindingAuthoringService(
-        collection_service=_CollectionService(),
-        objective_repository=repository,
-    )
+class _Transactions:
+    def __init__(self):
+        self.events = []
+        self.handle = object()
+
+    @asynccontextmanager
+    async def begin(self):
+        self.events.append("begin")
+        try:
+            yield self.handle
+        except Exception:
+            self.events.append("rollback")
+            raise
+        else:
+            self.events.append("commit")
 
 
-async def test_creates_new_manual_finding_version_from_published_evidence() -> None:
-    repository = await _published_objective_repository()
-    service = _service(repository)
+class _Repository:
+    def __init__(self, *, fail_publish=False):
+        self.fail_publish = fail_publish
+        self.failed = None
+        self.published = None
 
-    result = await service.create_version(
-        collection_id="col-gold",
-        objective_id="obj-1",
-        source_analysis_version=1,
-        statement="Higher temperature is associated with greater tensile strength.",
-        assertion_strength="associative",
-        supporting_evidence_ids=("evidence-1",),
-        contradicting_evidence_ids=(),
-        context_evidence_ids=(),
-        condition_boundary_evidence_ids=(),
-        limitations=("Only one paper has direct Evidence.",),
-        parent_finding_id=None,
-        abstention_reason=None,
-        created_by_user_id="user-researcher",
-    )
+    async def read_objective(self, *args):
+        return _objective()
 
-    assert result.analysis.analysis_version == 2
-    assert result.analysis.origin == "hybrid"
-    assert result.analysis.scientific_record_source == "authored_snapshot"
-    assert result.analysis.source_analysis_version == 1
-    assert result.finding is not None
-    assert result.finding.analysis_version == 2
-    assert result.finding.origin == "human_authored"
-    assert result.finding.source_analysis_version == 1
-    assert result.finding.created_by_user_id == "user-researcher"
-    assert result.finding.supporting_evidence_ids == ("evidence-1",)
+    async def read_analysis(self, *args):
+        return _analysis(args[-1], "succeeded")
 
-    objective = await repository.read_objective("col-gold", "obj-1")
-    assert objective is not None
-    assert objective.published_analysis_version == 2
-    original = await repository.read_finding("col-gold", "obj-1", 1, "finding-1")
-    assert original is not None
-    assert original.statement == "Higher temperature was associated with greater strength."
-    assert original.analysis_version == 1
-    authored = await repository.read_finding(
-        "col-gold", "obj-1", 2, result.finding.finding_id
-    )
-    assert authored == result.finding
-    cloned_evidence, total = await repository.list_evidence(
-        "col-gold", "obj-1", 2, finding_id=result.finding.finding_id
-    )
-    assert total == 1
-    assert cloned_evidence[0].analysis_version == 2
-    assert cloned_evidence[0].source_ref == "block-7"
+    async def queue_analysis(self, *args, **kwargs):
+        return _objective(), _analysis(2, "queued")
+
+    async def claim_analysis(self, *args, **kwargs):
+        return _analysis(2, "running")
+
+    async def list_contributions(self, *args, **kwargs):
+        return (PaperContribution.from_mapping({
+            "collection_id": "collection-1", "objective_id": "objective-1",
+            "analysis_version": args[-1], "document_id": "paper-1",
+            "analysis_status": "analyzed", "relevance": "relevant",
+        }),)
+
+    async def publish_experiment_analysis(self, *args, **kwargs):
+        self.published = kwargs
+        if self.fail_publish:
+            raise RuntimeError("publish failed")
+        return _objective(), _analysis(2, "succeeded")
+
+    async def fail_analysis(self, *args, **kwargs):
+        self.failed = kwargs
+        return None
 
 
-async def test_derives_hybrid_finding_without_mutating_parent() -> None:
-    repository = await _published_objective_repository()
-    service = _service(repository)
-
-    result = await service.create_version(
-        collection_id="col-gold",
-        objective_id="obj-1",
-        source_analysis_version=1,
-        statement="Within the reported tensile test, higher temperature accompanies greater strength.",
-        assertion_strength="associative",
-        supporting_evidence_ids=("evidence-1",),
-        contradicting_evidence_ids=(),
-        context_evidence_ids=(),
-        condition_boundary_evidence_ids=(),
-        limitations=("Applies only to the reported material and test condition.",),
-        parent_finding_id="finding-1",
-        abstention_reason=None,
-        created_by_user_id="user-researcher",
-    )
-
-    assert result.finding is not None
-    assert result.finding.origin == "hybrid"
-    assert result.finding.parent_finding_id == "finding-1"
-    parent = await repository.read_finding("col-gold", "obj-1", 1, "finding-1")
-    assert parent is not None
-    assert parent.statement == "Higher temperature was associated with greater strength."
-    version_two, total = await repository.list_findings(
-        "col-gold", "obj-1", 2, offset=0, limit=20
-    )
-    assert total == 2
-    assert {item.origin for item in version_two} == {"system_generated", "hybrid"}
-
-
-@pytest.mark.parametrize(
-    "statement",
-    (
-        "Higher temperature increased tensile strength to 999 MPa.",
-        "Higher temperature increased tensile strength to 620 GPa.",
-        "Higher temperature was associated with lower tensile strength.",
-        "Higher temperature was associated with greater hardness.",
-        "Higher temperature caused greater tensile strength.",
-        (
-            "For Ti-6Al-4V, increasing laser power from 180 W to 220 W "
-            "was associated with lower porosity."
-        ),
-        "The IN718 sample showed 10^-3 A/cm² behavior.",
-    ),
-)
-async def test_persists_finding_statement_warnings_without_blocking_authoring(
-    statement: str,
-) -> None:
-    repository = await _published_objective_repository()
-    service = _service(repository)
-
-    result = await service.create_version(
-        collection_id="col-gold",
-        objective_id="obj-1",
-        source_analysis_version=1,
-        statement=statement,
-        assertion_strength="associative",
-        supporting_evidence_ids=("evidence-1",),
-        contradicting_evidence_ids=(),
-        context_evidence_ids=(),
-        condition_boundary_evidence_ids=(),
-        limitations=(),
-        parent_finding_id=None,
-        abstention_reason=None,
-        created_by_user_id="user-researcher",
-    )
-
-    assert result.finding is not None
-    assert result.finding.warnings
-    persisted = await repository.read_finding(
-        "col-gold", "obj-1", 2, result.finding.finding_id
-    )
-    assert persisted is not None
-    assert persisted.warnings == result.finding.warnings
-
-    objective = await repository.read_objective("col-gold", "obj-1")
-    assert objective is not None
-    assert objective.published_analysis_version == 2
-
-
-async def test_page_citations_are_not_scientific_measurement_warnings() -> None:
-    repository = await _published_objective_repository()
-    service = _service(repository)
-
-    result = await service.create_version(
-        collection_id="col-gold",
-        objective_id="obj-1",
-        source_analysis_version=1,
-        statement=(
-            "Higher temperature was associated with greater tensile strength "
-            "in the results table on page 8. This is an observed association."
-        ),
-        assertion_strength="associative",
-        supporting_evidence_ids=("evidence-1",),
-        contradicting_evidence_ids=(),
-        context_evidence_ids=(),
-        condition_boundary_evidence_ids=(),
-        limitations=(),
-        parent_finding_id=None,
-        abstention_reason=None,
-        created_by_user_id="user-researcher",
-    )
-
-    assert not any(
-        "numeric values not present" in warning
-        or "value/unit pairs not present" in warning
-        for warning in result.finding.warnings
-    )
-
-
-async def test_rejects_stale_or_unknown_evidence_without_writing_a_version() -> None:
-    repository = await _published_objective_repository()
-    service = _service(repository)
-
-    with pytest.raises(ValueError, match="Evidence was not found"):
-        await service.create_version(
-            collection_id="col-gold",
-            objective_id="obj-1",
-            source_analysis_version=1,
-            statement="Unsupported draft.",
-            assertion_strength="associative",
-            supporting_evidence_ids=("evidence-missing",),
-            contradicting_evidence_ids=(),
-            context_evidence_ids=(),
-            condition_boundary_evidence_ids=(),
-            limitations=(),
-            parent_finding_id=None,
-            abstention_reason=None,
-            created_by_user_id="user-researcher",
-        )
-
-    objective = await repository.read_objective("col-gold", "obj-1")
-    assert objective is not None
-    assert objective.published_analysis_version == 1
-
-    await service.create_version(
-        collection_id="col-gold",
-        objective_id="obj-1",
-        source_analysis_version=1,
-        statement="Higher temperature was associated with greater strength.",
-        assertion_strength="associative",
-        supporting_evidence_ids=("evidence-1",),
-        contradicting_evidence_ids=(),
-        context_evidence_ids=(),
-        condition_boundary_evidence_ids=(),
-        limitations=(),
-        parent_finding_id=None,
-        abstention_reason=None,
-        created_by_user_id="user-researcher",
-    )
-
-    with pytest.raises(ValueError, match="source analysis version is stale"):
-        await service.create_version(
-            collection_id="col-gold",
-            objective_id="obj-1",
-            source_analysis_version=1,
-            statement="Stale draft.",
-            assertion_strength="associative",
-            supporting_evidence_ids=("evidence-1",),
-            contradicting_evidence_ids=(),
-            context_evidence_ids=(),
-            condition_boundary_evidence_ids=(),
-            limitations=(),
-            parent_finding_id=None,
-            abstention_reason=None,
-            created_by_user_id="user-researcher",
+class _Query:
+    async def read_analysis_bundle(self, *args):
+        return SimpleNamespace(
+            selections=(_selection(),),
+            groups=(),
+            revisions=(SimpleNamespace(revision=SimpleNamespace()),),
         )
 
 
-async def test_records_abstention_without_creating_placeholder_finding() -> None:
-    repository = await _published_objective_repository()
-    service = _service(repository)
+class _Writer:
+    def __init__(self):
+        self.call = None
 
-    result = await service.create_version(
-        collection_id="col-gold",
-        objective_id="obj-1",
-        source_analysis_version=1,
-        statement=None,
-        assertion_strength=None,
-        supporting_evidence_ids=(),
-        contradicting_evidence_ids=(),
-        context_evidence_ids=(),
-        condition_boundary_evidence_ids=(),
-        limitations=("The reported test conditions are not comparable.",),
-        parent_finding_id=None,
-        abstention_reason="no_comparable_evidence",
-        created_by_user_id="user-researcher",
+    async def write_selection_finding_revision(self, **kwargs):
+        self.call = kwargs
+        selection = kwargs["selections"][0]
+        finding = SimpleNamespace(selection_ids=(selection.selection_id,))
+        return SimpleNamespace(findings=(finding,), revisions=(), selections=(), groups=())
+
+
+@pytest.mark.anyio
+async def test_selection_version_copies_contributions_and_uses_one_transaction():
+    repository = _Repository()
+    transactions = _Transactions()
+    writer = _Writer()
+    service = FindingAuthoringService(
+        collection_service=_Collection(), objective_repository=repository,
+        experiment_query_service=_Query(), experiment_analysis_writer=writer,
+        experiment_analysis_transaction_factory=transactions,
     )
 
-    assert result.finding is None
-    assert result.analysis.analysis_version == 2
-    assert result.analysis.abstention_reason == "no_comparable_evidence"
-    assert result.analysis.created_by_user_id == "user-researcher"
-    previous, previous_total = await repository.list_findings(
-        "col-gold", "obj-1", 1, offset=0, limit=20
+    result = await service.create_selection_version(
+        collection_id="collection-1", objective_id="objective-1",
+        source_analysis_version=1, selection_ids=("selection-1",),
+        created_by_user_id="user-1",
     )
-    current, current_total = await repository.list_findings(
-        "col-gold", "obj-1", 2, offset=0, limit=20
+
+    assert transactions.events == ["begin", "commit"]
+    assert writer.call["transaction"] is transactions.handle
+    assert writer.call["selections"][0].selection_id == "selection-1"
+    assert repository.published["transaction"] is transactions.handle
+    assert repository.published["contributions"][0].analysis_version == 2
+    assert result.finding is not None
+
+
+@pytest.mark.anyio
+async def test_selection_version_rolls_back_and_marks_running_snapshot_failed():
+    repository = _Repository(fail_publish=True)
+    transactions = _Transactions()
+    service = FindingAuthoringService(
+        collection_service=_Collection(), objective_repository=repository,
+        experiment_query_service=_Query(), experiment_analysis_writer=_Writer(),
+        experiment_analysis_transaction_factory=transactions,
     )
-    assert previous_total == current_total == 1
-    assert previous[0].statement == current[0].statement
-    assert current[0].analysis_version == 2
+
+    with pytest.raises(RuntimeError, match="publish failed"):
+        await service.create_selection_version(
+            collection_id="collection-1", objective_id="objective-1",
+            source_analysis_version=1, selection_ids=("selection-1",),
+            created_by_user_id="user-1",
+        )
+
+    assert transactions.events == ["begin", "rollback"]
+    assert repository.failed["expected_status"] == "running"

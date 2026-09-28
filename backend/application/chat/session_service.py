@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import logging
+import re
+import unicodedata
 from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -17,10 +19,37 @@ from application.chat.agent_runner import AgentRunResult, AgentRunStatus, Resear
 from application.chat.inline_citations import format_message_citations, format_inline_citations
 from application.chat.capabilities import AgentContext
 from application.chat.intent_policy import _write_request_scope
-from application.core.objectives.evidence_authoring_service import (
-    normalize_source_text,
-    resolve_canonical_objective_source,
-)
+
+
+@dataclass(frozen=True)
+class _CanonicalObjectiveSource:
+    content: str
+    page: int | None
+    heading_path: str | None
+    grounding_source: dict[str, Any]
+
+
+def resolve_canonical_objective_source(document: Any, *, source_kind: str, source_ref: str) -> _CanonicalObjectiveSource:
+    if source_kind == "text_window":
+        source = next((item for item in document.blocks if item.block_id == source_ref), None)
+        if source is not None:
+            return _CanonicalObjectiveSource(source.text, source.page, source.heading_path, {"source_kind": source_kind, "text": source.text, "heading_path": source.heading_path})
+    elif source_kind == "table":
+        source = next((item for item in document.tables if item.table_id == source_ref), None)
+        if source is not None:
+            record = source.to_record()
+            return _CanonicalObjectiveSource(str(record["table_markdown"] or "").strip(), source.page, source.heading_path, {**record, "source_kind": source_kind})
+    elif source_kind == "figure":
+        source = next((item for item in document.figures if item.figure_id == source_ref), None)
+        if source is not None:
+            return _CanonicalObjectiveSource(str(source.caption_text or ""), source.page, source.heading_path, {"source_kind": source_kind, "caption_text": source.caption_text, "heading_path": source.heading_path})
+    else:
+        raise ValueError(f"unsupported objective source: {source_kind}")
+    raise FileNotFoundError("Source was not found in the requested document")
+
+
+def normalize_source_text(value: str) -> str:
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value)).strip()
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,

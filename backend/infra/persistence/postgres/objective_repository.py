@@ -567,13 +567,14 @@ class PostgresObjectiveRepository:
             analysis = self._analysis_from_row(analysis_row)
             if analysis.status != "running":
                 raise ValueError("only running objective analysis can be published")
-            input_documents = {item.document_id for item in analysis.document_inputs}
-            contribution_documents = {item.document_id for item in contributions}
-            if contribution_documents != input_documents:
-                raise ValueError("paper contributions must cover every analysis input")
-            if any(item.key[:3] != (collection_id, objective_id, analysis_version) for item in contributions):
-                raise ValueError("paper contribution belongs to another analysis")
-            self._write_contributions(analysis_row, contributions)
+            if contributions:
+                input_documents = {item.document_id for item in analysis.document_inputs}
+                contribution_documents = {item.document_id for item in contributions}
+                if contribution_documents != input_documents:
+                    raise ValueError("paper contributions must cover every analysis input")
+                if any(item.key[:3] != (collection_id, objective_id, analysis_version) for item in contributions):
+                    raise ValueError("paper contribution belongs to another analysis")
+                self._write_contributions(analysis_row, contributions)
             analysis = replace(
                 analysis,
                 scientific_record_source="experiment_graph",

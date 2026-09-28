@@ -1281,7 +1281,7 @@ class ResearchAgentRunner:
                 "Zero new reads does not erase earlier reading. Use earlier Source content still "
                 "present in the trajectory for the requested synthesis; distinguish historical "
                 "inspection from current validation. A reference alone cannot recover omitted "
-                "content or authorize a new Evidence write."
+                "content or authorize a new experiment or Finding write."
                 f"{deliverable_section}"
             ),
             created_at=_now_iso(),

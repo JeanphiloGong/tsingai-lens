@@ -471,7 +471,7 @@ def test_rollover_preserves_selected_source_and_pending_approval_lineage() -> No
     ))
     pending, _ = _tool_pair(call_id="pending", payload={})
     pending = replace(pending, tool_calls=(ChatToolRequest(
-        "pending", "create_evidence_version", {"document_id": "paper-1", "source_ref": "results-2"}, 0,
+        "pending", "create_paper_experiment_revision", {"draft_id": "draft-1", "draft_digest": "a" * 64}, 0,
     ),))
     messages = (_assistant("old", "old source text" * 1000), active, pending)
     builder = ChatContextBuilder(max_chars=1800, max_summary_chars=500)

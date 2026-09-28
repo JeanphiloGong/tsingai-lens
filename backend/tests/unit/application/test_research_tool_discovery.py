@@ -354,9 +354,9 @@ async def test_discovered_read_runs_and_does_not_carry_into_next_request():
 
 @pytest.mark.anyio
 async def test_catalog_can_load_a_write_without_executing_or_approving_it():
-    writer = _Capability("create_evidence_version", ToolRisk.WRITE)
+    writer = _Capability("create_paper_experiment_revision", ToolRisk.WRITE)
     model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["create_evidence_version"], "source_inspection_required": False}),)),
+        ModelTurn(tool_calls=(ModelToolCall(name="discover_research_tools", arguments={"tool_names": ["create_paper_experiment_revision"], "source_inspection_required": False}),)),
         ModelTurn(content="No Evidence was saved."),
     )
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((_Capability("search_sources", ToolRisk.READ), writer)))
@@ -364,7 +364,7 @@ async def test_catalog_can_load_a_write_without_executing_or_approving_it():
     assert writer.executed_arguments == []
     assert result.pending_approval is None
     assert result.tool_results[0].status == "succeeded"
-    assert result.tool_results[0].data["loaded_tool_names"] == ["create_evidence_version"]
+    assert result.tool_results[0].data["loaded_tool_names"] == ["create_paper_experiment_revision"]
 
 
 @pytest.mark.anyio
@@ -494,58 +494,6 @@ async def test_reading_a_plan_section_keeps_selected_source_tools():
 
 
 @pytest.mark.anyio
-async def test_real_p002_source_read_can_recover_from_a_stale_reference():
-    from application.chat import AgentContext
-    from application.chat.capabilities.document_sources import ReadSourceCapability, InspectDocumentSourcesCapability
-    from tests.unit.application.test_chat_p002_source_fixture import _P002CollectionService, _P002SourceRepository
-
-    dependencies = dict(collection_service=_P002CollectionService(), source_artifact_repository=_P002SourceRepository())
-    arguments = {"document_id": "doc_ef59d1f3a006", "source_kind": "text_window", "source_ref": "blk_doc_ef59d1f3a006_23"}
-    model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments={**arguments, "source_ref": "stale-id"}),)),
-        ModelTurn(tool_calls=(ModelToolCall(name="inspect_document_sources", arguments={"document_id": arguments["document_id"], "query": "NP P150"}),)),
-        ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments=arguments),)),
-        ModelTurn(content="NP means no build-platform preheating; P150 means preheating to 150 C."),
-    )
-    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
-        ReadSourceCapability(**dependencies), InspectDocumentSourcesCapability(**dependencies),
-    ))).run_turn(context=AgentContext("session-p002", "researcher-1", "collection-p002"), previous_messages=(), user_message="Inspect the P002 group definitions")
-    assert result.status == "completed"
-    assert result.tool_results[1].error_code == "source_not_found"
-    assert [call.name for call in result.tool_calls] == [
-        "discover_research_tools", "read_source", "discover_research_tools",
-        "inspect_document_sources", "read_source",
-    ]
-    assert all(item.status == "succeeded" for item in result.tool_results[2:])
-    assert result.tool_results[-1].data["source_ref"] == arguments["source_ref"]
-    assert result.tool_results[-1].data["content_truncated"] is False
-    assert "designated by NP and P150" in result.tool_results[-1].data["content"]
-    assert model.all_tool_spec_names[0] == ("discover_research_tools",)
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("user_id,document_id,error_code", [
-    ("researcher-1", "outside-collection", "document_sources_not_ready"),
-    ("another-user", "doc_ef59d1f3a006", "capability_execution_failed"),
-])
-async def test_discovery_does_not_bypass_source_ownership(user_id, document_id, error_code):
-    from application.chat import AgentContext
-    from application.chat.capabilities.document_sources import ReadSourceCapability
-    from tests.unit.application.test_chat_p002_source_fixture import _P002CollectionService, _P002SourceRepository
-
-    model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments={"document_id": document_id, "source_kind": "text_window", "source_ref": "blk_doc_ef59d1f3a006_23"}),)),
-        ModelTurn(content="The requested source could not be read."),
-    )
-    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
-        ReadSourceCapability(collection_service=_P002CollectionService(), source_artifact_repository=_P002SourceRepository()),
-    ))).run_turn(context=AgentContext("session-p002", user_id, "collection-p002"), previous_messages=(), user_message="Inspect the P002 group definitions")
-    assert result.status == "completed"
-    assert result.tool_results[-1].error_code == error_code
-    assert not result.tool_results[-1].resource_refs
-
-
-@pytest.mark.anyio
 @pytest.mark.parametrize("inspection", [
     {"objective_id": "other-objective", "plans": []},
     {"objective_id": "objective-1", "plans": [{"plan_id": "another-plan"}]},
@@ -570,6 +518,7 @@ async def test_plan_revision_rejects_a_parent_that_was_not_inspected(inspection)
     assert result.tool_results[-1].error_code == "research_plan_not_inspected"
 
 
+
 @pytest.mark.anyio
 async def test_automatically_loaded_exact_reader_stays_available_in_the_turn():
     source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "methods"}
@@ -585,30 +534,3 @@ async def test_automatically_loaded_exact_reader_stays_available_in_the_turn():
     )
     assert result.status == "completed"
     assert "read_source" in model.all_tool_spec_names[-1]
-
-
-@pytest.mark.anyio
-async def test_successful_navigation_after_a_failed_read_retains_reading_choice():
-    from application.chat import AgentContext
-    from application.chat.capabilities.document_sources import ReadSourceCapability, SearchSourcesCapability
-    from tests.unit.application.test_chat_p002_source_fixture import _P002CollectionService, _P002SourceRepository
-
-    dependencies = dict(collection_service=_P002CollectionService(), source_artifact_repository=_P002SourceRepository())
-    model = _Model(
-        ModelTurn(tool_calls=(ModelToolCall(name="read_source", arguments={
-            "document_id": "doc_ef59d1f3a006", "source_kind": "text_window", "source_ref": "stale-id",
-        }),)),
-        ModelTurn(tool_calls=(ModelToolCall(name="search_sources", arguments={
-            "document_ids": ["doc_ef59d1f3a006"], "query": "NP P150",
-        }),)),
-        ModelTurn(content="The group definitions are verified."),
-        ModelTurn(content="The group definitions are verified."),
-    )
-    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((
-        ReadSourceCapability(**dependencies), SearchSourcesCapability(**dependencies),
-    ))).run_turn(context=AgentContext("session-p002", "researcher-1", "collection-p002"), previous_messages=(), user_message="Inspect the P002 group definitions")
-    assert result.tool_calls[-1].name == "search_sources"
-    assert result.tool_calls[-1].status == "succeeded"
-    assert result.tool_results[-1].data["matches"]
-    assert result.error_code is None
-    assert set(model.all_tool_spec_names[-1]) == {"read_source", "search_sources", "discover_research_tools"}

@@ -533,9 +533,9 @@ async def test_single_experiment_writer_commits_revision_and_selection_only():
     assert len(result.revisions) == 1
     assert len(result.selections) == 1
     assert result.groups == ()
-    assert len(result.findings) == 1
+    assert result.findings == ()
     assert len(revisions.records) == 1
-    assert len(analyses.graphs[0].findings) == 1
+    assert analyses.graphs[0].findings == ()
 
 
 async def test_writer_passes_one_transaction_to_every_graph_repository():

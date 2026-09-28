@@ -4,7 +4,16 @@ from unittest.mock import AsyncMock
 import pytest
 
 from application.chat.capabilities.published_findings import InspectPublishedFindingCapability
-from tests.unit.application.test_chat_research_capabilities import _context
+from application.chat.capabilities.contracts import CapabilityExecutionContext
+
+
+def _context() -> CapabilityExecutionContext:
+    return CapabilityExecutionContext(
+        session_id="session-1",
+        user_id="user-1",
+        collection_id="col-1",
+        tool_call_id="call-1",
+    )
 
 
 @pytest.fixture

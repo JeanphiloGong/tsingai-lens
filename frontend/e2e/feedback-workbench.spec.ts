@@ -10,6 +10,9 @@ function json(body: unknown, status = 200) {
 
 type MockFeedbackApisOptions = {
 	sourceSignals?: Array<Record<string, unknown>>;
+	detailDelayMs?: number;
+	failDetailOnce?: boolean;
+	detailAnnotation?: Record<string, unknown> | null;
 };
 
 async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {}) {
@@ -19,6 +22,7 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 	let reviewAttempts = 0;
 	const reviewKeys: string[] = [];
 	let datasetMode = false;
+	let detailFailures = 0;
 
 	await page.route('**/*', async (route) => {
 		const request = route.request();
@@ -74,6 +78,8 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 			);
 		}
 		if (path === `/api/v1/feedback-cases/${caseId}` && request.method() === 'GET') {
+			if (options.detailDelayMs) await new Promise((resolve) => setTimeout(resolve, options.detailDelayMs));
+			if (options.failDetailOnce && detailFailures++ === 0) return route.fulfill(json({ detail: 'detail unavailable' }, 503));
 			return route.fulfill(
 				json({
 					case_id: caseId,
@@ -90,7 +96,7 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 					gaps: ['Paper B figure caption was omitted.'],
 					coverage_status: 'partial',
 					analysis: { problem_type: 'source_missing', confidence: 0.87, suggested_target: null, model: 'test', result_id: 'result_feedback', coverage_status: 'partial' },
-					annotation,
+					annotation: options.detailAnnotation ?? annotation,
 					current_annotation_digest: annotation ? digest : null,
 					review_decisions: reviewDecisions,
 					technical_error: null,
@@ -296,4 +302,41 @@ test('feedback workbench presents each source signal with its own meaning', asyn
 	expect(body).not.toContain('signal_correction_private');
 	expect(body).not.toContain('tool_call_private');
 	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test('dataset release blocks incomplete detail checks and retries failed cases', async ({ page }) => {
+	await mockFeedbackApis(page, { failDetailOnce: true });
+	await page.goto(`/collections/${collectionId}/feedback/datasets`);
+
+	await page.locator(`#case-${caseId}`).check();
+	await expect(page.getByText('Details failed')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Freeze snapshot' })).toBeDisabled();
+	await page.getByRole('button', { name: 'Retry' }).click();
+	await expect(page.getByText('Details verified')).toBeVisible();
+});
+
+test('preference release requires a distinct chosen and rejected pair', async ({ page }) => {
+	await mockFeedbackApis(page, {
+		detailAnnotation: {
+			annotation_id: 'annotation_feedback',
+			case_id: caseId,
+			version: 1,
+			problem_type: 'source_missing',
+			severity: 'high',
+			target: 'Paper B has no preheating information.',
+			support_source_refs: [],
+			dataset_uses: ['preference'],
+			reason: 'The figure caption was checked.',
+			annotation_digest: digest,
+			created_by: 'user_feedback',
+			created_at: '2026-09-25T00:00:00Z',
+			updated_at: '2026-09-25T00:00:00Z'
+		}
+	});
+	await page.goto(`/collections/${collectionId}/feedback/datasets`);
+	await page.locator(`#case-${caseId}`).check();
+	await page.getByLabel('Preference comparison').check();
+
+	await expect(page.getByText('Preference requires a distinct chosen target and rejected original answer.')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Freeze snapshot' })).toBeDisabled();
 });

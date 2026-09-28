@@ -50,6 +50,9 @@
 	let downloading = '';
 	let error = '';
 	let notice = '';
+	let noticeTone: 'success' | 'warning' = 'success';
+	let detailLoadingByCase: Record<string, boolean> = {};
+	let detailErrorsByCase: Record<string, string> = {};
 	let detailLoading = '';
 	let expandedSnapshot = '';
 	let caseSearch = '';
@@ -64,7 +67,10 @@
 		const searchable = [item.question_preview, item.answer_preview, ...item.document_titles]
 			.join(' ')
 			.toLowerCase();
-		return (!query || searchable.includes(query)) && (!problemFilter || item.problem_type === problemFilter);
+		return (
+			(!query || searchable.includes(query)) &&
+			(!problemFilter || item.problem_type === problemFilter)
+		);
 	});
 	$: splitCounts = {
 		train: selectedCases.filter((item) => (splitByCase[item.case_id] ?? 'eval') === 'train').length,
@@ -73,11 +79,60 @@
 	$: allCasesSelected =
 		filteredCases.length > 0 && filteredCases.every((item) => selectedIds.includes(item.case_id));
 	$: latestSnapshot = snapshots[0] ?? null;
-	$: selectedDocuments = Object.keys(documentTitles).filter((id) =>
-		selectedCases.some(
-			(item) => details[item.case_id] && caseDocumentIds(details[item.case_id]).includes(id)
+	$: selectedDocumentIds = Array.from(
+		new Set(
+			selectedCases.flatMap((item) => {
+				const detail = details[item.case_id];
+				return detail ? caseDocumentIds(detail) : [];
+			})
 		)
 	);
+	$: selectedDocuments = selectedDocumentIds;
+	$: selectedDetailLoadingCount = selectedCases.filter(
+		(item) => detailLoadingByCase[item.case_id]
+	).length;
+	$: selectedDetailErrorCount = selectedCases.filter((item) =>
+		Boolean(detailErrorsByCase[item.case_id])
+	).length;
+	$: selectedDetailsReady =
+		selectedCount > 0 &&
+		selectedCases.every(
+			(item) =>
+				Boolean(details[item.case_id]) &&
+				!detailLoadingByCase[item.case_id] &&
+				!detailErrorsByCase[item.case_id]
+		);
+	$: missingFamilyDocuments = selectedDocuments.filter(
+		(documentId) => !String(familyByDocument[documentId] ?? '').trim()
+	);
+	$: datasetValidationIssues = selectedCases.flatMap((item) => {
+		const detail = details[item.case_id];
+		if (!detail) return [];
+		const annotation = detail.annotation;
+		const target = String(annotation?.target ?? '').trim();
+		const answer = String(detail.answer ?? '').trim();
+		const uses = Array.isArray(annotation?.dataset_uses) ? annotation.dataset_uses.map(String) : [];
+		const issues: string[] = [];
+		if (!uses.includes(datasetType)) issues.push('dataset_use_not_authorized');
+		if (datasetType !== 'evaluation' && !target) issues.push('target_missing');
+		if (datasetType === 'preference' && (!target || !answer || target === answer)) {
+			issues.push('preference_pair_missing');
+		}
+		return issues.map((reason) => ({ caseId: item.case_id, reason }));
+	});
+	$: releaseReady =
+		selectedDetailsReady &&
+		missingFamilyDocuments.length === 0 &&
+		datasetValidationIssues.length === 0;
+	$: datasetFlowCurrent = !selectedCount
+		? 1
+		: !selectedDetailsReady
+			? 1
+			: !releaseReady
+				? 2
+				: latestSnapshot
+					? 3
+					: 3;
 
 	onMount(() => {
 		void load();
@@ -93,6 +148,9 @@
 				fetchDatasetSnapshots(collectionId)
 			]);
 			acceptedCases = cases.items;
+			selectedIds = selectedIds.filter((caseId) =>
+				acceptedCases.some((item) => item.case_id === caseId)
+			);
 			snapshots = existing.items;
 			for (const item of acceptedCases) {
 				if (!splitByCase[item.case_id]) splitByCase[item.case_id] = 'eval';
@@ -105,9 +163,16 @@
 		}
 	}
 
-	async function loadSelectedDetails() {
-		for (const caseId of selectedIds) {
-			if (details[caseId]) continue;
+	async function loadSelectedDetails(forceCaseId = '') {
+		const caseIds = selectedIds.filter(
+			(caseId) => forceCaseId === caseId || (!details[caseId] && !detailLoadingByCase[caseId])
+		);
+		await Promise.all(caseIds.map((caseId) => loadCaseDetail(caseId)));
+	}
+
+	async function loadCaseDetail(caseId: string) {
+		detailLoadingByCase = { ...detailLoadingByCase, [caseId]: true };
+		detailErrorsByCase = { ...detailErrorsByCase, [caseId]: '' };
 			try {
 				const detail = await fetchFeedbackCase(collectionId, caseId);
 				details = { ...details, [caseId]: detail };
@@ -115,18 +180,22 @@
 					const item = [
 						...detail.requested_scope,
 						...detail.inspected_sources,
-						...detail.omitted_candidates
+					...detail.omitted_candidates,
+					...detail.claim_support
 					].find((source) => String(source.document_id ?? '') === id);
 					const title = String(item?.document_title ?? item?.title ?? '').trim();
 					documentTitles = {
 						...documentTitles,
 						[id]: title || $t('datasetSnapshots.selectedPaper')
 					};
-					if (!familyByDocument[id] && title) familyByDocument[id] = title;
+				if (!familyByDocument[id] && title) {
+					familyByDocument = { ...familyByDocument, [id]: title };
 				}
-			} catch (err) {
-				error = errorMessage(err);
 			}
+		} catch (err) {
+			detailErrorsByCase = { ...detailErrorsByCase, [caseId]: errorMessage(err) };
+		} finally {
+			detailLoadingByCase = { ...detailLoadingByCase, [caseId]: false };
 		}
 	}
 
@@ -189,8 +258,15 @@
 		await loadSelectedDetails();
 	}
 
+	async function retryCaseDetail(caseId: string) {
+		if (!selectedIds.includes(caseId)) return;
+		await loadCaseDetail(caseId);
+	}
+
 	async function selectAllCases() {
-		selectedIds = Array.from(new Set([...selectedIds, ...filteredCases.map((item) => item.case_id)]));
+		selectedIds = Array.from(
+			new Set([...selectedIds, ...filteredCases.map((item) => item.case_id)])
+		);
 		await loadSelectedDetails();
 	}
 
@@ -203,10 +279,11 @@
 	}
 
 	async function saveSnapshot() {
-		if (saving || !selectedIds.length) return;
+		if (saving || !releaseReady) return;
 		saving = true;
 		error = '';
 		notice = '';
+		noticeTone = 'success';
 		try {
 			const snapshot = await createDatasetSnapshot(
 				collectionId,
@@ -214,7 +291,15 @@
 				selectedIds.map((caseId) => ({ case_id: caseId, split: splitByCase[caseId] ?? 'eval' })),
 				Object.fromEntries(selectedDocuments.map((id) => [id, familyByDocument[id] || '']))
 			);
-			notice = $t('datasetSnapshots.created', { count: snapshot.row_count });
+			if (snapshot.excluded_count) {
+				noticeTone = 'warning';
+				notice = $t('datasetSnapshots.createdWithExclusions', {
+					count: snapshot.row_count,
+					excluded: snapshot.excluded_count
+				});
+			} else {
+				notice = $t('datasetSnapshots.created', { count: snapshot.row_count });
+			}
 			snapshots = [
 				snapshot,
 				...snapshots.filter((item) => item.dataset_id !== snapshot.dataset_id)
@@ -261,6 +346,17 @@
 		return $t(`datasetSnapshots.type.${value}`);
 	}
 
+	function datasetFlowState(step: number) {
+		if (step < datasetFlowCurrent) return 'done';
+		if (step === datasetFlowCurrent) return 'active';
+		return 'pending';
+	}
+
+	function datasetFlowLabel(step: number) {
+		const state = datasetFlowState(step);
+		return $t(`datasetSnapshots.flowState${state[0].toUpperCase()}${state.slice(1)}`);
+	}
+
 	function formatDate(value: string) {
 		const date = new Date(value);
 		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
@@ -301,32 +397,41 @@
 	{#if error}<div class="notice notice--error" role="alert">
 			<TriangleAlert size={17} aria-hidden="true" /><span>{error}</span>
 		</div>{/if}
-	{#if notice}<div class="notice notice--success" role="status">
+	{#if notice}<div class="notice notice--{noticeTone}" role="status">
 			<CheckCircle2 size={17} aria-hidden="true" /><span>{notice}</span>
 		</div>{/if}
 
 	<nav class="flow-bar" aria-label={$t('datasetSnapshots.flowLabel')}>
-		<div class="flow-step flow-step--active">
+		<div
+			class="flow-step flow-step--{datasetFlowState(1)}"
+			aria-current={datasetFlowState(1) === 'active' ? 'step' : undefined}
+		>
 			<span class="flow-number">1</span><span
 				><strong>{$t('datasetSnapshots.flowScope')}</strong><small
 					>{$t('datasetSnapshots.flowScopeDetail')}</small
-				></span
+				><em>{datasetFlowLabel(1)}</em></span
 			>
 		</div>
 		<div class="flow-connector" aria-hidden="true"></div>
-		<div class="flow-step">
+		<div
+			class="flow-step flow-step--{datasetFlowState(2)}"
+			aria-current={datasetFlowState(2) === 'active' ? 'step' : undefined}
+		>
 			<span class="flow-number">2</span><span
 				><strong>{$t('datasetSnapshots.flowOutput')}</strong><small
 					>{$t('datasetSnapshots.flowOutputDetail')}</small
-				></span
+				><em>{datasetFlowLabel(2)}</em></span
 			>
 		</div>
 		<div class="flow-connector" aria-hidden="true"></div>
-		<div class="flow-step">
+		<div
+			class="flow-step flow-step--{datasetFlowState(3)}"
+			aria-current={datasetFlowState(3) === 'active' ? 'step' : undefined}
+		>
 			<span class="flow-number">3</span><span
 				><strong>{$t('datasetSnapshots.flowRelease')}</strong><small
 					>{$t('datasetSnapshots.flowReleaseDetail')}</small
-				></span
+				><em>{datasetFlowLabel(3)}</em></span
 			>
 		</div>
 	</nav>
@@ -385,14 +490,26 @@
 							<select bind:value={problemFilter} aria-label={$t('datasetSnapshots.filterProblem')}>
 								<option value="">{$t('datasetSnapshots.allProblems')}</option>
 								<option value="fact_error">{$t('feedbackWorkbench.problemFactError')}</option>
-								<option value="source_missing">{$t('feedbackWorkbench.problemSourceMissing')}</option>
-								<option value="evidence_mismatch">{$t('feedbackWorkbench.problemEvidenceMismatch')}</option>
-								<option value="retrieval_failure">{$t('feedbackWorkbench.problemRetrievalFailure')}</option>
+								<option value="source_missing"
+									>{$t('feedbackWorkbench.problemSourceMissing')}</option
+								>
+								<option value="evidence_mismatch"
+									>{$t('feedbackWorkbench.problemEvidenceMismatch')}</option
+								>
+								<option value="retrieval_failure"
+									>{$t('feedbackWorkbench.problemRetrievalFailure')}</option
+								>
 								<option value="tool_failure">{$t('feedbackWorkbench.problemToolFailure')}</option>
-								<option value="intent_mismatch">{$t('feedbackWorkbench.problemIntentMismatch')}</option>
-								<option value="incomplete_answer">{$t('feedbackWorkbench.problemIncomplete')}</option>
+								<option value="intent_mismatch"
+									>{$t('feedbackWorkbench.problemIntentMismatch')}</option
+								>
+								<option value="incomplete_answer"
+									>{$t('feedbackWorkbench.problemIncomplete')}</option
+								>
 								<option value="style_or_format">{$t('feedbackWorkbench.problemStyle')}</option>
-								<option value="undetermined_dissatisfaction">{$t('feedbackWorkbench.problemUndetermined')}</option>
+								<option value="undetermined_dissatisfaction"
+									>{$t('feedbackWorkbench.problemUndetermined')}</option
+								>
 							</select>
 						</label>
 					</div>
@@ -433,28 +550,59 @@
 								/>
 								<div class="case-copy">
 									<label for={`case-${item.case_id}`}
-										><strong>{item.question_preview || $t('datasetSnapshots.untitledCase')}</strong
+											><strong
+												>{item.question_preview || $t('datasetSnapshots.untitledCase')}</strong
 										></label
 									>
 									<small
-										>{item.document_titles.join(' · ') || $t('datasetSnapshots.noDocuments')}</small
+											>{item.document_titles.join(' · ') ||
+												$t('datasetSnapshots.noDocuments')}</small
 									>
 									<span class="case-status"
 										><CheckCircle2 size={12} aria-hidden="true" />{$t(
 											'datasetSnapshots.reviewed'
 										)}</span
 									>
+										{#if selectedIds.includes(item.case_id)}
+											{#if detailLoadingByCase[item.case_id]}
+												<span class="case-detail-state case-detail-state--loading"
+													>{$t('datasetSnapshots.detailLoading')}</span
+												>
+											{:else if detailErrorsByCase[item.case_id]}
+												<span class="case-detail-state case-detail-state--error" role="alert">
+													{$t('datasetSnapshots.detailFailed')}
+													<button
+														type="button"
+														class="retry-link"
+														on:click|stopPropagation={() => retryCaseDetail(item.case_id)}
+													>
+														<RefreshCw size={12} aria-hidden="true" />{$t(
+															'datasetSnapshots.retryDetail'
+														)}
+													</button>
+												</span>
+											{:else if details[item.case_id]}
+												<span class="case-detail-state case-detail-state--ready"
+													><CheckCircle2 size={12} aria-hidden="true" />{$t(
+														'datasetSnapshots.detailReady'
+													)}</span
+												>
+											{/if}
+										{/if}
 								</div>
 								<label class="split-field"
 									><span>{$t('datasetSnapshots.splitLabel')}</span><select
-										aria-label={$t('datasetSnapshots.splitFor', { case: caseLabel(item.case_id) })}
+											aria-label={$t('datasetSnapshots.splitFor', {
+												case: caseLabel(item.case_id)
+											})}
 										value={splitByCase[item.case_id] ?? 'eval'}
 										on:change={(event) =>
 											setSplit(
 												item.case_id,
 												(event.currentTarget as HTMLSelectElement).value as DatasetSplit
 											)}
-										><option value="eval">eval</option><option value="train">train</option></select
+											><option value="eval">eval</option><option value="train">train</option
+											></select
 									></label
 								>
 							</div>
@@ -494,7 +642,8 @@
 						{/each}
 					</div>
 					<p class="format-note">
-						<FileJson size={14} aria-hidden="true" /><span>{$t('datasetSnapshots.formatDetail')}</span
+						<FileJson size={14} aria-hidden="true" /><span
+							>{$t('datasetSnapshots.formatDetail')}</span
 						>
 					</p>
 				</fieldset>
@@ -563,22 +712,57 @@
 					>
 				</div>
 			</div>
+			{#if selectedCount && !releaseReady}
+				<div class="release-validation" role="status">
+					<TriangleAlert size={16} aria-hidden="true" />
+					<div>
+						<strong>{$t('datasetSnapshots.releaseBlocked')}</strong>
+						{#if selectedDetailLoadingCount}
+							<span
+								>{$t('datasetSnapshots.detailsStillLoading', {
+									count: selectedDetailLoadingCount
+								})}</span
+							>
+						{:else if selectedDetailErrorCount}
+							<span
+								>{$t('datasetSnapshots.detailsNeedRetry', {
+									count: selectedDetailErrorCount
+								})}</span
+							>
+						{:else if datasetValidationIssues.some((item) => item.reason === 'preference_pair_missing')}
+							<span>{$t('datasetSnapshots.preferencePairRequired')}</span>
+						{:else if datasetValidationIssues.some((item) => item.reason === 'target_missing')}
+							<span>{$t('datasetSnapshots.targetRequired')}</span>
+						{:else if datasetValidationIssues.some((item) => item.reason === 'dataset_use_not_authorized')}
+							<span>{$t('datasetSnapshots.datasetUseRequired')}</span>
+						{:else if missingFamilyDocuments.length}
+							<span
+								>{$t('datasetSnapshots.familyRequired', {
+									count: missingFamilyDocuments.length
+								})}</span
+							>
+						{/if}
+					</div>
+				</div>
+			{/if}
 			<button
 				class="primary-button"
 				type="button"
 				on:click={saveSnapshot}
-				disabled={saving || !selectedCount}
+				disabled={saving || !releaseReady}
 			>
 				<Save size={16} aria-hidden="true" />{saving
 					? $t('datasetSnapshots.saving')
 					: $t('datasetSnapshots.freeze')}
 			</button>
-			{#if selectedCount}
+			{#if selectedCount && releaseReady}
 				<p class="action-hint action-hint--ready">
 					<CheckCircle2 size={14} aria-hidden="true" />{$t('datasetSnapshots.readyToFreeze')}
 				</p>
-			{:else}
+			{:else if !selectedCount}
 				<p class="action-hint">{$t('datasetSnapshots.selectToFreeze')}</p>
+			{:else}
+				<p class="action-hint">{$t('datasetSnapshots.completeChecksToFreeze')}</p>
 			{/if}
 			<p class="privacy-note">{$t('datasetSnapshots.freezeNote')}</p>
 		</aside>
@@ -849,6 +1033,11 @@
 		background: var(--success-bg);
 		color: var(--success-text);
 	}
+	.notice--warning {
+		border: 1px solid var(--warning-border);
+		background: var(--warning-bg);
+		color: var(--warning-text);
+	}
 	.flow-bar {
 		display: grid;
 		grid-template-columns: 1fr 34px 1fr 34px 1fr;
@@ -871,6 +1060,9 @@
 	.flow-step--active {
 		color: var(--text-primary);
 	}
+	.flow-step--done {
+		color: var(--success-text);
+	}
 	.flow-number {
 		display: grid;
 		place-items: center;
@@ -887,9 +1079,22 @@
 		background: var(--brand-primary);
 		color: #fff;
 	}
+	.flow-step--done .flow-number {
+		background: var(--success-bg);
+		color: var(--success-text);
+	}
 	.flow-step strong,
 	.flow-step small {
 		display: block;
+	}
+	.flow-step em {
+		display: block;
+		margin-top: 3px;
+		color: inherit;
+		font-size: 9px;
+		font-style: normal;
+		font-weight: 700;
+		line-height: 1.2;
 	}
 	.flow-step strong {
 		font-size: 11px;
@@ -1248,6 +1453,58 @@
 		color: var(--success-text);
 		font-size: 10px;
 		line-height: 1.2;
+	}
+	.case-detail-state {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		width: fit-content;
+		margin-top: 3px;
+		font-size: 10px;
+		line-height: 1.25;
+	}
+	.case-detail-state--loading {
+		color: var(--warning-text);
+	}
+	.case-detail-state--ready {
+		color: var(--success-text);
+	}
+	.case-detail-state--error {
+		color: var(--danger-text);
+	}
+	.retry-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		font-weight: 750;
+		text-decoration: underline;
+		cursor: pointer;
+	}
+	.release-validation {
+		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+		margin: 16px 0 10px;
+		padding: 10px 11px;
+		border: 1px solid var(--warning-border);
+		border-radius: 7px;
+		background: var(--warning-bg);
+		color: var(--warning-text);
+		font-size: 11px;
+		line-height: 1.4;
+	}
+	.release-validation strong,
+	.release-validation span {
+		display: block;
+	}
+	.release-validation strong {
+		margin-bottom: 2px;
+		font-size: 11px;
 	}
 	.split-field {
 		display: grid;

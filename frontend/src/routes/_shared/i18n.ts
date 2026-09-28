@@ -2873,6 +2873,22 @@ const translations: Record<Language, Translations> = {
 			eyebrow: 'Quality loop',
 			title: 'Feedback workbench',
 			lede: 'Review what the model saw before deciding what needs a human label.',
+			flowLabel: 'Feedback quality flow',
+			flowFeedback: 'Feedback',
+			flowAnalysis: 'AI analysis',
+			flowAnnotation: 'Annotation',
+			flowReview: 'Review',
+			flowExport: 'Export',
+			flowStateDone: 'Complete',
+			flowStateActive: 'Current',
+			flowStatePending: 'Waiting',
+			queueEyebrow: 'Current stage',
+			queueTitle: 'Cases waiting for a decision',
+			queueDetail:
+				'Start with one case, inspect the evidence boundary, then record the decision that makes it eligible for export.',
+			placeholderStepOne: 'Select a case from the queue.',
+			placeholderStepTwo: 'Compare the question, answer, and inspected sources.',
+			placeholderStepThree: 'Save an annotation or continue to review.',
 			refresh: 'Refresh cases',
 			datasets: 'Dataset exports',
 			queueSummary: 'Feedback queue summary',
@@ -2880,7 +2896,8 @@ const translations: Record<Language, Translations> = {
 			needsReviewCount: 'Needs review',
 			acceptedCount: 'Accepted',
 			paperCount: 'Papers in scope',
-			realScenario: 'Real-paper scenario: compare scan-speed and scan-strategy evidence before deciding whether a claim transfers across studies.',
+			realScenario:
+				'Real-paper scenario: compare scan-speed and scan-strategy evidence before deciding whether a claim transfers across studies.',
 			nextStep: 'Next step',
 			nextInspect: 'Inspect the evidence boundary',
 			nextAnnotate: 'Record a human annotation',
@@ -2903,7 +2920,8 @@ const translations: Record<Language, Translations> = {
 			noMatchingDetail: 'New feedback appears here after the analysis worker records a case.',
 			loadingDetails: 'Loading case details…',
 			chooseCase: 'Choose a case to inspect',
-			chooseCaseDetail: 'The detail view keeps the question, answer, source coverage, and gaps together for one decision.',
+			chooseCaseDetail:
+				'The detail view keeps the question, answer, source coverage, and gaps together for one decision.',
 			caseReview: 'Case review',
 			question: 'Question',
 			answer: 'Answer',
@@ -2948,7 +2966,8 @@ const translations: Record<Language, Translations> = {
 			statusDetected: 'Detected',
 			statusReadyForReview: 'Ready for review',
 			statusFailed: 'Technical failure',
-			statusHelp: 'This state describes processing or review progress; it does not declare the answer correct or incorrect.',
+			statusHelp:
+				'This state describes processing or review progress; it does not declare the answer correct or incorrect.',
 			source: 'Source',
 			sourceUnknown: 'Source context recorded',
 			supportRecorded: 'Supporting source recorded',
@@ -2958,83 +2977,179 @@ const translations: Record<Language, Translations> = {
 			reasonNotRequested: 'Not requested',
 			reasonUnavailable: 'Unavailable',
 			location: 'Location',
-				noQuote: 'No excerpt was recorded.'
-				,annotationTitle: 'Human annotation'
-				,annotationHint: 'Candidate becomes reviewable after saving.'
-				,annotationProblem: 'Confirmed issue'
-				,annotationSeverity: 'Severity'
-				,annotationTarget: 'Reference target (optional)'
-				,annotationTargetPlaceholder: 'Write the answer or criterion a model should meet.'
-				,annotationSources: 'Supporting Sources'
-				,annotationNoSources: 'No Source references are available for this case.'
-				,annotationUses: 'Allowed dataset uses'
-				,useEvaluation: 'Evaluation'
-				,useSft: 'Supervised training'
-				,usePreference: 'Preference comparison'
-				,annotationReason: 'Reason'
-				,annotationReasonPlaceholder: 'Explain what you checked and why this label is correct.'
-				,annotationNoIds: 'The page keeps technical references for you.'
-				,annotationSave: 'Save annotation'
-				,annotationSaving: 'Saving…'
-				,annotationSaved: 'Annotation saved and ready for review.'
-				,savedAnnotation: 'Saved annotation'
-				,readOnly: 'Read only'
-				,noTarget: 'No reference target was recorded.'
-				,noReason: 'No annotation reason was recorded.'
-				,noDatasetUses: 'No dataset use was selected.'
-				,decisionAccept: 'Accepted'
-				,decisionReject: 'Rejected'
-				,decisionInsufficient: 'Insufficient evidence'
-				,decisionWithdraw: 'Acceptance withdrawn'
-				,problemFactError: 'Factual error'
-				,problemSourceMissing: 'Source missing'
-				,problemEvidenceMismatch: 'Evidence mismatch'
-				,problemRetrievalFailure: 'Retrieval failure'
-				,problemToolFailure: 'Tool failure'
-				,problemIntentMismatch: 'Intent mismatch'
-				,problemIncomplete: 'Incomplete answer'
-				,problemStyle: 'Style or format'
-				,problemUndetermined: 'Undetermined dissatisfaction'
-				,severityLow: 'Low'
-				,severityMedium: 'Medium'
-				,severityHigh: 'High'
-				,severityCritical: 'Critical'
-				,reviewTitle: 'Review decision'
-				,reviewHint: 'This records eligibility for the selected uses.'
-				,reviewReason: 'Review reason'
-				,reviewReasonPlaceholder: 'Explain why this annotation should or should not be admitted.'
-				,reviewAccept: 'Accept'
-				,reviewInsufficient: 'Insufficient evidence'
-				,reviewReject: 'Reject'
-				,reviewWithdraw: 'Withdraw acceptance'
-				,reviewHistory: 'Review history'
+			noQuote: 'No excerpt was recorded.',
+			annotationTitle: 'Human annotation',
+			annotationHint: 'Candidate becomes reviewable after saving.',
+			annotationProblem: 'Confirmed issue',
+			annotationSeverity: 'Severity',
+			annotationTarget: 'Reference target (optional)',
+			annotationTargetPlaceholder: 'Write the answer or criterion a model should meet.',
+			annotationSources: 'Supporting Sources',
+			annotationNoSources: 'No Source references are available for this case.',
+			annotationUses: 'Allowed dataset uses',
+			useEvaluation: 'Evaluation',
+			useSft: 'Supervised training',
+			usePreference: 'Preference comparison',
+			annotationReason: 'Reason',
+			annotationReasonPlaceholder: 'Explain what you checked and why this label is correct.',
+			annotationNoIds: 'The page keeps technical references for you.',
+			annotationSave: 'Save annotation',
+			annotationSaving: 'Saving…',
+			annotationSaved: 'Annotation saved and ready for review.',
+			savedAnnotation: 'Saved annotation',
+			readOnly: 'Read only',
+			noTarget: 'No reference target was recorded.',
+			noReason: 'No annotation reason was recorded.',
+			noDatasetUses: 'No dataset use was selected.',
+			decisionAccept: 'Accepted',
+			decisionReject: 'Rejected',
+			decisionInsufficient: 'Insufficient evidence',
+			decisionWithdraw: 'Acceptance withdrawn',
+			problemFactError: 'Factual error',
+			problemSourceMissing: 'Source missing',
+			problemEvidenceMismatch: 'Evidence mismatch',
+			problemRetrievalFailure: 'Retrieval failure',
+			problemToolFailure: 'Tool failure',
+			problemIntentMismatch: 'Intent mismatch',
+			problemIncomplete: 'Incomplete answer',
+			problemStyle: 'Style or format',
+			problemUndetermined: 'Undetermined dissatisfaction',
+			severityLow: 'Low',
+			severityMedium: 'Medium',
+			severityHigh: 'High',
+			severityCritical: 'Critical',
+			reviewTitle: 'Review decision',
+			reviewHint: 'This records eligibility for the selected uses.',
+			reviewReason: 'Review reason',
+			reviewReasonPlaceholder: 'Explain why this annotation should or should not be admitted.',
+			reviewAccept: 'Accept',
+			reviewInsufficient: 'Insufficient evidence',
+			reviewReject: 'Reject',
+			reviewWithdraw: 'Withdraw acceptance',
+			reviewHistory: 'Review history'
 		},
 		datasetSnapshots: {
-			eyebrow: 'Dataset release', title: 'Dataset snapshots',
+			eyebrow: 'Dataset release',
+			title: 'Dataset snapshots',
 			lede: 'Freeze reviewed cases into a reproducible export. Later edits do not change an existing snapshot.',
-			back: 'Back to feedback workbench', refresh: 'Refresh datasets', step: 'Release a fixed set',
-			flowLabel: 'Dataset release flow', flowScope: 'Data scope', flowScopeDetail: 'Choose reviewed cases', flowOutput: 'Output target', flowOutputDetail: 'Choose dataset use', flowRelease: 'Release', flowReleaseDetail: 'Freeze and download', releaseStep: 'Release', outputDetail: 'The dataset use changes the row schema. The file remains JSONL.', validationTitle: 'Release checks', validationDetail: 'Paper family boundaries',
-			formatBadge: 'JSONL export', formatDetail: 'One reviewed example per line; readable evidence stays in the row.',
-			overviewLabel: 'Dataset export status', overviewTitle: 'Ready to release', overviewDetail: 'Choose reviewed cases, then freeze a download.',
-			readyCases: 'Ready cases', selectedCases: 'Selected', snapshotCount: 'Snapshots',
-			chooseCases: 'Choose accepted cases', datasetType: 'Dataset use',
-			type: { evaluation: 'Evaluation', sft: 'Supervised training', preference: 'Preference comparison' },
-			typeHelp: { evaluation: 'Keeps the question, readable paper excerpts, reference, and review criteria.', sft: 'Requires a reviewed target and readable supporting excerpts.', preference: 'Uses the reviewed target as chosen, the original answer as rejected, and includes supporting excerpts.' },
-			loading: 'Loading accepted cases…', noAccepted: 'No accepted cases are ready.', noAcceptedDetail: 'Complete annotation and review for a case before selecting it here.',
-			openWorkbench: 'Open feedback workbench', caseListTitle: 'Reviewed cases', caseListDetail: 'Select the examples to include in this snapshot.', reviewed: 'Reviewed', filterCases: 'Filter reviewed cases', searchCases: 'Search by question, answer, or paper', filterProblem: 'Filter by issue type', allProblems: 'All issue types', noMatchingCases: 'No reviewed cases match these filters.', selectedSummary: '{selected} of {total} selected', selectAll: 'Select all visible', clearSelection: 'Clear', splitLabel: 'Split',
-			untitledCase: 'Untitled case', noDocuments: 'No paper scope recorded', splitFor: 'Split for {case}', selectedCase: 'Selected case', selectedPaper: 'Selected paper', familyFor: 'Paper family for {document}',
-			paperFamilies: 'Paper families', paperFamiliesHint: 'Cases sharing a family cannot cross train and eval.',
-			stepTwo: 'Download', exportSummary: 'Export summary', lastRows: 'Last rows', readyToFreeze: 'Ready to freeze this selection.', selectToFreeze: 'Select at least one reviewed case to enable export.', freeze: 'Freeze snapshot', saving: 'Freezing…', freezeNote: 'The server rechecks review, source, and split rules before freezing. Nothing changes in Chat.',
-			created: 'Snapshot created with {count} rows.', historyEyebrow: 'Immutable exports', history: 'Snapshot history',
-			noSnapshots: 'No snapshots yet', noSnapshotsDetail: 'Frozen exports will appear here with their exclusion counts.', immutable: 'Immutable snapshot',
-			rows: 'rows', excluded: 'Excluded', empty: 'Empty', download: 'Download JSONL', downloading: 'Preparing…',
-			viewDetails: 'View exclusions', hideDetails: 'Hide exclusions', loadingDetails: 'Loading exclusions…',
-			exclusionReasons: 'Excluded selections', noExclusions: 'No selections were excluded.',
-			reasonDuplicate: 'Duplicate selection', reasonSplitInvalid: 'Invalid split', reasonCaseNotInCollection: 'Case is outside this collection',
-			reasonCaseNotAccessible: 'Case is no longer accessible', reasonAnnotationStale: 'Annotation has changed', reasonReviewNotAccepted: 'Review was not accepted',
-			reasonDatasetUseNotAuthorized: 'Dataset use was not approved', reasonAnswerMissing: 'Answer is missing', reasonInputMissing: 'Question is missing',
-			reasonPaperFamilyMissing: 'Paper family is missing', reasonSourceNotInCase: 'Supporting source is unavailable', reasonTargetMissing: 'Reference target is missing',
-			reasonSupportSourceMissing: 'Supporting source is missing', reasonEvidenceContentMissing: 'Readable evidence content is missing', reasonPreferencePairMissing: 'Preference pair is incomplete', reasonOther: 'Could not include this selection'
+			back: 'Back to feedback workbench',
+			refresh: 'Refresh datasets',
+			step: 'Release a fixed set',
+			flowLabel: 'Dataset release flow',
+			flowScope: 'Data scope',
+			flowScopeDetail: 'Choose reviewed cases',
+			flowOutput: 'Output target',
+			flowOutputDetail: 'Choose dataset use',
+			flowRelease: 'Release',
+			flowReleaseDetail: 'Freeze and download',
+			flowStateDone: 'Complete',
+			flowStateActive: 'Current',
+			flowStatePending: 'Waiting',
+			releaseStep: 'Release',
+			outputDetail: 'The dataset use changes the row schema. The file remains JSONL.',
+			validationTitle: 'Release checks',
+			validationDetail: 'Paper family boundaries',
+			formatBadge: 'JSONL export',
+			formatDetail: 'One reviewed example per line; readable evidence stays in the row.',
+			overviewLabel: 'Dataset export status',
+			overviewTitle: 'Ready to release',
+			overviewDetail: 'Choose reviewed cases, then freeze a download.',
+			readyCases: 'Ready cases',
+			selectedCases: 'Selected',
+			snapshotCount: 'Snapshots',
+			chooseCases: 'Choose accepted cases',
+			datasetType: 'Dataset use',
+			type: {
+				evaluation: 'Evaluation',
+				sft: 'Supervised training',
+				preference: 'Preference comparison'
+			},
+			typeHelp: {
+				evaluation: 'Keeps the question, readable paper excerpts, reference, and review criteria.',
+				sft: 'Requires a reviewed target and readable supporting excerpts.',
+				preference:
+					'Uses the reviewed target as chosen, the original answer as rejected, and includes supporting excerpts.'
+			},
+			loading: 'Loading accepted cases…',
+			noAccepted: 'No accepted cases are ready.',
+			noAcceptedDetail: 'Complete annotation and review for a case before selecting it here.',
+			openWorkbench: 'Open feedback workbench',
+			caseListTitle: 'Reviewed cases',
+			caseListDetail: 'Select the examples to include in this snapshot.',
+			reviewed: 'Reviewed',
+			filterCases: 'Filter reviewed cases',
+			searchCases: 'Search by question, answer, or paper',
+			filterProblem: 'Filter by issue type',
+			allProblems: 'All issue types',
+			noMatchingCases: 'No reviewed cases match these filters.',
+			selectedSummary: '{selected} of {total} selected',
+			selectAll: 'Select all visible',
+			clearSelection: 'Clear',
+			splitLabel: 'Split',
+			untitledCase: 'Untitled case',
+			noDocuments: 'No paper scope recorded',
+			splitFor: 'Split for {case}',
+			selectedCase: 'Selected case',
+			selectedPaper: 'Selected paper',
+			familyFor: 'Paper family for {document}',
+			paperFamilies: 'Paper families',
+			paperFamiliesHint: 'Cases sharing a family cannot cross train and eval.',
+			stepTwo: 'Download',
+			exportSummary: 'Export summary',
+			lastRows: 'Last rows',
+			readyToFreeze: 'Ready to freeze this selection.',
+			selectToFreeze: 'Select at least one reviewed case to enable export.',
+			freeze: 'Freeze snapshot',
+			saving: 'Freezing…',
+			freezeNote:
+				'The server rechecks review, source, and split rules before freezing. Nothing changes in Chat.',
+			created: 'Snapshot created with {count} rows.',
+			createdWithExclusions:
+				'Snapshot created with {count} rows; {excluded} selections were excluded. Review exclusions before using it.',
+			detailLoading: 'Checking case details…',
+			detailReady: 'Details verified',
+			detailFailed: 'Details failed',
+			retryDetail: 'Retry',
+			releaseBlocked: 'Release is blocked until checks finish.',
+			detailsStillLoading: 'Checking details for {count} selected case(s).',
+			detailsNeedRetry: 'Retry the failed case detail request(s).',
+			preferencePairRequired:
+				'Preference requires a distinct chosen target and rejected original answer.',
+			targetRequired: 'This dataset use requires a reviewed target.',
+			datasetUseRequired: 'The selected dataset use was not approved for one or more cases.',
+			familyRequired: 'Enter a paper family for {count} selected paper(s).',
+			completeChecksToFreeze: 'Complete the release checks before freezing.',
+			historyEyebrow: 'Immutable exports',
+			history: 'Snapshot history',
+			noSnapshots: 'No snapshots yet',
+			noSnapshotsDetail: 'Frozen exports will appear here with their exclusion counts.',
+			immutable: 'Immutable snapshot',
+			rows: 'rows',
+			excluded: 'Excluded',
+			empty: 'Empty',
+			download: 'Download JSONL',
+			downloading: 'Preparing…',
+			viewDetails: 'View exclusions',
+			hideDetails: 'Hide exclusions',
+			loadingDetails: 'Loading exclusions…',
+			exclusionReasons: 'Excluded selections',
+			noExclusions: 'No selections were excluded.',
+			reasonDuplicate: 'Duplicate selection',
+			reasonSplitInvalid: 'Invalid split',
+			reasonCaseNotInCollection: 'Case is outside this collection',
+			reasonCaseNotAccessible: 'Case is no longer accessible',
+			reasonAnnotationStale: 'Annotation has changed',
+			reasonReviewNotAccepted: 'Review was not accepted',
+			reasonDatasetUseNotAuthorized: 'Dataset use was not approved',
+			reasonAnswerMissing: 'Answer is missing',
+			reasonInputMissing: 'Question is missing',
+			reasonPaperFamilyMissing: 'Paper family is missing',
+			reasonSourceNotInCase: 'Supporting source is unavailable',
+			reasonTargetMissing: 'Reference target is missing',
+			reasonSupportSourceMissing: 'Supporting source is missing',
+			reasonEvidenceContentMissing: 'Readable evidence content is missing',
+			reasonPreferencePairMissing: 'Preference pair is incomplete',
+			reasonOther: 'Could not include this selection'
 		},
 		error: {
 			unexpected: 'Unexpected error.',
@@ -5782,6 +5897,21 @@ const translations: Record<Language, Translations> = {
 			eyebrow: '质量闭环',
 			title: '反馈工作台',
 			lede: '先核对模型实际看到的内容，再决定是否需要人工标注。',
+			flowLabel: '反馈质量流程',
+			flowFeedback: '反馈采集',
+			flowAnalysis: 'AI 分析',
+			flowAnnotation: '人工标注',
+			flowReview: '审核',
+			flowExport: '导出',
+			flowStateDone: '已完成',
+			flowStateActive: '当前步骤',
+			flowStatePending: '等待前置步骤',
+			queueEyebrow: '当前阶段',
+			queueTitle: '等待处理的案例',
+			queueDetail: '先选择一个案例，检查证据边界，再记录决定它是否可以导出的标注。',
+			placeholderStepOne: '从队列中选择一个案例。',
+			placeholderStepTwo: '对照问题、回答和实际读取的来源。',
+			placeholderStepThree: '保存标注，或继续进入审核。',
 			refresh: '刷新案例',
 			datasets: '数据集导出',
 			queueSummary: '反馈队列摘要',
@@ -5789,7 +5919,8 @@ const translations: Record<Language, Translations> = {
 			needsReviewCount: '待处理',
 			acceptedCount: '已接受',
 			paperCount: '涉及文献',
-			realScenario: '真实论文场景：先比较扫描速度和扫描策略的证据，再判断一个结论能否迁移到另一项研究。',
+			realScenario:
+				'真实论文场景：先比较扫描速度和扫描策略的证据，再判断一个结论能否迁移到另一项研究。',
 			nextStep: '下一步',
 			nextInspect: '核对证据边界',
 			nextAnnotate: '记录人工标注',
@@ -5867,83 +5998,172 @@ const translations: Record<Language, Translations> = {
 			reasonNotRequested: '未被要求检查',
 			reasonUnavailable: '来源不可用',
 			location: '位置',
-				noQuote: '没有记录原文摘录。'
-				,annotationTitle: '人工标注'
-				,annotationHint: '保存后案例进入待审核状态。'
-				,annotationProblem: '确认的问题'
-				,annotationSeverity: '严重程度'
-				,annotationTarget: '参考目标（可选）'
-				,annotationTargetPlaceholder: '填写模型应达到的回答或评测标准。'
-				,annotationSources: '支持性 Source'
-				,annotationNoSources: '当前案例没有可选择的 Source 引用。'
-				,annotationUses: '允许的数据用途'
-				,useEvaluation: '评测'
-				,useSft: '监督训练'
-				,usePreference: '偏好比较'
-				,annotationReason: '判断理由'
-				,annotationReasonPlaceholder: '说明你核对了什么，以及为什么这个标注成立。'
-				,annotationNoIds: '页面会自动保存技术引用，不需要填写 ID。'
-				,annotationSave: '保存标注'
-				,annotationSaving: '正在保存…'
-				,annotationSaved: '标注已保存，可以进入审核。'
-				,savedAnnotation: '已保存的标注'
-				,readOnly: '只读'
-				,noTarget: '没有记录参考目标。'
-				,noReason: '没有记录标注理由。'
-				,noDatasetUses: '没有选择数据用途。'
-				,decisionAccept: '已接受'
-				,decisionReject: '已拒绝'
-				,decisionInsufficient: '依据不足'
-				,decisionWithdraw: '已撤回接受'
-				,problemFactError: '事实错误'
-				,problemSourceMissing: '来源遗漏'
-				,problemEvidenceMismatch: '证据不匹配'
-				,problemRetrievalFailure: '检索失败'
-				,problemToolFailure: '工具调用失败'
-				,problemIntentMismatch: '意图理解错误'
-				,problemIncomplete: '答案不完整'
-				,problemStyle: '表达或格式问题'
-				,problemUndetermined: '暂无法判断原因'
-				,severityLow: '低'
-				,severityMedium: '中'
-				,severityHigh: '高'
-				,severityCritical: '严重'
-				,reviewTitle: '审核决定'
-				,reviewHint: '这里记录当前标注是否可以用于选定的数据用途。'
-				,reviewReason: '审核理由'
-				,reviewReasonPlaceholder: '说明为什么应当或不应当接纳这条标注。'
-				,reviewAccept: '接受'
-				,reviewInsufficient: '依据不足'
-				,reviewReject: '拒绝'
-				,reviewWithdraw: '撤回接受'
-				,reviewHistory: '审核历史'
+			noQuote: '没有记录原文摘录。',
+			annotationTitle: '人工标注',
+			annotationHint: '保存后案例进入待审核状态。',
+			annotationProblem: '确认的问题',
+			annotationSeverity: '严重程度',
+			annotationTarget: '参考目标（可选）',
+			annotationTargetPlaceholder: '填写模型应达到的回答或评测标准。',
+			annotationSources: '支持性 Source',
+			annotationNoSources: '当前案例没有可选择的 Source 引用。',
+			annotationUses: '允许的数据用途',
+			useEvaluation: '评测',
+			useSft: '监督训练',
+			usePreference: '偏好比较',
+			annotationReason: '判断理由',
+			annotationReasonPlaceholder: '说明你核对了什么，以及为什么这个标注成立。',
+			annotationNoIds: '页面会自动保存技术引用，不需要填写 ID。',
+			annotationSave: '保存标注',
+			annotationSaving: '正在保存…',
+			annotationSaved: '标注已保存，可以进入审核。',
+			savedAnnotation: '已保存的标注',
+			readOnly: '只读',
+			noTarget: '没有记录参考目标。',
+			noReason: '没有记录标注理由。',
+			noDatasetUses: '没有选择数据用途。',
+			decisionAccept: '已接受',
+			decisionReject: '已拒绝',
+			decisionInsufficient: '依据不足',
+			decisionWithdraw: '已撤回接受',
+			problemFactError: '事实错误',
+			problemSourceMissing: '来源遗漏',
+			problemEvidenceMismatch: '证据不匹配',
+			problemRetrievalFailure: '检索失败',
+			problemToolFailure: '工具调用失败',
+			problemIntentMismatch: '意图理解错误',
+			problemIncomplete: '答案不完整',
+			problemStyle: '表达或格式问题',
+			problemUndetermined: '暂无法判断原因',
+			severityLow: '低',
+			severityMedium: '中',
+			severityHigh: '高',
+			severityCritical: '严重',
+			reviewTitle: '审核决定',
+			reviewHint: '这里记录当前标注是否可以用于选定的数据用途。',
+			reviewReason: '审核理由',
+			reviewReasonPlaceholder: '说明为什么应当或不应当接纳这条标注。',
+			reviewAccept: '接受',
+			reviewInsufficient: '依据不足',
+			reviewReject: '拒绝',
+			reviewWithdraw: '撤回接受',
+			reviewHistory: '审核历史'
 		},
 		datasetSnapshots: {
-			eyebrow: '数据集发布', title: '数据集快照',
+			eyebrow: '数据集发布',
+			title: '数据集快照',
 			lede: '把已审核案例冻结为可复现的导出文件。之后的修改不会改变已有快照。',
-			back: '返回反馈工作台', refresh: '刷新数据集', step: '发布固定数据集',
-			flowLabel: '数据集发布流程', flowScope: '数据范围', flowScopeDetail: '选择已审核案例', flowOutput: '输出目标', flowOutputDetail: '选择数据用途', flowRelease: '发布交付', flowReleaseDetail: '冻结并下载', releaseStep: '发布交付', outputDetail: '数据用途会决定数据行结构，当前文件格式为 JSONL。', validationTitle: '发布前校验', validationDetail: '论文家族边界',
-			formatBadge: 'JSONL 导出', formatDetail: '每行一个已审核案例；可读证据会保留在数据行中。',
-			overviewLabel: '数据集导出状态', overviewTitle: '准备发布', overviewDetail: '选择已审核案例，然后冻结下载文件。',
-			readyCases: '可发布案例', selectedCases: '已选择', snapshotCount: '快照',
-			chooseCases: '选择已接受案例', datasetType: '数据用途',
+			back: '返回反馈工作台',
+			refresh: '刷新数据集',
+			step: '发布固定数据集',
+			flowLabel: '数据集发布流程',
+			flowScope: '数据范围',
+			flowScopeDetail: '选择已审核案例',
+			flowOutput: '输出目标',
+			flowOutputDetail: '选择数据用途',
+			flowRelease: '发布交付',
+			flowReleaseDetail: '冻结并下载',
+			flowStateDone: '已完成',
+			flowStateActive: '当前步骤',
+			flowStatePending: '等待前置步骤',
+			releaseStep: '发布交付',
+			outputDetail: '数据用途会决定数据行结构，当前文件格式为 JSONL。',
+			validationTitle: '发布前校验',
+			validationDetail: '论文家族边界',
+			formatBadge: 'JSONL 导出',
+			formatDetail: '每行一个已审核案例；可读证据会保留在数据行中。',
+			overviewLabel: '数据集导出状态',
+			overviewTitle: '准备发布',
+			overviewDetail: '选择已审核案例，然后冻结下载文件。',
+			readyCases: '可发布案例',
+			selectedCases: '已选择',
+			snapshotCount: '快照',
+			chooseCases: '选择已接受案例',
+			datasetType: '数据用途',
 			type: { evaluation: '评测', sft: '监督训练', preference: '偏好比较' },
-			typeHelp: { evaluation: '保留问题、可读的论文摘录、参考目标和审核标准。', sft: '必须有已审核目标和可读的支持性摘录。', preference: '使用已审核目标作为 chosen，原回答作为 rejected，并附带支持性摘录。' },
-			loading: '正在加载已接受案例…', noAccepted: '当前没有可发布的已接受案例。', noAcceptedDetail: '先完成案例标注和审核，再从这里选择。',
-			openWorkbench: '打开反馈工作台', caseListTitle: '已审核案例', caseListDetail: '选择要放进这次快照的案例。', reviewed: '已审核', filterCases: '筛选已审核案例', searchCases: '按问题、回答或论文搜索', filterProblem: '按问题类型筛选', allProblems: '全部问题类型', noMatchingCases: '没有符合筛选条件的已审核案例。', selectedSummary: '已选择 {selected}/{total}', selectAll: '全选当前结果', clearSelection: '清空', splitLabel: '分区',
-			untitledCase: '未命名案例', noDocuments: '没有记录文献范围', splitFor: '为 {case} 选择分区', selectedCase: '所选案例', selectedPaper: '所选论文', familyFor: '为 {document} 设置论文家族',
-			paperFamilies: '论文家族', paperFamiliesHint: '同一家族不能同时出现在 train 和 eval。',
-			stepTwo: '下载', exportSummary: '导出摘要', lastRows: '上次行数', readyToFreeze: '当前选择可以冻结。', selectToFreeze: '至少选择一个已审核案例后才能导出。', freeze: '冻结快照', saving: '正在冻结…', freezeNote: '服务端会再次检查审核、来源和分区规则；不会修改 Chat。',
-			created: '快照已创建，包含 {count} 行。', historyEyebrow: '不可变导出', history: '快照历史',
-			noSnapshots: '还没有快照', noSnapshotsDetail: '冻结后的导出会显示在这里，包括排除数量。', immutable: '不可变快照',
-			rows: '行', excluded: '已排除', empty: '空快照', download: '下载 JSONL', downloading: '准备下载…',
-			viewDetails: '查看排除原因', hideDetails: '收起排除原因', loadingDetails: '正在加载排除原因…',
-			exclusionReasons: '被排除的选择', noExclusions: '没有被排除的选择。',
-			reasonDuplicate: '重复选择', reasonSplitInvalid: '分区无效', reasonCaseNotInCollection: '案例不属于当前集合',
-			reasonCaseNotAccessible: '案例当前不可访问', reasonAnnotationStale: '标注已经变化', reasonReviewNotAccepted: '审核未接受',
-			reasonDatasetUseNotAuthorized: '未批准该数据用途', reasonAnswerMissing: '缺少回答', reasonInputMissing: '缺少问题',
-			reasonPaperFamilyMissing: '缺少论文家族', reasonSourceNotInCase: '支持性来源不可用', reasonTargetMissing: '缺少参考目标',
-			reasonSupportSourceMissing: '缺少支持性来源', reasonEvidenceContentMissing: '缺少可读的证据内容', reasonPreferencePairMissing: '偏好对不完整', reasonOther: '无法纳入此选择'
+			typeHelp: {
+				evaluation: '保留问题、可读的论文摘录、参考目标和审核标准。',
+				sft: '必须有已审核目标和可读的支持性摘录。',
+				preference: '使用已审核目标作为 chosen，原回答作为 rejected，并附带支持性摘录。'
+			},
+			loading: '正在加载已接受案例…',
+			noAccepted: '当前没有可发布的已接受案例。',
+			noAcceptedDetail: '先完成案例标注和审核，再从这里选择。',
+			openWorkbench: '打开反馈工作台',
+			caseListTitle: '已审核案例',
+			caseListDetail: '选择要放进这次快照的案例。',
+			reviewed: '已审核',
+			filterCases: '筛选已审核案例',
+			searchCases: '按问题、回答或论文搜索',
+			filterProblem: '按问题类型筛选',
+			allProblems: '全部问题类型',
+			noMatchingCases: '没有符合筛选条件的已审核案例。',
+			selectedSummary: '已选择 {selected}/{total}',
+			selectAll: '全选当前结果',
+			clearSelection: '清空',
+			splitLabel: '分区',
+			untitledCase: '未命名案例',
+			noDocuments: '没有记录文献范围',
+			splitFor: '为 {case} 选择分区',
+			selectedCase: '所选案例',
+			selectedPaper: '所选论文',
+			familyFor: '为 {document} 设置论文家族',
+			paperFamilies: '论文家族',
+			paperFamiliesHint: '同一家族不能同时出现在 train 和 eval。',
+			stepTwo: '下载',
+			exportSummary: '导出摘要',
+			lastRows: '上次行数',
+			readyToFreeze: '当前选择可以冻结。',
+			selectToFreeze: '至少选择一个已审核案例后才能导出。',
+			freeze: '冻结快照',
+			saving: '正在冻结…',
+			freezeNote: '服务端会再次检查审核、来源和分区规则；不会修改 Chat。',
+			created: '快照已创建，包含 {count} 行。',
+			createdWithExclusions:
+				'快照已创建，包含 {count} 行；有 {excluded} 个选择被排除，请先查看排除原因。',
+			detailLoading: '正在核对案例详情…',
+			detailReady: '详情已核对',
+			detailFailed: '详情加载失败',
+			retryDetail: '重试',
+			releaseBlocked: '完成发布前校验后才能冻结。',
+			detailsStillLoading: '正在核对 {count} 个所选案例的详情。',
+			detailsNeedRetry: '请重试加载失败的案例详情。',
+			preferencePairRequired: '偏好数据需要不同的 chosen 目标和 rejected 原回答。',
+			targetRequired: '该数据用途需要已审核目标。',
+			datasetUseRequired: '一个或多个案例没有批准当前数据用途。',
+			familyRequired: '请为 {count} 篇所选论文填写论文家族。',
+			completeChecksToFreeze: '完成发布前校验后才能冻结。',
+			historyEyebrow: '不可变导出',
+			history: '快照历史',
+			noSnapshots: '还没有快照',
+			noSnapshotsDetail: '冻结后的导出会显示在这里，包括排除数量。',
+			immutable: '不可变快照',
+			rows: '行',
+			excluded: '已排除',
+			empty: '空快照',
+			download: '下载 JSONL',
+			downloading: '准备下载…',
+			viewDetails: '查看排除原因',
+			hideDetails: '收起排除原因',
+			loadingDetails: '正在加载排除原因…',
+			exclusionReasons: '被排除的选择',
+			noExclusions: '没有被排除的选择。',
+			reasonDuplicate: '重复选择',
+			reasonSplitInvalid: '分区无效',
+			reasonCaseNotInCollection: '案例不属于当前集合',
+			reasonCaseNotAccessible: '案例当前不可访问',
+			reasonAnnotationStale: '标注已经变化',
+			reasonReviewNotAccepted: '审核未接受',
+			reasonDatasetUseNotAuthorized: '未批准该数据用途',
+			reasonAnswerMissing: '缺少回答',
+			reasonInputMissing: '缺少问题',
+			reasonPaperFamilyMissing: '缺少论文家族',
+			reasonSourceNotInCase: '支持性来源不可用',
+			reasonTargetMissing: '缺少参考目标',
+			reasonSupportSourceMissing: '缺少支持性来源',
+			reasonEvidenceContentMissing: '缺少可读的证据内容',
+			reasonPreferencePairMissing: '偏好对不完整',
+			reasonOther: '无法纳入此选择'
 		},
 		error: {
 			unexpected: '发生未知错误。',

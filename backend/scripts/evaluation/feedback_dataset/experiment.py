@@ -153,6 +153,8 @@ def _protocol_metadata(prepared: dict[str, Any]) -> dict[str, Any]:
         raise ExperimentProtocolError("eval_row_ids_invalid")
     return {
         "prepared_schema_version": prepared.get("schema_version"),
+        "experiment_mode": prepared.get("experiment_mode", "historical"),
+        "experiment_plan_digest": prepared.get("experiment_plan_digest"),
         "prepared_digest": prepared.get("prepared_digest"),
         "snapshot_id": snapshot.get("dataset_id"),
         "collection_id": snapshot.get("collection_id"),

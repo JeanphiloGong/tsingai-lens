@@ -15,7 +15,7 @@ import subprocess
 from typing import Any, Iterable
 
 
-PREPARED_SCHEMA_VERSION = "feedback-offline-prepared.v2"
+PREPARED_SCHEMA_VERSION = "feedback-offline-prepared.v3"
 TOKENIZER_NAME = "lens-whitespace-v1"
 TOKENIZER_VERSION = 1
 DATASET_TYPES = {"evaluation", "sft", "preference"}
@@ -64,6 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("snapshot_path", type=Path, help="P5 snapshot detail JSON path.")
     parser.add_argument("output_dir", type=Path, help="Directory for prepared artifacts.")
     parser.add_argument("--revision", help="Source revision to record in the artifact.")
+    parser.add_argument("--experiment-plan", type=Path, help="Reviewed experiment selection and split JSON.")
     parser.add_argument("--seed", type=int, default=0, help="Deterministic experiment seed.")
     parser.add_argument(
         "--max-input-tokens",
@@ -82,6 +83,7 @@ def main() -> None:
         revision=args.revision,
         seed=args.seed,
         max_input_tokens=args.max_input_tokens,
+        experiment_plan_path=args.experiment_plan,
     )
     print(json.dumps(result, ensure_ascii=True, sort_keys=True))
 
@@ -93,6 +95,7 @@ def prepare_snapshot(
     revision: str | None = None,
     seed: int = 0,
     max_input_tokens: int = 4096,
+    experiment_plan_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate one immutable snapshot and write its offline representation.
 
@@ -110,12 +113,17 @@ def prepare_snapshot(
         raise SnapshotValidationError(f"snapshot_not_found:{source}")
     snapshot = _read_json_object(source, error_prefix="snapshot")
     validated = _validate_snapshot(snapshot, max_input_tokens=max_input_tokens)
+    plan = (
+        _read_json_object(Path(experiment_plan_path), error_prefix="experiment_plan")
+        if experiment_plan_path is not None else None
+    )
+    experiment_rows, plan = _experiment_rows(validated, plan)
     revision_value = (revision or os.environ.get("LENS_REVISION") or _git_revision()).strip()
     if not revision_value:
         revision_value = "unknown"
 
     prepared_rows = _materialize_prepared_rows(
-        validated.rows,
+        experiment_rows,
         dataset_type=str(snapshot["dataset_type"]),
         max_input_tokens=max_input_tokens,
     )
@@ -144,10 +152,13 @@ def prepare_snapshot(
         "max_input_tokens": max_input_tokens,
         "counts": {split: len(rows) for split, rows in split_rows.items()},
         "rows_digest": rows_digest,
+        "experiment_plan_digest": _digest(plan),
+        "experiment_mode": plan["mode"],
         "files": {
             "train": "train.jsonl",
             "eval": "eval.jsonl",
             "snapshot": "snapshot.json",
+            "experiment_plan": "experiment-plan.json",
         },
         "status": "ready",
     }
@@ -162,6 +173,7 @@ def prepare_snapshot(
     destination = Path(output_dir).expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
     _write_json(destination / "snapshot.json", snapshot)
+    _write_json(destination / "experiment-plan.json", plan)
     _write_json(destination / "prepared.json", prepared)
     for split, rows in split_rows.items():
         _write_jsonl(destination / f"{split}.jsonl", rows)
@@ -173,7 +185,7 @@ def load_prepared(prepared_dir: str | Path) -> dict[str, Any]:
 
     directory = Path(prepared_dir).expanduser().resolve()
     prepared = _read_json_object(directory / "prepared.json", error_prefix="prepared")
-    if prepared.get("schema_version") != PREPARED_SCHEMA_VERSION:
+    if prepared.get("schema_version") not in {PREPARED_SCHEMA_VERSION, "feedback-offline-prepared.v2"}:
         raise SnapshotValidationError("prepared_schema_invalid")
     prepared_digest = prepared.get("prepared_digest")
     if not isinstance(prepared_digest, str) or len(prepared_digest) != 64:
@@ -193,6 +205,19 @@ def load_prepared(prepared_dir: str | Path) -> dict[str, Any]:
     if not isinstance(max_input_tokens, int) or max_input_tokens < 1:
         raise SnapshotValidationError("prepared_max_input_tokens_invalid")
     validated = _validate_snapshot(snapshot, max_input_tokens=max_input_tokens)
+    experiment_rows = validated.rows
+    if prepared["schema_version"] == PREPARED_SCHEMA_VERSION:
+        filename = files.get("experiment_plan")
+        if not isinstance(filename, str) or Path(filename).name != filename:
+            raise SnapshotValidationError("prepared_experiment_plan_file_invalid")
+        plan = _read_json_object(directory / filename, error_prefix="experiment_plan")
+        if _digest(plan) != prepared.get("experiment_plan_digest"):
+            raise SnapshotValidationError("experiment_plan_digest_mismatch")
+        experiment_rows, _ = _experiment_rows(validated, plan)
+        if prepared.get("experiment_mode") != plan["mode"]:
+            raise SnapshotValidationError("experiment_mode_mismatch")
+    elif snapshot["manifest"]["schema_version"] != "feedback-dataset.v2":
+        raise SnapshotValidationError("prepared_schema_invalid")
     expected_snapshot = prepared.get("snapshot")
     if not isinstance(expected_snapshot, dict):
         raise SnapshotValidationError("prepared_snapshot_metadata_missing")
@@ -214,7 +239,7 @@ def load_prepared(prepared_dir: str | Path) -> dict[str, Any]:
     ):
         raise SnapshotValidationError("prepared_rows_digest_mismatch")
     expected_rows = _materialize_prepared_rows(
-        validated.rows,
+        experiment_rows,
         dataset_type=str(snapshot["dataset_type"]),
         max_input_tokens=max_input_tokens,
     )
@@ -259,6 +284,9 @@ def _validate_snapshot(snapshot: dict[str, Any], *, max_input_tokens: int) -> _V
         raise SnapshotValidationError("snapshot_rows_invalid")
     if not isinstance(provenance, dict) or not isinstance(manifest, dict):
         raise SnapshotValidationError("snapshot_metadata_invalid")
+    version = manifest.get("schema_version")
+    if version not in {"feedback-dataset.v2", "feedback-dataset.v3"}:
+        raise SnapshotValidationError("snapshot_schema_invalid")
     if snapshot["provenance_digest"] != _digest(provenance):
         raise SnapshotValidationError("provenance_digest_mismatch")
     if manifest.get("manifest_digest") != snapshot["manifest_digest"]:
@@ -298,8 +326,10 @@ def _validate_snapshot(snapshot: dict[str, Any], *, max_input_tokens: int) -> _V
             raise SnapshotValidationError("row_invalid")
         row = dict(raw)
         split = row.get("split")
-        if split not in SPLITS:
+        if version == "feedback-dataset.v2" and split not in SPLITS:
             raise SnapshotValidationError("split_invalid")
+        if version == "feedback-dataset.v3" and "split" in row:
+            raise SnapshotValidationError("export_split_forbidden")
         forbidden = _first_internal_field(row)
         if forbidden is not None:
             raise SnapshotValidationError(f"row_internal_field:{forbidden}")
@@ -465,7 +495,9 @@ def _validate_split_isolation(provenance_items: Iterable[dict[str, Any]]) -> Non
 def _validate_provenance(
     provenance: dict[str, Any], rows: list[dict[str, Any]], *, snapshot: dict[str, Any]
 ) -> None:
-    if provenance.get("schema_version") != "feedback-dataset-provenance.v1":
+    historical = snapshot["manifest"]["schema_version"] == "feedback-dataset.v2"
+    expected_version = "feedback-dataset-provenance.v1" if historical else "feedback-dataset-provenance.v2"
+    if provenance.get("schema_version") != expected_version:
         raise SnapshotValidationError("provenance_schema_invalid")
     if provenance.get("collection_id") != snapshot.get("collection_id"):
         raise SnapshotValidationError("provenance_collection_mismatch")
@@ -480,21 +512,106 @@ def _validate_provenance(
             raise SnapshotValidationError("provenance_item_invalid")
         if (
             not str(item.get("case_id") or "")
-            or str(item.get("split") or "") not in SPLITS
+            or (historical and str(item.get("split") or "") not in SPLITS)
             or not str(item.get("row_digest") or "")
             or len(str(item.get("row_digest"))) != 64
         ):
             raise SnapshotValidationError("provenance_item_identity_invalid")
         if item.get("record_type") != snapshot.get("dataset_type"):
             raise SnapshotValidationError("provenance_record_type_mismatch")
+        if not historical:
+            if any(key in item for key in ("split", "paper_families", "paper_family_keys")):
+                raise SnapshotValidationError("export_experiment_fields_forbidden")
+            docs = item.get("document_ids")
+            if not isinstance(docs, list) or any(not isinstance(doc, str) or not doc.strip() for doc in docs):
+                raise SnapshotValidationError("provenance_documents_invalid")
         by_key.append(item)
-    expected = Counter((_digest(row), str(row["split"])) for row in rows)
-    actual = Counter((str(item["row_digest"]), str(item["split"])) for item in by_key)
+    expected = Counter((_digest(row), str(row.get("split", ""))) for row in rows)
+    actual = Counter((str(item["row_digest"]), str(item.get("split", ""))) for item in by_key)
     if actual != expected:
         raise SnapshotValidationError("provenance_row_digest_mismatch")
-    _validate_split_isolation(by_key)
+    if historical:
+        _validate_split_isolation(by_key)
     if len(by_key) != len(rows):
         raise SnapshotValidationError("provenance_item_extra")
+
+
+def _experiment_rows(
+    validated: _ValidatedSnapshot, plan: dict[str, Any] | None,
+) -> tuple[tuple[dict[str, Any], ...], dict[str, Any]]:
+    """Bind experiment choices to immutable rows without rewriting the export."""
+    snapshot, rows = validated.snapshot, validated.rows
+    if snapshot["manifest"]["schema_version"] == "feedback-dataset.v2":
+        historical_plan = {"mode": "historical", "snapshot_manifest_digest": snapshot["manifest_digest"]}
+        if plan is not None and plan != historical_plan:
+            raise SnapshotValidationError("historical_snapshot_plan_override")
+        return rows, historical_plan
+    if plan is None:
+        plan = {
+            "schema_version": "feedback-experiment-plan.v1",
+            "snapshot_manifest_digest": snapshot["manifest_digest"],
+            "mode": "evaluation_only",
+            "rows": [{"row_digest": digest, "split": "eval"} for digest in sorted({_digest(row) for row in rows})],
+            "document_groups": {},
+        }
+    if set(plan) != {"schema_version", "snapshot_manifest_digest", "mode", "rows", "document_groups"}:
+        raise SnapshotValidationError("experiment_plan_fields_invalid")
+    if plan["schema_version"] != "feedback-experiment-plan.v1":
+        raise SnapshotValidationError("experiment_plan_schema_invalid")
+    if plan["snapshot_manifest_digest"] != snapshot["manifest_digest"]:
+        raise SnapshotValidationError("experiment_plan_snapshot_mismatch")
+    mode = plan["mode"]
+    if mode not in {"evaluation_only", "train_eval"}:
+        raise SnapshotValidationError("experiment_mode_invalid")
+    assignments, groups = plan["rows"], plan["document_groups"]
+    if not isinstance(assignments, list) or not isinstance(groups, dict):
+        raise SnapshotValidationError("experiment_plan_shape_invalid")
+    if any(not isinstance(k, str) or not k.strip() or not isinstance(v, str) or not v.strip() for k, v in groups.items()):
+        raise SnapshotValidationError("source_group_invalid")
+    if any(k != k.strip() or v != v.strip() for k, v in groups.items()):
+        raise SnapshotValidationError("source_group_invalid")
+    known = {_digest(row) for row in rows}
+    selected: dict[str, dict[str, Any]] = {}
+    for item in assignments:
+        if not isinstance(item, dict) or not isinstance(item.get("row_digest"), str):
+            raise SnapshotValidationError("experiment_assignment_invalid")
+        allowed = {"row_digest", "split", "input_document_ids", "source_review_reason"}
+        if set(item) - allowed:
+            raise SnapshotValidationError("experiment_assignment_fields_invalid")
+        digest = item["row_digest"]
+        if digest not in known or digest in selected:
+            raise SnapshotValidationError("experiment_row_unknown_or_duplicate")
+        if item.get("split") not in SPLITS:
+            raise SnapshotValidationError("experiment_split_invalid")
+        if mode == "evaluation_only" and item["split"] != "eval":
+            raise SnapshotValidationError("evaluation_only_train_forbidden")
+        selected[digest] = item
+    if not selected:
+        raise SnapshotValidationError("experiment_rows_empty")
+    if mode == "train_eval":
+        if {item["split"] for item in selected.values()} != SPLITS:
+            raise SnapshotValidationError("experiment_split_empty")
+        isolation: list[dict[str, Any]] = []
+        for source in snapshot["provenance"]["items"]:
+            item = selected.get(source["row_digest"])
+            if item is None:
+                continue
+            docs = item.get("input_document_ids")
+            reason = item.get("source_review_reason")
+            if (not isinstance(docs, list) or not docs
+                or any(not isinstance(doc, str) or not doc.strip() for doc in docs)
+                or not isinstance(reason, str) or not reason.strip()
+                or not set(source["document_ids"]).issubset(docs)
+                or any(doc not in groups for doc in docs)):
+                raise SnapshotValidationError("source_group_unknown")
+            tree = source.get("session_tree_id")
+            if not isinstance(tree, str) or not tree.strip():
+                raise SnapshotValidationError("session_tree_unknown")
+            isolation.append({"split": item["split"], "session_tree_id": tree,
+                              "paper_family_keys": [f"document:{groups[doc]}" for doc in docs]})
+        _validate_split_isolation(isolation)
+    return tuple({**row, "split": selected[_digest(row)]["split"]}
+                 for row in rows if _digest(row) in selected), plan
 
 
 def _messages_text(messages: list[Any]) -> str:

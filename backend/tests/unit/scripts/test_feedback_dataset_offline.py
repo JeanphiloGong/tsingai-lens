@@ -162,6 +162,112 @@ def _snapshot(*, dataset_type: str = "evaluation", rows: list[dict] | None = Non
     }
 
 
+def _export_snapshot() -> dict:
+    snapshot = _snapshot()
+    snapshot["manifest"]["schema_version"] = "feedback-dataset.v3"
+    snapshot["provenance"]["schema_version"] = "feedback-dataset-provenance.v2"
+    snapshot["provenance"].pop("paper_families")
+    for index, (row, source) in enumerate(zip(snapshot["rows"], snapshot["provenance"]["items"])):
+        row.pop("split")
+        for key in ("split", "paper_families", "paper_family_keys"):
+            source.pop(key)
+        source["document_ids"] = [f"document-{index + 1}"]
+        source["row_digest"] = _digest(row)
+    payload = "".join(json.dumps(row, ensure_ascii=True, sort_keys=True, separators=(",", ":")) + "\n"
+                      for row in snapshot["rows"]).encode()
+    snapshot["content_digest"] = hashlib.sha256(payload).hexdigest()
+    snapshot["manifest"]["content_digest"] = snapshot["content_digest"]
+    _refresh_snapshot_digests(snapshot)
+    return snapshot
+
+
+def _training_plan(snapshot: dict) -> dict:
+    return {
+        "schema_version": "feedback-experiment-plan.v1",
+        "snapshot_manifest_digest": snapshot["manifest_digest"],
+        "mode": "train_eval",
+        "rows": [{"row_digest": _digest(row), "split": split,
+                  "input_document_ids": [f"document-{index + 1}"],
+                  "source_review_reason": "Checked full question and source scope."}
+                 for index, (row, split) in enumerate(zip(snapshot["rows"], ("train", "eval")))],
+        "document_groups": {"document-1": "paper-a", "document-2": "paper-b"},
+    }
+
+
+def test_new_export_cli_defaults_to_evaluation_and_freezes_plan(tmp_path, prepare_module):
+    snapshot = _export_snapshot()
+    source = tmp_path / "export.json"
+    source.write_text(json.dumps(snapshot))
+    out = tmp_path / "prepared"
+    result = _run_cli("prepare.py", source, out, "--revision", "test-revision")
+    assert result.returncode == 0, result.stderr
+    prepared = prepare_module.load_prepared(out)
+    assert prepared["counts"] == {"train": 0, "eval": 2}
+    assert prepared["experiment_mode"] == "evaluation_only"
+    assert json.loads((out / "snapshot.json").read_text()) == snapshot
+    report = tmp_path / "report.json"
+    result = _run_cli("experiment.py", out, report)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(report.read_text())["status"] == "not_run"
+    plan = json.loads((out / "experiment-plan.json").read_text())
+    plan["rows"][0]["split"] = "train"
+    (out / "experiment-plan.json").write_text(json.dumps(plan))
+    with pytest.raises(prepare_module.SnapshotValidationError, match="experiment_plan_digest_mismatch"):
+        prepare_module.load_prepared(out)
+
+
+def test_training_plan_cli_binds_splits_without_mutating_snapshot(tmp_path, prepare_module):
+    snapshot = _export_snapshot()
+    source, plan_path = tmp_path / "export.json", tmp_path / "plan.json"
+    source.write_text(json.dumps(snapshot))
+    plan_path.write_text(json.dumps(_training_plan(snapshot)))
+    out = tmp_path / "prepared"
+    result = _run_cli("prepare.py", source, out, "--experiment-plan", plan_path)
+    assert result.returncode == 0, result.stderr
+    prepared = prepare_module.load_prepared(out)
+    assert prepared["counts"] == {"train": 1, "eval": 1}
+    assert all("split" not in row for row in json.loads((out / "snapshot.json").read_text())["rows"])
+
+
+@pytest.mark.parametrize("defect,expected", [
+    ("missing_group", "source_group_unknown"),
+    ("missing_review", "source_group_unknown"),
+    ("omitted_input", "source_group_unknown"),
+    ("same_paper", "split_leakage"),
+    ("same_session", "split_leakage"),
+    ("wrong_snapshot", "experiment_plan_snapshot_mismatch"),
+    ("duplicate", "experiment_row_unknown_or_duplicate"),
+    ("empty_train", "experiment_split_empty"),
+])
+def test_training_plan_rejects_uncertain_or_leaking_assignments(tmp_path, prepare_module, defect, expected):
+    snapshot = _export_snapshot()
+    if defect == "same_session":
+        snapshot["provenance"]["items"][1]["session_tree_id"] = "tree-1"
+        _refresh_snapshot_digests(snapshot)
+    plan = _training_plan(snapshot)
+    if defect == "missing_group":
+        plan["document_groups"].pop("document-2")
+    elif defect == "missing_review":
+        plan["rows"][0].pop("source_review_reason")
+    elif defect == "omitted_input":
+        plan["rows"][0]["input_document_ids"] = ["document-2"]
+    elif defect == "same_paper":
+        plan["document_groups"]["document-2"] = "paper-a"
+    elif defect == "wrong_snapshot":
+        plan["snapshot_manifest_digest"] = "a" * 64
+    elif defect == "duplicate":
+        plan["rows"].append(plan["rows"][0])
+    elif defect == "empty_train":
+        plan["rows"][0]["split"] = "eval"
+    source, plan_path = tmp_path / "export.json", tmp_path / "plan.json"
+    source.write_text(json.dumps(snapshot))
+    plan_path.write_text(json.dumps(plan))
+    out = tmp_path / "prepared"
+    with pytest.raises(prepare_module.SnapshotValidationError, match=expected):
+        prepare_module.prepare_snapshot(snapshot_path=source, output_dir=out, experiment_plan_path=plan_path)
+    assert not out.exists()
+
+
 def _refresh_snapshot_digests(snapshot: dict) -> None:
     provenance = snapshot["provenance"]
     provenance_digest = _digest(provenance)

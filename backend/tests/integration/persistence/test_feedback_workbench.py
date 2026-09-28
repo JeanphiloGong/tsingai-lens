@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -197,6 +201,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
 
 async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     feedback_chain,
+    tmp_path,
 ):
     chain = feedback_chain
 
@@ -321,6 +326,25 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     )
     assert loaded_snapshot == snapshot
     assert loaded_payload == payload
+
+    # Consume the actual persisted export through the offline CLI boundary.
+    source = tmp_path / "snapshot.json"
+    source.write_text(json.dumps(loaded_snapshot.to_record()), encoding="utf-8")
+    scripts = Path(__file__).resolve().parents[3] / "scripts/evaluation/feedback_dataset"
+    prepared = tmp_path / "experiment"
+    result = subprocess.run(
+        [sys.executable, str(scripts / "prepare.py"), str(source), str(prepared), "--revision", "integration"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads((prepared / "prepared.json").read_text())["counts"] == {"train": 0, "eval": 1}
+    report = tmp_path / "report.json"
+    result = subprocess.run(
+        [sys.executable, str(scripts / "experiment.py"), str(prepared), str(report)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(report.read_text())["status"] == "not_run"
 
     # The worker and the review pipeline must never rewrite the authoritative
     # chat trajectory while creating downstream records.

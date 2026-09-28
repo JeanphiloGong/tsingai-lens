@@ -2,6 +2,40 @@
 
 This directory consumes the immutable detail JSON returned by P5:
 
+New exports contain no paper-family inputs or train/eval assignments. With no
+experiment plan, preparation selects all rows for evaluation only; it makes no
+claim about isolation from a model's external training history. The saved
+`experiment-plan.json` is bound into `prepared.json` and checked again before
+each experiment. Historical v2 snapshots retain their frozen splits and
+cannot be overridden by a new plan.
+
+For a train/eval experiment, pass `--experiment-plan /tmp/plan.json`. The plan
+uses full canonical row digests from the snapshot's private provenance:
+
+```json
+{
+  "schema_version": "feedback-experiment-plan.v1",
+  "snapshot_manifest_digest": "<snapshot manifest_digest>",
+  "mode": "train_eval",
+  "rows": [
+    {"row_digest": "<first row_digest>", "split": "train", "input_document_ids": ["document-a"], "source_review_reason": "Checked the complete question and input sources."},
+    {"row_digest": "<second row_digest>", "split": "eval", "input_document_ids": ["document-b"], "source_review_reason": "Checked version identity against the paper metadata."}
+  ],
+  "document_groups": {"document-a": "paper-a", "document-b": "paper-b"}
+}
+```
+
+The experimenter reviews the entire input source scope, includes every known
+document plus any missing input sources, and records the reason for the
+grouping. Different versions of the same paper must share a group. Titles
+alone do not establish identity. Missing groups, omitted known documents,
+missing review reasons, or shared groups/session trees across train/eval are
+rejected before writing output. Both splits must be nonempty for `train_eval`.
+An explicit `evaluation_only` plan can select a subset using just row digests
+and `split: "eval"`, with an empty `document_groups` object. Duplicate content
+is selected and assigned together, not divided by case identity. The check
+enforces the supplied grouping, not the scientific truth of that judgment.
+
 ```bash
 python backend/scripts/evaluation/feedback_dataset/prepare.py \
   /tmp/dataset-snapshot.json \
@@ -16,14 +50,14 @@ they contain the question/messages, target or preference pair, and readable
 evidence (`document_title`, `quote`, and optional location fields). They do not
 contain `case_id`, `session_id`, `source_ref`, `source_refs`, review digests, or
 other storage identities. The private provenance ledger in `snapshot.json`
-retains those identities for audit and split isolation.
+retains those identities for audit and later experiment preparation.
 
 During preparation the script derives an experiment-only `row_id` from each
 clean row's canonical digest. That identifier appears only in the prepared
 `train.jsonl`/`eval.jsonl` files and prediction protocol; it is not part of the
 downloaded dataset. The script checks the manifest, provenance and content
-digests, dataset-specific fields, and train/eval isolation by paper family and
-session tree. `prepared.json` also carries a digest over its revision, seed,
+digests, dataset-specific fields, and experiment-plan isolation by source group
+and session tree. `prepared.json` also carries a digest over its revision, seed,
 tokenizer, counts, and file names; changing those values makes the directory
 unusable until it is prepared again. Context overflow is an error; Source or
 target text is never silently truncated. The token accounting format is

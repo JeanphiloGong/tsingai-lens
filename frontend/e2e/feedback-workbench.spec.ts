@@ -202,6 +202,8 @@ test('feedback workbench carries a retry key and keeps the reviewer out of techn
 	await page.goto(`/collections/${collectionId}/feedback`);
 
 	await expect(page.getByRole('heading', { name: 'Feedback workbench' })).toBeVisible();
+	await expect(page.locator('.quality-flow__step--done')).toHaveCount(2);
+	await expect(page.locator('.quality-flow__step--active')).toHaveCount(1);
 	await expect(page.getByRole('button', { name: 'Export candidate analysis' })).toHaveCount(0);
 	await page.getByRole('button', { name: /Compare Paper A and Paper B/ }).click();
 	await expect(page.getByRole('heading', { name: 'Human annotation' })).toBeVisible();
@@ -311,8 +313,23 @@ test('dataset release blocks incomplete detail checks and retries failed cases',
 	await page.locator(`#case-${caseId}`).check();
 	await expect(page.getByText('Details failed')).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Freeze snapshot' })).toBeDisabled();
+	await expect(page.locator('.flow-step--pending')).toHaveCount(2);
 	await page.getByRole('button', { name: 'Retry' }).click();
 	await expect(page.getByText('Details verified')).toBeVisible();
+	await expect(page.locator('.flow-step--active')).toHaveCount(1);
+	await expect(page.locator('.flow-step--done')).toHaveCount(1);
+	await expect(page.locator('.flow-step--pending')).toHaveCount(1);
+});
+
+test('the global header keeps language controls visible at tablet width', async ({ page }) => {
+	await mockFeedbackApis(page);
+	await page.setViewportSize({ width: 1024, height: 800 });
+	await page.goto(`/collections/${collectionId}/feedback`);
+
+	const bounds = await page.locator('.site-header .lang-menu').boundingBox();
+	expect(bounds).not.toBeNull();
+	expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1024);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
 });
 
 test('preference release requires a distinct chosen and rejected pair', async ({ page }) => {

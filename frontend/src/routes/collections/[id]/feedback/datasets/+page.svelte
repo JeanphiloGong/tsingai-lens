@@ -57,6 +57,7 @@
 	let expandedSnapshot = '';
 	let caseSearch = '';
 	let problemFilter = '';
+	let releasedSelectionKey = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: selectedCases = acceptedCases.filter((item) => selectedIds.includes(item.case_id));
@@ -124,15 +125,24 @@
 		selectedDetailsReady &&
 		missingFamilyDocuments.length === 0 &&
 		datasetValidationIssues.length === 0;
-	$: datasetFlowCurrent = !selectedCount
-		? 1
-		: !selectedDetailsReady
-			? 1
-			: !releaseReady
-				? 2
-				: latestSnapshot
-					? 3
-					: 3;
+	$: releaseSelectionKey = JSON.stringify({
+		type: datasetType,
+		cases: selectedIds
+			.slice()
+			.sort()
+			.map((caseId) => ({ caseId, split: splitByCase[caseId] ?? 'eval' })),
+		documents: selectedDocuments
+			.slice()
+			.sort()
+			.map((documentId) => [documentId, familyByDocument[documentId] ?? ''])
+	});
+	$: datasetFlowStep1 = selectedCount ? 'done' : 'active';
+	$: datasetFlowStep2 = !selectedCount || !selectedDetailsReady ? 'pending' : releaseReady ? 'done' : 'active';
+	$: datasetFlowStep3 = !selectedCount || !selectedDetailsReady || !releaseReady
+		? 'pending'
+		: releasedSelectionKey === releaseSelectionKey
+			? 'done'
+			: 'active';
 
 	onMount(() => {
 		void load();
@@ -304,6 +314,7 @@
 				snapshot,
 				...snapshots.filter((item) => item.dataset_id !== snapshot.dataset_id)
 			];
+			releasedSelectionKey = releaseSelectionKey;
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -346,14 +357,7 @@
 		return $t(`datasetSnapshots.type.${value}`);
 	}
 
-	function datasetFlowState(step: number) {
-		if (step < datasetFlowCurrent) return 'done';
-		if (step === datasetFlowCurrent) return 'active';
-		return 'pending';
-	}
-
-	function datasetFlowLabel(step: number) {
-		const state = datasetFlowState(step);
+	function datasetFlowLabel(state: string) {
 		return $t(`datasetSnapshots.flowState${state[0].toUpperCase()}${state.slice(1)}`);
 	}
 
@@ -403,35 +407,35 @@
 
 	<nav class="flow-bar" aria-label={$t('datasetSnapshots.flowLabel')}>
 		<div
-			class="flow-step flow-step--{datasetFlowState(1)}"
-			aria-current={datasetFlowState(1) === 'active' ? 'step' : undefined}
+			class="flow-step flow-step--{datasetFlowStep1}"
+			aria-current={datasetFlowStep1 === 'active' ? 'step' : undefined}
 		>
 			<span class="flow-number">1</span><span
 				><strong>{$t('datasetSnapshots.flowScope')}</strong><small
 					>{$t('datasetSnapshots.flowScopeDetail')}</small
-				><em>{datasetFlowLabel(1)}</em></span
+					><em>{datasetFlowLabel(datasetFlowStep1)}</em></span
 			>
 		</div>
 		<div class="flow-connector" aria-hidden="true"></div>
 		<div
-			class="flow-step flow-step--{datasetFlowState(2)}"
-			aria-current={datasetFlowState(2) === 'active' ? 'step' : undefined}
+			class="flow-step flow-step--{datasetFlowStep2}"
+			aria-current={datasetFlowStep2 === 'active' ? 'step' : undefined}
 		>
 			<span class="flow-number">2</span><span
 				><strong>{$t('datasetSnapshots.flowOutput')}</strong><small
 					>{$t('datasetSnapshots.flowOutputDetail')}</small
-				><em>{datasetFlowLabel(2)}</em></span
+					><em>{datasetFlowLabel(datasetFlowStep2)}</em></span
 			>
 		</div>
 		<div class="flow-connector" aria-hidden="true"></div>
 		<div
-			class="flow-step flow-step--{datasetFlowState(3)}"
-			aria-current={datasetFlowState(3) === 'active' ? 'step' : undefined}
+			class="flow-step flow-step--{datasetFlowStep3}"
+			aria-current={datasetFlowStep3 === 'active' ? 'step' : undefined}
 		>
 			<span class="flow-number">3</span><span
 				><strong>{$t('datasetSnapshots.flowRelease')}</strong><small
 					>{$t('datasetSnapshots.flowReleaseDetail')}</small
-				><em>{datasetFlowLabel(3)}</em></span
+					><em>{datasetFlowLabel(datasetFlowStep3)}</em></span
 			>
 		</div>
 	</nav>

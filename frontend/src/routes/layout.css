@@ -2617,6 +2617,38 @@ textarea {
   }
 }
 
+@media (min-width: 901px) and (max-width: 1100px) {
+  .site-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'left actions'
+      'search search';
+    row-gap: 10px;
+    padding-block: 10px;
+  }
+
+  .site-header .header-left {
+    grid-area: left;
+  }
+
+  .site-header .global-search {
+    grid-area: search;
+    width: 100%;
+  }
+
+  .site-header > .header-actions {
+    grid-area: actions;
+    min-width: 0;
+    max-width: 100%;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .site-header .session-summary__name {
+    display: none;
+  }
+}
+
 @media (max-width: 720px) {
   .connection-controls {
     flex-direction: column;

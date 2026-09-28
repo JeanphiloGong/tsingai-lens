@@ -66,7 +66,20 @@
 		accepted: cases.filter((item) => item.status === 'accepted').length,
 		papers: new Set(cases.flatMap((item) => item.document_titles)).size
 	};
-	$: feedbackFlowCurrent = getFeedbackFlowCurrent(loading, cases);
+	$: feedbackFlowCurrent = (() => {
+		if (loading || !cases.length) return 1;
+		const statuses = new Set(cases.map((item) => String(item.status ?? '').trim().toLowerCase()));
+		if (statuses.has('detected') || statuses.has('collecting_context')) return 2;
+		if (['needs_annotation', 'rejected', 'insufficient'].some((status) => statuses.has(status))) return 3;
+		if (statuses.has('ready_for_review')) return 4;
+		if (statuses.has('accepted')) return 5;
+		return 3;
+	})();
+	$: feedbackFlowStep1 = feedbackFlowCurrent > 1 ? 'done' : feedbackFlowCurrent === 1 ? 'active' : 'pending';
+	$: feedbackFlowStep2 = feedbackFlowCurrent > 2 ? 'done' : feedbackFlowCurrent === 2 ? 'active' : 'pending';
+	$: feedbackFlowStep3 = feedbackFlowCurrent > 3 ? 'done' : feedbackFlowCurrent === 3 ? 'active' : 'pending';
+	$: feedbackFlowStep4 = feedbackFlowCurrent > 4 ? 'done' : feedbackFlowCurrent === 4 ? 'active' : 'pending';
+	$: feedbackFlowStep5 = feedbackFlowCurrent > 5 ? 'done' : feedbackFlowCurrent === 5 ? 'active' : 'pending';
 
 	onMount(() => {
 		void loadCases();
@@ -103,27 +116,7 @@
 		return $t('feedbackWorkbench.nextInspect');
 	}
 
-	function getFeedbackFlowCurrent(isLoading: boolean, currentCases: FeedbackCaseSummary[]) {
-		if (isLoading || !currentCases.length) return 1;
-		if (currentCases.some((item) => item.status === 'detected' || item.status === 'collecting_context'))
-			return 2;
-		if (
-			currentCases.some((item) => ['needs_annotation', 'rejected', 'insufficient'].includes(item.status))
-		)
-			return 3;
-		if (currentCases.some((item) => item.status === 'ready_for_review')) return 4;
-		if (currentCases.some((item) => item.status === 'accepted')) return 5;
-		return 3;
-	}
-
-	function feedbackFlowState(step: number) {
-		if (step < feedbackFlowCurrent) return 'done';
-		if (step === feedbackFlowCurrent) return 'active';
-		return 'pending';
-	}
-
-	function feedbackFlowLabel(step: number) {
-		const state = feedbackFlowState(step);
+	function feedbackFlowLabel(state: string) {
 		return $t(`feedbackWorkbench.flowState${state[0].toUpperCase()}${state.slice(1)}`);
 	}
 
@@ -442,47 +435,47 @@
 	{/if}
 	<nav class="quality-flow" aria-label={$t('feedbackWorkbench.flowLabel')}>
 		<div
-			class="quality-flow__step quality-flow__step--{feedbackFlowState(1)}"
-			aria-current={feedbackFlowState(1) === 'active' ? 'step' : undefined}
+			class="quality-flow__step quality-flow__step--{feedbackFlowStep1}"
+			aria-current={feedbackFlowStep1 === 'active' ? 'step' : undefined}
 		>
 			<span>1</span><strong>{$t('feedbackWorkbench.flowFeedback')}</strong><small
-				>{feedbackFlowLabel(1)}</small
+				>{feedbackFlowLabel(feedbackFlowStep1)}</small
 			>
 		</div>
 		<div class="quality-flow__line" aria-hidden="true"></div>
 		<div
-			class="quality-flow__step quality-flow__step--{feedbackFlowState(2)}"
-			aria-current={feedbackFlowState(2) === 'active' ? 'step' : undefined}
+			class="quality-flow__step quality-flow__step--{feedbackFlowStep2}"
+			aria-current={feedbackFlowStep2 === 'active' ? 'step' : undefined}
 		>
 			<span>2</span><strong>{$t('feedbackWorkbench.flowAnalysis')}</strong><small
-				>{feedbackFlowLabel(2)}</small
+				>{feedbackFlowLabel(feedbackFlowStep2)}</small
 			>
 		</div>
 		<div class="quality-flow__line" aria-hidden="true"></div>
 		<div
-			class="quality-flow__step quality-flow__step--{feedbackFlowState(3)}"
-			aria-current={feedbackFlowState(3) === 'active' ? 'step' : undefined}
+			class="quality-flow__step quality-flow__step--{feedbackFlowStep3}"
+			aria-current={feedbackFlowStep3 === 'active' ? 'step' : undefined}
 		>
 			<span>3</span><strong>{$t('feedbackWorkbench.flowAnnotation')}</strong><small
-				>{feedbackFlowLabel(3)}</small
+				>{feedbackFlowLabel(feedbackFlowStep3)}</small
 			>
 		</div>
 		<div class="quality-flow__line" aria-hidden="true"></div>
 		<div
-			class="quality-flow__step quality-flow__step--{feedbackFlowState(4)}"
-			aria-current={feedbackFlowState(4) === 'active' ? 'step' : undefined}
+			class="quality-flow__step quality-flow__step--{feedbackFlowStep4}"
+			aria-current={feedbackFlowStep4 === 'active' ? 'step' : undefined}
 		>
 			<span>4</span><strong>{$t('feedbackWorkbench.flowReview')}</strong><small
-				>{feedbackFlowLabel(4)}</small
+				>{feedbackFlowLabel(feedbackFlowStep4)}</small
 			>
 		</div>
 		<div class="quality-flow__line" aria-hidden="true"></div>
 		<a
-			class="quality-flow__step quality-flow__step--link quality-flow__step--{feedbackFlowState(5)}"
-			aria-current={feedbackFlowState(5) === 'active' ? 'step' : undefined}
+			class="quality-flow__step quality-flow__step--link quality-flow__step--{feedbackFlowStep5}"
+			aria-current={feedbackFlowStep5 === 'active' ? 'step' : undefined}
 			href={resolve('/collections/[id]/feedback/datasets', { id: collectionId })}
 			><span>5</span><strong>{$t('feedbackWorkbench.flowExport')}</strong><small
-				>{feedbackFlowLabel(5)}</small
+				>{feedbackFlowLabel(feedbackFlowStep5)}</small
 			></a
 		>
 	</nav>

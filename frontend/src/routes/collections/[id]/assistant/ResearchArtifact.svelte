@@ -137,8 +137,8 @@
 
 	function draftReviewNote(toolName: string | null) {
 		switch (toolName) {
-			case 'create_evidence_draft':
-				return $t('researchAgent.capability.evidenceDraftTransient');
+			case 'propose_paper_experiment_draft':
+				return $t('researchAgent.capability.paperExperimentDraftReady');
 			case 'create_finding_draft':
 				return $t('researchAgent.capability.findingDraftTransient');
 			default:

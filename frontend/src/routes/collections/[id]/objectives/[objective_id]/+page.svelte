@@ -6,7 +6,6 @@
 	import { onDestroy } from 'svelte';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import FindingAuthoringEditor from '../../_components/FindingAuthoringEditor.svelte';
-	import EvidenceAuthoringEditor from '../../_components/EvidenceAuthoringEditor.svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
 	import { downloadBlob, errorMessage } from '../../../../_shared/api';
 	import { t } from '../../../../_shared/i18n';
@@ -44,16 +43,9 @@
 	let loadedKey = '';
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let findingRequestSequence = 0;
-	let authoringRequestSequence = 0;
 	let authoringOpen = false;
-	let authoringLoading = false;
 	let authoringError = '';
-	let authoringEvidence: ObjectiveEvidence[] = [];
-	let authoringEvidenceVersion: number | null = null;
 	let authoringParent: ObjectiveFinding | null = null;
-	let evidenceAuthoringOpen = false;
-	let evidenceAuthoringSource: ObjectiveEvidence | null = null;
-	let evidenceAuthoringMode: 'create' | 'revise' = 'create';
 	let datasetLabelStatus: FindingDatasetLabelStatus | '' = '';
 	let datasetUseStatus: FindingDatasetUseStatus | '' = '';
 	let datasetDownloading = false;
@@ -148,69 +140,18 @@
 		authoringOpen = true;
 		authoringParent = parent;
 		authoringError = '';
-		const version = published.analysis_version;
-		if (authoringEvidenceVersion === version && authoringEvidence.length) return;
-		const requestSequence = ++authoringRequestSequence;
-		authoringLoading = true;
-		try {
-			const records: ObjectiveEvidence[] = [];
-			while (true) {
-				const page = await fetchObjectiveEvidence(
-					collectionId,
-					objectiveId,
-					version,
-					null,
-					records.length,
-					500
-				);
-				records.push(...page.items);
-				if (records.length >= page.total) break;
-				if (!page.items.length) throw new Error('Evidence 分页结果不完整。');
-			}
-			if (requestSequence !== authoringRequestSequence) return;
-			authoringEvidence = records;
-			authoringEvidenceVersion = version;
-		} catch (err) {
-			if (requestSequence === authoringRequestSequence) authoringError = errorMessage(err);
-		} finally {
-			if (requestSequence === authoringRequestSequence) authoringLoading = false;
-		}
 	}
 
 	function closeAuthoring() {
-		authoringRequestSequence += 1;
 		authoringOpen = false;
 		authoringParent = null;
 		authoringError = '';
-		authoringLoading = false;
-	}
-
-	function openEvidenceAuthoring(item: ObjectiveEvidence, mode: 'create' | 'revise') {
-		closeAuthoring();
-		evidenceAuthoringOpen = true;
-		evidenceAuthoringSource = item;
-		evidenceAuthoringMode = mode;
-	}
-
-	function closeEvidenceAuthoring() {
-		evidenceAuthoringOpen = false;
-		evidenceAuthoringSource = null;
 	}
 
 	async function handleFindingSaved(result: FindingAuthoringResult) {
 		const findingId = result.finding?.finding_id ?? '';
 		closeAuthoring();
-		authoringEvidence = [];
-		authoringEvidenceVersion = null;
 		await loadObjective(findingId, Boolean(findingId));
-	}
-
-	async function handleEvidenceSaved() {
-		const selectedId = selectedFindingId;
-		closeEvidenceAuthoring();
-		authoringEvidence = [];
-		authoringEvidenceVersion = null;
-		await loadObjective(selectedId, Boolean(selectedId));
 	}
 
 	async function selectFinding(findingId: string, updateUrl = true) {
@@ -382,8 +323,6 @@
 					selectedFinding = null;
 					evidence = [];
 					closeAuthoring();
-					authoringEvidence = [];
-					authoringEvidenceVersion = null;
 				}
 				analysis = refreshed;
 				if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
@@ -694,28 +633,15 @@
 				<section
 					class="finding-workspace"
 					aria-label="Finding 详情"
-					aria-busy={findingLoading || authoringLoading}
+					aria-busy={findingLoading}
 				>
-					{#if evidenceAuthoringOpen && evidenceAuthoringSource}
-						<EvidenceAuthoringEditor
-							{collectionId}
-							{objectiveId}
-							analysisVersion={published.analysis_version}
-							sourceEvidence={evidenceAuthoringSource}
-							documentTitle={documentTitles[evidenceAuthoringSource.document_id] ?? '当前文献'}
-							mode={evidenceAuthoringMode}
-							onSaved={handleEvidenceSaved}
-							onCancel={closeEvidenceAuthoring}
-						/>
-					{:else if authoringOpen && authoringLoading}
-						<p class="page-state">正在加载当前版本的 Evidence...</p>
-					{:else if authoringOpen && authoringError}
+					{#if authoringOpen && authoringError}
 						<div class="finding-error" role="alert">
 							<p>{authoringError}</p>
 							<button
 								class="btn btn--ghost btn--small"
 								type="button"
-								on:click={() => openAuthoring(authoringParent)}>重试加载 Evidence</button
+								 on:click={() => openAuthoring(authoringParent)}>重试加载实验选择</button
 							>
 						</div>
 					{:else if authoringOpen}
@@ -724,8 +650,6 @@
 								{collectionId}
 								{objectiveId}
 								analysisVersion={published.analysis_version}
-								evidence={authoringEvidence}
-								{documentTitles}
 								parentFinding={authoringParent}
 								onSaved={handleFindingSaved}
 								onCancel={closeAuthoring}
@@ -757,7 +681,6 @@
 							{collectionId}
 							{documentTitles}
 							onDerive={(finding) => openAuthoring(finding)}
-							onAuthorEvidence={openEvidenceAuthoring}
 						/>
 					{:else}
 						<div class="page-state page-state--complete">

@@ -148,22 +148,17 @@ def validate_batch(
             validated_arguments,
         )
     for call, _handler in requested:
-        if call.name not in {"create_evidence_draft", "create_evidence_version"}:
+        if call.name != "propose_paper_experiment_draft":
             continue
-        source_identity = (
-            str(call.arguments.get("document_id") or "").strip(),
-            str(call.arguments.get("source_kind") or "").strip(),
-            str(call.arguments.get("source_ref") or "").strip(),
-        )
-        if not has_successful_exact_source_read(
-            successful_results,
-            (source_identity,),
-            source_digest=str(call.arguments.get("source_digest") or ""),
+        document_id = str(call.arguments.get("document_id") or "").strip()
+        if not any(
+            item[0] == document_id
+            for item in complete_source_reads(successful_results)
         ):
             return (
                 (
                     "source_read_incomplete",
-                    "Read the complete canonical Source before recording Evidence.",
+                    "Read at least one complete canonical Source for the paper before proposing a PaperExperiment draft.",
                 ),
                 validated_arguments,
             )
@@ -601,11 +596,7 @@ def stage_instruction(
             observations["reading_ledger"] = coverage
 
     drafts = {}
-    for name in (
-        "create_evidence_draft",
-        "create_finding_draft",
-        "propose_research_plan",
-    ):
+    for name in ("create_finding_draft", "propose_paper_experiment_draft", "propose_research_plan"):
         values = successful_results.get(name, ())
         if values:
             drafts[name] = values[-1]

@@ -247,8 +247,7 @@ def test_automatic_permission_covers_every_registered_write_action() -> None:
         "record_finding_feedback",
         "curate_finding",
         "create_finding_version",
-        "create_evidence_version",
-        "publish_agent_objective_analysis",
+        "create_paper_experiment_revision",
         "create_research_plan",
         "revise_research_plan",
     }

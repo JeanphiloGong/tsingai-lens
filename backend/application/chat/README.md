@@ -55,6 +55,11 @@ Evidence, Finding, or Analysis record; it calls the Source and Core services.
 When adding a capability, define its typed input/output and approval risk first;
 do not add scientific state to the Chat trajectory.
 
+Agent-authored experiment records use `propose_paper_experiment_draft` followed
+by the separately approved `create_paper_experiment_revision`. The capability
+does not own experiment persistence: it reloads canonical Sources and delegates
+identity, revision, Selection, and atomic graph writes to `application/core/`.
+
 ## Main Flow
 
 ```text

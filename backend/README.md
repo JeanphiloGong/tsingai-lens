@@ -35,6 +35,11 @@ Objective selection for each completed run; it does not reuse a runtime
 per-document Evidence checkpoint. A later supplement creates a successor
 revision while earlier Findings keep their original selection references.
 
+The Research Agent can also author one paper experiment directly after reading
+complete Sources. It first proposes a review-only Draft, then an approved write
+creates the same immutable revision and Selection graph through the canonical
+writer. This Agent path does not publish a Finding automatically.
+
 ## Ownership Map
 
 - `controllers/`: HTTP routes and response schemas.

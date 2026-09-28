@@ -156,7 +156,7 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.25"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.26"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -177,13 +177,13 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "record or correct Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "exact complete Source" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "`read_source`" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "create_evidence_version" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Evidence draft" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "create_paper_experiment_revision" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "propose_paper_experiment_draft" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Finding draft" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Source-to-Evidence write" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "analysis authored by you" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "publish_agent_objective_analysis" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "publishes no Finding" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "publish_agent_objective_analysis" not in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "fixed Selection/ComparisonGroup references" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "derive_objective" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "propose_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "create_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT

@@ -332,7 +332,7 @@ describe('buildChatPresentation', () => {
 			'read_source',
 			'inspect_table',
 			'confirm_objective',
-			'create_evidence_draft',
+			'propose_paper_experiment_draft',
 			'create_finding_draft',
 			'assess_objective_quality',
 			'derive_objective',

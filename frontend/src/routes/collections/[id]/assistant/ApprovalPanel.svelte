@@ -79,14 +79,11 @@
 				? $t('researchAgent.approval.findingAbstentionBody')
 				: $t('researchAgent.approval.findingAuthoringBody');
 		}
-		if (call.name === 'create_evidence_version') {
-			return $t('researchAgent.approval.evidenceAuthoringBody');
+		if (call.name === 'create_paper_experiment_revision') {
+			return $t('researchAgent.approval.paperExperimentRevisionBody');
 		}
 		if (call.name === 'create_research_plan') {
 			return $t('researchAgent.approval.researchPlanBody');
-		}
-		if (call.name === 'publish_agent_objective_analysis') {
-			return $t('researchAgent.approval.agentObjectiveAnalysisBody');
 		}
 		return $t('researchAgent.approval.body');
 	}
@@ -112,14 +109,11 @@
 				? $t('researchAgent.approval.publishAbstention')
 				: $t('researchAgent.approval.publishFinding');
 		}
-		if (call.name === 'create_evidence_version') {
-			return $t('researchAgent.approval.publishEvidence');
+		if (call.name === 'create_paper_experiment_revision') {
+			return $t('researchAgent.approval.publishPaperExperimentRevision');
 		}
 		if (call.name === 'create_research_plan') {
 			return $t('researchAgent.approval.publishResearchPlan');
-		}
-		if (call.name === 'publish_agent_objective_analysis') {
-			return $t('researchAgent.approval.publishAgentAnalysis');
 		}
 		return $t('researchAgent.approval.approve');
 	}

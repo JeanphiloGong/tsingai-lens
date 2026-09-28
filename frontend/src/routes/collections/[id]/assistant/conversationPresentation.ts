@@ -175,8 +175,8 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 }
 
 const reviewableResultTools = new Set([
-	'create_evidence_draft',
-	'create_evidence_version',
+	'propose_paper_experiment_draft',
+	'create_paper_experiment_revision',
 	'create_finding_draft',
 	'create_finding_version',
 	'create_objective_candidate',
@@ -191,7 +191,6 @@ const reviewableResultTools = new Set([
 	'preview_research_scope',
 	'propose_objective_drafts',
 	'propose_research_plan',
-	'publish_agent_objective_analysis',
 	'read_source',
 	'search_sources',
 	'start_objective_analysis',

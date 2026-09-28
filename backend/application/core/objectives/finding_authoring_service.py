@@ -21,6 +21,7 @@ from domain.core import (
 )
 from application.repositories.objective_repository import ObjectiveRepository
 from application.source.collection_service import CollectionService
+from application.core.objectives.analysis.experiment_query_service import ExperimentQueryService
 
 
 _NUMBER_PATTERN = re.compile(
@@ -100,9 +101,40 @@ class FindingAuthoringService:
         *,
         collection_service: CollectionService,
         objective_repository: ObjectiveRepository,
+        experiment_query_service: ExperimentQueryService | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
+        self.experiment_query_service = experiment_query_service
+
+    async def create_selection_version(
+        self,
+        *,
+        collection_id: str,
+        objective_id: str,
+        source_analysis_version: int,
+        selection_ids: tuple[str, ...],
+        comparison_group_ids: tuple[str, ...] = (),
+        created_by_user_id: str,
+    ) -> FindingAuthoringResult:
+        """Read the canonical Finding produced from an experiment selection set."""
+        await self.collection_service.get_collection_for_user(
+            collection_id, created_by_user_id
+        )
+        objective = await self.objective_repository.read_objective(
+            collection_id, objective_id
+        )
+        if objective is None:
+            raise FileNotFoundError(
+                f"research objective not found: {collection_id}/{objective_id}"
+            )
+        return await self._read_experiment_finding(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=source_analysis_version,
+            selection_ids=selection_ids,
+            comparison_group_ids=comparison_group_ids,
+        )
 
     async def create_version(
         self,
@@ -121,6 +153,8 @@ class FindingAuthoringService:
         abstention_reason: str | None,
         created_by_user_id: str,
         created_by_tool_call_id: str | None = None,
+        selection_ids: tuple[str, ...] = (),
+        comparison_group_ids: tuple[str, ...] = (),
     ) -> FindingAuthoringResult:
         await self.collection_service.get_collection_for_user(
             collection_id, created_by_user_id
@@ -131,6 +165,14 @@ class FindingAuthoringService:
         if objective is None:
             raise FileNotFoundError(
                 f"research objective not found: {collection_id}/{objective_id}"
+            )
+        if selection_ids:
+            return await self._read_experiment_finding(
+                collection_id=collection_id,
+                objective_id=objective_id,
+                analysis_version=source_analysis_version,
+                selection_ids=selection_ids,
+                comparison_group_ids=comparison_group_ids,
             )
         if objective.published_analysis_version != source_analysis_version:
             raise ValueError("source analysis version is stale")
@@ -275,6 +317,40 @@ class FindingAuthoringService:
         return FindingAuthoringResult(
             analysis=published,
             finding=authored_finding,
+        )
+
+    async def _read_experiment_finding(
+        self,
+        *,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        selection_ids: tuple[str, ...],
+        comparison_group_ids: tuple[str, ...],
+    ) -> FindingAuthoringResult:
+        if self.experiment_query_service is None:
+            raise ValueError("experiment-backed Finding authoring is unavailable")
+        bundle = await self.experiment_query_service.read_analysis_bundle(
+            collection_id, objective_id, analysis_version
+        )
+        selected = tuple(dict.fromkeys(selection_ids))
+        groups = tuple(dict.fromkeys(comparison_group_ids))
+        if not set(selected) <= {item.selection_id for item in bundle.selections}:
+            raise ValueError("Finding references an unknown experiment selection")
+        if not set(groups) <= {item.group_id for item in bundle.groups}:
+            raise ValueError("Finding references an unknown comparison group")
+        for finding in bundle.findings:
+            if set(finding.selection_ids) == set(selected) and set(
+                finding.comparison_group_ids
+            ) == set(groups):
+                analysis = await self.objective_repository.read_analysis(
+                    collection_id, objective_id, analysis_version
+                )
+                if analysis is None:
+                    raise FileNotFoundError("experiment analysis snapshot not found")
+                return FindingAuthoringResult(analysis=analysis, finding=finding)
+        raise ValueError(
+            "no Finding exists for the selected experiment variables; rerun experiment aggregation"
         )
 
     def _build_finding(

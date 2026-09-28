@@ -33,12 +33,10 @@ export function capabilityName(toolName: string | null, translate: Translate) {
 			return translate('researchAgent.capability.findingDraft');
 		case 'create_finding_version':
 			return translate('researchAgent.capability.findingAuthoring');
-		case 'create_evidence_draft':
-			return translate('researchAgent.capability.evidenceDraft');
-		case 'create_evidence_version':
-			return translate('researchAgent.capability.evidenceAuthoring');
-		case 'publish_agent_objective_analysis':
-			return translate('researchAgent.capability.agentObjectiveAnalysis');
+		case 'propose_paper_experiment_draft':
+			return translate('researchAgent.capability.paperExperimentDraft');
+		case 'create_paper_experiment_revision':
+			return translate('researchAgent.capability.paperExperimentRevision');
 		case 'propose_objective_drafts':
 			return translate('researchAgent.capability.proposals');
 		case 'create_objective_candidate':
@@ -182,16 +180,11 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 	if (name === 'create_finding_draft') {
 		return translate('researchAgent.capability.findingDraftReady');
 	}
-	if (name === 'create_evidence_draft') {
-		return translate('researchAgent.capability.evidenceDraftReady');
+	if (name === 'propose_paper_experiment_draft') {
+		return translate('researchAgent.capability.paperExperimentDraftReady');
 	}
-	if (name === 'create_evidence_version') {
-		return translate('researchAgent.capability.evidencePublished');
-	}
-	if (name === 'publish_agent_objective_analysis') {
-		return translate('researchAgent.capability.agentAnalysisPublished', {
-			count: numberValue(result.data, 'evidence_count')
-		});
+	if (name === 'create_paper_experiment_revision') {
+		return translate('researchAgent.capability.paperExperimentRevisionSaved');
 	}
 	if (name === 'propose_objective_drafts') {
 		return translate('researchAgent.capability.draftCount', {

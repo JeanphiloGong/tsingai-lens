@@ -39,14 +39,14 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 	select.dispatchEvent(new Event('change', { bubbles: true }));
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]').length)
-		.toBe(12);
+	.toBe(11);
 	await expect
 		.element(screen.getByText('Select at least one action to enable automatic execution.'))
 		.toBeVisible();
 	expect((screen.container.querySelector('button') as HTMLButtonElement).disabled).toBe(true);
 	(
 		screen.container.querySelector(
-			'input[type=checkbox][value="create_evidence_version"]'
+			'input[type=checkbox][value="create_paper_experiment_revision"]'
 		) as HTMLInputElement
 	).click();
 	await expect
@@ -54,7 +54,7 @@ it('saves exact scoped actions and revokes through the authenticated API', async
 		.toBe(false);
 	(screen.container.querySelector('button') as HTMLButtonElement).click();
 	await expect.poll(() => writes.length).toBe(1);
-	expect(writes[0].actions).toEqual(['create_evidence_version']);
+	expect(writes[0].actions).toEqual(['create_paper_experiment_revision']);
 	expect(writes[0].expires_at).toBeNull();
 	expect(writes[0].expected_revision).toBe(0);
 	await expect.poll(() => screen.container.querySelectorAll('button').length).toBe(2);
@@ -72,7 +72,7 @@ it('restores an existing automatic grant duration and can authorize every write 
 	const expiresAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
 	let permission = {
 		mode: 'auto' as const,
-		actions: ['create_evidence_version'],
+		actions: ['create_paper_experiment_revision'],
 		expires_at: expiresAt,
 		revision: 3
 	};
@@ -106,10 +106,10 @@ it('restores an existing automatic grant duration and can authorize every write 
 	all.click();
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]:checked').length)
-		.toBe(12);
+	.toBe(11);
 	(screen.container.querySelector('button') as HTMLButtonElement).click();
 	await expect.poll(() => writes.length).toBe(1);
-	expect(writes[0].actions).toHaveLength(11);
+	expect(writes[0].actions).toHaveLength(10);
 	expect(writes[0].expires_at).toBe(expiresAt);
 });
 
@@ -117,7 +117,7 @@ it('renews an expired automatic grant instead of resubmitting its past expiry', 
 	const expiredAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 	let permission = {
 		mode: 'auto' as const,
-		actions: ['create_evidence_version'],
+		actions: ['create_paper_experiment_revision'],
 		expires_at: expiredAt,
 		revision: 4
 	};
@@ -193,11 +193,11 @@ it('uses the collection settings endpoint for defaults and sends the server expa
 	select.dispatchEvent(new Event('change', { bubbles: true }));
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]').length)
-		.toBe(12);
+	.toBe(11);
 	(screen.container.querySelector('input[type=checkbox]') as HTMLInputElement).click();
 	await expect
 		.poll(() => screen.container.querySelectorAll('input[type=checkbox]:checked').length)
-		.toBe(12);
+	.toBe(11);
 	(screen.container.querySelector('button') as HTMLButtonElement).click();
 	await expect.poll(() => calls.some((call) => call.body?.all_actions === true)).toBe(true);
 	expect(calls[0].url).toContain('/collections/collection-1/agent-permissions');

@@ -1196,11 +1196,8 @@
 		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
-		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
+		if (toolName === 'create_paper_experiment_revision') return 'researchAgent.paperExperimentRevisionRejected';
 		if (toolName === 'create_research_plan') return 'researchAgent.researchPlanRejected';
-		if (toolName === 'publish_agent_objective_analysis') {
-			return 'researchAgent.agentObjectiveAnalysisRejected';
-		}
 		return 'researchAgent.rejected';
 	}
 

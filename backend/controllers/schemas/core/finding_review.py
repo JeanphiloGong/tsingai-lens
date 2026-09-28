@@ -126,67 +126,12 @@ class EvidenceContextCreate(BaseModel):
     test: list[EvidenceAttributeCreate] = Field(default_factory=list, max_length=40)
 
 
-class EvidenceAuthoringCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    source_analysis_version: int = Field(..., ge=1)
-    document_id: str = Field(..., min_length=1, max_length=240)
-    source_kind: EvidenceSourceKind
-    source_ref: str = Field(..., min_length=1, max_length=240)
-    source_excerpt: str = Field(..., min_length=1, max_length=20_000)
-    evidence_role: EvidenceRole
-    changed_variables: list[EvidenceVariableCreate] = Field(
-        default_factory=list, max_length=20
-    )
-    comparison: EvidenceComparisonCreate | None = None
-    reported_result: EvidenceResultCreate | None = None
-    attribution_scope: EvidenceAttributionScope
-    scientific_context: EvidenceContextCreate = Field(
-        default_factory=EvidenceContextCreate
-    )
-    supersedes_evidence_id: str | None = Field(default=None, max_length=128)
-    authoring_note: str | None = Field(default=None, max_length=2000)
-
-    @model_validator(mode="after")
-    def validate_scientific_shape(self) -> "EvidenceAuthoringCreateRequest":
-        result_role = self.evidence_role in {
-            "direct_result",
-            "contradictory_result",
-        }
-        if result_role and self.reported_result is None:
-            raise ValueError("result Evidence requires a reported result")
-        if not result_role and self.reported_result is not None:
-            raise ValueError("context Evidence cannot contain a reported result")
-        if self.attribution_scope in {"isolated_effect", "joint_effect"}:
-            if self.comparison is None or not self.comparison.comparable:
-                raise ValueError("experimental attribution requires a comparison")
-            if not self.changed_variables:
-                raise ValueError("experimental attribution requires changed variables")
-        return self
-
-
-class EvidenceAuthoringResponse(BaseModel):
-    affected_finding_ids: list[str] = Field(default_factory=list)
-    analysis: ObjectiveAnalysisStateResponse
-    evidence: ObjectiveEvidenceResponse
-
-
 class FindingAuthoringCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source_analysis_version: int = Field(..., ge=1)
-    statement: str | None = Field(default=None, max_length=3000)
-    assertion_strength: FindingAssertionStrength | None = None
-    supporting_evidence_ids: list[str] = Field(
-        default_factory=list, max_length=100
-    )
-    contradicting_evidence_ids: list[str] = Field(
-        default_factory=list, max_length=100
-    )
-    context_evidence_ids: list[str] = Field(default_factory=list, max_length=100)
-    condition_boundary_evidence_ids: list[str] = Field(
-        default_factory=list, max_length=100
-    )
+    selection_ids: list[str] = Field(default_factory=list, max_length=100)
+    comparison_group_ids: list[str] = Field(default_factory=list, max_length=20)
     limitations: list[str] = Field(default_factory=list, max_length=20)
     parent_finding_id: str | None = Field(default=None, max_length=128)
     abstention_reason: FindingAbstentionReason | None = None
@@ -195,33 +140,17 @@ class FindingAuthoringCreateRequest(BaseModel):
     def validate_authoring_mode(self) -> "FindingAuthoringCreateRequest":
         if any(len(value.strip()) > 1000 for value in self.limitations):
             raise ValueError("Finding limitations cannot exceed 1000 characters")
-        selected = (
-            self.supporting_evidence_ids
-            + self.contradicting_evidence_ids
-            + self.context_evidence_ids
-            + self.condition_boundary_evidence_ids
-        )
+        selected = self.selection_ids + self.comparison_group_ids
         if any(not value.strip() or len(value) > 128 for value in selected):
-            raise ValueError("Evidence IDs must be non-empty and at most 128 characters")
+            raise ValueError("experiment reference IDs must be non-empty and at most 128 characters")
         if self.abstention_reason is not None:
-            if (
-                (self.statement or "").strip()
-                or self.assertion_strength is not None
-                or selected
-                or self.parent_finding_id is not None
-            ):
-                raise ValueError(
-                    "abstention cannot contain a Finding statement or Evidence roles"
-                )
+            if selected or self.parent_finding_id is not None:
+                raise ValueError("abstention cannot contain experiment selections")
             if not any(value.strip() for value in self.limitations):
                 raise ValueError("abstention requires an explanation")
             return self
-        if not (self.statement or "").strip():
-            raise ValueError("Finding statement is required")
-        if self.assertion_strength is None:
-            raise ValueError("Finding assertion strength is required")
-        if not self.supporting_evidence_ids:
-            raise ValueError("Finding requires supporting Evidence")
+        if not self.selection_ids:
+            raise ValueError("Finding requires at least one experiment selection")
         return self
 
 

@@ -271,9 +271,9 @@ DECISION PROCESS
     Once each question is resolved or blocked by a specific unavailable Source,
     locate the error before choosing the correction action: compare each stored
     Evidence field with its Source, then compare the Finding with its Evidence.
-    If extraction is wrong, form create_evidence_draft first (step 14), naming
-    the superseded Evidence and explaining the factual change. The dependent
-    Finding still needs synthesis after this Evidence is approved and published.
+    If extraction is wrong or incomplete, form a new
+    `propose_paper_experiment_draft` after rereading the exact Source. The
+    dependent Finding remains tied to its previous fixed Selection.
     If Evidence is correct and the synthesis overclaims, form
     create_finding_draft from those facts (step 13). Never change correct
     Evidence to fit a desired conclusion. If only front matter
@@ -315,11 +315,11 @@ DECISION PROCESS
     exact complete Source in the relevant paper with `read_source`, following
     its continuation offsets when the Source is oversized. Use the returned
     Source kind, reference, and complete-Source digest, and copy only facts
-    explicitly present in that Source into the structured Evidence fields.
+    explicitly present in that Source into the structured experiment fields.
     Never use a shortened Source page to compute or guess a digest. Call
-    `create_evidence_draft` first. Only after the researcher can review that
-    Evidence draft should you propose the separate approved
-    `create_evidence_version` write.
+    `propose_paper_experiment_draft` first. Only after the researcher can review
+    that draft should you propose the separate approved
+    `create_paper_experiment_revision` write.
     A request to save requires that actual approval-producing call after the
     draft, not a prose table or a question asking permission to submit it.
     Sending the write proposal only opens exact user approval; it does not
@@ -359,27 +359,38 @@ DECISION PROCESS
     remain unread.
 16. After every paper in the proposed Agent analysis scope has at least one
     exact, complete, relevant Source, prepare one paper summary per paper.
-    Create structured Evidence only for facts copied from those Sources. When
-    the inspected Source supports no fact for the Objective, record
+    Create structured experiment facts only for facts copied from those Sources.
+    When the inspected Source supports no fact for the Objective, record
     `no_grounded_evidence` or `excluded_after_review`, the exact inspected
     Source digest, and a scientific reason instead of inventing Evidence. If a
     Source read or extraction attempt fails technically, record
     `extraction_failed`, the exact inspected Source digest when available, and
     the technical failure reason; never recast that failure as a scientific
     absence or exclusion. Propose
-    `publish_agent_objective_analysis` and stop for exact user approval. That
-    publication contains Evidence only. After it succeeds, use the returned
-    Evidence identifiers to record a transient Finding draft, then propose a
-    separate approved Finding write only when the Evidence supports a
-    defensible conclusion.
-17. When the researcher asks what question should follow a published analysis,
+    `propose_paper_experiment_draft` and stop for exact user approval. After it
+    succeeds, use `create_paper_experiment_revision` to create the immutable
+    revision and Objective Selection. This does not publish a Finding; create a
+    Finding separately from fixed Selection/ComparisonGroup references.
+17. If the researcher asks you to maintain a paper's reusable experiment record,
+    first read the complete canonical Sources for that paper, including Methods
+    and any relevant tables or figure captions. Use only response-local
+    experiment, variant, test, measurement, and comparison keys in
+    `propose_paper_experiment_draft`; never submit Lens-owned IDs, versions,
+    fingerprints, collection IDs, or objective IDs inside the scientific draft.
+    Show the draft and unresolved boundary items for review. Only after the
+    exact draft has been approved may you call
+    `create_paper_experiment_revision` with the unchanged draft and digest. This
+    creates an immutable revision and Objective Selection, not a Finding. Create
+    a Finding separately from the returned fixed selection/evidence; do not claim
+    that experiment creation published a conclusion.
+18. When the researcher asks what question should follow a published analysis,
     inspect its quality ledger first. Use `derive_objective` only with exact
     published Findings, scientific Evidence gaps, or non-failed paper
     contributions from that analysis. A technical extraction failure is a
     recovery task, not scientific basis for a new question. A derived draft is
     still transient; creating its Objective candidate remains a separate
     approved action.
-18. When the researcher asks how to test a supported claim or resolve a gap,
+19. When the researcher asks how to test a supported claim or resolve a gap,
     first inspect the current Finding and its exact Evidence. Check whether
     differing results describe different conditions or genuinely conflicting
     measurements under comparable conditions. Preserve unreviewed Finding

@@ -522,13 +522,11 @@ approval. The production Research Agent currently exposes these capabilities:
   distinct approval event. The runner checks its scientific claims before
   execution; a successful final draft appears as the exact structured result
   with a deterministic unsaved-status message, without another model rewrite;
-- `create_finding_version` is a `write` capability. It accepts the same
-  statement, assertion strength, version-local Evidence roles, limitations,
-  optional parent Finding, or explicit abstention as the human Finding
-  authoring command. After exact-argument approval it calls
-  `FindingAuthoringService.create_version()` and returns the canonical new
-  analysis and optional Finding. The source analysis and all existing Finding,
-  Evidence, and Source records remain unchanged;
+- `create_finding_version` is a `write` capability. It accepts fixed
+  experiment `selection_ids` and optional `comparison_group_ids`; it never
+  accepts Evidence IDs, a hand-written statement, or assertion strength.
+  After exact-argument approval it reads the canonical Finding aggregated for
+  that selection set and returns the fixed analysis projection;
 - `record_finding_feedback` is a `write` capability. After exact-argument
   approval, it calls the same `FindingFeedbackService.record_feedback()` path
   as the Finding workbench and records the authenticated user as reviewer. It
@@ -538,14 +536,6 @@ approval. The production Research Agent currently exposes these capabilities:
   `FindingFeedbackService.record_curation()` path as the Finding workbench.
   Service validation preserves Finding identity, paper coverage, Evidence IDs,
   and Source lineage; curation cannot create a new Finding;
-- `create_evidence_draft` records one transient Source-bound Evidence proposal
-  in the Chat trajectory. Before returning it, Lens verifies Collection
-  ownership, exact Source identity, complete-content digest, and verbatim
-  excerpt. It does not publish Evidence, advance an analysis version, or make
-  the proposed scientific fields verified Evidence;
-- `create_evidence_version` is the separate `write` capability for a reviewed
-  Evidence draft. Exact-argument approval invokes the same immutable
-  Source-to-Evidence versioning service used by the human authoring route;
 - `propose_objective_drafts` records at most three focused, single-outcome
   drafts in the Chat trajectory. PaperResearchMap relationships may be reported
   as proposal context, but they are never presented as Evidence and this call
@@ -584,30 +574,20 @@ approval. The production Research Agent currently exposes these capabilities:
   without allocating an analysis version. It
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
-- `publish_agent_objective_analysis` is a separate `write` capability for the
-  case where the researcher explicitly asks the Agent itself to analyze a
-  bounded paper scope. Before proposing the write, the Agent reads exact
-  Sources through `read_source`, or complete untruncated
-  `inspect_document_sources` results, over one or more turns. The
-  approved payload contains one summary for every selected ready Document.
-  Papers with supported facts carry structured Evidence drafts. A paper that
-  was inspected but supplied no grounded fact instead carries an explicit
-  `no_grounded_evidence` or `excluded_after_review` disposition, reason, and at
-  least one exact inspected Source locator and digest. A technical read or
-  extraction failure carries `extraction_failed` and its technical reason; it
-  is never treated as a scientific absence. The backend revalidates
-  each Source locator, complete-content SHA-256 digest, normalized verbatim
-  excerpt, Evidence contract, and no-Evidence inspection record before
-  allocating a version. It then publishes one
-  `agent_authored` analysis through the existing repository queue, claim, and
-  atomic publication lifecycle. If every non-excluded paper reports
-  `extraction_failed`, the active version is marked failed and remains retryable;
-  it does not publish `no_grounded_evidence` or advance the published pointer.
-  Mixed scopes may publish surviving Evidence while retaining failed paper
-  contributions. A successful version contains PaperContributions and Evidence
-  but no Finding; any conclusion requires a later approved
-  `create_finding_version` call. This capability has no separate HTTP endpoint,
-  draft store, background extraction, or Finding-synthesis call;
+- `propose_paper_experiment_draft` is a `draft` capability for Agent-authored
+  reconstruction of one paper's reusable experiment record. The Agent must
+  first read complete canonical Sources and may submit only response-local
+  scientific keys plus supplied Source labels. Lens reloads the prepared
+  document, resolves the authoritative Source catalog and fingerprint, and
+  rejects Lens-owned IDs, versions, ownership fields, and validation status in
+  the draft. The result is review-only and does not write a PaperExperiment;
+- `create_paper_experiment_revision` is a separate `write` capability for an
+  approved, unchanged PaperExperiment draft. Lens revalidates the draft digest,
+  confirmed Objective, active analysis, current Source fingerprint, and user
+  ownership, then calls the canonical single-experiment writer. The immutable
+  PaperExperiment revision and its Objective Selection are committed through
+  the same atomic graph repository as automatic analysis. It does not create a
+  Finding; a Finding remains a separate Evidence/Selection-backed write;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work;
@@ -932,12 +912,12 @@ It is durable authoring provenance, not scientific support; Evidence remains
 grounded through its Source identity and a Finding remains supported through
 its version-local Evidence bindings.
 
-The Findings POST command records one deliberate researcher Evidence-to-Finding
-decision. It never inserts into the published source version. The request
-identifies that current `source_analysis_version`, assigns existing
-version-local Evidence to support, contradiction, context, and optional
-condition-boundary roles, and supplies a statement, assertion strength,
-limitations, and optional `parent_finding_id`.
+The Findings POST command selects one Finding already aggregated from a fixed
+experiment analysis snapshot. The request identifies the
+`source_analysis_version`, one or more `selection_ids`, and optional
+`comparison_group_ids`. The authenticated user identity is server-derived;
+the conclusion, factors, outcome, direction, and evidence projection remain
+derived from the experiment records.
 The authenticated user identity is server-derived. Paper coverage, factors,
 outcome, direction, attribution, synthesis status, certainty, target version,
 and Source content are also server-derived and cannot be supplied by the
@@ -946,25 +926,15 @@ browser.
 ```json
 {
   "source_analysis_version": 3,
-  "statement": "Higher laser power is associated with lower porosity under the reported scan conditions.",
-  "assertion_strength": "associative",
-  "supporting_evidence_ids": ["evidence_a"],
-  "contradicting_evidence_ids": [],
-  "context_evidence_ids": ["evidence_b"],
-  "condition_boundary_evidence_ids": ["evidence_b"],
-  "limitations": ["Direct support is currently limited to one paper."],
-  "parent_finding_id": null,
-  "abstention_reason": null
+  "selection_ids": ["selection-1", "selection-2"],
+  "comparison_group_ids": ["comparison-group-1"]
 }
 ```
 
-A successful command returns `201` with the newly published authored analysis
-and its new canonical Finding. The repository clones the complete published
-PaperContribution, Evidence, and Finding snapshot into the next version,
-validates every selected Evidence and exact Source, appends the human-authored
-or hybrid Finding, and atomically advances the Objective's published pointer.
-The source version and parent Finding remain unchanged. `parent_finding_id`
-therefore means derivation, not in-place editing.
+A successful command returns `201` with the fixed analysis and canonical
+Finding matching the requested selection/group sets. Unknown selections,
+groups, or an unaggregated combination are rejected; rerun experiment
+aggregation to create the Finding.
 
 A researcher may instead submit one of `no_comparable_evidence`,
 `no_grounded_evidence`, or `insufficient_evidence` as `abstention_reason`, with
@@ -1023,26 +993,13 @@ is a substring of the canonical Source. It derives identity, page, resolution,
 confidence, and creator provenance. The browser cannot provide a creator,
 analysis target version, or Source outside the selected analysis.
 
-An Evidence correction never overwrites the old record. Supplying
-`supersedes_evidence_id` must refer to the current Evidence at the same Source
-locator; publication clones the complete source snapshot into the next
-immutable analysis version, marks the old record as superseded, and leaves old
-Findings pointing at their original Evidence. A successful command returns
-`201` with the new analysis, Evidence, and `affected_finding_ids`, including
-Findings referencing earlier ancestors of the corrected Evidence. The Agent
-receives these same IDs. `inspect_published_finding` includes the complete
-linked Evidence page, review metadata, and `replacement_evidence` for that
-page so it can compare old and current facts. It must recheck Sources, roles,
-measurement identity, conditions, and scope before proposing a parent-linked
-Finding draft. Publishing that draft requires a separate exact approval; the
-Evidence approval never authorizes downstream Finding writes.
-Stale versions, running analyses,
-unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
-already superseded record return `409`; malformed scientific shapes return
-  `422`. The Research Agent exposes the same operation as the approved
-  `create_evidence_version` write capability and must supply the digest returned
-  by `read_source` or a complete untruncated `inspect_document_sources` result;
-  it does not create a second Evidence identity.
+Evidence remains available through read-only projections for historical analyses
+and source traceback. New researcher and Agent writes use the reviewed
+PaperExperiment draft and the approved `create_paper_experiment_revision`
+capability; that write validates the complete Source digest, creates an
+immutable revision and Objective Selection, and does not create a Finding.
+Historical Evidence records remain readable, but no new Evidence version or
+independent Evidence identity can be created through the browser or Agent.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns

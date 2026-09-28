@@ -21,10 +21,9 @@ from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
     BrowseCollectionPapersCapability,
     ConfirmObjectiveCapability,
-    CreateEvidenceDraftCapability,
     CreateFindingDraftCapability,
     CreateFindingVersionCapability,
-    CreateEvidenceVersionCapability,
+    CreatePaperExperimentRevisionCapability,
     CreateObjectiveCandidateCapability,
     CreateResearchPlanCapability,
     CurateFindingCapability,
@@ -40,7 +39,7 @@ from application.chat.capabilities import (
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
     ProposeResearchPlanCapability,
-    PublishAgentObjectiveAnalysisCapability,
+    ProposePaperExperimentDraftCapability,
     QueryPublishedFindingsCapability,
     ReviseResearchPlanCapability,
     RecordFindingFeedbackCapability,
@@ -62,12 +61,6 @@ from application.core.objectives.analysis.experiment_query_service import (
     ExperimentQueryService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
-from application.core.objectives.agent_analysis_service import (
-    AgentObjectiveAnalysisService,
-)
-from application.core.objectives.evidence_authoring_service import (
-    EvidenceAuthoringService,
-)
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
@@ -82,6 +75,9 @@ from application.core.objectives.objective_authoring_service import (
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import PaperResearchMapService
+from application.core.objectives.paper_experiment_authoring_service import (
+    PaperExperimentAuthoringService,
+)
 from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisService,
 )
@@ -329,7 +325,6 @@ class ApplicationRuntime:
     finding_review_repository: FindingReviewRepository
     finding_feedback_service: FindingFeedbackService
     finding_authoring_service: FindingAuthoringService
-    evidence_authoring_service: EvidenceAuthoringService
     document_profile_service: DocumentProfileService
     document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
@@ -455,6 +450,14 @@ async def build_application_runtime(
             experiment_analysis_writer = ExperimentAnalysisWriter(
                 paper_experiment_repository=paper_experiment_repository,
                 experiment_analysis_repository=experiment_analysis_repository,
+            )
+        paper_experiment_authoring_service = None
+        if experiment_analysis_writer is not None:
+            paper_experiment_authoring_service = PaperExperimentAuthoringService(
+                collection_service=collection_service,
+                source_artifact_repository=source_artifact_repository,
+                objective_repository=objective_repository,
+                experiment_analysis_writer=experiment_analysis_writer,
             )
         experiment_compatibility_projection = overrides.experiment_compatibility_projection
         if (
@@ -615,20 +618,6 @@ async def build_application_runtime(
             repository=experiment_plan_repository,
             finding_feedback_service=finding_feedback_service,
         )
-        finding_authoring_service = FindingAuthoringService(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-        )
-        evidence_authoring_service = EvidenceAuthoringService(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-            source_artifact_repository=source_artifact_repository,
-        )
-        agent_analysis_service = AgentObjectiveAnalysisService(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-            source_artifact_repository=source_artifact_repository,
-        )
         experiment_analysis_service = ObjectiveExperimentAnalysisService(
             collection_service=collection_service,
             paper_map_repository=paper_map_repository,
@@ -668,6 +657,11 @@ async def build_application_runtime(
                 finding_repository=experiment_finding_repository,
                 objective_repository=objective_repository,
             )
+        finding_authoring_service = FindingAuthoringService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+            experiment_query_service=experiment_query_service,
+        )
 
         if overrides.chat_session_service is None:
             chat_model = OpenAIChatModel()
@@ -744,17 +738,18 @@ async def build_application_runtime(
                             CreateFindingVersionCapability(
                                 finding_authoring_service=finding_authoring_service,
                             ),
-                            CreateEvidenceDraftCapability(
-                                collection_service=collection_service,
-                                source_artifact_repository=source_artifact_repository,
-                            ),
-                            CreateEvidenceVersionCapability(
-                                evidence_authoring_service=evidence_authoring_service,
-                            ),
-                            PublishAgentObjectiveAnalysisCapability(
-                                agent_analysis_service=agent_analysis_service,
-                                model_name=chat_model.model,
-                                prompt_version=RESEARCH_AGENT_PROMPT_VERSION,
+                            *(
+                                (
+                                    ProposePaperExperimentDraftCapability(
+                                        authoring_service=paper_experiment_authoring_service,
+                                    ),
+                                    CreatePaperExperimentRevisionCapability(
+                                        authoring_service=paper_experiment_authoring_service,
+                                        chat_repository=chat_repository,
+                                    ),
+                                )
+                                if paper_experiment_authoring_service is not None
+                                else ()
                             ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,
@@ -826,7 +821,6 @@ async def build_application_runtime(
             finding_review_repository=finding_review_repository,
             finding_feedback_service=finding_feedback_service,
             finding_authoring_service=finding_authoring_service,
-            evidence_authoring_service=evidence_authoring_service,
             document_profile_service=document_profile_service,
             document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
@@ -876,7 +870,6 @@ def install_application_runtime(
     application.state.finding_review_repository = runtime.finding_review_repository
     application.state.finding_feedback_service = runtime.finding_feedback_service
     application.state.finding_authoring_service = runtime.finding_authoring_service
-    application.state.evidence_authoring_service = runtime.evidence_authoring_service
     application.state.document_profile_service = runtime.document_profile_service
     application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service

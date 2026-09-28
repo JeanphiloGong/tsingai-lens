@@ -18,11 +18,10 @@ AUTO_ACTIONS = frozenset({
     "create_objective_candidate",
     "confirm_objective",
     "start_objective_analysis",
-    "create_evidence_version",
     "create_finding_version",
     "record_finding_feedback",
     "curate_finding",
-    "publish_agent_objective_analysis",
+    "create_paper_experiment_revision",
     "create_research_plan",
     "revise_research_plan",
 })

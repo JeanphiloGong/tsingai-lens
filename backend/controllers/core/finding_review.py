@@ -7,8 +7,6 @@ from fastapi.responses import Response
 
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.core.finding_review import (
-    EvidenceAuthoringCreateRequest,
-    EvidenceAuthoringResponse,
     FindingAuthoringCreateRequest,
     FindingAuthoringResponse,
     FindingCurationCreateRequest,
@@ -26,56 +24,6 @@ router = APIRouter(prefix="/collections", tags=["finding-review"])
 
 
 @router.post(
-    "/{collection_id}/objectives/{objective_id}/evidence",
-    response_model=EvidenceAuthoringResponse,
-    status_code=201,
-    summary="Create a researcher-confirmed Evidence version",
-)
-async def create_evidence_version(
-    collection_id: str,
-    objective_id: str,
-    payload: EvidenceAuthoringCreateRequest,
-    request: Request,
-) -> EvidenceAuthoringResponse:
-    try:
-        result = await request.app.state.evidence_authoring_service.create_version(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            source_analysis_version=payload.source_analysis_version,
-            document_id=payload.document_id,
-            source_kind=payload.source_kind,
-            source_ref=payload.source_ref,
-            source_excerpt=payload.source_excerpt,
-            evidence_role=payload.evidence_role,
-            changed_variables=tuple(
-                item.model_dump() for item in payload.changed_variables
-            ),
-            comparison=(payload.comparison.model_dump() if payload.comparison else None),
-            reported_result=(
-                payload.reported_result.model_dump() if payload.reported_result else None
-            ),
-            attribution_scope=payload.attribution_scope,
-            scientific_context=payload.scientific_context.model_dump(),
-            supersedes_evidence_id=payload.supersedes_evidence_id,
-            authoring_note=payload.authoring_note,
-            created_by_user_id=await current_user_id(request),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return EvidenceAuthoringResponse(
-        analysis=result.analysis.to_record(),
-        evidence={
-            **result.evidence.to_record(),
-            "supports_finding": result.evidence.supports_finding,
-            "eligible_for_finding_authoring": result.evidence.eligible_for_finding_authoring,
-        },
-        affected_finding_ids=list(result.affected_finding_ids),
-    )
-
-
-@router.post(
     "/{collection_id}/objectives/{objective_id}/findings",
     response_model=FindingAuthoringResponse,
     status_code=201,
@@ -88,22 +36,13 @@ async def create_finding_version(
     request: Request,
 ) -> FindingAuthoringResponse:
     try:
-        result = await request.app.state.finding_authoring_service.create_version(
+        result = await request.app.state.finding_authoring_service.create_selection_version(
             collection_id=collection_id,
             objective_id=objective_id,
             source_analysis_version=payload.source_analysis_version,
-            statement=payload.statement,
-            assertion_strength=payload.assertion_strength,
-            supporting_evidence_ids=tuple(payload.supporting_evidence_ids),
-            contradicting_evidence_ids=tuple(payload.contradicting_evidence_ids),
-            context_evidence_ids=tuple(payload.context_evidence_ids),
-            condition_boundary_evidence_ids=tuple(
-                payload.condition_boundary_evidence_ids
-            ),
-            limitations=tuple(payload.limitations),
-            parent_finding_id=payload.parent_finding_id,
-            abstention_reason=payload.abstention_reason,
             created_by_user_id=await current_user_id(request),
+            selection_ids=tuple(payload.selection_ids),
+            comparison_group_ids=tuple(payload.comparison_group_ids),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

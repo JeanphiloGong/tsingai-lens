@@ -1,9 +1,7 @@
 import { downloadBlob, requestJson } from './api';
 
 export type DatasetType = 'evaluation' | 'sft' | 'preference';
-export type DatasetSplit = 'train' | 'eval';
-
-export type DatasetSelection = { case_id: string; split: DatasetSplit };
+export type DatasetSelection = { case_id: string };
 
 export type DatasetSnapshot = {
 	dataset_id: string;
@@ -44,8 +42,7 @@ function datasetPath(datasetId = '') {
 export async function createDatasetSnapshot(
 	collectionId: string,
 	datasetType: DatasetType,
-	items: DatasetSelection[],
-	paperFamilies: Record<string, string>
+	items: DatasetSelection[]
 ) {
 	return (await requestJson(datasetPath(), {
 		method: 'POST',
@@ -53,8 +50,7 @@ export async function createDatasetSnapshot(
 		body: JSON.stringify({
 			collection_id: collectionId,
 			dataset_type: datasetType,
-			items,
-			paper_families: paperFamilies
+			items
 		})
 	})) as DatasetSnapshot;
 }

@@ -20,7 +20,6 @@ from domain.feedback import DatasetSnapshot, DatasetType, FeedbackCase
 @dataclass(frozen=True)
 class DatasetSelection:
     case_id: str
-    split: str
 
 
 class DatasetSnapshotError(ValueError):
@@ -54,7 +53,6 @@ class DatasetSnapshotService:
         collection_id: str,
         dataset_type: DatasetType | str,
         selections: tuple[DatasetSelection, ...],
-        paper_families: dict[str, str] | None = None,
         now: str | None = None,
     ) -> DatasetSnapshot:
         await self.collection_service.get_collection_for_user(collection_id, owner_id)
@@ -63,28 +61,23 @@ class DatasetSnapshotService:
         if len(selections) > 500:
             raise DatasetSnapshotError("dataset_selection_too_large")
         timestamp = now or datetime.now(timezone.utc).isoformat()
-        families = _normalise_families(paper_families or {})
         rows: list[dict[str, Any]] = []
         exclusions: list[dict[str, Any]] = []
         provenance_items: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
 
         for selection in selections:
-            key = (selection.case_id, selection.split)
+            key = selection.case_id
             if key in seen:
                 exclusions.append(_exclusion(selection, "duplicate_selection"))
                 continue
             seen.add(key)
-            if selection.split not in {"train", "eval"}:
-                exclusions.append(_exclusion(selection, "split_invalid"))
-                continue
             try:
                 candidate = await self._candidate(
                     owner_id=owner_id,
                     collection_id=collection_id,
                     dataset_type=dataset_type,  # type: ignore[arg-type]
                     selection=selection,
-                    paper_families=families,
                 )
             except DatasetSnapshotError as exc:
                 exclusions.append(_exclusion(selection, str(exc)))
@@ -94,11 +87,10 @@ class DatasetSnapshotService:
 
         # Selection order is a UI detail. Canonical ordering keeps repeated
         # exports of the same reviewed material on the same digest.
-        rows.sort(key=lambda item: (str(item.get("split")), _digest(item)))
+        rows.sort(key=_digest)
         exclusions.sort(
             key=lambda item: (
                 str(item.get("case_id")),
-                str(item.get("split")),
                 str(item.get("reason")),
                 str(item.get("detail")),
             )
@@ -106,20 +98,17 @@ class DatasetSnapshotService:
         provenance_items.sort(
             key=lambda item: (
                 str(item.get("case_id")),
-                str(item.get("split")),
             )
         )
-        _ensure_split_isolation(rows, provenance_items)
         provenance = {
-            "schema_version": "feedback-dataset-provenance.v1",
+            "schema_version": "feedback-dataset-provenance.v2",
             "collection_id": collection_id,
             "dataset_type": dataset_type,
-            "paper_families": families,
             "items": provenance_items,
         }
         provenance_digest = _digest(provenance)
         digest_basis = {
-            "schema_version": "feedback-dataset.v2",
+            "schema_version": "feedback-dataset.v3",
             "owner_id": owner_id,
             "collection_id": collection_id,
             "dataset_type": dataset_type,
@@ -206,7 +195,6 @@ class DatasetSnapshotService:
         collection_id: str,
         dataset_type: DatasetType,
         selection: DatasetSelection,
-        paper_families: dict[str, str],
     ) -> "_Candidate":
         case = await self.case_repository.read_case(selection.case_id)
         if case is None or case.collection_id != collection_id:
@@ -250,10 +238,7 @@ class DatasetSnapshotService:
             raise DatasetSnapshotError("answer_missing")
         results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
         coverage = _latest_coverage(results, case.context_snapshot)
-        document_ids = _document_ids(coverage, messages)
-        missing_families = sorted(document_id for document_id in document_ids if document_id not in paper_families)
-        if missing_families:
-            raise DatasetSnapshotError("paper_family_missing:" + ",".join(missing_families))
+        document_ids = _document_ids(coverage, messages) | _document_ids(case.context_snapshot, ())
         source_refs = tuple(dict.fromkeys(annotation.support_source_refs))
         allowed_source_refs = _coverage_source_refs(
             coverage,
@@ -282,8 +267,7 @@ class DatasetSnapshotService:
         if dataset_type == "preference" and (not target or target == answer_text):
             raise DatasetSnapshotError("preference_pair_missing")
         session_tree_id = session.root_session_id or session.session_id
-        family_values = tuple(sorted({paper_families[item] for item in document_ids}))
-        base: dict[str, Any] = {"split": selection.split, "evidence": evidence}
+        base: dict[str, Any] = {"evidence": evidence}
         if dataset_type == "evaluation":
             row = {
                 **base,
@@ -316,11 +300,8 @@ class DatasetSnapshotService:
             "review_digest": current.annotation_digest,
             "session_id": case.session_id,
             "session_tree_id": session_tree_id,
-            "split": selection.split,
             "source_refs": list(source_refs),
             "document_ids": sorted(document_ids),
-            "paper_families": {item: paper_families[item] for item in sorted(document_ids)},
-            "paper_family_keys": list(family_values),
             "record_type": dataset_type,
             "row_digest": row_digest,
         }
@@ -339,16 +320,6 @@ def jsonl_bytes_for_rows(rows: Iterable[dict[str, Any]]) -> bytes:
         for row in rows
     ]
     return ("\n".join(encoded) + ("\n" if encoded else "")).encode("utf-8")
-
-
-def _normalise_families(values: dict[str, str]) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for key, value in values.items():
-        document_id = str(key).strip()
-        family = str(value).strip()
-        if document_id and family:
-            result[document_id] = family
-    return result
 
 
 def _digest(value: Any) -> str:
@@ -430,7 +401,6 @@ def _verify_snapshot_integrity(snapshot: DatasetSnapshot) -> None:
 def _exclusion(selection: DatasetSelection, reason: str) -> dict[str, Any]:
     return {
         "case_id": selection.case_id,
-        "split": selection.split,
         "reason": reason.split(":", 1)[0],
         "detail": reason,
     }
@@ -609,22 +579,6 @@ def _coverage_document_titles(coverage: dict[str, Any]) -> dict[str, str]:
 
 def _as_texts(values: Any) -> list[str]:
     return [str(value) for value in values or () if str(value).strip()]
-
-
-def _ensure_split_isolation(
-    rows: list[dict[str, Any]], provenance_items: list[dict[str, Any]]
-) -> None:
-    del rows  # The split invariants are represented by the private provenance.
-    for field in ("paper_family_keys", "session_tree_id"):
-        seen: dict[str, set[str]] = {}
-        for item in provenance_items:
-            values = item.get(field) if field == "paper_family_keys" else [item.get(field)]
-            for value in values or ():
-                if value:
-                    seen.setdefault(str(value), set()).add(str(item["split"]))
-        leaked = sorted(key for key, splits in seen.items() if len(splits) > 1)
-        if leaked:
-            raise DatasetSnapshotError("dataset_split_leakage:" + ",".join(leaked))
 
 
 __all__ = [

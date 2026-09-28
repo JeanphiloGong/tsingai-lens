@@ -299,8 +299,7 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
         owner_id=USER_ID,
         collection_id=COLLECTION_ID,
         dataset_type="preference",
-        selections=(DatasetSelection(case.case_id, "eval"),),
-        paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+        selections=(DatasetSelection(case.case_id),),
         now=_current_iso(),
     )
     assert snapshot.row_count == 1

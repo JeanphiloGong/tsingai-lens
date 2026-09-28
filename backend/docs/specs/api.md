@@ -292,6 +292,16 @@ evaluation or training export.
 
 ### Feedback Analysis Workbench
 
+Snapshot creation accepts only `collection_id`, `dataset_type`, and
+`items: [{"case_id": "..."}]` (at most 500 selections). Retired `split` and
+`paper_families` inputs are rejected with 422. New exports use manifest
+`feedback-dataset.v3` and provenance `feedback-dataset-provenance.v2`;
+model-facing rows have no experiment split. Document and session identities
+remain in private provenance. Historical v2 snapshots keep their original
+bytes and digests. No stored snapshots are rewritten. A 201 response freezes
+the exclusion report even if no rows qualify; clients must inspect `row_count`
+and `excluded_count` instead of treating every 201 as a usable dataset.
+
 The feedback workbench turns a saved Chat rating into a reviewable, source-
 grounded case. It does not rewrite the original messages or model-call audit:
 

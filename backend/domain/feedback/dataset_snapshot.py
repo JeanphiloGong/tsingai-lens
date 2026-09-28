@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 
 DatasetType = Literal["evaluation", "sft", "preference"]
-DatasetSplit = Literal["train", "eval"]
 
 _DATASET_TYPES = {"evaluation", "sft", "preference"}
 _SPLITS = {"train", "eval"}
@@ -41,11 +40,16 @@ class DatasetSnapshot:
             raise ValueError("provenance digest must be sha256")
         if len(self.content_digest) != 64:
             raise ValueError("content digest must be sha256")
+        version = self.manifest.get("schema_version")
+        if version not in {"feedback-dataset.v2", "feedback-dataset.v3"}:
+            raise ValueError("unsupported dataset snapshot version")
         for row in self.rows:
-            if not isinstance(row, dict) or row.get("split") not in _SPLITS:
-                raise ValueError("snapshot rows require train or eval split")
-            if row.get("record_type") not in _DATASET_TYPES:
+            if not isinstance(row, dict) or row.get("record_type") != self.dataset_type:
                 raise ValueError("snapshot rows require a dataset record type")
+            if version == "feedback-dataset.v2" and row.get("split") not in _SPLITS:
+                raise ValueError("historical snapshot rows require train or eval split")
+            if version == "feedback-dataset.v3" and "split" in row:
+                raise ValueError("export rows must not contain experiment splits")
         object.__setattr__(self, "rows", tuple(dict(row) for row in self.rows))
         object.__setattr__(self, "exclusions", tuple(dict(item) for item in self.exclusions))
         object.__setattr__(self, "provenance", dict(self.provenance))
@@ -83,4 +87,4 @@ class DatasetSnapshot:
         }
 
 
-__all__ = ["DatasetSnapshot", "DatasetSplit", "DatasetType"]
+__all__ = ["DatasetSnapshot", "DatasetType"]

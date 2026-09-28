@@ -8,7 +8,6 @@ import pytest
 
 from application.feedback.dataset_snapshot_service import (
     DatasetSelection,
-    DatasetSnapshotError,
     DatasetSnapshotIntegrityError,
     DatasetSnapshotService,
     jsonl_bytes_for_rows,
@@ -20,6 +19,7 @@ from domain.feedback import (
     FeedbackAnnotation,
     FeedbackCase,
     ReviewDecision,
+    DatasetSnapshot,
 )
 
 
@@ -170,12 +170,14 @@ def test_evaluation_snapshot_freezes_rows_and_digest() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
-            selections=(DatasetSelection("case-1", "eval"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
             now="2026-09-24T00:01:00+00:00",
         )
     )
     assert snapshot.row_count == 1
+    assert "split" not in snapshot.rows[0]
+    assert "paper_families" not in snapshot.provenance
+    assert snapshot.provenance["items"][0]["document_ids"] == ["doc-a", "doc-b"]
     assert snapshot.rows[0]["reference"] is None
     assert snapshot.rows[0]["evidence"][0]["document_title"] == "Paper B"
     assert snapshot.rows[0]["evidence"][0]["quote"].startswith("Figure 3")
@@ -193,8 +195,7 @@ def test_sft_without_target_is_excluded_but_empty_snapshot_is_valid() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
-            selections=(DatasetSelection("case-1", "train"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     assert snapshot.row_count == 0
@@ -210,8 +211,7 @@ def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
-            selections=(DatasetSelection("case-1", "train"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     preference = asyncio.run(
@@ -219,8 +219,7 @@ def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="preference",
-            selections=(DatasetSelection("case-1", "eval"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     assert sft.rows[0]["record_type"] == "sft"
@@ -237,8 +236,7 @@ def test_download_rows_keep_readable_evidence_but_hide_internal_ids() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
-            selections=(DatasetSelection("case-1", "train"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
 
@@ -276,8 +274,7 @@ def test_sft_is_excluded_when_support_source_has_no_readable_content() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
-            selections=(DatasetSelection("case-1", "train"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
 
@@ -311,8 +308,7 @@ def test_sft_is_excluded_when_evidence_has_no_readable_document_title() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
-            selections=(DatasetSelection("case-1", "train"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
 
@@ -327,8 +323,7 @@ def test_selection_order_is_canonical_for_digest() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
-            selections=(DatasetSelection("case-1", "eval"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     second = asyncio.run(
@@ -336,28 +331,59 @@ def test_selection_order_is_canonical_for_digest() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
-            selections=(DatasetSelection("case-1", "eval"),),
-            paper_families={"doc-b": "family-b", "doc-a": "family-a"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     assert first.manifest_digest == second.manifest_digest
 
 
-def test_train_eval_family_or_session_leakage_is_rejected() -> None:
+def test_duplicate_case_is_excluded_without_experiment_grouping() -> None:
     service, _ = _fixture()
-    with pytest.raises(DatasetSnapshotError, match="dataset_split_leakage"):
-        asyncio.run(
-            service.create_for_user(
-                owner_id="user-1",
-                collection_id="collection-1",
-                dataset_type="evaluation",
-                selections=(
-                    DatasetSelection("case-1", "train"),
-                    DatasetSelection("case-1", "eval"),
-                ),
-                paper_families={"doc-a": "family-a", "doc-b": "family-b"},
-            )
+    snapshot = asyncio.run(
+        service.create_for_user(
+            owner_id="user-1",
+            collection_id="collection-1",
+            dataset_type="evaluation",
+            selections=(DatasetSelection("case-1"), DatasetSelection("case-1")),
         )
+    )
+    assert snapshot.row_count == 1
+    assert snapshot.exclusions[0]["reason"] == "duplicate_selection"
+
+
+def test_historical_snapshot_download_preserves_bytes_and_digests() -> None:
+    from application.feedback.dataset_snapshot_service import _digest
+
+    service, snapshots = _fixture()
+    snapshot = asyncio.run(service.create_for_user(
+        owner_id="user-1", collection_id="collection-1", dataset_type="evaluation",
+        selections=(DatasetSelection("case-1"),),
+    ))
+    rows = [{**snapshot.rows[0], "split": "eval"}]
+    provenance = {
+        **snapshot.provenance, "schema_version": "feedback-dataset-provenance.v1",
+        "paper_families": {"doc-b": "paper-b"},
+        "items": [{**snapshot.provenance["items"][0], "split": "eval",
+                   "row_digest": _digest(rows[0]), "paper_family_keys": ["paper-b"]}],
+    }
+    basis = {key: snapshot.manifest[key] for key in (
+        "schema_version", "owner_id", "collection_id", "dataset_type",
+        "rows", "exclusions", "provenance_digest",
+    )}
+    basis.update(schema_version="feedback-dataset.v2", rows=rows, provenance_digest=_digest(provenance))
+    payload = jsonl_bytes_for_rows(rows)
+    manifest = {**snapshot.manifest, **basis, "manifest_digest": _digest(basis),
+                "content_digest": hashlib.sha256(payload).hexdigest()}
+    record = snapshot.to_record()
+    for key in ("row_count", "excluded_count", "is_empty"):
+        record.pop(key)
+    historical = DatasetSnapshot(**{**record, "rows": tuple(rows), "provenance": provenance,
+        "manifest": manifest, "manifest_digest": manifest["manifest_digest"],
+        "provenance_digest": basis["provenance_digest"], "content_digest": manifest["content_digest"]})
+    snapshots.saved = [historical]
+    read, downloaded = asyncio.run(service.jsonl_for_user(owner_id="user-1", dataset_id=historical.dataset_id))
+    assert downloaded == payload
+    assert read.manifest == manifest
 
 
 def test_cross_collection_access_is_rejected_before_reading_cases() -> None:
@@ -437,8 +463,7 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
-            selections=(DatasetSelection("case-1", "train"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     assert snapshot.row_count == 1
@@ -451,8 +476,7 @@ def test_read_rejects_snapshot_when_provenance_digest_no_longer_matches() -> Non
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
-            selections=(DatasetSelection("case-1", "eval"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     snapshot.provenance["items"].append({"case_id": "tampered", "split": "eval"})
@@ -473,8 +497,7 @@ def test_download_rejects_snapshot_when_manifest_digest_no_longer_matches() -> N
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
-            selections=(DatasetSelection("case-1", "eval"),),
-            paper_families={"doc-a": "family-a", "doc-b": "family-b"},
+            selections=(DatasetSelection("case-1"),),
         )
     )
     snapshot.manifest["manifest_digest"] = "0" * 64

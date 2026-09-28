@@ -4,22 +4,22 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 DatasetTypeLiteral = Literal["evaluation", "sft", "preference"]
 
 
 class DatasetSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     case_id: str = Field(min_length=1, max_length=64)
-    split: Literal["train", "eval"]
 
 
 class DatasetSnapshotCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     collection_id: str = Field(min_length=1, max_length=64)
     dataset_type: DatasetTypeLiteral
     items: list[DatasetSelectionRequest] = Field(default_factory=list, max_length=500)
-    paper_families: dict[str, str] = Field(default_factory=dict, max_length=500)
 
 
 class DatasetSnapshotResponse(BaseModel):

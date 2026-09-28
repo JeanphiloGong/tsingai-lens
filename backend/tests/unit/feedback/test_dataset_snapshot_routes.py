@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from controllers.feedback import datasets
 from controllers.schemas.datasets import DatasetSnapshotCreateRequest
@@ -27,7 +28,6 @@ def _snapshot() -> DatasetSnapshot:
         rows=(
             {
                 "record_type": "evaluation",
-                "split": "eval",
                 "input": "Question",
                 "reference": "Answer",
                 "evidence": [],
@@ -36,7 +36,7 @@ def _snapshot() -> DatasetSnapshot:
         ),
         exclusions=(),
         provenance={"items": []},
-        manifest={"empty": False},
+        manifest={"empty": False, "schema_version": "feedback-dataset.v3"},
         manifest_digest="a" * 64,
         provenance_digest="b" * 64,
         content_digest="c" * 64,
@@ -50,6 +50,8 @@ class _Service:
 
     async def create_for_user(self, **kwargs):
         assert kwargs["owner_id"] == "user-1"
+        assert "paper_families" not in kwargs
+        assert vars(kwargs["selections"][0]) == {"case_id": "case-1"}
         return self.snapshot
 
     async def list_for_user(self, **kwargs):
@@ -70,8 +72,7 @@ def test_dataset_routes_create_list_detail_and_download() -> None:
     payload = DatasetSnapshotCreateRequest(
         collection_id="collection-1",
         dataset_type="evaluation",
-        items=[{"case_id": "case-1", "split": "eval"}],
-        paper_families={"doc-1": "family-1"},
+        items=[{"case_id": "case-1"}],
     )
     created = asyncio.run(datasets.create_dataset_snapshot(payload, request))
     assert created.dataset_id == "dataset-1"
@@ -96,3 +97,15 @@ def test_dataset_route_maps_missing_snapshot_to_404() -> None:
     with pytest.raises(HTTPException) as error:
         asyncio.run(datasets.get_dataset_snapshot("missing", _request(Missing())))
     assert error.value.status_code == 404
+
+
+@pytest.mark.parametrize("extra", [
+    {"paper_families": {"doc": "family"}},
+    {"items": [{"case_id": "case-1", "split": "eval"}]},
+])
+def test_creation_rejects_retired_experiment_fields(extra) -> None:
+    with pytest.raises(ValidationError):
+        DatasetSnapshotCreateRequest.model_validate({
+            "collection_id": "collection-1", "dataset_type": "evaluation",
+            "items": [{"case_id": "case-1"}], **extra,
+        })

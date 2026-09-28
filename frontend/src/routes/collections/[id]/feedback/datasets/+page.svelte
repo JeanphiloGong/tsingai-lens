@@ -32,16 +32,12 @@
 		fetchDatasetSnapshot,
 		type DatasetSnapshot,
 		type DatasetSnapshotSummary,
-		type DatasetSplit,
 		type DatasetType
 	} from '../../../../_shared/datasetSnapshots';
 
 	let acceptedCases: FeedbackCaseSummary[] = [];
 	let selectedIds: string[] = [];
-	let splitByCase: Record<string, DatasetSplit> = {};
 	let details: Record<string, FeedbackCaseDetail> = {};
-	let familyByDocument: Record<string, string> = {};
-	let documentTitles: Record<string, string> = {};
 	let snapshots: DatasetSnapshotSummary[] = [];
 	let snapshotDetails: Record<string, DatasetSnapshot> = {};
 	let datasetType: DatasetType = 'evaluation';
@@ -73,22 +69,9 @@
 			(!problemFilter || item.problem_type === problemFilter)
 		);
 	});
-	$: splitCounts = {
-		train: selectedCases.filter((item) => (splitByCase[item.case_id] ?? 'eval') === 'train').length,
-		eval: selectedCases.filter((item) => (splitByCase[item.case_id] ?? 'eval') === 'eval').length
-	};
 	$: allCasesSelected =
 		filteredCases.length > 0 && filteredCases.every((item) => selectedIds.includes(item.case_id));
 	$: latestSnapshot = snapshots[0] ?? null;
-	$: selectedDocumentIds = Array.from(
-		new Set(
-			selectedCases.flatMap((item) => {
-				const detail = details[item.case_id];
-				return detail ? caseDocumentIds(detail) : [];
-			})
-		)
-	);
-	$: selectedDocuments = selectedDocumentIds;
 	$: selectedDetailLoadingCount = selectedCases.filter(
 		(item) => detailLoadingByCase[item.case_id]
 	).length;
@@ -103,9 +86,6 @@
 				!detailLoadingByCase[item.case_id] &&
 				!detailErrorsByCase[item.case_id]
 		);
-	$: missingFamilyDocuments = selectedDocuments.filter(
-		(documentId) => !String(familyByDocument[documentId] ?? '').trim()
-	);
 	$: datasetValidationIssues = selectedCases.flatMap((item) => {
 		const detail = details[item.case_id];
 		if (!detail) return [];
@@ -122,19 +102,11 @@
 		return issues.map((reason) => ({ caseId: item.case_id, reason }));
 	});
 	$: releaseReady =
-		selectedDetailsReady &&
-		missingFamilyDocuments.length === 0 &&
+		!loading && selectedDetailsReady &&
 		datasetValidationIssues.length === 0;
 	$: releaseSelectionKey = JSON.stringify({
 		type: datasetType,
-		cases: selectedIds
-			.slice()
-			.sort()
-			.map((caseId) => ({ caseId, split: splitByCase[caseId] ?? 'eval' })),
-		documents: selectedDocuments
-			.slice()
-			.sort()
-			.map((documentId) => [documentId, familyByDocument[documentId] ?? ''])
+		cases: selectedIds.slice().sort()
 	});
 	$: datasetFlowStep1 = selectedCount ? 'done' : 'active';
 	$: datasetFlowStep2 = !selectedCount || !selectedDetailsReady ? 'pending' : releaseReady ? 'done' : 'active';
@@ -162,9 +134,8 @@
 				acceptedCases.some((item) => item.case_id === caseId)
 			);
 			snapshots = existing.items;
-			for (const item of acceptedCases) {
-				if (!splitByCase[item.case_id]) splitByCase[item.case_id] = 'eval';
-			}
+			details = {};
+			releasedSelectionKey = '';
 			await loadSelectedDetails();
 		} catch (err) {
 			error = errorMessage(err);
@@ -183,45 +154,14 @@
 	async function loadCaseDetail(caseId: string) {
 		detailLoadingByCase = { ...detailLoadingByCase, [caseId]: true };
 		detailErrorsByCase = { ...detailErrorsByCase, [caseId]: '' };
-			try {
-				const detail = await fetchFeedbackCase(collectionId, caseId);
-				details = { ...details, [caseId]: detail };
-				for (const id of caseDocumentIds(detail)) {
-					const item = [
-						...detail.requested_scope,
-						...detail.inspected_sources,
-					...detail.omitted_candidates,
-					...detail.claim_support
-					].find((source) => String(source.document_id ?? '') === id);
-					const title = String(item?.document_title ?? item?.title ?? '').trim();
-					documentTitles = {
-						...documentTitles,
-						[id]: title || $t('datasetSnapshots.selectedPaper')
-					};
-				if (!familyByDocument[id] && title) {
-					familyByDocument = { ...familyByDocument, [id]: title };
-				}
-			}
+		try {
+			const detail = await fetchFeedbackCase(collectionId, caseId);
+			details = { ...details, [caseId]: detail };
 		} catch (err) {
 			detailErrorsByCase = { ...detailErrorsByCase, [caseId]: errorMessage(err) };
 		} finally {
 			detailLoadingByCase = { ...detailLoadingByCase, [caseId]: false };
 		}
-	}
-
-	function caseDocumentIds(detail: FeedbackCaseDetail) {
-		return [
-			...detail.requested_scope,
-			...detail.inspected_sources,
-			...detail.omitted_candidates,
-			...detail.claim_support
-		]
-			.map((source) => String(source.document_id ?? ''))
-			.filter((id, index, values) => id && values.indexOf(id) === index);
-	}
-
-	function documentLabel(documentId: string) {
-		return documentTitles[documentId] || $t('datasetSnapshots.selectedPaper');
 	}
 
 	function caseLabel(caseId: string) {
@@ -284,24 +224,23 @@
 		selectedIds = [];
 	}
 
-	function setSplit(caseId: string, split: DatasetSplit) {
-		splitByCase = { ...splitByCase, [caseId]: split };
-	}
-
 	async function saveSnapshot() {
 		if (saving || !releaseReady) return;
 		saving = true;
 		error = '';
 		notice = '';
 		noticeTone = 'success';
+		const submittedKey = releaseSelectionKey;
 		try {
 			const snapshot = await createDatasetSnapshot(
 				collectionId,
 				datasetType,
-				selectedIds.map((caseId) => ({ case_id: caseId, split: splitByCase[caseId] ?? 'eval' })),
-				Object.fromEntries(selectedDocuments.map((id) => [id, familyByDocument[id] || '']))
+				selectedIds.map((caseId) => ({ case_id: caseId }))
 			);
-			if (snapshot.excluded_count) {
+			if (!snapshot.row_count) {
+				noticeTone = 'warning';
+				notice = $t('datasetSnapshots.noExportableCases');
+			} else if (snapshot.excluded_count) {
 				noticeTone = 'warning';
 				notice = $t('datasetSnapshots.createdWithExclusions', {
 					count: snapshot.row_count,
@@ -314,7 +253,9 @@
 				snapshot,
 				...snapshots.filter((item) => item.dataset_id !== snapshot.dataset_id)
 			];
-			releasedSelectionKey = releaseSelectionKey;
+			snapshotDetails = { ...snapshotDetails, [snapshot.dataset_id]: snapshot };
+			expandedSnapshot = snapshot.excluded_count ? snapshot.dataset_id : '';
+			releasedSelectionKey = snapshot.row_count ? submittedKey : '';
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -594,21 +535,6 @@
 											{/if}
 										{/if}
 								</div>
-								<label class="split-field"
-									><span>{$t('datasetSnapshots.splitLabel')}</span><select
-											aria-label={$t('datasetSnapshots.splitFor', {
-												case: caseLabel(item.case_id)
-											})}
-										value={splitByCase[item.case_id] ?? 'eval'}
-										on:change={(event) =>
-											setSplit(
-												item.case_id,
-												(event.currentTarget as HTMLSelectElement).value as DatasetSplit
-											)}
-											><option value="eval">eval</option><option value="train">train</option
-											></select
-									></label
-								>
 							</div>
 						{/each}
 					</div>
@@ -653,35 +579,6 @@
 				</fieldset>
 			</div>
 
-			{#if selectedDocuments.length}
-				<details class="validation-section" open>
-					<summary
-						><span
-							><CheckCircle2 size={15} aria-hidden="true" /><strong
-								>{$t('datasetSnapshots.validationTitle')}</strong
-							></span
-						><small>{$t('datasetSnapshots.validationDetail')}</small></summary
-					>
-					<div class="families">
-						<div class="section-heading">
-							<div>
-								<h3>{$t('datasetSnapshots.paperFamilies')}</h3>
-								<span>{$t('datasetSnapshots.paperFamiliesHint')}</span>
-							</div>
-						</div>
-						{#each selectedDocuments as documentId (documentId)}
-							<label class="family-row"
-								><span>{documentLabel(documentId)}</span><input
-									bind:value={familyByDocument[documentId]}
-									aria-label={$t('datasetSnapshots.familyFor', {
-										document: documentLabel(documentId)
-									})}
-								/></label
-							>
-						{/each}
-					</div>
-				</details>
-			{/if}
 		</section>
 
 		<aside class="summary-panel" aria-labelledby="summary-title">
@@ -700,8 +597,6 @@
 				<div>
 					<strong>{selectedCount}</strong><span>{$t('datasetSnapshots.selectedCases')}</span>
 				</div>
-				<div><strong>{splitCounts.train}</strong><span>train</span></div>
-				<div><strong>{splitCounts.eval}</strong><span>eval</span></div>
 				<div>
 					<strong>{latestSnapshot?.row_count ?? 0}</strong><span
 						>{$t('datasetSnapshots.lastRows')}</span
@@ -739,12 +634,6 @@
 							<span>{$t('datasetSnapshots.targetRequired')}</span>
 						{:else if datasetValidationIssues.some((item) => item.reason === 'dataset_use_not_authorized')}
 							<span>{$t('datasetSnapshots.datasetUseRequired')}</span>
-						{:else if missingFamilyDocuments.length}
-							<span
-								>{$t('datasetSnapshots.familyRequired', {
-									count: missingFamilyDocuments.length
-								})}</span
-							>
 						{/if}
 					</div>
 				</div>
@@ -1147,34 +1036,6 @@
 		min-width: 0;
 		padding: 20px;
 	}
-	.validation-section {
-		padding: 17px 0 0;
-	}
-	.validation-section summary {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		cursor: pointer;
-		list-style: none;
-	}
-	.validation-section summary::-webkit-details-marker {
-		display: none;
-	}
-	.validation-section summary > span {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		color: var(--text-primary);
-		font-size: 12px;
-	}
-	.validation-section summary > span :global(svg) {
-		color: var(--success-text);
-	}
-	.validation-section summary small {
-		color: var(--text-secondary);
-		font-size: 10px;
-	}
 	.history-section {
 		margin-top: 26px;
 		padding-top: 21px;
@@ -1402,7 +1263,7 @@
 	}
 	.case-option {
 		display: grid;
-		grid-template-columns: 20px minmax(0, 1fr) 94px;
+		grid-template-columns: 20px minmax(0, 1fr);
 		gap: 10px;
 		align-items: center;
 		min-width: 0;
@@ -1510,14 +1371,6 @@
 		margin-bottom: 2px;
 		font-size: 11px;
 	}
-	.split-field {
-		display: grid;
-		gap: 4px;
-		min-width: 0;
-		color: var(--text-secondary);
-		font-size: 10px;
-	}
-	.split-field select,
 	select,
 	input {
 		box-sizing: border-box;
@@ -1525,37 +1378,6 @@
 		border-radius: 6px;
 		background: var(--surface-card);
 		color: var(--text-primary);
-	}
-	.split-field select {
-		width: 100%;
-		min-height: 31px;
-		padding: 0 7px;
-		font-size: 11px;
-	}
-	.families {
-		margin: 19px 0 0;
-		padding-top: 17px;
-		border-top: 1px solid var(--border-default);
-	}
-	.family-row {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(140px, 0.7fr);
-		gap: 10px;
-		align-items: center;
-		margin-top: 9px;
-		font-size: 11px;
-	}
-	.family-row span {
-		overflow: hidden;
-		color: var(--text-secondary);
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.family-row input {
-		width: 100%;
-		min-height: 33px;
-		padding: 0 8px;
-		font-size: 12px;
 	}
 	.summary-icon {
 		width: 34px;
@@ -1877,10 +1699,6 @@
 		.case-option {
 			grid-template-columns: 20px minmax(0, 1fr);
 			align-items: start;
-		}
-		.split-field {
-			grid-column: 2;
-			width: 110px;
 		}
 		.selection-toolbar {
 			align-items: flex-start;

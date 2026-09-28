@@ -50,18 +50,16 @@ async def create_dataset_snapshot(
             collection_id=payload.collection_id,
             dataset_type=payload.dataset_type,
             selections=tuple(
-                DatasetSelection(case_id=item.case_id, split=item.split)
+                DatasetSelection(case_id=item.case_id)
                 for item in payload.items
             ),
-            paper_families=payload.paper_families,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DatasetSnapshotError as exc:
         code = str(exc).split(":", 1)[0]
-        status_code = 409 if code == "dataset_split_leakage" else 422
         raise HTTPException(
-            status_code=status_code,
+            status_code=422,
             detail={"code": code, "message": str(exc)},
         ) from exc
     return _response(snapshot)

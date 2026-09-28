@@ -161,6 +161,12 @@ This node owns the Collection route family.
 
 ## Objective Interaction
 
+The feedback dataset page selects accepted cases and one export use. It does
+not request paper-family names or experiment splits. Detail loading or failure
+blocks freezing and failed cases can be retried individually. Empty exports
+show exclusion reasons rather than a successful release; historical snapshots
+remain downloadable without changing their contents.
+
 The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
 Opening "AI summary" requests one short paragraph; it has no categorized
 sections or evidence counters. Compact references link to exact Sources, and

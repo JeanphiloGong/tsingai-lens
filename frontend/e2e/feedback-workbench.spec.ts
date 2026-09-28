@@ -13,6 +13,7 @@ type MockFeedbackApisOptions = {
 	detailDelayMs?: number;
 	failDetailOnce?: boolean;
 	detailAnnotation?: Record<string, unknown> | null;
+	emptyExport?: boolean;
 };
 
 async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {}) {
@@ -23,6 +24,7 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 	const reviewKeys: string[] = [];
 	let datasetMode = false;
 	let detailFailures = 0;
+	const datasetRequests: unknown[] = [];
 
 	await page.route('**/*', async (route) => {
 		const request = route.request();
@@ -145,6 +147,17 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 		if (path === `/api/v1/feedback-cases/${caseId}/review-decisions` && request.method() === 'GET') {
 			return route.fulfill(json({ items: reviewDecisions }));
 		}
+		if (path === '/api/v1/dataset-snapshots' && request.method() === 'POST') {
+			datasetRequests.push(request.postDataJSON());
+			return route.fulfill(json({
+				dataset_id: 'dataset_new', collection_id: collectionId, dataset_type: 'evaluation',
+				rows: [], exclusions: options.emptyExport ? [{ case_id: caseId, reason: 'review_not_accepted' }] : [],
+				provenance: {}, manifest: {}, manifest_digest: digest, provenance_digest: digest,
+				content_digest: digest, row_count: options.emptyExport ? 0 : 1,
+				excluded_count: options.emptyExport ? 1 : 0, is_empty: Boolean(options.emptyExport),
+				created_at: '2026-09-28T00:00:00Z'
+			}, 201));
+		}
 		if (path === '/api/v1/dataset-snapshots' && request.method() === 'GET') {
 			return route.fulfill(
 				json({
@@ -192,6 +205,7 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 
 	return {
 		getReviewKeys: () => reviewKeys,
+		getDatasetRequests: () => datasetRequests,
 		getReviewAttempts: () => reviewAttempts
 	};
 }
@@ -227,6 +241,40 @@ test('feedback workbench carries a retry key and keeps the reviewer out of techn
 	expect(await page.locator('body').textContent()).not.toContain(caseId);
 	expect(await page.locator('body').textContent()).not.toContain('source_b');
 	expect(await page.locator('body').textContent()).toContain('Figure 3 caption');
+});
+
+for (const width of [1440, 390]) {
+	test(`export needs no grouping or splits and waits for details at ${width}px`, async ({ page }, testInfo) => {
+		const api = await mockFeedbackApis(page, {
+			detailDelayMs: 700, detailAnnotation: { dataset_uses: ['evaluation'], target: null }
+		});
+		await page.setViewportSize({ width, height: 900 });
+		await page.goto(`/collections/${collectionId}/feedback/datasets`);
+		await page.locator(`#case-${caseId}`).check();
+		await expect(page.getByText('Checking case details…')).toBeVisible();
+		const freeze = page.getByRole('button', { name: 'Freeze snapshot' });
+		await expect(freeze).toBeDisabled();
+		await expect(freeze).toBeEnabled();
+		await expect(page.getByRole('textbox', { name: /Paper family/ })).toHaveCount(0);
+		await expect(page.getByRole('combobox', { name: /Split/ })).toHaveCount(0);
+		await freeze.click();
+		await expect(page.getByText('Snapshot created with 1 rows.')).toBeVisible();
+		expect(api.getDatasetRequests()).toEqual([{
+			collection_id: collectionId, dataset_type: 'evaluation', items: [{ case_id: caseId }]
+		}]);
+		await expect(page.locator('.flow-step--done')).toHaveCount(3);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+		await page.screenshot({ path: testInfo.outputPath(`export-${width}.png`), fullPage: true });
+	});
+}
+
+test('empty export displays exclusions without marking release complete', async ({ page }) => {
+	await mockFeedbackApis(page, { emptyExport: true, detailAnnotation: { dataset_uses: ['evaluation'] } });
+	await page.goto(`/collections/${collectionId}/feedback/datasets`);
+	await page.locator(`#case-${caseId}`).check();
+	await page.getByRole('button', { name: 'Freeze snapshot' }).click();
+	await expect(page.getByText('No exportable cases. Review the exclusion reasons below.')).toBeVisible();
+	await expect(page.locator('.flow-step--done')).toHaveCount(2);
 });
 
 test('dataset history uses case context instead of internal identifiers', async ({ page }) => {

@@ -1871,6 +1871,96 @@ async def test_approved_write_resumes_exact_call_before_returning_to_model() -> 
     ]
 
 
+@pytest.mark.parametrize(
+    "model_failure,limits",
+    (
+        pytest.param(
+            ModelResponseError(
+                "Model request exceeds its context window.",
+                reason="context_window_exceeded",
+                retryable=False,
+            ),
+            None,
+            id="invalid-model-response",
+        ),
+        pytest.param(
+            RuntimeError("provider unavailable"),
+            None,
+            id="provider-failure",
+        ),
+        pytest.param(
+            RuntimeError("final answer unavailable"),
+            AgentRunLimits(max_tool_calls=1),
+            id="finalization-failure",
+        ),
+    ),
+)
+async def test_successful_approved_write_survives_unavailable_detailed_response(
+    model_failure: Exception,
+    limits: AgentRunLimits | None,
+) -> None:
+    capability = _Capability(
+        "create_paper_experiment_revision",
+        ToolRisk.WRITE,
+        _QuestionArguments,
+    )
+    runner = ResearchAgentRunner(
+        model=_Model(model_failure),
+        capabilities=CapabilityRegistry((capability,)),
+        limits=limits,
+    )
+    pending = ChatToolCall.requested(
+        tool_call_id="call-1",
+        session_id="chat-1",
+        assistant_message_id="msg-2",
+        name=capability.spec.name,
+        arguments={"question": "Record the reconstructed tensile experiment."},
+        risk=ToolRisk.WRITE,
+    ).require_approval()
+    approved = pending.approve(
+        user_id="user-1",
+        arguments_digest=pending.arguments_digest,
+        decided_at="2026-09-29T00:01:00+00:00",
+    )
+    prior_messages = (
+        ChatMessage.user(
+            message_id="msg-1",
+            session_id="chat-1",
+            content="保存已重建的拉伸实验。",
+            created_at="2026-09-29T00:00:00+00:00",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="msg-2",
+            session_id="chat-1",
+            content="我准备保存这个实验版本。",
+            tool_calls=(approved.to_request(),),
+            created_at="2026-09-29T00:00:30+00:00",
+        ),
+    )
+
+    result = await runner.resume_claimed_call(
+        context=_context(),
+        previous_messages=prior_messages,
+        claimed_call=approved.start("2026-09-29T00:01:01+00:00"),
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
+    assert result.error_code is None
+    assert result.tool_calls[0].status is ToolCallStatus.SUCCEEDED
+    assert result.tool_results[0].status is ToolResultStatus.SUCCEEDED
+    assert result.warnings == (
+        "The approved action completed, but the detailed response was unavailable; "
+        "the saved result remains authoritative.",
+    )
+    assert result.messages[-1].content == (
+        "已批准的操作已完成并保存。详细回复暂时无法生成；请以已保存的结果为准。"
+    )
+    assert capability.executed_arguments == [
+        {"question": "Record the reconstructed tensile experiment."}
+    ]
+
+
 async def test_failed_approved_write_allows_a_failure_explanation_without_new_reads() -> None:
     writer = _Capability("test_write", ToolRisk.WRITE, fail_with=RuntimeError("stale source"))
     read = _Capability("inspect_document_sources", ToolRisk.READ)

@@ -736,7 +736,14 @@ Only `completed` has a non-null `completion_reason`: `model_answer`,
 repeated identical observations, and the emergency ceiling allow one final
 model request with no tools, using inspected evidence and explicit unread or
 failed scope. It returns `completed` with warnings when an answer is available;
-finalization failure returns `failed` with a sanitized error code.
+response or finalization failure returns `failed` with a sanitized error code.
+The exception is an approved durable write in the current continuation whose
+tool call and matching result both already have status `succeeded`. A later
+response-generation failure does not reverse that completed action: the turn
+returns `completed` with `completion_reason: "model_answer"`, no error code, a
+deterministic saved-action message, and a non-blocking warning that the detailed
+response was unavailable. Successful reads, drafts, queued writes, failed
+writes, and writes from earlier turns do not use this fallback.
 
 Tool call and result failures are
 technical trajectory outcomes; they are not scientific absence, uncertainty,

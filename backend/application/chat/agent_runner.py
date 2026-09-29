@@ -42,6 +42,7 @@ from domain.chat import (
     ChatSourceContext,
     ChatToolCall,
     ChatToolResult,
+    ToolCallStatus,
     ToolPermissionMode,
     ToolResultStatus,
     ToolRisk,
@@ -116,6 +117,10 @@ _FINAL_ANSWER_INSTRUCTION = (
 )
 _INCOMPLETE_SCOPE_WARNING = (
     "The answer covers only inspected Sources; unread or failed work remains unresolved."
+)
+_SUCCESSFUL_WRITE_RESPONSE_UNAVAILABLE_WARNING = (
+    "The approved action completed, but the detailed response was unavailable; "
+    "the saved result remains authoritative."
 )
 
 def _now_iso() -> str:
@@ -654,6 +659,18 @@ class ResearchAgentRunner:
                             response_retries + 1,
                         )
                         continue
+                    write_completion = await self._complete_after_successful_write_response_failure(
+                        context,
+                        messages,
+                        calls,
+                        results,
+                        progress,
+                        checkpoint=checkpoint,
+                        phase="terminal",
+                        technical_reason=exc.reason,
+                    )
+                    if write_completion is not None:
+                        return write_completion
                     messages.append(
                         self._assistant(
                             context,
@@ -706,6 +723,18 @@ class ResearchAgentRunner:
                         )
                         await sleep(delay)
                         continue
+                    write_completion = await self._complete_after_successful_write_response_failure(
+                        context,
+                        messages,
+                        calls,
+                        results,
+                        progress,
+                        checkpoint=checkpoint,
+                        phase="terminal",
+                        technical_reason=failure["reason"],
+                    )
+                    if write_completion is not None:
+                        return write_completion
                     provider_timeout = failure["reason"] == "provider_timeout"
                     messages.append(
                         self._assistant(
@@ -1193,6 +1222,18 @@ class ResearchAgentRunner:
                 "Research Agent final answer failed exception_type=%s",
                 type(exc).__name__,
             )
+            write_completion = await self._complete_after_successful_write_response_failure(
+                context,
+                messages,
+                calls,
+                results,
+                progress,
+                checkpoint=checkpoint,
+                phase="finalize",
+                technical_reason="final_answer_unavailable",
+            )
+            if write_completion is not None:
+                return write_completion
             messages.append(
                 self._assistant(
                     context,
@@ -1462,6 +1503,68 @@ class ResearchAgentRunner:
             ),
             "Answer the researcher's current request.",
         )[:4_000]
+
+    async def _complete_after_successful_write_response_failure(
+        self,
+        context: AgentContext,
+        messages: list[ChatMessage],
+        calls: list[ChatToolCall],
+        results: list[ChatToolResult],
+        progress: _RunProgress,
+        *,
+        checkpoint: _TrajectoryCheckpoint | None,
+        phase: str,
+        technical_reason: str,
+    ) -> AgentRunResult | None:
+        successful_result_ids = {
+            result.tool_call_id
+            for result in results
+            if result.status is ToolResultStatus.SUCCEEDED
+        }
+        if not any(
+            call.risk is ToolRisk.WRITE
+            and call.status is ToolCallStatus.SUCCEEDED
+            and call.tool_call_id in successful_result_ids
+            for call in calls
+        ):
+            return None
+
+        chinese = any(
+            "\u4e00" <= char <= "\u9fff"
+            for char in self._active_user_request(messages)
+        )
+        content = (
+            "已批准的操作已完成并保存。详细回复暂时无法生成；请以已保存的结果为准。"
+            if chinese
+            else "The approved action completed and was saved. The detailed response is "
+            "unavailable; the saved result remains authoritative."
+        )
+        messages.append(
+            self._assistant(
+                context,
+                content,
+                progress,
+                messages=messages,
+                calls=calls,
+                results=results,
+            )
+        )
+        await self._checkpoint(checkpoint, messages, calls, results)
+        progress.trace(
+            context,
+            phase=phase,
+            termination_reason="write_completed_response_unavailable",
+            final_answer=True,
+            retry_reason=technical_reason,
+        )
+        return self._result(
+            AgentRunStatus.COMPLETED,
+            messages,
+            calls,
+            results,
+            completion_reason=AgentCompletionReason.MODEL_ANSWER,
+            warnings=(_SUCCESSFUL_WRITE_RESPONSE_UNAVAILABLE_WARNING,),
+        )
 
     @staticmethod
     def _failure_answer(

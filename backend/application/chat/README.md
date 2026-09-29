@@ -462,7 +462,11 @@ checks, certify a scientific stage, or automatically restart interrupted work.
   the emergency cycle ceiling. One private request path enforces model
   deadlines and output allowances for both decisions and answer-only
   finalization. Technical limits permit finalization with scope warnings only
-  while turn time remains; a failed finalization remains a failure.
+  while turn time remains. A response or finalization failure remains a failure
+  unless an approved durable write in the current continuation already has a
+  matching successful result. In that case, the runner checkpoints a short
+  deterministic confirmation and returns `completed` with a non-blocking
+  warning; the persisted write remains authoritative.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
   while pinning the active question and keeping whole request/result batches
   together. Selection uses the token capacity remaining after request overhead

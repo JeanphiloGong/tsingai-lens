@@ -13,6 +13,7 @@ from application.chat import (
     AgentContext,
     AgentRunLimits,
     CapabilityRegistry,
+    ModelResponseError,
     ModelToolCall,
     ModelTurn,
     ModelUsage,
@@ -800,6 +801,55 @@ async def test_approved_continuation_captures_text_without_repeating_the_write()
         model.continue_response.set()
         model.finish_response.set()
         await decision
+
+
+async def test_approved_write_response_failure_is_a_completed_session_turn() -> None:
+    repository = _Repository()
+    capability = _WriteCapability()
+    service = _service(
+        _Model(ModelTurn(tool_calls=(ModelToolCall(
+            name=capability.spec.name,
+            arguments={"question": "Record the reconstructed tensile experiment."},
+        ),))),
+        repository,
+        capability,
+    )
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    proposed = await service.post_message_for_user(
+        session.session_id,
+        "user-1",
+        message="保存已重建的拉伸实验。",
+    )
+    pending = proposed["pending_approval"]
+    assert pending is not None
+    service.runner.model = _Model(ModelResponseError(
+        "Model request exceeds its context window.",
+        reason="context_window_exceeded",
+        retryable=False,
+    ))
+
+    completed = await service.decide_tool_call_for_user(
+        session.session_id,
+        pending.tool_call_id,
+        "user-1",
+        arguments_digest=pending.arguments_digest,
+        decision="approved",
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["completion_reason"] == "model_answer"
+    assert completed["error_code"] is None
+    assert completed["warnings"]
+    assert completed["messages"][-1].content == (
+        "已批准的操作已完成并保存。详细回复暂时无法生成；请以已保存的结果为准。"
+    )
+    assert len(capability.executed) == 1
+    assert repository.calls[pending.tool_call_id].status is ToolCallStatus.SUCCEEDED
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot is not None
+    assert snapshot.status == "completed"
+    assert snapshot.error_code is None
+    assert snapshot.warnings == completed["warnings"]
 
 
 async def test_chat_session_service_checkpoints_every_agent_step() -> None:

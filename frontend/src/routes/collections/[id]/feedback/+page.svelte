@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
 	import {
 		AlertTriangle,
 		CheckCircle2,
@@ -46,6 +45,8 @@
 	let annotationReason = '';
 	let annotationSupportRefs: string[] = [];
 	let annotationDatasetUses: string[] = ['evaluation'];
+	let loadedCollectionId = '';
+	let loadGeneration = 0;
 
 	$: collectionId = $page.params.id ?? '';
 	$: visibleCases = cases.filter((item) => {
@@ -81,22 +82,41 @@
 	$: feedbackFlowStep4 = feedbackFlowCurrent > 4 ? 'done' : feedbackFlowCurrent === 4 ? 'active' : 'pending';
 	$: feedbackFlowStep5 = feedbackFlowCurrent > 5 ? 'done' : feedbackFlowCurrent === 5 ? 'active' : 'pending';
 
-	onMount(() => {
-		void loadCases();
-	});
+	$: if (collectionId && collectionId !== loadedCollectionId) {
+		loadedCollectionId = collectionId;
+		const generation = ++loadGeneration;
+		resetCollectionState();
+		void loadCases(generation);
+	}
 
-	async function loadCases() {
+	function resetCollectionState() {
+		cases = [];
+		selected = null;
+		loading = true;
+		detailLoading = false;
+		annotationSaving = false;
+		reviewSaving = false;
+		error = '';
+		annotationError = '';
+		annotationSaved = false;
+		reviewError = '';
+		reviewReason = '';
+		reviewRequestKey = '';
+	}
+
+	async function loadCases(generation = loadGeneration) {
 		if (!collectionId) return;
 		loading = true;
 		error = '';
 		try {
 			const response = await fetchFeedbackCases(collectionId);
+			if (generation !== loadGeneration) return;
 			cases = response.items;
 			if (selected && !cases.some((item) => item.case_id === selected?.case_id)) selected = null;
 		} catch (err) {
-			error = errorMessage(err);
+			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
-			loading = false;
+			if (generation === loadGeneration) loading = false;
 		}
 	}
 
@@ -121,16 +141,19 @@
 	}
 
 	async function openCase(item: FeedbackCaseSummary) {
+		const generation = loadGeneration;
 		detailLoading = true;
 		error = '';
 		try {
-			selected = await fetchFeedbackCase(collectionId, item.case_id);
+			const detail = await fetchFeedbackCase(collectionId, item.case_id);
+			if (generation !== loadGeneration || collectionId !== ($page.params.id ?? '')) return;
+			selected = detail;
 			reviewRequestKey = '';
 			loadAnnotationForm(selected);
 		} catch (err) {
-			error = errorMessage(err);
+			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
-			detailLoading = false;
+			if (generation === loadGeneration) detailLoading = false;
 		}
 	}
 
@@ -167,11 +190,13 @@
 
 	async function saveAnnotation() {
 		if (!selected || annotationSaving) return;
+		const generation = loadGeneration;
+		const caseId = selected.case_id;
 		annotationSaving = true;
 		annotationError = '';
 		annotationSaved = false;
 		try {
-			await saveFeedbackAnnotation(collectionId, selected.case_id, {
+			await saveFeedbackAnnotation(collectionId, caseId, {
 				expected_digest: selected.current_annotation_digest,
 				problem_type: annotationProblemType,
 				severity: annotationSeverity,
@@ -180,27 +205,31 @@
 				dataset_uses: annotationDatasetUses,
 				reason: annotationReason.trim()
 			});
-			selected = await fetchFeedbackCase(collectionId, selected.case_id);
+			const detail = await fetchFeedbackCase(collectionId, caseId);
+			if (generation !== loadGeneration || collectionId !== ($page.params.id ?? '')) return;
+			selected = detail;
 			loadAnnotationForm(selected);
 			reviewRequestKey = '';
 			annotationSaved = true;
 			await loadCases();
 		} catch (err) {
-			annotationError = errorMessage(err);
+			if (generation === loadGeneration) annotationError = errorMessage(err);
 		} finally {
-			annotationSaving = false;
+			if (generation === loadGeneration) annotationSaving = false;
 		}
 	}
 
 	async function submitReview(decision: string) {
 		if (!selected || reviewSaving || !selected.current_annotation_digest) return;
+		const generation = loadGeneration;
+		const caseId = selected.case_id;
 		reviewSaving = true;
 		reviewError = '';
 		if (!reviewRequestKey) reviewRequestKey = newReviewRequestKey();
 		try {
 			await submitFeedbackReview(
 				collectionId,
-				selected.case_id,
+					caseId,
 				{
 				expected_annotation_digest: selected.current_annotation_digest,
 				decision,
@@ -208,17 +237,19 @@
 				},
 				reviewRequestKey
 			);
-			selected = await fetchFeedbackCase(collectionId, selected.case_id);
+			const detail = await fetchFeedbackCase(collectionId, caseId);
+			if (generation !== loadGeneration || collectionId !== ($page.params.id ?? '')) return;
+			selected = detail;
 			loadAnnotationForm(selected);
 			reviewRequestKey = '';
 			await loadCases();
 		} catch (err) {
-			reviewError = errorMessage(err);
+			if (generation === loadGeneration) reviewError = errorMessage(err);
 			// A validation or stale-digest response describes a new attempt; a
 			// transport/server failure should keep the key for a safe retry.
 			if (err instanceof ApiError && err.status < 500) reviewRequestKey = '';
 		} finally {
-			reviewSaving = false;
+			if (generation === loadGeneration) reviewSaving = false;
 		}
 	}
 
@@ -420,7 +451,7 @@
 					type="button"
 					title={$t('feedbackWorkbench.refresh')}
 					aria-label={$t('feedbackWorkbench.refresh')}
-					on:click={loadCases}
+				on:click={() => loadCases()}
 					disabled={loading}
 				>
 					<span class:spin={loading}><RefreshCw size={17} /></span>

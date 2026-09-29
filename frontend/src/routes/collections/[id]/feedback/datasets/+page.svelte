@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { resolve } from '$app/paths';
-	import { onMount } from 'svelte';
 	import {
 		ArrowLeft,
 		ArrowRight,
@@ -54,6 +53,8 @@
 	let caseSearch = '';
 	let problemFilter = '';
 	let releasedSelectionKey = '';
+	let loadedCollectionId = '';
+	let loadGeneration = 0;
 
 	$: collectionId = $page.params.id ?? '';
 	$: selectedCases = acceptedCases.filter((item) => selectedIds.includes(item.case_id));
@@ -116,11 +117,31 @@
 			? 'done'
 			: 'active';
 
-	onMount(() => {
-		void load();
-	});
+	$: if (collectionId && collectionId !== loadedCollectionId) {
+		loadedCollectionId = collectionId;
+		const generation = ++loadGeneration;
+		resetCollectionState();
+		void load(generation);
+	}
 
-	async function load() {
+	function resetCollectionState() {
+		acceptedCases = [];
+		selectedIds = [];
+		details = {};
+		snapshots = [];
+		snapshotDetails = {};
+		detailLoadingByCase = {};
+		detailErrorsByCase = {};
+		detailLoading = '';
+		releasedSelectionKey = '';
+		expandedSnapshot = '';
+		saving = false;
+		downloading = '';
+		error = '';
+		notice = '';
+	}
+
+	async function load(generation = loadGeneration) {
 		if (!collectionId) return;
 		loading = true;
 		error = '';
@@ -129,6 +150,7 @@
 				fetchFeedbackCases(collectionId, { status: 'accepted', limit: 200 }),
 				fetchDatasetSnapshots(collectionId)
 			]);
+			if (generation !== loadGeneration) return;
 			acceptedCases = cases.items;
 			selectedIds = selectedIds.filter((caseId) =>
 				acceptedCases.some((item) => item.case_id === caseId)
@@ -136,31 +158,36 @@
 			snapshots = existing.items;
 			details = {};
 			releasedSelectionKey = '';
-			await loadSelectedDetails();
+			await loadSelectedDetails('', generation);
 		} catch (err) {
-			error = errorMessage(err);
+			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
-			loading = false;
+			if (generation === loadGeneration) loading = false;
 		}
 	}
 
-	async function loadSelectedDetails(forceCaseId = '') {
+	async function loadSelectedDetails(forceCaseId = '', generation = loadGeneration) {
 		const caseIds = selectedIds.filter(
 			(caseId) => forceCaseId === caseId || (!details[caseId] && !detailLoadingByCase[caseId])
 		);
-		await Promise.all(caseIds.map((caseId) => loadCaseDetail(caseId)));
+		await Promise.all(caseIds.map((caseId) => loadCaseDetail(caseId, generation)));
 	}
 
-	async function loadCaseDetail(caseId: string) {
+	async function loadCaseDetail(caseId: string, generation = loadGeneration) {
 		detailLoadingByCase = { ...detailLoadingByCase, [caseId]: true };
 		detailErrorsByCase = { ...detailErrorsByCase, [caseId]: '' };
 		try {
 			const detail = await fetchFeedbackCase(collectionId, caseId);
+			if (generation !== loadGeneration) return;
 			details = { ...details, [caseId]: detail };
 		} catch (err) {
-			detailErrorsByCase = { ...detailErrorsByCase, [caseId]: errorMessage(err) };
+			if (generation === loadGeneration) {
+				detailErrorsByCase = { ...detailErrorsByCase, [caseId]: errorMessage(err) };
+			}
 		} finally {
-			detailLoadingByCase = { ...detailLoadingByCase, [caseId]: false };
+			if (generation === loadGeneration) {
+				detailLoadingByCase = { ...detailLoadingByCase, [caseId]: false };
+			}
 		}
 	}
 
@@ -226,6 +253,7 @@
 
 	async function saveSnapshot() {
 		if (saving || !releaseReady) return;
+		const generation = loadGeneration;
 		saving = true;
 		error = '';
 		notice = '';
@@ -237,6 +265,7 @@
 				datasetType,
 				selectedIds.map((caseId) => ({ case_id: caseId }))
 			);
+			if (generation !== loadGeneration) return;
 			if (!snapshot.row_count) {
 				noticeTone = 'warning';
 				notice = $t('datasetSnapshots.noExportableCases');
@@ -257,26 +286,28 @@
 			expandedSnapshot = snapshot.excluded_count ? snapshot.dataset_id : '';
 			releasedSelectionKey = snapshot.row_count ? submittedKey : '';
 		} catch (err) {
-			error = errorMessage(err);
+			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
-			saving = false;
+			if (generation === loadGeneration) saving = false;
 		}
 	}
 
 	async function download(snapshot: DatasetSnapshotSummary) {
 		if (downloading) return;
+		const generation = loadGeneration;
 		downloading = snapshot.dataset_id;
 		error = '';
 		try {
 			await downloadDatasetSnapshot(snapshot.dataset_id);
 		} catch (err) {
-			error = errorMessage(err);
+			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
-			downloading = '';
+			if (generation === loadGeneration) downloading = '';
 		}
 	}
 
 	async function toggleSnapshot(snapshot: DatasetSnapshotSummary) {
+		const generation = loadGeneration;
 		if (expandedSnapshot === snapshot.dataset_id) {
 			expandedSnapshot = '';
 			return;
@@ -286,11 +317,12 @@
 		detailLoading = snapshot.dataset_id;
 		try {
 			const detail = await fetchDatasetSnapshot(snapshot.dataset_id);
+			if (generation !== loadGeneration) return;
 			snapshotDetails = { ...snapshotDetails, [snapshot.dataset_id]: detail };
 		} catch (err) {
-			error = errorMessage(err);
+			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
-			detailLoading = '';
+			if (generation === loadGeneration) detailLoading = '';
 		}
 	}
 
@@ -331,7 +363,7 @@
 				type="button"
 				title={$t('datasetSnapshots.refresh')}
 				aria-label={$t('datasetSnapshots.refresh')}
-				on:click={load}
+				on:click={() => load()}
 				disabled={loading}
 			>
 				<span class:spin={loading}><RefreshCw size={17} aria-hidden="true" /></span>

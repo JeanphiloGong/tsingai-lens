@@ -21,6 +21,7 @@ from domain.feedback import (
     SftRevisionContent,
     content_digest_for,
 )
+from main import create_app
 
 
 def _request(service, user_id: str = "user-1"):
@@ -176,6 +177,13 @@ def test_task_dataset_routes_create_list_and_detail() -> None:
     assert listing.items[0].task_type == "sft"
     detail = asyncio.run(task_datasets.get_feedback_dataset("fdset_1", request))
     assert detail.collection_id == "collection-1"
+
+
+def test_legacy_snapshot_routes_are_not_registered_after_d7_cutover() -> None:
+    paths = {route.path for route in create_app().routes}
+
+    assert "/api/v1/feedback-datasets" in paths
+    assert not any(path.startswith("/api/v1/dataset-snapshots") for path in paths)
 
 
 def test_task_dataset_route_maps_missing_to_404() -> None:

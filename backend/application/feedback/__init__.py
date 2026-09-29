@@ -11,6 +11,7 @@ from application.feedback.tool_failure_handler import (
 )
 from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
 from application.feedback.feedback_case_service import FeedbackCaseService, FeedbackCaseSummary
+from application.feedback.dataset_service import FeedbackDatasetError, FeedbackDatasetService
 
 __all__ = [
     "FeedbackAnalysisHandler",
@@ -23,4 +24,6 @@ __all__ = [
     "ToolFailureAnalysisWorker",
     "FeedbackCaseService",
     "FeedbackCaseSummary",
+    "FeedbackDatasetError",
+    "FeedbackDatasetService",
 ]

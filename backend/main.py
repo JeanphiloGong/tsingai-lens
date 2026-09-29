@@ -94,6 +94,7 @@ from application.feedback import (
     ToolFailureAnalysisWorker,
 )
 from application.feedback.dataset_snapshot_service import DatasetSnapshotService
+from application.feedback.dataset_service import FeedbackDatasetService
 from application.feedback.feedback_case_service import FeedbackCaseService
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
@@ -108,6 +109,7 @@ from controllers import auth
 from controllers.chat import sessions as chat_sessions
 from controllers import feedback_cases
 from controllers.feedback import datasets as feedback_datasets
+from controllers.feedback import task_datasets
 from controllers.core import (
     documents,
     finding_review,
@@ -128,6 +130,7 @@ from application.repositories.chat_repository import ChatRepository
 from application.repositories.analysis_job_repository import AnalysisJobRepository
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.repositories.dataset_snapshot_repository import DatasetSnapshotRepository
+from application.repositories.feedback_dataset_repository import FeedbackDatasetRepository
 from application.repositories.objective_repository import ObjectiveRepository
 from application.repositories.paper_experiment_repository import PaperExperimentRepository
 from application.repositories.objective_experiment_selection_repository import (
@@ -153,6 +156,9 @@ from infra.persistence.postgres.feedback_case_repository import (
 )
 from infra.persistence.postgres.dataset_snapshot_repository import (
     PostgresDatasetSnapshotRepository,
+)
+from infra.persistence.postgres.feedback_dataset_repository import (
+    PostgresFeedbackDatasetRepository,
 )
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
@@ -280,6 +286,8 @@ class ApplicationOverrides:
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None
     tool_failure_analysis_worker: ToolFailureAnalysisWorker | None = None
+    feedback_dataset_repository: FeedbackDatasetRepository | None = None
+    feedback_dataset_service: FeedbackDatasetService | None = None
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None
     dataset_snapshot_service: DatasetSnapshotService | None = None
     paper_experiment_repository: PaperExperimentRepository | None = None
@@ -340,6 +348,8 @@ class ApplicationRuntime:
     feedback_analysis_worker: FeedbackAnalysisWorker | None
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None
     tool_failure_analysis_worker: ToolFailureAnalysisWorker | None
+    feedback_dataset_repository: FeedbackDatasetRepository | None
+    feedback_dataset_service: FeedbackDatasetService | None
     dataset_snapshot_repository: DatasetSnapshotRepository | None
     dataset_snapshot_service: DatasetSnapshotService | None
     experiment_plan_service: ExperimentPlanService
@@ -498,6 +508,7 @@ async def build_application_runtime(
         )
         analysis_job_repository = overrides.analysis_job_repository
         feedback_case_repository = overrides.feedback_case_repository
+        feedback_dataset_repository = overrides.feedback_dataset_repository
         dataset_snapshot_repository = overrides.dataset_snapshot_repository
         if session_factory is not None:
             analysis_job_repository = (
@@ -507,6 +518,10 @@ async def build_application_runtime(
             feedback_case_repository = (
                 feedback_case_repository
                 or PostgresFeedbackCaseRepository(session_factory)
+            )
+            feedback_dataset_repository = (
+                feedback_dataset_repository
+                or PostgresFeedbackDatasetRepository(session_factory)
             )
             dataset_snapshot_repository = (
                 dataset_snapshot_repository
@@ -575,6 +590,13 @@ async def build_application_runtime(
                 repository=dataset_snapshot_repository,
                 case_repository=feedback_case_repository,
                 chat_repository=chat_repository,
+                collection_service=collection_service,
+            )
+
+        feedback_dataset_service = overrides.feedback_dataset_service
+        if feedback_dataset_service is None and feedback_dataset_repository is not None:
+            feedback_dataset_service = FeedbackDatasetService(
+                repository=feedback_dataset_repository,
                 collection_service=collection_service,
             )
 
@@ -839,6 +861,8 @@ async def build_application_runtime(
             feedback_analysis_worker=feedback_analysis_worker,
             correction_signal_analysis_worker=correction_signal_analysis_worker,
             tool_failure_analysis_worker=tool_failure_analysis_worker,
+            feedback_dataset_repository=feedback_dataset_repository,
+            feedback_dataset_service=feedback_dataset_service,
             dataset_snapshot_repository=dataset_snapshot_repository,
             dataset_snapshot_service=dataset_snapshot_service,
             experiment_plan_service=experiment_plan_service,
@@ -890,6 +914,8 @@ def install_application_runtime(
         runtime.correction_signal_analysis_worker
     )
     application.state.tool_failure_analysis_worker = runtime.tool_failure_analysis_worker
+    application.state.feedback_dataset_repository = runtime.feedback_dataset_repository
+    application.state.feedback_dataset_service = runtime.feedback_dataset_service
     application.state.dataset_snapshot_repository = runtime.dataset_snapshot_repository
     application.state.dataset_snapshot_service = runtime.dataset_snapshot_service
     application.state.experiment_plan_service = runtime.experiment_plan_service
@@ -1031,6 +1057,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(chat_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(feedback_cases.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(task_datasets.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(feedback_datasets.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(pipeline_runs.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
@@ -1058,6 +1085,8 @@ def create_app(
     feedback_analysis_worker: FeedbackAnalysisWorker | None = None,
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None,
     tool_failure_analysis_worker: ToolFailureAnalysisWorker | None = None,
+    feedback_dataset_repository: FeedbackDatasetRepository | None = None,
+    feedback_dataset_service: FeedbackDatasetService | None = None,
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None,
     dataset_snapshot_service: DatasetSnapshotService | None = None,
     paper_experiment_repository: PaperExperimentRepository | None = None,
@@ -1088,6 +1117,8 @@ def create_app(
         feedback_analysis_worker=feedback_analysis_worker,
         correction_signal_analysis_worker=correction_signal_analysis_worker,
         tool_failure_analysis_worker=tool_failure_analysis_worker,
+        feedback_dataset_repository=feedback_dataset_repository,
+        feedback_dataset_service=feedback_dataset_service,
         dataset_snapshot_repository=dataset_snapshot_repository,
         dataset_snapshot_service=dataset_snapshot_service,
         paper_experiment_repository=paper_experiment_repository,

@@ -33,11 +33,20 @@
 		type DatasetSnapshotSummary,
 		type DatasetType
 	} from '../../../../_shared/datasetSnapshots';
+	import {
+		createFeedbackDataset,
+		fetchFeedbackDatasets,
+		type FeedbackDataset
+	} from '../../../../_shared/feedbackDatasets';
 
 	let acceptedCases: FeedbackCaseSummary[] = [];
 	let selectedIds: string[] = [];
 	let details: Record<string, FeedbackCaseDetail> = {};
 	let snapshots: DatasetSnapshotSummary[] = [];
+	let taskDatasets: FeedbackDataset[] = [];
+	let taskDatasetName = '';
+	let taskDatasetCreating = false;
+	let taskDatasetError = '';
 	let snapshotDetails: Record<string, DatasetSnapshot> = {};
 	let datasetType: DatasetType = 'evaluation';
 	let loading = true;
@@ -129,6 +138,10 @@
 		selectedIds = [];
 		details = {};
 		snapshots = [];
+		taskDatasets = [];
+		taskDatasetName = '';
+		taskDatasetCreating = false;
+		taskDatasetError = '';
 		snapshotDetails = {};
 		detailLoadingByCase = {};
 		detailErrorsByCase = {};
@@ -146,9 +159,10 @@
 		loading = true;
 		error = '';
 		try {
-			const [cases, existing] = await Promise.all([
+			const [cases, existing, maintained] = await Promise.all([
 				fetchFeedbackCases(collectionId, { status: 'accepted', limit: 200 }),
-				fetchDatasetSnapshots(collectionId)
+				fetchDatasetSnapshots(collectionId),
+				fetchFeedbackDatasets(collectionId)
 			]);
 			if (generation !== loadGeneration) return;
 			acceptedCases = cases.items;
@@ -156,6 +170,7 @@
 				acceptedCases.some((item) => item.case_id === caseId)
 			);
 			snapshots = existing.items;
+			taskDatasets = maintained.items;
 			details = {};
 			releasedSelectionKey = '';
 			await loadSelectedDetails('', generation);
@@ -163,6 +178,25 @@
 			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
 			if (generation === loadGeneration) loading = false;
+		}
+	}
+
+	async function createTaskDataset() {
+		const name = taskDatasetName.trim();
+		if (!name || taskDatasetCreating) return;
+		taskDatasetCreating = true;
+		taskDatasetError = '';
+		try {
+			const created = await createFeedbackDataset(collectionId, name, {
+				language: 'zh-CN',
+				source_kinds: ['feedback_case']
+			});
+			taskDatasets = [created, ...taskDatasets.filter((item) => item.dataset_id !== created.dataset_id)];
+			taskDatasetName = '';
+		} catch (err) {
+			taskDatasetError = errorMessage(err);
+		} finally {
+			taskDatasetCreating = false;
 		}
 	}
 
@@ -377,6 +411,46 @@
 	{#if notice}<div class="notice notice--{noticeTone}" role="status">
 			<CheckCircle2 size={17} aria-hidden="true" /><span>{notice}</span>
 		</div>{/if}
+
+	<section class="maintained-panel" aria-labelledby="maintained-title">
+		<div class="maintained-heading">
+			<div>
+				<p class="eyebrow">{$t('datasetSnapshots.maintainedTitle')}</p>
+				<h2 id="maintained-title">{$t('datasetSnapshots.maintainedTitle')}</h2>
+				<p>{$t('datasetSnapshots.maintainedDetail')}</p>
+			</div>
+			<form class="maintained-create" on:submit|preventDefault={createTaskDataset}>
+				<label class="sr-only" for="task-dataset-name">{$t('datasetSnapshots.maintainedNamePlaceholder')}</label>
+				<input
+					id="task-dataset-name"
+					bind:value={taskDatasetName}
+					maxlength="120"
+					placeholder={$t('datasetSnapshots.maintainedNamePlaceholder')}
+					required
+				/>
+				<button type="submit" disabled={taskDatasetCreating || !taskDatasetName.trim()}>
+					{taskDatasetCreating ? $t('datasetSnapshots.maintainedOpening') : $t('datasetSnapshots.maintainedCreate')}
+				</button>
+			</form>
+		</div>
+		{#if taskDatasetError}<p class="maintained-error" role="alert">{taskDatasetError}</p>{/if}
+		{#if taskDatasets.length}
+			<div class="maintained-grid">
+				{#each taskDatasets as dataset}
+					<a
+						class="maintained-card"
+						href={`/collections/${encodeURIComponent(collectionId)}/feedback/datasets/${encodeURIComponent(dataset.dataset_id)}`}
+					>
+						<strong>{dataset.name}</strong>
+						<span>{$t('datasetSnapshots.maintainedTaskSft')}</span>
+						<small>v{dataset.spec_version} · {formatDate(dataset.updated_at)}</small>
+					</a>
+				{/each}
+			</div>
+		{:else}
+			<p class="maintained-empty">{$t('datasetSnapshots.maintainedEmpty')}</p>
+		{/if}
+	</section>
 
 	<nav class="flow-bar" aria-label={$t('datasetSnapshots.flowLabel')}>
 		<div
@@ -962,6 +1036,86 @@
 		border: 1px solid var(--warning-border);
 		background: var(--warning-bg);
 		color: var(--warning-text);
+	}
+	.maintained-panel {
+		margin-top: 20px;
+		padding: 20px;
+		border: 1px solid var(--border-default);
+		border-radius: 10px;
+		background: var(--bg-surface);
+	}
+	.maintained-heading {
+		display: flex;
+		justify-content: space-between;
+		gap: 20px;
+		align-items: flex-start;
+	}
+	.maintained-heading p:last-child {
+		margin: 5px 0 0;
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+	.maintained-create {
+		display: flex;
+		gap: 8px;
+		flex: 0 0 360px;
+		align-items: center;
+	}
+	.maintained-create input {
+		min-width: 0;
+		flex: 1;
+		min-height: 38px;
+		padding: 0 10px;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--bg-canvas);
+		color: var(--text-primary);
+	}
+	.maintained-create button {
+		min-height: 38px;
+		padding: 0 12px;
+		border: 1px solid var(--brand-primary);
+		border-radius: 6px;
+		background: var(--brand-primary);
+		color: white;
+		font-weight: 700;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.maintained-create button:disabled { opacity: .55; cursor: not-allowed; }
+	.maintained-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		gap: 10px;
+		margin-top: 18px;
+	}
+	.maintained-card {
+		display: grid;
+		gap: 6px;
+		padding: 15px;
+		border: 1px solid var(--border-default);
+		border-radius: 8px;
+		background: var(--bg-canvas);
+		color: var(--text-primary);
+		text-decoration: none;
+	}
+	.maintained-card:hover { border-color: var(--brand-primary); }
+	.maintained-card span,
+	.maintained-card small,
+	.maintained-empty,
+	.maintained-error { color: var(--text-secondary); font-size: 12px; }
+	.maintained-error { margin: 12px 0 0; color: var(--danger-text); }
+	.maintained-empty { margin: 18px 0 0; }
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 	.flow-bar {
 		display: grid;
@@ -1690,6 +1844,13 @@
 		}
 	}
 	@media (max-width: 720px) {
+		.maintained-heading {
+			flex-direction: column;
+		}
+		.maintained-create {
+			width: 100%;
+			flex-basis: auto;
+		}
 		.flow-bar {
 			grid-template-columns: 1fr;
 			gap: 8px;

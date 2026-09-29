@@ -30,6 +30,7 @@ from domain.feedback.feedback_case import FeedbackCase, FeedbackCaseStatus
 from domain.feedback.annotation import AnnotationSeverity, DatasetUse, FeedbackAnnotation
 from domain.feedback.review_decision import ReviewDecision, ReviewDecisionValue
 from domain.feedback.dataset_snapshot import DatasetSnapshot, DatasetType
+from domain.feedback.dataset import DATASET_TASK_TYPES, Dataset, DatasetTaskType
 
 __all__ = [
     "AnalysisJob",
@@ -62,4 +63,7 @@ __all__ = [
     "ReviewDecisionValue",
     "DatasetSnapshot",
     "DatasetType",
+    "DATASET_TASK_TYPES",
+    "Dataset",
+    "DatasetTaskType",
 ]

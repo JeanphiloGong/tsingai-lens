@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from contextlib import asynccontextmanager
+from copy import deepcopy
 
 import pytest
 
@@ -94,6 +95,77 @@ def _draft() -> dict:
         ],
         "unresolved_issues": [],
     }
+
+
+def test_agent_request_schema_describes_structured_test_parameters() -> None:
+    schema = ProposePaperExperimentDraftCapability.spec.model_schema()
+    serialized = str(schema)
+    assert "Structured test parameters" in serialized
+    assert "strain_rate" in serialized
+    assert "test_attributes" in serialized
+
+    request = PaperExperimentDraftToolRequest(
+        objective_id="objective-1",
+        document_id="paper-1",
+        source_labels=["S001"],
+        experiments=[
+            {
+                "series_key": "series-a",
+                "test_conditions": [
+                    {
+                        "test_key": "tensile-1",
+                        "test_type": "tensile",
+                        "parameters": [
+                            {"name": "temperature", "value": 25, "unit": "C"},
+                            {"name": "strain_rate", "value": 0.001, "unit": "1/s"},
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+    raw = request.raw_draft()
+    assert raw["experiments"][0]["test_conditions"][0]["parameters"][1]["name"] == "strain_rate"
+
+
+@pytest.mark.anyio
+async def test_agent_request_parameters_survive_authoring_prepare() -> None:
+    draft = deepcopy(_draft())
+    draft["experiments"][0]["test_conditions"] = [
+        {
+            "test_key": "tensile-1",
+            "test_type": "tensile",
+            "parameters": [
+                {"name": "temperature", "value": 25, "unit": "C"},
+                {"name": "strain_rate", "value": 0.001, "unit": "1/s"},
+                {"name": "n", "value": 5},
+            ],
+        }
+    ]
+    request = PaperExperimentDraftToolRequest(
+        objective_id="objective-1", document_id="paper-1", **draft
+    )
+    service = PaperExperimentAuthoringService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=_SourceRepository(),
+        objective_repository=_ObjectiveRepository(),
+        experiment_analysis_writer=object(),
+    )
+    prepared = await service.prepare(
+        collection_id="collection-1",
+        user_id="user-1",
+        objective_id=request.objective_id,
+        document_id=request.document_id,
+        raw_draft=request.raw_draft(),
+    )
+    parameters = prepared.output.output.experiments[0].payload["test_conditions"][0][
+        "parameters"
+    ]
+    assert parameters == [
+        {"name": "temperature", "value": 25, "unit": "C"},
+        {"name": "strain_rate", "value": 0.001, "unit": "1/s"},
+        {"name": "n", "value": 5},
+    ]
 
 
 class _CollectionService:

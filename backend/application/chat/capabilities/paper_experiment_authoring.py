@@ -15,18 +15,142 @@ from application.core.objectives.paper_experiment_authoring_service import (
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
+class _ScientificAttributeToolField(BaseModel):
+    """A source-reported named value used in variants or test conditions."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = Field(
+        min_length=1,
+        description="Source-reported parameter name, such as temperature or strain_rate.",
+    )
+    value: str | int | float | bool = Field(
+        description="The reported value; do not invent a value when the source is silent."
+    )
+    unit: str | None = Field(
+        default=None,
+        description="Reported unit, such as C, K, or 1/s; null when not reported.",
+    )
+    context_scope: str | None = Field(
+        default=None,
+        description="Optional scope: experimental, simulation, background, or unknown.",
+    )
+    applies_to_outcomes: list[str] = Field(
+        default_factory=list,
+        description="Optional outcome labels this parameter applies to.",
+    )
+
+
+class _PaperExperimentVariantToolField(BaseModel):
+    """One response-local experimental variant; extra scientific fields are allowed."""
+
+    model_config = ConfigDict(extra="allow")
+
+    variant_key: str | None = Field(default=None, description="Response-local variant key.")
+    variant_label: str | None = Field(default=None, description="Human-readable variant label.")
+    subject_attributes: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Material, specimen, or population attributes reported for this variant.",
+    )
+    intervention_attributes: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Treatment or process attributes that distinguish this variant.",
+    )
+    state: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Other source-reported state attributes for this variant.",
+    )
+
+
+class _PaperExperimentTestConditionToolField(BaseModel):
+    """A test or characterization and the parameters reported for it."""
+
+    model_config = ConfigDict(extra="allow")
+
+    test_key: str | None = Field(default=None, description="Response-local test key.")
+    test_type: str = Field(
+        min_length=1,
+        description="Test or characterization category, such as tensile or microscopy.",
+    )
+    method: str | None = Field(default=None, description="Reported method or instrument description.")
+    standard: str | None = Field(default=None, description="Reported standard, such as ASTM E8.")
+    parameters: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description=(
+            "Structured test parameters reported by the source, such as temperature, "
+            "strain_rate, frequency, duration, or n. Use this field rather than "
+            "test_attributes."
+        ),
+    )
+    outcome_scope: list[str] = Field(
+        default_factory=list,
+        description="Outcome labels measured or characterized by this test.",
+    )
+
+
+class _PaperExperimentMeasurementToolField(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    measurement_key: str | None = Field(default=None, description="Response-local measurement key.")
+    variant_key: str | None = Field(default=None, description="Response-local variant key, when known.")
+    test_key: str | None = Field(default=None, description="Response-local test key, when known.")
+    outcome: str = Field(min_length=1, description="Measured or observed outcome label.")
+    value: str | int | float | bool | None = Field(default=None, description="Reported value, if numeric or scalar.")
+    unit: str | None = Field(default=None, description="Reported measurement unit.")
+    result_text: str | None = Field(default=None, description="Reported qualitative result when no scalar value exists.")
+
+
+class _PaperExperimentDraftExperimentField(BaseModel):
+    """One paper experiment with response-local relationships."""
+
+    model_config = ConfigDict(extra="allow")
+
+    series_key: str | None = Field(default=None, description="Response-local experiment series key.")
+    scope_kind: str | None = Field(default=None, description="Experiment scope, such as parent or unknown.")
+    experimental_variants: list[_PaperExperimentVariantToolField] = Field(
+        default_factory=list,
+        description="Variants or groups reconstructed from the paper.",
+    )
+    variants: list[_PaperExperimentVariantToolField] = Field(
+        default_factory=list,
+        description="Alias accepted by the contract for experimental_variants.",
+    )
+    test_conditions: list[_PaperExperimentTestConditionToolField] = Field(
+        default_factory=list,
+        description="Tests or characterizations and their structured parameters.",
+    )
+    measurements: list[_PaperExperimentMeasurementToolField] = Field(
+        default_factory=list,
+        description="Source-reported measurements or qualitative observations.",
+    )
+    comparisons: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Within-paper comparisons using response-local keys and source labels.",
+    )
+    reported_interpretations: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Source-reported interpretations, kept distinct from Lens Findings.",
+    )
+    source_labels: list[str] = Field(default_factory=list, description="Sxxx labels supporting this experiment.")
+    unresolved_issues: list[dict[str, Any]] = Field(default_factory=list, description="Unknown or unresolved source facts.")
+
+
 class _PaperExperimentDraftFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
     document_id: str = Field(min_length=1, max_length=240)
-    experiments: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
+    experiments: list[_PaperExperimentDraftExperimentField] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Experiments reconstructed from the source; keep all keys response-local.",
+    )
     source_labels: list[str] = Field(default_factory=list, max_length=100)
     unresolved_issues: list[dict[str, Any]] = Field(default_factory=list, max_length=50)
 
     def raw_draft(self) -> dict[str, Any]:
         return {
-            "experiments": self.experiments,
+            "experiments": [item.model_dump(exclude_defaults=True) for item in self.experiments],
             "source_labels": self.source_labels,
             "unresolved_issues": self.unresolved_issues,
         }

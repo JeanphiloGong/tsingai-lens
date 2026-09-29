@@ -101,7 +101,7 @@ for (const width of [1440, 390]) {
 		await page.getByRole('button', { name: '保存修改' }).click();
 		await expect(page.getByRole('status')).toContainText('修改已保存');
 		await page.getByRole('button', { name: '确认样本' }).click();
-		await expect(page.getByText('已确认')).toBeVisible();
+		await expect(page.getByText('已确认', { exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
 		await page.screenshot({ path: testInfo.outputPath(`task-dataset-${width}.png`), fullPage: true });
 	});

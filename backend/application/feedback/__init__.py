@@ -17,6 +17,16 @@ from application.feedback.sft_sample_builder import (
     SftBuildNeedsInput,
     SftSampleBuilder,
 )
+from application.feedback.preference_sample_builder import (
+    PreferenceBuildCandidate,
+    PreferenceBuildNeedsInput,
+    PreferenceSampleBuilder,
+)
+from application.feedback.evaluation_sample_builder import (
+    EvaluationBuildCandidate,
+    EvaluationBuildNeedsInput,
+    EvaluationSampleBuilder,
+)
 from application.feedback.feedback_case_service import FeedbackCaseService, FeedbackCaseSummary
 from application.feedback.dataset_service import FeedbackDatasetError, FeedbackDatasetService
 
@@ -34,6 +44,12 @@ __all__ = [
     "SftBuildCandidate",
     "SftBuildNeedsInput",
     "SftSampleBuilder",
+    "PreferenceBuildCandidate",
+    "PreferenceBuildNeedsInput",
+    "PreferenceSampleBuilder",
+    "EvaluationBuildCandidate",
+    "EvaluationBuildNeedsInput",
+    "EvaluationSampleBuilder",
     "FeedbackCaseService",
     "FeedbackCaseSummary",
     "FeedbackDatasetError",

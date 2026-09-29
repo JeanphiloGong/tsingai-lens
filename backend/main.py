@@ -91,6 +91,8 @@ from application.feedback import (
     FeedbackAnalysisHandler,
     FeedbackAnalysisWorker,
     DatasetSampleBuildWorker,
+    EvaluationSampleBuilder,
+    PreferenceSampleBuilder,
     SftSampleBuilder,
     ToolFailureAnalysisHandler,
     ToolFailureAnalysisWorker,
@@ -661,7 +663,11 @@ async def build_application_runtime(
                 dataset_repository=feedback_dataset_repository,
                 sample_repository=feedback_dataset_sample_repository,
                 case_repository=feedback_case_repository,
-                builder=SftSampleBuilder(),
+                builders={
+                    "sft": SftSampleBuilder(),
+                    "preference": PreferenceSampleBuilder(),
+                    "evaluation": EvaluationSampleBuilder(),
+                },
             )
 
         # Services share the resolved objects above; no service locator is used.

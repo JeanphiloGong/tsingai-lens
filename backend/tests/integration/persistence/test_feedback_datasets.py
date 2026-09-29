@@ -145,7 +145,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         reason=None, idempotency_key="restore-1",
     )
     assert restored.status == "needs_confirmation" and restored.confirmed_revision_id is None
-    confirmed = await service.confirm_sft_sample(
+    confirmed = await service.confirm_sample(
         user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
         expected_revision_id=original_revision_id,
     )

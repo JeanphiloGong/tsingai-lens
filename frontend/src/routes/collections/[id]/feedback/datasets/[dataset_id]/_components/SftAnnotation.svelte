@@ -23,14 +23,16 @@
 
 	$: if (sample?.current_revision?.revision_id && sample.current_revision.revision_id !== loadedRevisionId) {
 		loadedRevisionId = sample.current_revision.revision_id;
-		target = sample.current_revision.content.target;
-		evidence = sample.current_revision.content.evidence.map((item) => ({ ...item }));
+		const content = sample.current_revision.content as SftRevisionContent;
+		target = content.target;
+		evidence = content.evidence.map((item) => ({ ...item }));
 	}
 
 	$: currentRevision = sample?.current_revision ?? null;
+	$: currentContent = currentRevision?.content as SftRevisionContent | undefined;
 	$: draftChanged = Boolean(currentRevision && (
-		target.trim() !== currentRevision.content.target ||
-		JSON.stringify(evidence) !== JSON.stringify(currentRevision.content.evidence)
+		target.trim() !== currentContent?.target ||
+		JSON.stringify(evidence) !== JSON.stringify(currentContent?.evidence)
 	));
 	$: canConfirm = Boolean(currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged && !saving && !confirming && !acting);
 	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed';
@@ -38,9 +40,9 @@
 	function content(): SftRevisionContent | null {
 		if (!currentRevision) return null;
 		return {
-			schema_version: currentRevision.content.schema_version,
-			messages: currentRevision.content.messages,
-			context: currentRevision.content.context,
+			schema_version: currentContent?.schema_version ?? 'literature-sft.v1',
+			messages: currentContent?.messages ?? [],
+			context: currentContent?.context ?? [],
 			target: target.trim(),
 			evidence: evidence.map((item) => ({
 				document_title: item.document_title.trim(),

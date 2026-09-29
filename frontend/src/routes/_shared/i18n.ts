@@ -3151,6 +3151,30 @@ const translations: Record<Language, Translations> = {
 			reasonPreferencePairMissing: 'Preference pair is incomplete',
 			reasonOther: 'Could not include this selection'
 		},
+		taskDatasets: {
+			eyebrow: 'Training data workspace',
+			title: 'Task datasets',
+			lede: 'Choose one task type, collect candidate samples, review them, and publish a frozen export.',
+			back: 'Back to feedback workbench',
+			refresh: 'Refresh task datasets',
+			createTitle: 'Create a dataset',
+			createDetail: 'The task type is fixed after creation and determines the annotation editor and export schema.',
+			nameLabel: 'Dataset name',
+			namePlaceholder: 'For example, preheating question corrections',
+			taskTypeLabel: 'Task type',
+			create: 'Create dataset',
+			creating: 'Creating…',
+			emptyTitle: 'No task datasets yet',
+			emptyDetail: 'Create a task dataset before collecting feedback cases.',
+			open: 'Open dataset',
+			updated: 'Updated {date}',
+			specVersion: 'Rule version {version}',
+			type: {
+				sft: 'Literature question answering · SFT',
+				preference: 'Answer preference',
+				evaluation: 'Evaluation'
+			}
+		},
 		error: {
 			unexpected: 'Unexpected error.',
 			requestFailed: 'The request could not be completed. Please try again.',
@@ -6164,6 +6188,30 @@ const translations: Record<Language, Translations> = {
 			reasonEvidenceContentMissing: '缺少可读的证据内容',
 			reasonPreferencePairMissing: '偏好对不完整',
 			reasonOther: '无法纳入此选择'
+		},
+		taskDatasets: {
+			eyebrow: '训练数据工作台',
+			title: '任务数据集',
+			lede: '先确定任务类型，再收集候选样本、人工校正并发布冻结导出。',
+			back: '返回反馈工作台',
+			refresh: '刷新任务数据集',
+			createTitle: '创建数据集',
+			createDetail: '创建后任务类型不可修改，并决定标注界面和导出结构。',
+			nameLabel: '数据集名称',
+			namePlaceholder: '例如：预热条件问答纠错',
+			taskTypeLabel: '任务类型',
+			create: '创建数据集',
+			creating: '正在创建…',
+			emptyTitle: '还没有任务数据集',
+			emptyDetail: '先创建一个任务数据集，再收集反馈案例。',
+			open: '打开数据集',
+			updated: '更新于 {date}',
+			specVersion: '规则版本 {version}',
+			type: {
+				sft: '文献问答 · SFT',
+				preference: '回答偏好',
+				evaluation: '评测'
+			}
 		},
 		error: {
 			unexpected: '发生未知错误。',

@@ -41,8 +41,11 @@ class _Jobs:
 
 
 class _Datasets:
+    def __init__(self, dataset=None) -> None:
+        self.dataset = dataset or _dataset()
+
     async def read(self, dataset_id: str):
-        return _dataset() if dataset_id == "fdset-1" else None
+        return self.dataset if dataset_id == "fdset-1" else None
 
 
 class _Cases:
@@ -207,6 +210,71 @@ async def test_worker_rejects_source_changed_after_collect() -> None:
     assert samples.completed["outcome"] == "needs_input"
     assert samples.completed["missing_reasons"] == ("source_changed_since_collection",)
     assert samples.revision is None
+
+
+async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> None:
+    from dataclasses import replace
+
+    dataset = replace(_dataset(), task_type="preference")
+    case = replace(
+        _case(),
+        context_snapshot={
+            "question": "比较 A、B。",
+            "original_answer": "回答 A",
+            "candidate_target": "回答 B",
+            "inspected_sources": [{"document_title": "文献 B", "quote": "图注原文"}],
+        },
+    )
+    sample = DatasetSample.pending(
+        sample_id="sample-1",
+        dataset_id="fdset-1",
+        source_case_id="case-1",
+        source_digest=source_digest_for_case(case.to_record()),
+        active_job_id="job-1",
+        now="2026-09-29T00:00:00+00:00",
+    )
+    jobs = _Jobs(_job_for_case(case))
+    samples = _Samples(sample)
+
+    class Cases(_Cases):
+        async def read_case(self, case_id: str):
+            return case
+
+    worker = DatasetSampleBuildWorker(
+        job_repository=jobs,
+        dataset_repository=_Datasets(dataset),
+        sample_repository=samples,
+        case_repository=Cases(),
+    )
+    result = await worker.run_once()
+
+    assert result.status == "succeeded"
+    assert samples.revision is not None
+    assert samples.revision.content.schema_version == "literature-preference.v1"
+
+
+def _job_for_case(case: FeedbackCase) -> AnalysisJob:
+    source_digest = source_digest_for_case(case.to_record())
+    payload = build_job_payload(
+        dataset_id="fdset-1",
+        sample_id="sample-1",
+        generation=1,
+        spec_version=1,
+        source_digest=source_digest,
+    )
+    return AnalysisJob(
+        job_id="job-1",
+        job_type="dataset_sample_build",
+        payload_version=1,
+        payload=payload,
+        status="pending",
+        idempotency_key=sample_build_idempotency_key(
+            sample_id="sample-1", generation=1, spec_version=1, source_digest=source_digest
+        ),
+        available_at="2026-09-29T00:00:00+00:00",
+        created_at="2026-09-29T00:00:00+00:00",
+        updated_at="2026-09-29T00:00:00+00:00",
+    )
 
 
 async def _missing_case(case_id: str):

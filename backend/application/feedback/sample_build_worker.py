@@ -6,13 +6,13 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import logging
 from uuid import uuid4
-from typing import Any
+from typing import Any, Mapping
 
 from application.feedback.sft_sample_builder import (
-    SftBuildCandidate,
-    SftBuildNeedsInput,
     SftSampleBuilderProtocol,
 )
+from application.feedback.preference_sample_builder import PreferenceSampleBuilder
+from application.feedback.evaluation_sample_builder import EvaluationSampleBuilder
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.repositories.feedback_dataset_repository import FeedbackDatasetRepository
 from application.repositories.feedback_dataset_sample_repository import (
@@ -38,13 +38,19 @@ class DatasetSampleBuildWorker:
         dataset_repository: FeedbackDatasetRepository,
         sample_repository: FeedbackDatasetSampleRepository,
         case_repository: FeedbackCaseRepository,
-        builder: SftSampleBuilderProtocol,
+        builder: SftSampleBuilderProtocol | None = None,
+        builders: Mapping[str, Any] | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.dataset_repository = dataset_repository
         self.sample_repository = sample_repository
         self.case_repository = case_repository
-        self.builder = builder
+        self.builders = dict(builders or {})
+        if builder is not None:
+            # Runtime overrides can continue to provide a custom SFT builder.
+            self.builders.setdefault("sft", builder)
+        self.builders.setdefault("preference", PreferenceSampleBuilder())
+        self.builders.setdefault("evaluation", EvaluationSampleBuilder())
 
     async def run_once(self) -> Any | None:
         now = datetime.now(timezone.utc).isoformat()
@@ -93,23 +99,37 @@ class DatasetSampleBuildWorker:
                 )
                 return await self._read_finished(job, status="succeeded", result_id=sample_id)
             annotation = await self.case_repository.read_annotation(case.case_id)
-            built = await self.builder.build(
+            task_builder = self.builders.get(dataset.task_type)
+            if task_builder is None:
+                raise ValueError("unsupported_dataset_task_type")
+            built = await task_builder.build(
                 dataset=dataset,
                 sample=sample,
                 case=case,
                 annotation=annotation,
             )
-            if isinstance(built, SftBuildNeedsInput):
+            missing_reasons = getattr(built, "missing_reasons", None)
+            if missing_reasons is not None and not hasattr(built, "content"):
                 await self.sample_repository.complete_build(
                     job=job,
                     sample_id=sample_id,
                     generation=generation,
                     revision=None,
                     outcome="needs_input",
-                    missing_reasons=built.missing_reasons,
+                    missing_reasons=tuple(missing_reasons),
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
                 return await self._read_finished(job, status="succeeded", result_id=sample_id)
+
+            content = getattr(built, "content", None)
+            provenance = getattr(built, "provenance", None)
+            expected_schema = {
+                "sft": "literature-sft.v1",
+                "preference": "literature-preference.v1",
+                "evaluation": "literature-evaluation.v1",
+            }.get(dataset.task_type)
+            if content is None or not isinstance(provenance, dict) or content.schema_version != expected_schema:
+                raise ValueError("dataset_sample_build_content_task_mismatch")
 
             previous = (
                 await self.sample_repository.read_revision(sample.current_revision_id)
@@ -118,7 +138,7 @@ class DatasetSampleBuildWorker:
             if (
                 payload.get("review_note")
                 and previous is not None
-                and previous.content_digest == content_digest_for(built.content)
+                and previous.content_digest == content_digest_for(content)
             ):
                 await self.sample_repository.complete_build(
                     job=job,
@@ -138,11 +158,11 @@ class DatasetSampleBuildWorker:
                 revision_id=f"revision_{uuid4().hex[:32]}",
                 sample_id=sample_id,
                 revision_no=revision_no,
-                content=built.content,
+                content=content,
                 input_digest=sample.source_digest,
                 construction_spec_version=dataset.spec_version,
                 provenance={
-                    **built.provenance,
+                    **provenance,
                     **({"review_note": payload["review_note"]} if payload.get("review_note") else {}),
                 },
                 created_at=datetime.now(timezone.utc).isoformat(),

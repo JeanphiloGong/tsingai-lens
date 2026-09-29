@@ -124,7 +124,12 @@ def _preview_response(preview) -> DatasetExportPreviewResponse:
             DatasetExportPreviewRowResponse(
                 sample_id=member.sample_id,
                 question=question,
-                target_preview=member.content.target[:240],
+                schema_version=member.content.schema_version,
+                target_preview=getattr(member.content, "target", "")[:240],
+                response_a_preview=getattr(member.content, "response_a", "")[:240],
+                response_b_preview=getattr(member.content, "response_b", "")[:240],
+                reference_preview=getattr(member.content, "reference", "")[:240],
+                human_preference=getattr(member.content, "human_preference", None),
                 evidence_count=len(member.content.evidence),
                 issue_codes=issue_codes.get(member.sample_id, []),
             )
@@ -326,7 +331,7 @@ async def download_feedback_dataset_export(
     dataset_id: str,
     export_id: str,
     request: Request,
-    format: Literal["json", "jsonl", "provenance"] = Query(default="jsonl"),
+    format: Literal["json", "jsonl", "provenance", "manifest"] = Query(default="jsonl"),
 ) -> Response:
     try:
         export, payload, media_type, filename = await _export_service(request).download_for_user(
@@ -421,7 +426,7 @@ async def update_dataset_sample(
     request: Request,
 ) -> DatasetSampleSummaryResponse:
     try:
-        result = await _service(request).update_sft_sample(
+        result = await _service(request).update_sample(
             user_id=await current_user_id(request),
             dataset_id=dataset_id,
             sample_id=sample_id,
@@ -454,7 +459,7 @@ async def confirm_dataset_sample(
     request: Request,
 ) -> DatasetSampleSummaryResponse:
     try:
-        result = await _service(request).confirm_sft_sample(
+        result = await _service(request).confirm_sample(
             user_id=await current_user_id(request),
             dataset_id=dataset_id,
             sample_id=sample_id,

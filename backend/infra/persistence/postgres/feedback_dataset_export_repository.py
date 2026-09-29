@@ -147,7 +147,7 @@ class PostgresFeedbackDatasetExportRepository:
                 export_id=export_id,
                 dataset_id=draft.dataset_id,
                 export_no=export_no,
-                schema_version=EXPORT_SCHEMA_VERSION,
+                schema_version=str(draft.manifest.get("schema_version") or EXPORT_SCHEMA_VERSION),
                 rows=deepcopy(list(draft.rows)),
                 provenance=deepcopy(list(draft.provenance)),
                 manifest=manifest,

@@ -33,7 +33,12 @@ from domain.feedback.dataset_export import (
     member_digest,
     provenance_digest_for_rows,
 )
-from domain.feedback.sample_revision import SftRevisionContent
+from domain.feedback.dataset import DatasetTaskType
+from domain.feedback.sample_revision import (
+    EvaluationRevisionContent,
+    PreferenceRevisionContent,
+    SftRevisionContent,
+)
 
 
 class DatasetExportError(ValueError):
@@ -63,14 +68,12 @@ class FeedbackDatasetExportService:
         self, *, user_id: str, dataset_id: str
     ) -> ExportPreview:
         dataset = await self._read_dataset(user_id, dataset_id)
-        if dataset.task_type != "sft":
-            raise DatasetExportError("dataset_task_type_not_available")
         members = await self.sample_repository.read_confirmed_members(dataset_id=dataset_id)
         export_members = tuple(_export_member(item) for item in members)
         issues = tuple(
             issue
             for member in export_members
-            for issue in _validate_member(member)
+            for issue in _validate_member(member, dataset.task_type)
         )
         created = datetime.now(timezone.utc)
         preview = ExportPreview.build(
@@ -94,8 +97,6 @@ class FeedbackDatasetExportService:
         idempotency_key: str,
     ) -> DatasetExport:
         dataset = await self._read_dataset(user_id, dataset_id)
-        if dataset.task_type != "sft":
-            raise DatasetExportError("dataset_task_type_not_available")
         if not idempotency_key.strip() or len(idempotency_key) > 128:
             raise DatasetExportError("export_idempotency_key_invalid")
         preview = await self.repository.read_preview(preview_id)
@@ -124,17 +125,22 @@ class FeedbackDatasetExportService:
         rows: list[dict[str, Any]] = []
         provenance: list[dict[str, Any]] = []
         for member in included:
-            row, trace = _serialize_sft(member)
+            row, trace = _serialize_member(member, dataset.task_type)
             rows.append(row)
             provenance.append(trace)
         row_tuple = tuple(rows)
         provenance_tuple = tuple(provenance)
+        content_digest = content_digest_for_rows(row_tuple)
+        provenance_digest = provenance_digest_for_rows(provenance_tuple)
         export_id = f"export_{uuid4().hex[:32]}"
         created_at = datetime.now(timezone.utc).isoformat()
         manifest = {
-            "schema_version": EXPORT_SCHEMA_VERSION,
+            "manifest_schema_version": "feedback-dataset-export-manifest.v1",
+            "schema_version": _schema_for_task(dataset.task_type),
+            "dataset_type": dataset.task_type,
             "dataset_id": dataset_id,
             "dataset_name": dataset.name,
+            "collection_id": dataset.collection_id,
             "export_id": export_id,
             "preview_id": preview_id,
             "preview_digest": preview_digest,
@@ -142,6 +148,8 @@ class FeedbackDatasetExportService:
             "row_count": len(row_tuple),
             "main_file": "data.jsonl",
             "provenance_file": "provenance.jsonl",
+            "content_digest": content_digest,
+            "provenance_digest": provenance_digest,
             "created_at": created_at,
         }
         draft = DatasetExportDraft(
@@ -152,8 +160,8 @@ class FeedbackDatasetExportService:
             rows=row_tuple,
             provenance=provenance_tuple,
             members=included,
-            content_digest=content_digest_for_rows(row_tuple),
-            provenance_digest=provenance_digest_for_rows(provenance_tuple),
+            content_digest=content_digest,
+            provenance_digest=provenance_digest,
             manifest_digest=digest_for_value(manifest),
             manifest=manifest,
             created_by=user_id,
@@ -212,6 +220,12 @@ class FeedbackDatasetExportService:
                 "application/x-ndjson",
                 "provenance.jsonl",
             )
+        if format == "manifest":
+            manifest = {**export.manifest, "manifest_digest": export.manifest_digest}
+            payload = (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(
+                "utf-8"
+            )
+            return export, payload, "application/json", "manifest.json"
         raise DatasetExportError("export_format_invalid")
 
     async def _read_dataset(self, user_id: str, dataset_id: str):
@@ -233,9 +247,12 @@ def _export_member(item: ConfirmedDatasetMember) -> ExportMember:
     )
 
 
-def _validate_member(member: ExportMember) -> tuple[ExportIssue, ...]:
+def _validate_member(
+    member: ExportMember, task_type: DatasetTaskType
+) -> tuple[ExportIssue, ...]:
     content = member.content
-    if not isinstance(content, SftRevisionContent):
+    expected = _schema_for_task(task_type)
+    if content.schema_version != expected:
         return (
             ExportIssue(
                 sample_id=member.sample_id,
@@ -270,7 +287,29 @@ def _validate_member(member: ExportMember) -> tuple[ExportIssue, ...]:
                 question=question,
             )
         )
+    if isinstance(content, PreferenceRevisionContent) and content.human_preference not in {"a", "b"}:
+        issues.append(
+            ExportIssue(
+                sample_id=member.sample_id,
+                revision_id=member.revision_id,
+                code="preference_not_pairwise",
+                message="只有人工明确选择 A 或 B 的偏好样本才能导出 pairwise 数据。",
+                question=question,
+            )
+        )
     return tuple(issues)
+
+
+def _serialize_member(
+    member: ExportMember, task_type: DatasetTaskType
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if task_type == "sft":
+        return _serialize_sft(member)
+    if task_type == "preference":
+        return _serialize_preference(member)
+    if task_type == "evaluation":
+        return _serialize_evaluation(member)
+    raise DatasetExportError("dataset_task_type_not_available")
 
 
 def _serialize_sft(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -283,10 +322,69 @@ def _serialize_sft(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]
             {"role": "assistant", "content": content.target},
         ],
         "context": [dict(item) for item in content.context],
+        "evidence": [dict(item) for item in content.evidence],
     }
-    trace = {
+    trace = _trace(member, row)
+    return row, trace
+
+
+def _serialize_preference(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]]:
+    content = member.content
+    if not isinstance(content, PreferenceRevisionContent) or content.human_preference not in {"a", "b"}:
+        raise DatasetExportError("preference_not_pairwise")
+    chosen, rejected = (
+        (content.response_a, content.response_b)
+        if content.human_preference == "a"
+        else (content.response_b, content.response_a)
+    )
+    row = {
+        "messages": [dict(message) for message in content.messages],
+        "context": [dict(item) for item in content.context],
+        "chosen": chosen,
+        "rejected": rejected,
+        "evidence": [dict(item) for item in content.evidence],
+    }
+    trace = _trace(member, row)
+    trace.update(
+        {
+            "task_type": "preference",
+            "human_preference": content.human_preference,
+            "suggested_preference": content.suggested_preference,
+        }
+    )
+    return row, trace
+
+
+def _serialize_evaluation(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]]:
+    content = member.content
+    if not isinstance(content, EvaluationRevisionContent):
+        raise DatasetExportError("unsupported_schema")
+    row = {
+        "messages": [dict(message) for message in content.messages],
+        "context": [dict(item) for item in content.context],
+        "reference": content.reference,
+        "criteria": list(content.criteria),
+        "evaluation_mode": content.evaluation_mode,
+        "evidence": [dict(item) for item in content.evidence],
+    }
+    trace = _trace(member, row)
+    trace.update({"task_type": "evaluation", "evaluation_mode": content.evaluation_mode})
+    return row, trace
+
+
+def _trace(member: ExportMember, row: dict[str, Any]) -> dict[str, Any]:
+    evidence_records = member.provenance.get("evidence_records", [])
+    document_ids = sorted(
+        {
+            str(item.get("document_id"))
+            for item in evidence_records
+            if isinstance(item, dict) and item.get("document_id")
+        }
+    )
+    return {
         "schema_version": "feedback-dataset-provenance.v1",
         "row_key": member.row_key,
+        "row_digest": digest_for_value(row),
         "sample_id": member.sample_id,
         "source_case_id": member.source_case_id,
         "revision_id": member.revision_id,
@@ -296,9 +394,18 @@ def _serialize_sft(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]
         "anchor_message_id": member.provenance.get("anchor_message_id"),
         "message_ids": member.provenance.get("related_message_ids", []),
         "source_refs": member.provenance.get("source_refs", []),
-        "evidence_records": member.provenance.get("evidence_records", []),
+        "document_ids": document_ids,
+        "session_tree_id": member.provenance.get("session_tree_id"),
+        "evidence_records": evidence_records,
     }
-    return row, trace
+
+
+def _schema_for_task(task_type: DatasetTaskType) -> str:
+    return {
+        "sft": "literature-sft.v1",
+        "preference": "literature-preference.v1",
+        "evaluation": "literature-evaluation.v1",
+    }[task_type]
 __all__ = [
     "DatasetExportError",
     "DatasetExportListResult",

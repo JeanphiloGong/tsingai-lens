@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
@@ -29,9 +29,14 @@ from domain.feedback.dataset_sample import (
     source_digest_for_case,
 )
 from application.source.collection_service import CollectionService
-from domain.feedback.dataset import Dataset
+from domain.feedback.dataset import DATASET_TASK_TYPES, Dataset, DatasetTaskType
 from domain.feedback.feedback_case import FeedbackCase
-from domain.feedback.sample_revision import SampleRevision, SftRevisionContent, content_digest_for
+from domain.feedback.sample_revision import (
+    RevisionContent,
+    SampleRevision,
+    content_digest_for,
+    parse_revision_content,
+)
 
 
 class FeedbackDatasetError(ValueError):
@@ -102,7 +107,7 @@ class FeedbackDatasetService:
         construction_spec: dict[str, Any],
     ) -> Dataset:
         await self.collection_service.get_collection_for_user(collection_id, user_id)
-        if task_type != "sft":
+        if task_type not in DATASET_TASK_TYPES:
             raise FeedbackDatasetError("dataset_task_type_not_available")
         cleaned_name = name.strip()
         if not cleaned_name:
@@ -113,7 +118,7 @@ class FeedbackDatasetService:
             dataset_id=f"fdset_{uuid4().hex[:32]}",
             collection_id=collection_id,
             name=cleaned_name,
-            task_type="sft",
+            task_type=cast(DatasetTaskType, task_type),
             construction_spec=construction_spec,
             spec_version=1,
             created_by=user_id,
@@ -159,8 +164,6 @@ class FeedbackDatasetService:
         """Freeze selected cases and enqueue one build job per new sample."""
 
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        if dataset.task_type != "sft":
-            raise FeedbackDatasetError("dataset_task_type_not_available")
         if self.sample_repository is None or self.case_repository is None:
             raise FeedbackDatasetError("dataset_samples_unavailable")
         case_ids = tuple(dict.fromkeys(str(item).strip() for item in source_case_ids if str(item).strip()))
@@ -236,7 +239,7 @@ class FeedbackDatasetService:
         offset: int = 0,
     ) -> DatasetSampleListResult:
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_sft(dataset)
+        self._require_supported(dataset)
         repository = self._sample_repository()
         if limit < 1 or limit > 200 or offset < 0:
             raise FeedbackDatasetError("pagination_invalid")
@@ -264,7 +267,7 @@ class FeedbackDatasetService:
         self, *, user_id: str, dataset_id: str, sample_id: str
     ) -> DatasetSampleDetail:
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_sft(dataset)
+        self._require_supported(dataset)
         repository = self._sample_repository()
         sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
         if sample is None:
@@ -290,7 +293,7 @@ class FeedbackDatasetService:
             source_case=source_case,
         )
 
-    async def update_sft_sample(
+    async def update_sample(
         self,
         *,
         user_id: str,
@@ -300,7 +303,7 @@ class FeedbackDatasetService:
         content: dict[str, Any],
     ) -> DatasetSample:
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_sft(dataset)
+        self._require_supported(dataset)
         repository = self._sample_repository()
         sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
         if sample is None:
@@ -311,9 +314,11 @@ class FeedbackDatasetService:
         if current is None or current.sample_id != sample_id:
             raise FeedbackDatasetError("sample_current_revision_missing")
         try:
-            parsed = SftRevisionContent.from_mapping(content)
+            parsed = parse_revision_content(content)
         except ValueError as exc:
             raise FeedbackDatasetError(str(exc)) from exc
+        if parsed.schema_version != _schema_for_task(dataset.task_type):
+            raise FeedbackDatasetError("sample_content_task_type_mismatch")
         now = datetime.now(timezone.utc).isoformat()
         revision = SampleRevision(
             revision_id=f"revision_{uuid4().hex[:32]}",
@@ -343,7 +348,7 @@ class FeedbackDatasetService:
         except DatasetSampleRevisionConflict as exc:
             raise FeedbackDatasetConflict(str(exc)) from exc
 
-    async def confirm_sft_sample(
+    async def confirm_sample(
         self,
         *,
         user_id: str,
@@ -352,7 +357,7 @@ class FeedbackDatasetService:
         expected_revision_id: str,
     ) -> DatasetSample:
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_sft(dataset)
+        self._require_supported(dataset)
         repository = self._sample_repository()
         sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
         if sample is None:
@@ -362,7 +367,7 @@ class FeedbackDatasetService:
         revision = await repository.read_revision(expected_revision_id)
         if revision is None or revision.sample_id != sample_id:
             raise FeedbackDatasetError("sample_current_revision_missing")
-        if not isinstance(revision.content, SftRevisionContent):
+        if revision.content.schema_version != _schema_for_task(dataset.task_type):
             raise FeedbackDatasetError("sample_content_invalid")
         now = datetime.now(timezone.utc).isoformat()
         try:
@@ -387,7 +392,7 @@ class FeedbackDatasetService:
         idempotency_key: str,
     ) -> DatasetSample:
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
-        self._require_sft(dataset)
+        self._require_supported(dataset)
         repository = self._sample_repository()
         sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
         if sample is None:
@@ -490,9 +495,17 @@ class FeedbackDatasetService:
         return self.case_repository
 
     @staticmethod
-    def _require_sft(dataset: Dataset) -> None:
-        if dataset.task_type != "sft":
+    def _require_supported(dataset: Dataset) -> None:
+        if dataset.task_type not in DATASET_TASK_TYPES:
             raise FeedbackDatasetError("dataset_task_type_not_available")
+
+
+def _schema_for_task(task_type: DatasetTaskType) -> str:
+    return {
+        "sft": "literature-sft.v1",
+        "preference": "literature-preference.v1",
+        "evaluation": "literature-evaluation.v1",
+    }[task_type]
 
 
 def _validate_public_spec(value: dict[str, Any]) -> None:

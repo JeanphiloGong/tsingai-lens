@@ -9,6 +9,10 @@ import json
 from typing import Any, Literal
 
 from domain.feedback.sample_revision import (
+    EVALUATION_SCHEMA_VERSION,
+    PREFERENCE_SCHEMA_VERSION,
+    EvaluationRevisionContent,
+    PreferenceRevisionContent,
     RevisionContent,
     SftRevisionContent,
     content_digest_for,
@@ -16,7 +20,10 @@ from domain.feedback.sample_revision import (
 
 
 EXPORT_SCHEMA_VERSION = "literature-sft.v1"
-ExportFormat = Literal["json", "jsonl", "provenance"]
+EXPORT_SCHEMA_VERSIONS = frozenset(
+    {EXPORT_SCHEMA_VERSION, PREFERENCE_SCHEMA_VERSION, EVALUATION_SCHEMA_VERSION}
+)
+ExportFormat = Literal["json", "jsonl", "provenance", "manifest"]
 
 
 @dataclass(frozen=True)
@@ -37,7 +44,10 @@ class ExportMember:
             raise ValueError("export member identity is required")
         if self.revision_no < 1:
             raise ValueError("export member revision number must be positive")
-        if not isinstance(self.content, SftRevisionContent):
+        if not isinstance(
+            self.content,
+            (SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent),
+        ):
             raise ValueError("unsupported export member content")
         if not _is_sha256(self.content_digest) or not _is_sha256(self.input_digest):
             raise ValueError("export member digests must be sha256")
@@ -116,7 +126,7 @@ class ExportPreview:
         expires_at: str,
     ) -> "ExportPreview":
         digest_basis = {
-            "schema_version": EXPORT_SCHEMA_VERSION,
+            "schema_versions": sorted({member.content.schema_version for member in members}),
             "dataset_id": dataset_id,
             "members": [member.to_record() for member in members],
             "issues": [issue.to_record() for issue in issues],
@@ -172,7 +182,7 @@ class DatasetExport:
             raise ValueError("export identity is required")
         if self.export_no < 1:
             raise ValueError("export number must be positive")
-        if self.schema_version != EXPORT_SCHEMA_VERSION:
+        if self.schema_version not in EXPORT_SCHEMA_VERSIONS:
             raise ValueError("unsupported export schema version")
         for digest in (
             self.preview_digest,
@@ -272,6 +282,7 @@ def _is_sha256(value: str) -> bool:
 
 __all__ = [
     "EXPORT_SCHEMA_VERSION",
+    "EXPORT_SCHEMA_VERSIONS",
     "DatasetExport",
     "ExportFormat",
     "ExportIssue",

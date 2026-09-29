@@ -29,9 +29,11 @@
 		type DatasetExportPreview,
 		type DatasetExportSummary,
 		type FeedbackDataset,
-		type SftRevisionContent
+		type RevisionContent
 	} from '../../../../../_shared/feedbackDatasets';
 	import SftAnnotation from './_components/SftAnnotation.svelte';
+	import PreferenceAnnotation from './_components/PreferenceAnnotation.svelte';
+	import EvaluationAnnotation from './_components/EvaluationAnnotation.svelte';
 
 	let dataset: FeedbackDataset | null = null;
 	let samples: DatasetSample[] = [];
@@ -216,7 +218,7 @@
 		}
 	}
 
-	async function saveSample(event: CustomEvent<{ content: SftRevisionContent }>) {
+	async function saveSample(event: CustomEvent<{ content: RevisionContent }>) {
 		if (!sampleDetail?.sample.current_revision_id || saving || confirming || acting) return;
 		const generation = loadGeneration;
 		saving = true;
@@ -331,10 +333,28 @@
 		const date = new Date(value);
 		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 	}
+
+	function taskLabel(taskType: FeedbackDataset['task_type'] | undefined) {
+		return {
+			sft: '文献问答 · SFT',
+			preference: '回答偏好',
+			evaluation: '评测'
+		}[taskType ?? 'sft'];
+	}
+
+	function previewRowSummary(row: DatasetExportPreview['sample_rows'][number]) {
+		if (dataset?.task_type === 'preference') {
+			return `A：${row.response_a_preview || '无'} · B：${row.response_b_preview || '无'} · 选择：${row.human_preference ?? '未选择'} · 证据 ${row.evidence_count} 段`;
+		}
+		if (dataset?.task_type === 'evaluation') {
+			return `参考：${row.reference_preview || '无'} · 证据 ${row.evidence_count} 段`;
+		}
+		return `回答：${row.target_preview || '无'} · 证据 ${row.evidence_count} 段`;
+	}
 </script>
 
 <svelte:head>
-	<title>{dataset?.name ?? 'SFT 样本'} | Lens</title>
+	<title>{dataset?.name ?? '任务数据集'} | Lens</title>
 </svelte:head>
 
 <main class="page-shell">
@@ -343,9 +363,9 @@
 			<a class="back-link" href={`/collections/${encodeURIComponent(collectionId)}/feedback/datasets`}>
 				<ArrowLeft size={16} aria-hidden="true" />返回数据集
 			</a>
-			<div class="eyebrow">文献问答 · SFT</div>
+			<div class="eyebrow">{taskLabel(dataset?.task_type)}</div>
 			<h1>{dataset?.name ?? '加载数据集…'}</h1>
-			<p class="lede">核对 Worker 生成的候选回答，修改后确认可进入训练数据。</p>
+			<p class="lede">核对 Worker 生成的候选内容，按任务类型修改后确认。</p>
 		</div>
 		<div class="header-actions">
 			{#if dataset}<span class="spec">构建规则 v{dataset.spec_version}</span>{/if}
@@ -420,7 +440,7 @@
 							<div class="export-subheading"><strong>文件内容预览</strong><span>展示前几条模型输入，完整内容会写入发布文件。</span></div>
 							{#each exportPreview.sample_rows.slice(0, 5) as row (row.sample_id)}
 								<div class="preview-row">
-									<div><strong>{row.question || '未命名问题'}</strong><span>回答：{row.target_preview || '无'} · 证据 {row.evidence_count} 段</span></div>
+									<div><strong>{row.question || '未命名问题'}</strong><span>{previewRowSummary(row)}</span></div>
 									<button class="link-button" type="button" on:click={() => openExportSample(row.sample_id)}>查看</button>
 								</div>
 							{/each}
@@ -484,7 +504,13 @@
 				{:else if editorError && !sampleDetail}
 					<div class="detail-error" role="alert"><TriangleAlert size={22} aria-hidden="true" /><p>{editorError}</p><button type="button" on:click={() => selectedSample && selectSample(selectedSample)}>重新加载</button></div>
 				{:else}
-					<SftAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
+						{#if dataset?.task_type === 'preference'}
+							<PreferenceAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
+						{:else if dataset?.task_type === 'evaluation'}
+							<EvaluationAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
+						{:else}
+							<SftAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
+						{/if}
 				{/if}
 			</section>
 		</div>

@@ -140,10 +140,10 @@ class _Service:
             source_case=_case(),
         )
 
-    async def update_sft_sample(self, **kwargs):
+    async def update_sample(self, **kwargs):
         return _sample()
 
-    async def confirm_sft_sample(self, **kwargs):
+    async def confirm_sample(self, **kwargs):
         return DatasetSample(
             **{
                 **_sample().to_record(),
@@ -184,13 +184,13 @@ def test_task_dataset_route_maps_missing_to_404() -> None:
     assert error.value.status_code == 404
 
 
-def test_task_dataset_request_rejects_other_task_types_and_extra_fields() -> None:
-    with pytest.raises(ValidationError):
-        TaskDatasetCreateRequest.model_validate({
-            "collection_id": "collection-1",
-            "name": "Preference",
-            "task_type": "preference",
-        })
+def test_task_dataset_request_accepts_task_types_and_rejects_extra_fields() -> None:
+    preference = TaskDatasetCreateRequest.model_validate({
+        "collection_id": "collection-1",
+        "name": "Preference",
+        "task_type": "preference",
+    })
+    assert preference.task_type == "preference"
     with pytest.raises(ValidationError):
         TaskDatasetCreateRequest.model_validate({
             "collection_id": "collection-1",

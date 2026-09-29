@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 
@@ -19,7 +20,12 @@ from application.repositories.feedback_dataset_sample_repository import (
     ConfirmedDatasetMember,
 )
 from domain.feedback import Dataset, DatasetExport, DatasetSample, SampleRevision
-from domain.feedback.sample_revision import SftRevisionContent, content_digest_for
+from domain.feedback.sample_revision import (
+    EvaluationRevisionContent,
+    PreferenceRevisionContent,
+    SftRevisionContent,
+    content_digest_for,
+)
 
 
 pytestmark = pytest.mark.anyio
@@ -125,11 +131,14 @@ def _member(index: int = 1, *, complete: bool = True) -> ConfirmedDatasetMember:
 
 
 class _DatasetService:
+    def __init__(self, dataset: Dataset | None = None) -> None:
+        self.dataset = dataset or _dataset()
+
     async def read_for_user(self, *, user_id: str, dataset_id: str) -> Dataset:
         assert user_id == "user-1"
         if dataset_id != "fdset_export_test":
             raise FileNotFoundError("dataset not found")
-        return _dataset()
+        return self.dataset
 
 
 class _Samples:
@@ -199,7 +208,7 @@ class _Exports:
             export_id=export_id,
             dataset_id=draft.dataset_id,
             export_no=export_no,
-            schema_version="literature-sft.v1",
+            schema_version=str(draft.manifest["schema_version"]),
             rows=draft.rows,
             provenance=draft.provenance,
             members=draft.members,
@@ -222,12 +231,54 @@ class _Exports:
         return self.exports.get(export_id)
 
 
-def _service(samples: _Samples, exports: _Exports) -> FeedbackDatasetExportService:
+def _service(
+    samples: _Samples, exports: _Exports, dataset: Dataset | None = None
+) -> FeedbackDatasetExportService:
     return FeedbackDatasetExportService(
-        dataset_service=_DatasetService(),
+        dataset_service=_DatasetService(dataset),
         sample_repository=samples,
         repository=exports,
     )
+
+
+def _content_member(content, *, sample_id: str, dataset_id: str = "fdset_export_test") -> ConfirmedDatasetMember:
+    sample = DatasetSample(
+        sample_id=sample_id,
+        dataset_id=dataset_id,
+        source_case_id=f"case-{sample_id}",
+        status="confirmed",
+        current_revision_id=f"revision-{sample_id}",
+        confirmed_revision_id=f"revision-{sample_id}",
+        generation=1,
+        source_digest="a" * 64,
+        active_job_id=None,
+        missing_reasons=(),
+        created_at="2026-09-29T00:00:00+00:00",
+        updated_at="2026-09-29T00:00:00+00:00",
+        confirmed_by="user-1",
+        confirmed_at="2026-09-29T00:01:00+00:00",
+    )
+    revision = SampleRevision(
+        revision_id=f"revision-{sample_id}",
+        sample_id=sample_id,
+        revision_no=1,
+        author_kind="human",
+        content=content,
+        content_digest=content_digest_for(content),
+        input_digest="b" * 64,
+        construction_spec_version=1,
+        provenance={
+            "session_id": "session-1",
+            "anchor_message_id": "answer-1",
+            "related_message_ids": ["question-1", "answer-1"],
+            "source_refs": ["source-ref-1"],
+            "evidence_records": [{"document_title": "文献", "quote": "原文"}],
+        },
+        created_at="2026-09-29T00:01:00+00:00",
+        created_by="user-1",
+        job_id=None,
+    )
+    return ConfirmedDatasetMember(sample=sample, revision=revision)
 
 
 @pytest.mark.anyio
@@ -329,3 +380,76 @@ async def test_publish_is_idempotent_and_separates_model_file_from_provenance() 
         assert internal_id not in serialized
     assert first.provenance[0]["sample_id"] == "sample-1"
     assert first.provenance[0]["evidence_records"][0]["heading_path"] == "Results > Figure 3"
+
+
+@pytest.mark.anyio
+async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected() -> None:
+    content = PreferenceRevisionContent.from_mapping(
+        {
+            "schema_version": "literature-preference.v1",
+            "messages": [{"role": "user", "content": "比较 A、B。"}],
+            "context": [{"document_title": "文献", "text": "原文"}],
+            "response_a": "回答 A",
+            "response_b": "回答 B",
+            "suggested_preference": "a",
+            "rationale": "AI 建议 A",
+            "evidence": [{"document_title": "文献", "text": "原文"}],
+        }
+    )
+    dataset = replace(_dataset(), task_type="preference")
+    samples = _Samples(_content_member(content, sample_id="preference-1"))
+    exports = _Exports()
+    service = _service(samples, exports, dataset)
+    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    assert preview.exportable_count == 0
+    assert any(issue.code == "preference_not_pairwise" for issue in preview.issues)
+
+    content_with_label = PreferenceRevisionContent.from_mapping(
+        {**content.to_record(), "human_preference": "b"}
+    )
+    samples.members = [_content_member(content_with_label, sample_id="preference-1")]
+    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    assert preview.issues == ()
+    exported = await service.publish_for_user(
+        user_id="user-1",
+        dataset_id="fdset_export_test",
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key="preference-1",
+    )
+    assert exported.rows[0]["chosen"] == "回答 B"
+    assert exported.rows[0]["rejected"] == "回答 A"
+    assert "suggested_preference" not in exported.rows[0]
+
+
+@pytest.mark.anyio
+async def test_evaluation_export_keeps_reference_criteria_and_evidence() -> None:
+    content = EvaluationRevisionContent.from_mapping(
+        {
+            "schema_version": "literature-evaluation.v1",
+            "messages": [{"role": "user", "content": "比较 A、B。"}],
+            "context": [{"document_title": "文献", "text": "原文"}],
+            "reference": "B 有预热。",
+            "criteria": ["指出 B 的预热条件", "引用图注"],
+            "evaluation_mode": "reference",
+            "evidence": [{"document_title": "文献", "text": "原文"}],
+        }
+    )
+    dataset = replace(_dataset(), task_type="evaluation")
+    service = _service(
+        _Samples(_content_member(content, sample_id="evaluation-1")), _Exports(), dataset
+    )
+    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    assert preview.issues == ()
+    exported = await service.publish_for_user(
+        user_id="user-1",
+        dataset_id="fdset_export_test",
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key="evaluation-1",
+    )
+    assert exported.schema_version == "literature-evaluation.v1"
+    assert exported.rows[0]["reference"] == "B 有预热。"
+    assert exported.rows[0]["criteria"] == ["指出 B 的预热条件", "引用图注"]

@@ -108,20 +108,20 @@ async def test_create_dataset_has_own_identity_and_fixed_sft_type() -> None:
 
 
 @pytest.mark.anyio
-async def test_create_rejects_unavailable_task_and_credentials() -> None:
+async def test_create_allows_task_types_and_rejects_credentials() -> None:
     service = FeedbackDatasetService(
         repository=_Repository(),
         collection_service=_Collections(),
     )
 
-    with pytest.raises(FeedbackDatasetError, match="dataset_task_type_not_available"):
-        await service.create_for_user(
-            user_id="user-1",
-            collection_id="collection-1",
-            name="Preference",
-            task_type="preference",
-            construction_spec={},
-        )
+    dataset = await service.create_for_user(
+        user_id="user-1",
+        collection_id="collection-1",
+        name="Preference",
+        task_type="preference",
+        construction_spec={},
+    )
+    assert dataset.task_type == "preference"
     with pytest.raises(FeedbackDatasetError, match="construction_spec_contains_credential"):
         await service.create_for_user(
             user_id="user-1",

@@ -23,6 +23,28 @@ export type SftRevisionContent = {
 	target: string;
 	evidence: SftText[];
 };
+export type PreferenceChoice = 'a' | 'b' | 'tie' | 'unclear';
+export type PreferenceRevisionContent = {
+	schema_version: 'literature-preference.v1';
+	messages: SftMessage[];
+	context: SftText[];
+	response_a: string;
+	response_b: string;
+	suggested_preference: PreferenceChoice | null;
+	rationale: string;
+	evidence: SftText[];
+	human_preference: PreferenceChoice | null;
+};
+export type EvaluationRevisionContent = {
+	schema_version: 'literature-evaluation.v1';
+	messages: SftMessage[];
+	context: SftText[];
+	reference: string;
+	criteria: string[];
+	evaluation_mode: 'reference' | 'rubric';
+	evidence: SftText[];
+};
+export type RevisionContent = SftRevisionContent | PreferenceRevisionContent | EvaluationRevisionContent;
 
 export type DatasetSample = {
 	sample_id: string;
@@ -46,7 +68,7 @@ export type DatasetSampleRevision = {
 	sample_id: string;
 	revision_no: number;
 	author_kind: 'worker' | 'human';
-	content: SftRevisionContent;
+	content: RevisionContent;
 	content_digest: string;
 	input_digest: string;
 	construction_spec_version: number;
@@ -89,7 +111,12 @@ export type DatasetExportIssue = {
 export type DatasetExportPreviewRow = {
 	sample_id: string;
 	question: string;
+	schema_version: string;
 	target_preview: string;
+	response_a_preview: string;
+	response_b_preview: string;
+	reference_preview: string;
+	human_preference: PreferenceChoice | null;
 	evidence_count: number;
 	issue_codes: string[];
 };
@@ -126,6 +153,7 @@ function datasetPath(datasetId = '') {
 export async function createFeedbackDataset(
 	collectionId: string,
 	name: string,
+	taskType: FeedbackDatasetTaskType = 'sft',
 	constructionSpec: Record<string, unknown> = {}
 ) {
 	return (await requestJson(datasetPath(), {
@@ -134,7 +162,7 @@ export async function createFeedbackDataset(
 		body: JSON.stringify({
 			collection_id: collectionId,
 			name,
-			task_type: 'sft',
+			task_type: taskType,
 			construction_spec: constructionSpec
 		})
 	})) as FeedbackDataset;
@@ -190,7 +218,7 @@ export async function fetchDatasetSample(datasetId: string, sampleId: string) {
 export async function updateDatasetSample(
 	datasetId: string,
 	sampleId: string,
-	input: { expected_revision_id: string; content: SftRevisionContent }
+	input: { expected_revision_id: string; content: RevisionContent }
 ) {
 	return (await requestJson(`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}`, {
 		method: 'PATCH',

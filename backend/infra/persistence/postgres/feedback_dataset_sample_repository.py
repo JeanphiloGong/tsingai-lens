@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from application.repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
+    DatasetSampleRevisionConflict,
 )
 from domain.feedback.analysis_job import AnalysisJob
 from domain.feedback.dataset_sample import DatasetSample
@@ -67,6 +68,8 @@ class PostgresFeedbackDatasetSampleRepository:
                     missing_reasons=list(sample.missing_reasons),
                     created_at=_datetime(sample.created_at),
                     updated_at=_datetime(sample.updated_at),
+                    confirmed_by=sample.confirmed_by,
+                    confirmed_at=_datetime(sample.confirmed_at) if sample.confirmed_at else None,
                 )
                 job_row = _job_row(job)
                 session.add(row)
@@ -125,6 +128,83 @@ class PostgresFeedbackDatasetSampleRepository:
         async with self.session_factory() as session:
             row = await session.get(FeedbackSampleRevisionRow, revision_id)
             return _revision(row) if row is not None else None
+
+    async def count_samples(self, *, dataset_id: str, status: str | None = None) -> int:
+        from sqlalchemy import func
+
+        statement = select(func.count()).select_from(FeedbackDatasetSampleRow).where(
+            FeedbackDatasetSampleRow.dataset_id == dataset_id
+        )
+        if status is not None:
+            statement = statement.where(FeedbackDatasetSampleRow.status == status)
+        async with self.session_factory() as session:
+            return int((await session.scalar(statement)) or 0)
+
+    async def append_human_revision(
+        self,
+        *,
+        sample_id: str,
+        expected_revision_id: str,
+        revision: SampleRevision,
+        updated_at: str,
+    ) -> DatasetSample:
+        if revision.author_kind != "human" or revision.sample_id != sample_id:
+            raise ValueError("human revision identity is invalid")
+        timestamp = _datetime(updated_at)
+        async with self.session_factory.begin() as session:
+            row = await session.scalar(
+                select(FeedbackDatasetSampleRow)
+                .where(FeedbackDatasetSampleRow.sample_id == sample_id)
+                .with_for_update()
+            )
+            if row is None:
+                raise FileNotFoundError("dataset sample not found")
+            if row.current_revision_id != expected_revision_id:
+                raise DatasetSampleRevisionConflict("sample_revision_stale")
+            if row.status in {"discarded", "build_failed", "needs_input"}:
+                raise ValueError("sample_not_editable")
+            session.add(_revision_row(revision))
+            row.current_revision_id = revision.revision_id
+            row.confirmed_revision_id = None
+            row.confirmed_by = None
+            row.confirmed_at = None
+            row.status = "needs_confirmation"
+            row.missing_reasons = []
+            row.updated_at = timestamp
+            await session.flush()
+            return _sample(row)
+
+    async def confirm_revision(
+        self,
+        *,
+        sample_id: str,
+        expected_revision_id: str,
+        confirmed_by: str,
+        confirmed_at: str,
+    ) -> DatasetSample:
+        timestamp = _datetime(confirmed_at)
+        async with self.session_factory.begin() as session:
+            row = await session.scalar(
+                select(FeedbackDatasetSampleRow)
+                .where(FeedbackDatasetSampleRow.sample_id == sample_id)
+                .with_for_update()
+            )
+            if row is None:
+                raise FileNotFoundError("dataset sample not found")
+            if row.confirmed_revision_id == expected_revision_id and row.status == "confirmed":
+                return _sample(row)
+            if row.current_revision_id != expected_revision_id:
+                raise DatasetSampleRevisionConflict("sample_revision_stale")
+            revision = await session.get(FeedbackSampleRevisionRow, expected_revision_id)
+            if revision is None or revision.sample_id != sample_id:
+                raise ValueError("sample_revision_missing")
+            row.confirmed_revision_id = expected_revision_id
+            row.confirmed_by = confirmed_by
+            row.confirmed_at = timestamp
+            row.status = "confirmed"
+            row.updated_at = timestamp
+            await session.flush()
+            return _sample(row)
 
     async def complete_build(
         self,
@@ -254,12 +334,14 @@ def _sample(row: FeedbackDatasetSampleRow) -> DatasetSample:
         current_revision_id=row.current_revision_id,
         confirmed_revision_id=row.confirmed_revision_id,
         generation=row.generation,
-        source_digest=row.source_digest,
-        active_job_id=row.active_job_id,
-        missing_reasons=tuple(row.missing_reasons or ()),
-        created_at=_iso(row.created_at),
-        updated_at=_iso(row.updated_at),
-    )
+                    source_digest=row.source_digest,
+                    active_job_id=row.active_job_id,
+                    missing_reasons=tuple(row.missing_reasons or ()),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    confirmed_by=row.confirmed_by,
+                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+                )
 
 
 def _revision(row: FeedbackSampleRevisionRow) -> SampleRevision:

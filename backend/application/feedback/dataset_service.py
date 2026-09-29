@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -12,6 +13,7 @@ from application.repositories.feedback_dataset_repository import (
 )
 from application.repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
+    DatasetSampleRevisionConflict,
     FeedbackDatasetSampleRepository,
 )
 from domain.feedback.analysis_job import AnalysisJob
@@ -25,10 +27,33 @@ from domain.feedback.dataset_sample import (
 )
 from application.source.collection_service import CollectionService
 from domain.feedback.dataset import Dataset
+from domain.feedback.feedback_case import FeedbackCase
+from domain.feedback.sample_revision import SampleRevision, SftRevisionContent, content_digest_for
 
 
 class FeedbackDatasetError(ValueError):
     """A user-correctable dataset request."""
+
+
+class FeedbackDatasetConflict(FeedbackDatasetError):
+    """A mutable sample changed after the caller read it."""
+
+
+@dataclass(frozen=True)
+class DatasetSampleListResult:
+    items: tuple[DatasetSample, ...]
+    total: int
+    limit: int
+    offset: int
+
+
+@dataclass(frozen=True)
+class DatasetSampleDetail:
+    dataset: Dataset
+    sample: DatasetSample
+    current_revision: SampleRevision | None
+    confirmed_revision: SampleRevision | None
+    source_case: FeedbackCase
 
 
 class DatasetCollectionResult:
@@ -198,6 +223,184 @@ class FeedbackDatasetService:
             items=collected,
         )
 
+    async def list_samples_for_user(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> DatasetSampleListResult:
+        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
+        self._require_sft(dataset)
+        repository = self._sample_repository()
+        if limit < 1 or limit > 200 or offset < 0:
+            raise FeedbackDatasetError("pagination_invalid")
+        allowed_statuses = {
+            "pending",
+            "building",
+            "needs_confirmation",
+            "needs_input",
+            "confirmed",
+            "discarded",
+            "build_failed",
+        }
+        if status is not None and status not in allowed_statuses:
+            raise FeedbackDatasetError("sample_status_invalid")
+        items = await repository.list_samples(
+            dataset_id=dataset_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+        total = await repository.count_samples(dataset_id=dataset_id, status=status)
+        return DatasetSampleListResult(items=items, total=total, limit=limit, offset=offset)
+
+    async def read_sample_for_user(
+        self, *, user_id: str, dataset_id: str, sample_id: str
+    ) -> DatasetSampleDetail:
+        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
+        self._require_sft(dataset)
+        repository = self._sample_repository()
+        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+        if sample is None:
+            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
+        current_revision = await self._read_related_revision(
+            repository, sample.current_revision_id, sample_id, "sample_current_revision_missing"
+        )
+        confirmed_revision = await self._read_related_revision(
+            repository,
+            sample.confirmed_revision_id,
+            sample_id,
+            "sample_confirmed_revision_missing",
+        )
+        case_repository = self._case_repository()
+        source_case = await case_repository.read_case(sample.source_case_id)
+        if source_case is None or source_case.collection_id != dataset.collection_id:
+            raise FeedbackDatasetError("sample_source_case_missing")
+        return DatasetSampleDetail(
+            dataset=dataset,
+            sample=sample,
+            current_revision=current_revision,
+            confirmed_revision=confirmed_revision,
+            source_case=source_case,
+        )
+
+    async def update_sft_sample(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        sample_id: str,
+        expected_revision_id: str,
+        content: dict[str, Any],
+    ) -> DatasetSample:
+        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
+        self._require_sft(dataset)
+        repository = self._sample_repository()
+        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+        if sample is None:
+            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
+        if sample.current_revision_id != expected_revision_id:
+            raise FeedbackDatasetConflict("sample_revision_stale")
+        current = await repository.read_revision(expected_revision_id)
+        if current is None or current.sample_id != sample_id:
+            raise FeedbackDatasetError("sample_current_revision_missing")
+        try:
+            parsed = SftRevisionContent.from_mapping(content)
+        except ValueError as exc:
+            raise FeedbackDatasetError(str(exc)) from exc
+        now = datetime.now(timezone.utc).isoformat()
+        revision = SampleRevision(
+            revision_id=f"revision_{uuid4().hex[:32]}",
+            sample_id=sample_id,
+            revision_no=current.revision_no + 1,
+            author_kind="human",
+            content=parsed,
+            content_digest=content_digest_for(parsed),
+            input_digest=sample.source_digest,
+            construction_spec_version=dataset.spec_version,
+            provenance={
+                **current.provenance,
+                "edited_from_revision_id": current.revision_id,
+                "edited_by": user_id,
+            },
+            created_at=now,
+            created_by=user_id,
+            job_id=None,
+        )
+        try:
+            return await repository.append_human_revision(
+                sample_id=sample_id,
+                expected_revision_id=expected_revision_id,
+                revision=revision,
+                updated_at=now,
+            )
+        except DatasetSampleRevisionConflict as exc:
+            raise FeedbackDatasetConflict(str(exc)) from exc
+
+    async def confirm_sft_sample(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        sample_id: str,
+        expected_revision_id: str,
+    ) -> DatasetSample:
+        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
+        self._require_sft(dataset)
+        repository = self._sample_repository()
+        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+        if sample is None:
+            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
+        if sample.current_revision_id != expected_revision_id:
+            raise FeedbackDatasetConflict("sample_revision_stale")
+        revision = await repository.read_revision(expected_revision_id)
+        if revision is None or revision.sample_id != sample_id:
+            raise FeedbackDatasetError("sample_current_revision_missing")
+        if not isinstance(revision.content, SftRevisionContent):
+            raise FeedbackDatasetError("sample_content_invalid")
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            return await repository.confirm_revision(
+                sample_id=sample_id,
+                expected_revision_id=expected_revision_id,
+                confirmed_by=user_id,
+                confirmed_at=now,
+            )
+        except DatasetSampleRevisionConflict as exc:
+            raise FeedbackDatasetConflict(str(exc)) from exc
+
+    async def _read_related_revision(
+        self,
+        repository: FeedbackDatasetSampleRepository,
+        revision_id: str | None,
+        sample_id: str,
+        missing_code: str,
+    ) -> SampleRevision | None:
+        if not revision_id:
+            return None
+        revision = await repository.read_revision(revision_id)
+        if revision is None or revision.sample_id != sample_id:
+            raise FeedbackDatasetError(missing_code)
+        return revision
+
+    def _sample_repository(self) -> FeedbackDatasetSampleRepository:
+        if self.sample_repository is None:
+            raise FeedbackDatasetError("dataset_samples_unavailable")
+        return self.sample_repository
+
+    def _case_repository(self) -> FeedbackCaseRepository:
+        if self.case_repository is None:
+            raise FeedbackDatasetError("dataset_samples_unavailable")
+        return self.case_repository
+
+    @staticmethod
+    def _require_sft(dataset: Dataset) -> None:
+        if dataset.task_type != "sft":
+            raise FeedbackDatasetError("dataset_task_type_not_available")
+
 
 def _validate_public_spec(value: dict[str, Any]) -> None:
     if not isinstance(value, dict):
@@ -218,6 +421,9 @@ def _validate_public_spec(value: dict[str, Any]) -> None:
 
 __all__ = [
     "DatasetCollectionResult",
+    "DatasetSampleDetail",
+    "DatasetSampleListResult",
+    "FeedbackDatasetConflict",
     "FeedbackDatasetError",
     "FeedbackDatasetService",
 ]

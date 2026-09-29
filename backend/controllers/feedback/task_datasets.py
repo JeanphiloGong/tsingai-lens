@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from application.feedback.dataset_service import (
+    DatasetSampleDetail,
+    FeedbackDatasetConflict,
     FeedbackDatasetError,
     FeedbackDatasetService,
 )
@@ -13,6 +15,13 @@ from controllers.schemas.task_datasets import (
     DatasetCollectionItemResponse,
     DatasetCollectionRequest,
     DatasetCollectionResponse,
+    DatasetSampleDetailResponse,
+    DatasetSampleListResponse,
+    DatasetSampleRevisionResponse,
+    DatasetSampleSourceCaseResponse,
+    DatasetSampleSummaryResponse,
+    SampleConfirmRequest,
+    SampleRevisionUpdateRequest,
     TaskDatasetCreateRequest,
     TaskDatasetListResponse,
     TaskDatasetResponse,
@@ -33,6 +42,40 @@ def _service(request: Request) -> FeedbackDatasetService:
             },
         )
     return service
+
+
+def _sample_response(sample: object) -> DatasetSampleSummaryResponse:
+    return DatasetSampleSummaryResponse.model_validate(sample.to_record())  # type: ignore[attr-defined]
+
+
+def _revision_response(revision: object | None) -> DatasetSampleRevisionResponse | None:
+    if revision is None:
+        return None
+    return DatasetSampleRevisionResponse.model_validate(revision.to_record())  # type: ignore[attr-defined]
+
+
+def _detail_response(detail: DatasetSampleDetail) -> DatasetSampleDetailResponse:
+    snapshot = dict(detail.source_case.context_snapshot or {})
+    source_case = DatasetSampleSourceCaseResponse(
+        case_id=detail.source_case.case_id,
+        collection_id=detail.source_case.collection_id,
+        session_id=detail.source_case.session_id,
+        anchor_message_id=detail.source_case.anchor_message_id,
+        status=detail.source_case.status,
+        question=str(snapshot.get("question") or ""),
+        answer=str(snapshot.get("answer") or ""),
+        requested_scope=list(snapshot.get("requested_scope") or ()),
+        inspected_sources=list(snapshot.get("inspected_sources") or ()),
+        omitted_candidates=list(snapshot.get("omitted_candidates") or ()),
+        gaps=[str(item) for item in (snapshot.get("gaps") or ())],
+        context_snapshot=snapshot,
+    )
+    return DatasetSampleDetailResponse(
+        sample=_sample_response(detail.sample),
+        source_case=source_case,
+        current_revision=_revision_response(detail.current_revision),
+        confirmed_revision=_revision_response(detail.confirmed_revision),
+    )
 
 
 @router.post("", response_model=TaskDatasetResponse, status_code=status.HTTP_201_CREATED)
@@ -99,6 +142,127 @@ async def get_feedback_dataset(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc
     return TaskDatasetResponse.model_validate(dataset.to_record())
+
+
+@router.get("/{dataset_id}/samples", response_model=DatasetSampleListResponse)
+async def list_dataset_samples(
+    dataset_id: str,
+    request: Request,
+    status_filter: str | None = Query(default=None, alias="status", min_length=1, max_length=32),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> DatasetSampleListResponse:
+    try:
+        result = await _service(request).list_samples_for_user(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            status=status_filter,
+            limit=limit,
+            offset=offset,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset not found") from exc
+    except FeedbackDatasetError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return DatasetSampleListResponse(
+        items=[_sample_response(item) for item in result.items],
+        total=result.total,
+        limit=result.limit,
+        offset=result.offset,
+    )
+
+
+@router.get(
+    "/{dataset_id}/samples/{sample_id}",
+    response_model=DatasetSampleDetailResponse,
+)
+async def get_dataset_sample(
+    dataset_id: str,
+    sample_id: str,
+    request: Request,
+) -> DatasetSampleDetailResponse:
+    try:
+        result = await _service(request).read_sample_for_user(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            sample_id=sample_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset sample not found") from exc
+    except FeedbackDatasetError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return _detail_response(result)
+
+
+@router.patch(
+    "/{dataset_id}/samples/{sample_id}",
+    response_model=DatasetSampleSummaryResponse,
+)
+async def update_dataset_sample(
+    dataset_id: str,
+    sample_id: str,
+    payload: SampleRevisionUpdateRequest,
+    request: Request,
+) -> DatasetSampleSummaryResponse:
+    try:
+        result = await _service(request).update_sft_sample(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            sample_id=sample_id,
+            expected_revision_id=payload.expected_revision_id,
+            content=payload.content.model_dump(mode="json"),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset sample not found") from exc
+    except FeedbackDatasetConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": str(exc), "message": "sample has a newer revision"},
+        ) from exc
+    except FeedbackDatasetError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return _sample_response(result)
+
+
+@router.post(
+    "/{dataset_id}/samples/{sample_id}/confirm",
+    response_model=DatasetSampleSummaryResponse,
+)
+async def confirm_dataset_sample(
+    dataset_id: str,
+    sample_id: str,
+    payload: SampleConfirmRequest,
+    request: Request,
+) -> DatasetSampleSummaryResponse:
+    try:
+        result = await _service(request).confirm_sft_sample(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            sample_id=sample_id,
+            expected_revision_id=payload.expected_revision_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset sample not found") from exc
+    except FeedbackDatasetConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": str(exc), "message": "sample has a newer revision"},
+        ) from exc
+    except FeedbackDatasetError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return _sample_response(result)
 
 
 @router.post(

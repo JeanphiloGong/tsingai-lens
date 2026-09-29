@@ -1,0 +1,189 @@
+<script lang="ts">
+	import { Check, ChevronDown, FileText, Save, ShieldCheck, TriangleAlert } from '@lucide/svelte';
+	import { createEventDispatcher } from 'svelte';
+	import type { DatasetSampleDetail, SftRevisionContent } from '../../../../../../_shared/feedbackDatasets';
+
+	export let sample: DatasetSampleDetail | null = null;
+	export let saving = false;
+	export let confirming = false;
+	export let error = '';
+	export let notice = '';
+
+	const dispatch = createEventDispatcher<{
+		save: { content: SftRevisionContent };
+		confirm: { next: boolean };
+	}>();
+
+	let loadedRevisionId = '';
+	let target = '';
+	let evidence: Array<{ document_title: string; text: string }> = [];
+
+	$: if (sample?.current_revision?.revision_id && sample.current_revision.revision_id !== loadedRevisionId) {
+		loadedRevisionId = sample.current_revision.revision_id;
+		target = sample.current_revision.content.target;
+		evidence = sample.current_revision.content.evidence.map((item) => ({ ...item }));
+	}
+
+	$: currentRevision = sample?.current_revision ?? null;
+	$: canConfirm = Boolean(currentRevision && sample?.sample.status === 'needs_confirmation' && !saving && !confirming);
+
+	function content(): SftRevisionContent | null {
+		if (!currentRevision) return null;
+		return {
+			schema_version: currentRevision.content.schema_version,
+			messages: currentRevision.content.messages,
+			context: currentRevision.content.context,
+			target: target.trim(),
+			evidence: evidence.map((item) => ({
+				document_title: item.document_title.trim(),
+				text: item.text.trim()
+			}))
+		};
+	}
+
+	function save() {
+		const next = content();
+		if (!next || !next.target || next.evidence.some((item) => !item.document_title || !item.text)) return;
+		dispatch('save', { content: next });
+	}
+
+	function confirm(next: boolean) {
+		if (canConfirm) dispatch('confirm', { next });
+	}
+
+	function formatSource(source: Record<string, unknown>) {
+		return String(source.document_title ?? source.title ?? '未命名文献');
+	}
+</script>
+
+{#if !sample}
+	<section class="empty" aria-live="polite">
+		<FileText size={28} aria-hidden="true" />
+		<h2>选择一个样本</h2>
+		<p>左侧队列中的候选会在这里显示问题、回答和可核对的证据。</p>
+	</section>
+{:else}
+	<div class="annotation-grid">
+		<section class="question-column" aria-labelledby="question-title">
+			<div class="section-kicker">输入</div>
+			<h2 id="question-title">研究问题</h2>
+			<p class="question">{sample.source_case.question || '暂无可读问题'}</p>
+			<details class="original-answer">
+				<summary><ChevronDown size={15} aria-hidden="true" />原始回答</summary>
+				<p>{sample.source_case.answer || '暂无原始回答'}</p>
+			</details>
+			<div class="source-meta">
+				<span>案例来源</span>
+				<small>{sample.source_case.status}</small>
+			</div>
+		</section>
+
+		<section class="editor-column" aria-labelledby="answer-title">
+			<div class="section-heading">
+				<div>
+					<div class="section-kicker">人工确认</div>
+					<h2 id="answer-title">正确回答</h2>
+				</div>
+				{#if sample.sample.status === 'confirmed'}
+					<span class="status status--confirmed"><ShieldCheck size={14} aria-hidden="true" />已确认</span>
+				{:else}
+					<span class="status">待确认</span>
+				{/if}
+			</div>
+			<label for="sft-target">回答内容</label>
+			<textarea id="sft-target" bind:value={target} rows="12" disabled={saving || confirming}></textarea>
+
+			<div class="actions" aria-label="样本操作">
+				<button class="primary" type="button" on:click={save} disabled={saving || confirming || !target.trim()}>
+					<Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}
+				</button>
+				<button type="button" on:click={() => confirm(false)} disabled={!canConfirm}>
+					<Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}
+				</button>
+				<button type="button" on:click={() => confirm(true)} disabled={!canConfirm}>
+					确认并下一条
+				</button>
+			</div>
+			{#if notice}<p class="notice" role="status">{notice}</p>{/if}
+			{#if error}<p class="error" role="alert"><TriangleAlert size={15} aria-hidden="true" />{error}</p>{/if}
+		</section>
+
+		<aside class="evidence-column" aria-labelledby="evidence-title">
+			<div class="section-kicker">核对</div>
+			<h2 id="evidence-title">证据原文</h2>
+			<p class="aside-note">回答只能使用这里显示的可读片段。内部来源编号不会进入训练内容。</p>
+			<div class="evidence-list">
+				{#each evidence as item, index}
+					<article class="evidence-card">
+						<label for={`evidence-title-${index}`}>文献标题</label>
+						<input id={`evidence-title-${index}`} bind:value={item.document_title} disabled={saving || confirming} />
+						<label for={`evidence-text-${index}`}>片段</label>
+						<textarea id={`evidence-text-${index}`} bind:value={item.text} rows="6" disabled={saving || confirming}></textarea>
+					</article>
+				{:else}
+					<p class="missing">当前候选没有可读证据，不能确认。</p>
+				{/each}
+			</div>
+			{#if sample.sample.missing_reasons.length}
+				<div class="missing-box">
+					<strong>还需要补充</strong>
+					<ul>{#each sample.sample.missing_reasons as reason}<li>{reason}</li>{/each}</ul>
+				</div>
+			{/if}
+			{#if sample.source_case.omitted_candidates.length}
+				<details class="omitted">
+					<summary>未读取的候选来源（{sample.source_case.omitted_candidates.length}）</summary>
+					{#each sample.source_case.omitted_candidates as source}
+						<p>{formatSource(source)}：{String(source.reason ?? '未读取')}</p>
+					{/each}
+				</details>
+			{/if}
+		</aside>
+	</div>
+{/if}
+
+<style>
+	:global(button), :global(input), :global(textarea) { font: inherit; }
+	.annotation-grid { display: grid; grid-template-columns: minmax(190px, .72fr) minmax(330px, 1.35fr) minmax(250px, .95fr); gap: 1px; background: #dbe3ec; border: 1px solid #dbe3ec; border-radius: 10px; overflow: hidden; }
+	.question-column, .editor-column, .evidence-column { background: #fff; padding: 24px; min-width: 0; }
+	.editor-column { background: #fbfcfe; }
+	.section-kicker { color: #0f766e; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+	h2 { margin: 5px 0 14px; color: #172033; font-size: 19px; line-height: 1.25; }
+	.question { color: #172033; font-size: 16px; line-height: 1.65; white-space: pre-wrap; }
+	.original-answer { margin-top: 28px; border-top: 1px solid #e7edf3; padding-top: 14px; }
+	.original-answer summary, .omitted summary { display: flex; align-items: center; gap: 6px; color: #506176; cursor: pointer; font-size: 13px; font-weight: 700; }
+	.original-answer summary :global(svg) { transition: transform .15s ease; }
+	.original-answer[open] summary :global(svg), .omitted[open] summary :global(svg) { transform: rotate(180deg); }
+	.original-answer p { color: #5b687a; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
+	.source-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; padding-top: 14px; border-top: 1px solid #e7edf3; color: #7b8796; font-size: 12px; }
+	.source-meta small { color: #64748b; }
+	.section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+	label { display: block; margin: 12px 0 6px; color: #536174; font-size: 12px; font-weight: 700; }
+	textarea, input { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #172033; padding: 10px 11px; line-height: 1.55; resize: vertical; }
+	textarea:focus, input:focus { outline: 3px solid #99f6e4; border-color: #0f766e; }
+	textarea:disabled, input:disabled { background: #f1f5f9; color: #526174; }
+	.status { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e2e8f0; border-radius: 999px; padding: 5px 9px; color: #64748b; font-size: 12px; white-space: nowrap; }
+	.status--confirmed { border-color: #99f6e4; color: #0f766e; background: #f0fdfa; }
+	.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+	.actions button { display: inline-flex; gap: 7px; align-items: center; min-height: 36px; border: 1px solid #b8c4d3; border-radius: 6px; background: #fff; color: #304057; padding: 7px 11px; cursor: pointer; }
+	.actions button:hover:not(:disabled) { border-color: #0f766e; color: #0f766e; }
+	.actions button.primary { border-color: #0f766e; background: #0f766e; color: #fff; }
+	.actions button:disabled { cursor: not-allowed; opacity: .48; }
+	.notice { margin: 14px 0 0; color: #0f766e; font-size: 13px; }
+	.error { display: flex; gap: 7px; align-items: flex-start; margin: 14px 0 0; color: #b42318; font-size: 13px; }
+	.aside-note { margin: -4px 0 18px; color: #68778a; font-size: 12px; line-height: 1.55; }
+	.evidence-list { display: grid; gap: 14px; }
+	.evidence-card { border-left: 3px solid #0f766e; padding-left: 12px; }
+	.evidence-card label { margin-top: 0; }
+	.evidence-card textarea { min-height: 120px; }
+	.missing, .missing-box { color: #a15c00; font-size: 13px; line-height: 1.55; }
+	.missing-box { margin-top: 16px; border: 1px solid #fed7aa; border-radius: 6px; background: #fff7ed; padding: 11px 12px; }
+	.missing-box ul { margin: 7px 0 0; padding-left: 18px; }
+	.omitted { margin-top: 18px; border-top: 1px solid #e7edf3; padding-top: 13px; }
+	.omitted p { color: #68778a; font-size: 12px; line-height: 1.5; }
+	.empty { display: grid; justify-items: center; padding: 72px 24px; border: 1px dashed #cbd5e1; border-radius: 10px; background: #fff; color: #64748b; text-align: center; }
+	.empty h2 { margin-bottom: 5px; }
+	.empty p { margin: 0; max-width: 380px; line-height: 1.6; }
+	@media (max-width: 1080px) { .annotation-grid { grid-template-columns: minmax(180px, .7fr) minmax(320px, 1.3fr); } .evidence-column { grid-column: 1 / -1; border-top: 1px solid #dbe3ec; } .evidence-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+	@media (max-width: 680px) { .annotation-grid { display: block; } .question-column, .editor-column, .evidence-column { padding: 19px; } .evidence-column { border-top: 1px solid #dbe3ec; } .evidence-list { grid-template-columns: 1fr; } .actions button { flex: 1 1 auto; justify-content: center; } }
+</style>

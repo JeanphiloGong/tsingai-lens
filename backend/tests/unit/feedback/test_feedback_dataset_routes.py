@@ -8,8 +8,19 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from controllers.feedback import task_datasets
-from controllers.schemas.task_datasets import TaskDatasetCreateRequest
-from domain.feedback import Dataset
+from controllers.schemas.task_datasets import (
+    SampleConfirmRequest,
+    SampleRevisionUpdateRequest,
+    TaskDatasetCreateRequest,
+)
+from domain.feedback import (
+    Dataset,
+    DatasetSample,
+    FeedbackCase,
+    SampleRevision,
+    SftRevisionContent,
+    content_digest_for,
+)
 
 
 def _request(service, user_id: str = "user-1"):
@@ -36,6 +47,68 @@ def _dataset() -> Dataset:
     )
 
 
+def _sample() -> DatasetSample:
+    return DatasetSample(
+        sample_id="sample-1",
+        dataset_id="fdset_1",
+        source_case_id="case-1",
+        status="needs_confirmation",
+        current_revision_id="revision-1",
+        confirmed_revision_id=None,
+        generation=1,
+        source_digest="a" * 64,
+        active_job_id=None,
+        missing_reasons=(),
+        created_at="2026-09-29T00:00:00+00:00",
+        updated_at="2026-09-29T00:00:00+00:00",
+    )
+
+
+def _revision() -> SampleRevision:
+    content = SftRevisionContent.from_mapping(
+        {
+            "schema_version": "literature-sft.v1",
+            "messages": [{"role": "user", "content": "比较 A、B。"}],
+            "context": [{"document_title": "文献 A", "text": "原文"}],
+            "target": "候选回答",
+            "evidence": [{"document_title": "文献 A", "text": "原文"}],
+        }
+    )
+    return SampleRevision(
+        revision_id="revision-1",
+        sample_id="sample-1",
+        revision_no=1,
+        author_kind="worker",
+        content=content,
+        content_digest=content_digest_for(content),
+        input_digest="a" * 64,
+        construction_spec_version=1,
+        provenance={"source_case_id": "case-1"},
+        created_at="2026-09-29T00:00:00+00:00",
+        created_by=None,
+        job_id="job-1",
+    )
+
+
+def _case() -> FeedbackCase:
+    return FeedbackCase(
+        case_id="case-1",
+        collection_id="collection-1",
+        session_id="session-1",
+        anchor_message_id="answer-1",
+        source_signal_ids=(),
+        analysis_result_ids=(),
+        context_snapshot={
+            "question": "比较 A、B。",
+            "answer": "原回答",
+            "inspected_sources": [{"document_title": "文献 A", "quote": "原文"}],
+        },
+        status="needs_annotation",
+        created_at="2026-09-29T00:00:00+00:00",
+        updated_at="2026-09-29T00:00:00+00:00",
+    )
+
+
 class _Service:
     async def create_for_user(self, **kwargs):
         assert kwargs["user_id"] == "user-1"
@@ -48,6 +121,38 @@ class _Service:
         if kwargs["dataset_id"] != "fdset_1":
             raise FileNotFoundError("dataset not found")
         return _dataset()
+
+    async def list_samples_for_user(self, **kwargs):
+        from application.feedback.dataset_service import DatasetSampleListResult
+
+        return DatasetSampleListResult(
+            items=(_sample(),), total=1, limit=kwargs["limit"], offset=kwargs["offset"]
+        )
+
+    async def read_sample_for_user(self, **kwargs):
+        from application.feedback.dataset_service import DatasetSampleDetail
+
+        return DatasetSampleDetail(
+            dataset=_dataset(),
+            sample=_sample(),
+            current_revision=_revision(),
+            confirmed_revision=None,
+            source_case=_case(),
+        )
+
+    async def update_sft_sample(self, **kwargs):
+        return _sample()
+
+    async def confirm_sft_sample(self, **kwargs):
+        return DatasetSample(
+            **{
+                **_sample().to_record(),
+                "status": "confirmed",
+                "confirmed_revision_id": "revision-1",
+                "confirmed_by": "user-1",
+                "confirmed_at": "2026-09-29T01:00:00+00:00",
+            }
+        )
 
 
 def test_task_dataset_routes_create_list_and_detail() -> None:
@@ -134,3 +239,46 @@ def test_task_dataset_collection_returns_accepted_operation() -> None:
     assert response.operation_id == "collect-1"
     assert response.items[0].sample_id == "sample-1"
     assert response.items[0].job_id == "job-1"
+
+
+def test_task_dataset_sample_routes_keep_revision_and_confirmation_contract() -> None:
+    request = _request(_Service())
+    listing = asyncio.run(
+        task_datasets.list_dataset_samples(
+            "fdset_1", request, status_filter="needs_confirmation", limit=50, offset=0
+        )
+    )
+    assert listing.total == 1
+    assert listing.items[0].current_revision_id == "revision-1"
+
+    detail = asyncio.run(task_datasets.get_dataset_sample("fdset_1", "sample-1", request))
+    assert detail.current_revision is not None
+    assert detail.current_revision.content["context"][0]["text"] == "原文"
+    assert detail.source_case.question == "比较 A、B。"
+
+    content = {
+        "schema_version": "literature-sft.v1",
+        "messages": [{"role": "user", "content": "比较 A、B。"}],
+        "context": [{"document_title": "文献 A", "text": "原文"}],
+        "target": "人工回答",
+        "evidence": [{"document_title": "文献 A", "text": "原文"}],
+    }
+    updated = asyncio.run(
+        task_datasets.update_dataset_sample(
+            "fdset_1",
+            "sample-1",
+            SampleRevisionUpdateRequest(expected_revision_id="revision-1", content=content),
+            request,
+        )
+    )
+    assert updated.status == "needs_confirmation"
+
+    confirmed = asyncio.run(
+        task_datasets.confirm_dataset_sample(
+            "fdset_1",
+            "sample-1",
+            SampleConfirmRequest(expected_revision_id="revision-1"),
+            request,
+        )
+    )
+    assert confirmed.status == "confirmed"

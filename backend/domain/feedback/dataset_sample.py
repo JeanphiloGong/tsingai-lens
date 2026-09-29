@@ -38,6 +38,8 @@ class DatasetSample:
     missing_reasons: tuple[str, ...]
     created_at: str
     updated_at: str
+    confirmed_by: str | None = None
+    confirmed_at: str | None = None
 
     def __post_init__(self) -> None:
         if not self.sample_id or not self.dataset_id or not self.source_case_id:
@@ -60,6 +62,12 @@ class DatasetSample:
             raise ValueError("building sample must reference its active job")
         if self.confirmed_revision_id and not self.current_revision_id:
             raise ValueError("confirmed revision requires a current revision")
+        if self.confirmed_revision_id and (not self.confirmed_by or not self.confirmed_at):
+            raise ValueError("confirmed revision requires confirmation audit")
+        if self.status == "confirmed" and not self.confirmed_revision_id:
+            raise ValueError("confirmed sample requires a confirmed revision")
+        if self.status != "confirmed" and (self.confirmed_by or self.confirmed_at):
+            raise ValueError("unconfirmed sample cannot have confirmation audit")
         reasons = tuple(dict.fromkeys(str(item).strip() for item in self.missing_reasons if str(item).strip()))
         object.__setattr__(self, "missing_reasons", reasons)
 
@@ -103,6 +111,8 @@ class DatasetSample:
             "missing_reasons": list(self.missing_reasons),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "confirmed_by": self.confirmed_by,
+            "confirmed_at": self.confirmed_at,
         }
 
 

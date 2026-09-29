@@ -161,11 +161,14 @@ This node owns the Collection route family.
 
 ## Objective Interaction
 
-The feedback dataset page selects accepted cases and one export use. It does
-not request paper-family names or experiment splits. Detail loading or failure
-blocks freezing and failed cases can be retried individually. Empty exports
-show exclusion reasons rather than a successful release; historical snapshots
-remain downloadable without changing their contents.
+The maintained feedback dataset page opens a fixed task dataset and shows its
+sample queue. For SFT, the page keeps the question and readable evidence beside
+an editable candidate answer; saving appends a human revision and confirming
+binds that exact revision. A stale revision returns a conflict without losing
+the local draft. Users operate on questions, answers, and evidence text; sample,
+case, message, and source identities remain browser request parameters rather
+than visible labels. Historical snapshot creation and download remain a legacy
+surface until the D7 cutover removes its product read-back entry points.
 
 The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
 Opening "AI summary" requests one short paragraph; it has no categorized

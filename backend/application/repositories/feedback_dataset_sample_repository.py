@@ -16,6 +16,10 @@ class CollectedDatasetSample:
     job: AnalysisJob | None
 
 
+class DatasetSampleRevisionConflict(ValueError):
+    """The sample changed after the caller read its current revision."""
+
+
 BuildCompletionKind = Literal["candidate", "needs_input", "failed"]
 
 
@@ -42,6 +46,26 @@ class FeedbackDatasetSampleRepository(Protocol):
 
     async def read_revision(self, revision_id: str) -> SampleRevision | None: ...
 
+    async def count_samples(self, *, dataset_id: str, status: str | None = None) -> int: ...
+
+    async def append_human_revision(
+        self,
+        *,
+        sample_id: str,
+        expected_revision_id: str,
+        revision: SampleRevision,
+        updated_at: str,
+    ) -> DatasetSample: ...
+
+    async def confirm_revision(
+        self,
+        *,
+        sample_id: str,
+        expected_revision_id: str,
+        confirmed_by: str,
+        confirmed_at: str,
+    ) -> DatasetSample: ...
+
     async def complete_build(
         self,
         *,
@@ -59,5 +83,6 @@ class FeedbackDatasetSampleRepository(Protocol):
 __all__ = [
     "BuildCompletionKind",
     "CollectedDatasetSample",
+    "DatasetSampleRevisionConflict",
     "FeedbackDatasetSampleRepository",
 ]

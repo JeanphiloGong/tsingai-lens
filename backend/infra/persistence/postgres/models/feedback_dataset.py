@@ -249,9 +249,129 @@ class FeedbackSampleActionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class FeedbackDatasetExportPreviewRow(Base):
+    """Short-lived server-side member and issue snapshot used before publish."""
+
+    __tablename__ = "feedback_export_previews"
+    __table_args__ = (
+        Index("ix_feedback_export_previews_dataset_created", "dataset_id", "created_at"),
+        CheckConstraint("length(preview_digest) = 64", name="feedback_export_preview_digest_len"),
+    )
+
+    preview_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dataset_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("feedback_datasets.dataset_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    members: Mapped[list[dict[str, Any]]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    issues: Mapped[list[dict[str, Any]]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    preview_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    exportable_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FeedbackDatasetExportRow(Base):
+    """Immutable model-facing rows and provenance for one published export."""
+
+    __tablename__ = "feedback_dataset_exports"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset_id", "export_no", name="uq_feedback_dataset_exports_number"
+        ),
+        UniqueConstraint(
+            "dataset_id", "idempotency_key", name="uq_feedback_dataset_exports_idempotency"
+        ),
+        Index("ix_feedback_dataset_exports_dataset_created", "dataset_id", "created_at"),
+        CheckConstraint("export_no >= 1", name="feedback_dataset_export_number_positive"),
+        CheckConstraint("row_count > 0", name="feedback_dataset_export_rows_positive"),
+        CheckConstraint("length(content_digest) = 64", name="feedback_dataset_export_content_len"),
+        CheckConstraint(
+            "length(provenance_digest) = 64",
+            name="feedback_dataset_export_provenance_len",
+        ),
+        CheckConstraint("length(manifest_digest) = 64", name="feedback_dataset_export_manifest_len"),
+        CheckConstraint("length(preview_digest) = 64", name="feedback_dataset_export_preview_len"),
+    )
+
+    export_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    dataset_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("feedback_datasets.dataset_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    export_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    rows: Mapped[list[dict[str, Any]]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    provenance: Mapped[list[dict[str, Any]]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    manifest: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    preview_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("feedback_export_previews.preview_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    preview_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    member_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_by: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("auth_users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FeedbackDatasetExportMemberRow(Base):
+    """Stable relation from each frozen row to its confirmed revision."""
+
+    __tablename__ = "feedback_export_members"
+    __table_args__ = (
+        Index("ix_feedback_export_members_sample", "sample_id"),
+        Index("ix_feedback_export_members_revision", "revision_id"),
+        CheckConstraint("length(row_key) = 64", name="feedback_export_member_row_key_len"),
+        CheckConstraint(
+            "length(content_digest) = 64",
+            name="feedback_export_member_content_len",
+        ),
+        CheckConstraint("length(input_digest) = 64", name="feedback_export_member_input_len"),
+    )
+
+    export_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("feedback_dataset_exports.export_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    row_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sample_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("feedback_dataset_samples.sample_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    revision_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("feedback_sample_revisions.revision_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 __all__ = [
     "FeedbackDatasetRow",
     "FeedbackDatasetSampleRow",
     "FeedbackSampleRevisionRow",
     "FeedbackSampleActionRow",
+    "FeedbackDatasetExportPreviewRow",
+    "FeedbackDatasetExportRow",
+    "FeedbackDatasetExportMemberRow",
 ]

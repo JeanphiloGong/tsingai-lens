@@ -24,6 +24,9 @@ from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetSampleRow,
     FeedbackSampleRevisionRow,
     FeedbackSampleActionRow,
+    FeedbackDatasetExportPreviewRow,
+    FeedbackDatasetExportRow,
+    FeedbackDatasetExportMemberRow,
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
@@ -100,6 +103,9 @@ __all__ = [
     "FeedbackDatasetSampleRow",
     "FeedbackSampleRevisionRow",
     "FeedbackSampleActionRow",
+    "FeedbackDatasetExportPreviewRow",
+    "FeedbackDatasetExportRow",
+    "FeedbackDatasetExportMemberRow",
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",

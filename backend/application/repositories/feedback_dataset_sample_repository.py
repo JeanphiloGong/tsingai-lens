@@ -16,6 +16,12 @@ class CollectedDatasetSample:
     job: AnalysisJob | None
 
 
+@dataclass(frozen=True)
+class ConfirmedDatasetMember:
+    sample: DatasetSample
+    revision: SampleRevision
+
+
 class DatasetSampleRevisionConflict(ValueError):
     """The sample changed after the caller read its current revision."""
 
@@ -51,6 +57,10 @@ class FeedbackDatasetSampleRepository(Protocol):
     async def read_revision(self, revision_id: str) -> SampleRevision | None: ...
 
     async def count_samples(self, *, dataset_id: str, status: str | None = None) -> int: ...
+
+    async def read_confirmed_members(
+        self, *, dataset_id: str
+    ) -> tuple[ConfirmedDatasetMember, ...]: ...
 
     async def append_human_revision(
         self,
@@ -104,6 +114,7 @@ class FeedbackDatasetSampleRepository(Protocol):
 __all__ = [
     "BuildCompletionKind",
     "CollectedDatasetSample",
+    "ConfirmedDatasetMember",
     "DatasetSampleRevisionConflict",
     "DatasetSampleActionConflict",
     "FeedbackDatasetSampleRepository",

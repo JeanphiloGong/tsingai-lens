@@ -1,4 +1,4 @@
-import { requestJson } from './api';
+import { downloadBlob, requestJson } from './api';
 
 export type FeedbackDatasetTaskType = 'sft' | 'preference' | 'evaluation';
 
@@ -76,6 +76,47 @@ export type DatasetSampleDetail = {
 	source_case: DatasetSampleSourceCase;
 	current_revision: DatasetSampleRevision | null;
 	confirmed_revision: DatasetSampleRevision | null;
+};
+
+export type DatasetExportIssue = {
+	sample_id: string;
+	revision_id: string | null;
+	code: string;
+	message: string;
+	question: string;
+};
+
+export type DatasetExportPreviewRow = {
+	sample_id: string;
+	question: string;
+	target_preview: string;
+	evidence_count: number;
+	issue_codes: string[];
+};
+
+export type DatasetExportPreview = {
+	preview_id: string;
+	dataset_id: string;
+	requested_count: number;
+	exportable_count: number;
+	issues: DatasetExportIssue[];
+	sample_rows: DatasetExportPreviewRow[];
+	preview_digest: string;
+	created_at: string;
+	expires_at: string;
+};
+
+export type DatasetExportSummary = {
+	export_id: string;
+	dataset_id: string;
+	export_no: number;
+	schema_version: string;
+	row_count: number;
+	content_digest: string;
+	provenance_digest: string;
+	manifest_digest: string;
+	created_at: string;
+	download_formats: Array<'jsonl' | 'json' | 'provenance'>;
 };
 
 function datasetPath(datasetId = '') {
@@ -191,4 +232,50 @@ export async function actOnDatasetSample(
 			body: JSON.stringify(input)
 		}
 	)) as DatasetSample;
+}
+
+export async function previewFeedbackDatasetExport(datasetId: string) {
+	return (await requestJson(`${datasetPath(datasetId)}/export-previews`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({})
+	})) as DatasetExportPreview;
+}
+
+export async function publishFeedbackDatasetExport(
+	datasetId: string,
+	input: { preview_id: string; preview_digest: string; allow_partial: boolean },
+	idempotencyKey: string
+) {
+	return (await requestJson(`${datasetPath(datasetId)}/exports`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+		body: JSON.stringify(input)
+	})) as DatasetExportSummary;
+}
+
+export async function fetchFeedbackDatasetExports(
+	datasetId: string,
+	options: { limit?: number; offset?: number } = {}
+) {
+	const params = new URLSearchParams({
+		limit: String(options.limit ?? 50),
+		offset: String(options.offset ?? 0)
+	});
+	return (await requestJson(`${datasetPath(datasetId)}/exports?${params.toString()}`, {
+		method: 'GET'
+	})) as { items: DatasetExportSummary[]; limit: number; offset: number };
+}
+
+export async function downloadFeedbackDatasetExport(
+	datasetId: string,
+	exportItem: DatasetExportSummary,
+	format: 'jsonl' | 'json' | 'provenance'
+) {
+	const extension = format === 'provenance' ? 'jsonl' : format;
+	const suffix = format === 'provenance' ? 'provenance' : 'data';
+	await downloadBlob(
+		`${datasetPath(datasetId)}/exports/${encodeURIComponent(exportItem.export_id)}/download?format=${format}`,
+		`${datasetId}-v${exportItem.export_no}-${suffix}.${extension}`
+	);
 }

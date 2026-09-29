@@ -63,7 +63,7 @@ class SftSampleBuilder:
         if not question:
             return SftBuildNeedsInput(("question_missing",))
 
-        readable_sources, source_provenance = _readable_sources(snapshot)
+        readable_sources, source_provenance = _readable_sources(snapshot, annotation)
         missing: list[str] = []
         if not readable_sources:
             missing.append("readable_evidence_missing")
@@ -117,11 +117,25 @@ def _candidate_target(
     return "", "missing"
 
 
-def _readable_sources(snapshot: Mapping[str, Any]) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, Any], ...]]:
+def _readable_sources(
+    snapshot: Mapping[str, Any], annotation: FeedbackAnnotation | None
+) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, Any], ...]]:
     model_sources: list[dict[str, str]] = []
     provenance: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    for raw in snapshot.get("inspected_sources") or ():
+    supported_refs = set(annotation.support_source_refs) if annotation is not None else set()
+    candidates = [
+        (raw, "successful_source_tool_result")
+        for raw in snapshot.get("inspected_sources") or ()
+    ]
+    candidates.extend(
+        (raw, "human_annotation_selected_context")
+        for raw in snapshot.get("requested_scope") or ()
+        if isinstance(raw, Mapping)
+        and str(raw.get("source_ref") or raw.get("table_ref") or "") in supported_refs
+        and raw.get("origin") == "user_selected_context"
+    )
+    for raw, audit_basis in candidates:
         if not isinstance(raw, Mapping):
             continue
         title = str(raw.get("document_title") or raw.get("title") or "").strip()
@@ -143,6 +157,7 @@ def _readable_sources(snapshot: Mapping[str, Any]) -> tuple[tuple[dict[str, str]
                 "page": raw.get("page"),
                 "heading_path": raw.get("heading_path"),
                 "quote": text,
+                "audit_basis": audit_basis,
             }
         )
     return tuple(model_sources), tuple(provenance)

@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+import re
+from typing import Literal
 
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
+
+from application.feedback.dataset_export_service import (
+    DatasetExportError,
+    FeedbackDatasetExportService,
+)
+from application.repositories.feedback_dataset_export_repository import DatasetExportSummary
 from application.feedback.dataset_service import (
     DatasetSampleDetail,
     FeedbackDatasetConflict,
@@ -20,6 +28,12 @@ from controllers.schemas.task_datasets import (
     DatasetSampleRevisionResponse,
     DatasetSampleSourceCaseResponse,
     DatasetSampleSummaryResponse,
+    DatasetExportIssueResponse,
+    DatasetExportListResponse,
+    DatasetExportPreviewResponse,
+    DatasetExportPreviewRowResponse,
+    DatasetExportPublishRequest,
+    DatasetExportSummaryResponse,
     SampleConfirmRequest,
     SampleActionRequest,
     SampleRevisionUpdateRequest,
@@ -40,6 +54,19 @@ def _service(request: Request) -> FeedbackDatasetService:
             detail={
                 "code": "feedback_datasets_unavailable",
                 "message": "feedback datasets are not configured",
+            },
+        )
+    return service
+
+
+def _export_service(request: Request) -> FeedbackDatasetExportService:
+    service = getattr(request.app.state, "feedback_dataset_export_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "feedback_dataset_exports_unavailable",
+                "message": "feedback dataset exports are not configured",
             },
         )
     return service
@@ -77,6 +104,61 @@ def _detail_response(detail: DatasetSampleDetail) -> DatasetSampleDetailResponse
         current_revision=_revision_response(detail.current_revision),
         confirmed_revision=_revision_response(detail.confirmed_revision),
     )
+
+
+def _preview_response(preview) -> DatasetExportPreviewResponse:
+    issue_codes: dict[str, list[str]] = {}
+    for issue in preview.issues:
+        issue_codes.setdefault(issue.sample_id, []).append(issue.code)
+    rows: list[DatasetExportPreviewRowResponse] = []
+    for member in preview.members:
+        question = next(
+            (
+                item["content"]
+                for item in member.content.messages
+                if item["role"] == "user"
+            ),
+            "",
+        )
+        rows.append(
+            DatasetExportPreviewRowResponse(
+                sample_id=member.sample_id,
+                question=question,
+                target_preview=member.content.target[:240],
+                evidence_count=len(member.content.evidence),
+                issue_codes=issue_codes.get(member.sample_id, []),
+            )
+        )
+    return DatasetExportPreviewResponse(
+        preview_id=preview.preview_id,
+        dataset_id=preview.dataset_id,
+        requested_count=preview.requested_count,
+        exportable_count=preview.exportable_count,
+        issues=[DatasetExportIssueResponse(**issue.to_record()) for issue in preview.issues],
+        sample_rows=rows,
+        preview_digest=preview.preview_digest,
+        created_at=preview.created_at,
+        expires_at=preview.expires_at,
+    )
+
+
+def _export_summary_response(summary) -> DatasetExportSummaryResponse:
+    return DatasetExportSummaryResponse(
+        export_id=summary.export_id,
+        dataset_id=summary.dataset_id,
+        export_no=summary.export_no,
+        schema_version=summary.schema_version,
+        row_count=summary.row_count,
+        content_digest=summary.content_digest,
+        provenance_digest=summary.provenance_digest,
+        manifest_digest=summary.manifest_digest,
+        created_at=summary.created_at,
+    )
+
+
+def _safe_filename(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip(".-")
+    return (cleaned or "dataset-export")[:100]
 
 
 @router.post("", response_model=TaskDatasetResponse, status_code=status.HTTP_201_CREATED)
@@ -143,6 +225,133 @@ async def get_feedback_dataset(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc
     return TaskDatasetResponse.model_validate(dataset.to_record())
+
+
+@router.post(
+    "/{dataset_id}/export-previews",
+    response_model=DatasetExportPreviewResponse,
+)
+async def preview_feedback_dataset_export(
+    dataset_id: str,
+    request: Request,
+) -> DatasetExportPreviewResponse:
+    try:
+        preview = await _export_service(request).preview_for_user(
+            user_id=await current_user_id(request), dataset_id=dataset_id
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset not found") from exc
+    except (DatasetExportError, FeedbackDatasetError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return _preview_response(preview)
+
+
+@router.post(
+    "/{dataset_id}/exports",
+    response_model=DatasetExportSummaryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def publish_feedback_dataset_export(
+    dataset_id: str,
+    payload: DatasetExportPublishRequest,
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+) -> DatasetExportSummaryResponse:
+    try:
+        export = await _export_service(request).publish_for_user(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            preview_id=payload.preview_id,
+            preview_digest=payload.preview_digest,
+            allow_partial=payload.allow_partial,
+            idempotency_key=idempotency_key,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset or preview not found") from exc
+    except DatasetExportError as exc:
+        code = str(exc)
+        status_code = 409 if "stale" in code or "conflict" in code or "expired" in code else 422
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": code, "message": code},
+        ) from exc
+    return _export_summary_response(
+        DatasetExportSummary(
+            export_id=export.export_id,
+            dataset_id=export.dataset_id,
+            export_no=export.export_no,
+            schema_version=export.schema_version,
+            row_count=export.row_count,
+            content_digest=export.content_digest,
+            provenance_digest=export.provenance_digest,
+            manifest_digest=export.manifest_digest,
+            created_at=export.created_at,
+        )
+    )
+
+
+@router.get("/{dataset_id}/exports", response_model=DatasetExportListResponse)
+async def list_feedback_dataset_exports(
+    dataset_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> DatasetExportListResponse:
+    try:
+        result = await _export_service(request).list_for_user(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            limit=limit,
+            offset=offset,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset not found") from exc
+    except DatasetExportError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return DatasetExportListResponse(
+        items=[_export_summary_response(item) for item in result.items],
+        limit=result.limit,
+        offset=result.offset,
+    )
+
+
+@router.get("/{dataset_id}/exports/{export_id}/download")
+async def download_feedback_dataset_export(
+    dataset_id: str,
+    export_id: str,
+    request: Request,
+    format: Literal["json", "jsonl", "provenance"] = Query(default="jsonl"),
+) -> Response:
+    try:
+        export, payload, media_type, filename = await _export_service(request).download_for_user(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            export_id=export_id,
+            format=format,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset export not found") from exc
+    except DatasetExportError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    dataset_name = _safe_filename(str(export.manifest.get("dataset_name") or dataset_id))
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{dataset_name}-v{export.export_no}-{filename}"',
+            "X-Manifest-Digest": export.manifest_digest,
+            "X-Content-Digest": export.content_digest,
+        },
+    )
 
 
 @router.get("/{dataset_id}/samples", response_model=DatasetSampleListResponse)

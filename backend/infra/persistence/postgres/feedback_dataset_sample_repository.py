@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from application.repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
+    ConfirmedDatasetMember,
     DatasetSampleActionConflict,
     DatasetSampleRevisionConflict,
 )
@@ -142,6 +143,34 @@ class PostgresFeedbackDatasetSampleRepository:
             statement = statement.where(FeedbackDatasetSampleRow.status == status)
         async with self.session_factory() as session:
             return int((await session.scalar(statement)) or 0)
+
+    async def read_confirmed_members(
+        self, *, dataset_id: str
+    ) -> tuple[ConfirmedDatasetMember, ...]:
+        statement = (
+            select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow)
+            .join(
+                FeedbackSampleRevisionRow,
+                FeedbackDatasetSampleRow.confirmed_revision_id
+                == FeedbackSampleRevisionRow.revision_id,
+            )
+            .where(
+                FeedbackDatasetSampleRow.dataset_id == dataset_id,
+                FeedbackDatasetSampleRow.status == "confirmed",
+                FeedbackDatasetSampleRow.current_revision_id
+                == FeedbackDatasetSampleRow.confirmed_revision_id,
+            )
+            .order_by(
+                FeedbackDatasetSampleRow.created_at,
+                FeedbackDatasetSampleRow.sample_id,
+            )
+        )
+        async with self.session_factory() as session:
+            rows = (await session.execute(statement)).all()
+            return tuple(
+                ConfirmedDatasetMember(sample=_sample(sample), revision=_revision(revision))
+                for sample, revision in rows
+            )
 
     async def append_human_revision(
         self,

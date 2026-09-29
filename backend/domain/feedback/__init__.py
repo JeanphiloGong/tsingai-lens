@@ -49,6 +49,19 @@ from domain.feedback.sample_revision import (
     content_digest_for,
     parse_revision_content,
 )
+from domain.feedback.dataset_export import (
+    EXPORT_SCHEMA_VERSION,
+    DatasetExport,
+    ExportFormat,
+    ExportIssue,
+    ExportMember,
+    ExportPreview,
+    content_digest_for_rows,
+    digest_for_value,
+    jsonl_bytes_for_rows,
+    member_digest,
+    provenance_digest_for_rows,
+)
 
 __all__ = [
     "AnalysisJob",
@@ -98,4 +111,15 @@ __all__ = [
     "SftRevisionContent",
     "content_digest_for",
     "parse_revision_content",
+    "EXPORT_SCHEMA_VERSION",
+    "DatasetExport",
+    "ExportFormat",
+    "ExportIssue",
+    "ExportMember",
+    "ExportPreview",
+    "content_digest_for_rows",
+    "digest_for_value",
+    "jsonl_bytes_for_rows",
+    "member_digest",
+    "provenance_digest_for_rows",
 ]

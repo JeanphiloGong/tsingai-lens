@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import json
 from uuid import uuid4
 
 import pytest
@@ -11,12 +12,16 @@ import pytest
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
 from application.feedback.dataset_service import FeedbackDatasetService
+from application.feedback.dataset_export_service import FeedbackDatasetExportService
 from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from application.repositories.feedback_dataset_sample_repository import DatasetSampleActionConflict
 from domain.feedback.sample_revision import SampleRevision
 from infra.persistence.postgres.feedback_dataset_repository import PostgresFeedbackDatasetRepository
 from infra.persistence.postgres.feedback_dataset_sample_repository import PostgresFeedbackDatasetSampleRepository
+from infra.persistence.postgres.feedback_dataset_export_repository import (
+    PostgresFeedbackDatasetExportRepository,
+)
 from tests.integration.persistence.test_feedback_workbench import (
     COLLECTION_ID,
     SESSION_ID,
@@ -146,6 +151,58 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     )
     assert confirmed.status == "confirmed"
     assert confirmed.confirmed_revision_id == original_revision_id
+
+    exports = PostgresFeedbackDatasetExportRepository(postgres_session_factory)
+    export_service = FeedbackDatasetExportService(
+        dataset_service=service,
+        sample_repository=samples,
+        repository=exports,
+    )
+    preview = await export_service.preview_for_user(
+        user_id=USER_ID, dataset_id=dataset.dataset_id
+    )
+    assert preview.requested_count == 1
+    assert preview.exportable_count == 1
+    assert preview.issues == ()
+    published = await export_service.publish_for_user(
+        user_id=USER_ID,
+        dataset_id=dataset.dataset_id,
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key="export-integration-1",
+    )
+    replayed = await export_service.publish_for_user(
+        user_id=USER_ID,
+        dataset_id=dataset.dataset_id,
+        preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest,
+        allow_partial=False,
+        idempotency_key="export-integration-1",
+    )
+    assert replayed == published
+    assert published.row_count == 1
+    model_payload = json.loads(
+        (await export_service.download_for_user(
+            user_id=USER_ID,
+            dataset_id=dataset.dataset_id,
+            export_id=published.export_id,
+            format="jsonl",
+        ))[1].decode("utf-8")
+    )
+    assert model_payload["context"][0]["document_title"] == "Paper B"
+    assert model_payload["messages"][-1]["role"] == "assistant"
+    assert "source-b-caption" not in json.dumps(model_payload, ensure_ascii=False)
+    trace_payload = json.loads(
+        (await export_service.download_for_user(
+            user_id=USER_ID,
+            dataset_id=dataset.dataset_id,
+            export_id=published.export_id,
+            format="provenance",
+        ))[1].decode("utf-8")
+    )
+    assert trace_payload["source_refs"] == ["source-b-caption"]
+
     assert await service.apply_sample_action_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
         action="discard", expected_revision_id=original_revision_id,

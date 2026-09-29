@@ -150,6 +150,61 @@ class DatasetSampleDetailResponse(BaseModel):
     confirmed_revision: DatasetSampleRevisionResponse | None
 
 
+class DatasetExportIssueResponse(BaseModel):
+    sample_id: str
+    revision_id: str | None
+    code: str
+    message: str
+    question: str
+
+
+class DatasetExportPreviewRowResponse(BaseModel):
+    sample_id: str
+    question: str
+    target_preview: str
+    evidence_count: int
+    issue_codes: list[str]
+
+
+class DatasetExportPreviewResponse(BaseModel):
+    preview_id: str
+    dataset_id: str
+    requested_count: int
+    exportable_count: int
+    issues: list[DatasetExportIssueResponse]
+    sample_rows: list[DatasetExportPreviewRowResponse]
+    preview_digest: str
+    created_at: str
+    expires_at: str
+
+
+class DatasetExportPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preview_id: str = Field(min_length=1, max_length=64)
+    preview_digest: str = Field(min_length=64, max_length=64)
+    allow_partial: bool = False
+
+
+class DatasetExportSummaryResponse(BaseModel):
+    export_id: str
+    dataset_id: str
+    export_no: int
+    schema_version: str
+    row_count: int
+    content_digest: str
+    provenance_digest: str
+    manifest_digest: str
+    created_at: str
+    download_formats: list[str] = ["jsonl", "json", "provenance"]
+
+
+class DatasetExportListResponse(BaseModel):
+    items: list[DatasetExportSummaryResponse]
+    limit: int
+    offset: int
+
+
 __all__ = [
     "TaskDatasetCreateRequest",
     "TaskDatasetListResponse",
@@ -166,4 +221,10 @@ __all__ = [
     "SampleActionRequest",
     "SampleRevisionUpdateRequest",
     "SftRevisionContentRequest",
+    "DatasetExportIssueResponse",
+    "DatasetExportPreviewRowResponse",
+    "DatasetExportPreviewResponse",
+    "DatasetExportPublishRequest",
+    "DatasetExportSummaryResponse",
+    "DatasetExportListResponse",
 ]

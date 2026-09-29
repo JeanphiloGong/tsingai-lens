@@ -97,6 +97,7 @@ from application.feedback import (
 )
 from application.feedback.dataset_snapshot_service import DatasetSnapshotService
 from application.feedback.dataset_service import FeedbackDatasetService
+from application.feedback.dataset_export_service import FeedbackDatasetExportService
 from application.feedback.feedback_case_service import FeedbackCaseService
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
@@ -136,6 +137,9 @@ from application.repositories.feedback_dataset_repository import FeedbackDataset
 from application.repositories.feedback_dataset_sample_repository import (
     FeedbackDatasetSampleRepository,
 )
+from application.repositories.feedback_dataset_export_repository import (
+    FeedbackDatasetExportRepository,
+)
 from application.repositories.objective_repository import ObjectiveRepository
 from application.repositories.paper_experiment_repository import PaperExperimentRepository
 from application.repositories.objective_experiment_selection_repository import (
@@ -167,6 +171,9 @@ from infra.persistence.postgres.feedback_dataset_repository import (
 )
 from infra.persistence.postgres.feedback_dataset_sample_repository import (
     PostgresFeedbackDatasetSampleRepository,
+)
+from infra.persistence.postgres.feedback_dataset_export_repository import (
+    PostgresFeedbackDatasetExportRepository,
 )
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
@@ -297,6 +304,8 @@ class ApplicationOverrides:
     feedback_dataset_repository: FeedbackDatasetRepository | None = None
     feedback_dataset_sample_repository: FeedbackDatasetSampleRepository | None = None
     feedback_dataset_service: FeedbackDatasetService | None = None
+    feedback_dataset_export_repository: FeedbackDatasetExportRepository | None = None
+    feedback_dataset_export_service: FeedbackDatasetExportService | None = None
     dataset_sample_build_worker: DatasetSampleBuildWorker | None = None
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None
     dataset_snapshot_service: DatasetSnapshotService | None = None
@@ -361,6 +370,8 @@ class ApplicationRuntime:
     feedback_dataset_repository: FeedbackDatasetRepository | None
     feedback_dataset_sample_repository: FeedbackDatasetSampleRepository | None
     feedback_dataset_service: FeedbackDatasetService | None
+    feedback_dataset_export_repository: FeedbackDatasetExportRepository | None
+    feedback_dataset_export_service: FeedbackDatasetExportService | None
     dataset_sample_build_worker: DatasetSampleBuildWorker | None
     dataset_snapshot_repository: DatasetSnapshotRepository | None
     dataset_snapshot_service: DatasetSnapshotService | None
@@ -522,6 +533,7 @@ async def build_application_runtime(
         feedback_case_repository = overrides.feedback_case_repository
         feedback_dataset_repository = overrides.feedback_dataset_repository
         feedback_dataset_sample_repository = overrides.feedback_dataset_sample_repository
+        feedback_dataset_export_repository = overrides.feedback_dataset_export_repository
         dataset_snapshot_repository = overrides.dataset_snapshot_repository
         if session_factory is not None:
             analysis_job_repository = (
@@ -539,6 +551,10 @@ async def build_application_runtime(
             feedback_dataset_sample_repository = (
                 feedback_dataset_sample_repository
                 or PostgresFeedbackDatasetSampleRepository(session_factory)
+            )
+            feedback_dataset_export_repository = (
+                feedback_dataset_export_repository
+                or PostgresFeedbackDatasetExportRepository(session_factory)
             )
             dataset_snapshot_repository = (
                 dataset_snapshot_repository
@@ -617,6 +633,19 @@ async def build_application_runtime(
                 collection_service=collection_service,
                 sample_repository=feedback_dataset_sample_repository,
                 case_repository=feedback_case_repository,
+            )
+
+        feedback_dataset_export_service = overrides.feedback_dataset_export_service
+        if (
+            feedback_dataset_export_service is None
+            and feedback_dataset_service is not None
+            and feedback_dataset_sample_repository is not None
+            and feedback_dataset_export_repository is not None
+        ):
+            feedback_dataset_export_service = FeedbackDatasetExportService(
+                dataset_service=feedback_dataset_service,
+                sample_repository=feedback_dataset_sample_repository,
+                repository=feedback_dataset_export_repository,
             )
 
         dataset_sample_build_worker = overrides.dataset_sample_build_worker
@@ -899,6 +928,8 @@ async def build_application_runtime(
             feedback_dataset_repository=feedback_dataset_repository,
             feedback_dataset_sample_repository=feedback_dataset_sample_repository,
             feedback_dataset_service=feedback_dataset_service,
+            feedback_dataset_export_repository=feedback_dataset_export_repository,
+            feedback_dataset_export_service=feedback_dataset_export_service,
             dataset_sample_build_worker=dataset_sample_build_worker,
             dataset_snapshot_repository=dataset_snapshot_repository,
             dataset_snapshot_service=dataset_snapshot_service,
@@ -956,6 +987,10 @@ def install_application_runtime(
         runtime.feedback_dataset_sample_repository
     )
     application.state.feedback_dataset_service = runtime.feedback_dataset_service
+    application.state.feedback_dataset_export_repository = (
+        runtime.feedback_dataset_export_repository
+    )
+    application.state.feedback_dataset_export_service = runtime.feedback_dataset_export_service
     application.state.dataset_sample_build_worker = runtime.dataset_sample_build_worker
     application.state.dataset_snapshot_repository = runtime.dataset_snapshot_repository
     application.state.dataset_snapshot_service = runtime.dataset_snapshot_service
@@ -1127,6 +1162,8 @@ def create_app(
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None,
     tool_failure_analysis_worker: ToolFailureAnalysisWorker | None = None,
     feedback_dataset_repository: FeedbackDatasetRepository | None = None,
+    feedback_dataset_export_repository: FeedbackDatasetExportRepository | None = None,
+    feedback_dataset_export_service: FeedbackDatasetExportService | None = None,
     feedback_dataset_service: FeedbackDatasetService | None = None,
     dataset_snapshot_repository: DatasetSnapshotRepository | None = None,
     dataset_snapshot_service: DatasetSnapshotService | None = None,
@@ -1159,6 +1196,8 @@ def create_app(
         correction_signal_analysis_worker=correction_signal_analysis_worker,
         tool_failure_analysis_worker=tool_failure_analysis_worker,
         feedback_dataset_repository=feedback_dataset_repository,
+        feedback_dataset_export_repository=feedback_dataset_export_repository,
+        feedback_dataset_export_service=feedback_dataset_export_service,
         feedback_dataset_service=feedback_dataset_service,
         dataset_snapshot_repository=dataset_snapshot_repository,
         dataset_snapshot_service=dataset_snapshot_service,

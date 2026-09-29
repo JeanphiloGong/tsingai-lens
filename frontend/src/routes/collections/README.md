@@ -173,6 +173,15 @@ queue keeps discarded and incomplete samples reachable for recovery. Historical
 snapshot creation and download remain a legacy surface until the D7 cutover
 removes its product read-back entry points.
 
+The SFT page's export section is a separate delivery step after confirmation. It
+requests a server-side preflight, shows the count of valid rows and each issue,
+and lets the user open an affected sample or explicitly publish only the valid
+rows. Publishing freezes the confirmed revision set; later edits create a new
+export rather than changing an earlier file. JSONL and JSON downloads contain
+model-readable messages and document text only. The provenance download keeps
+the row-to-message/source mapping and evidence locators for audit, while those
+internal identifiers stay out of the training file.
+
 The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
 Opening "AI summary" requests one short paragraph; it has no categorized
 sections or evidence counters. Compact references link to exact Sources, and

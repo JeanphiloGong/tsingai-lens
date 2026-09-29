@@ -30,7 +30,7 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260929_0082"
+HEAD_REVISION = "20260929_0083"
 POSTGRES_IDENTIFIER_LIMIT = 63
 
 

@@ -7,9 +7,9 @@ import pytest
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.paper_experiment_authoring import (
-    CreatePaperExperimentRevisionArguments,
+    PaperExperimentRevisionToolRequest,
     CreatePaperExperimentRevisionCapability,
-    ProposePaperExperimentDraftArguments,
+    PaperExperimentDraftToolRequest,
     ProposePaperExperimentDraftCapability,
 )
 from application.core.objectives.paper_experiment_authoring_service import (
@@ -349,7 +349,7 @@ async def test_agent_experiment_draft_can_only_be_published_from_stored_digest()
         authoring_service=authoring
     ).execute(
         context,
-        ProposePaperExperimentDraftArguments(
+        PaperExperimentDraftToolRequest(
             objective_id="objective-1", document_id="paper-1", **draft
         ),
     )
@@ -373,7 +373,7 @@ async def test_agent_experiment_draft_can_only_be_published_from_stored_digest()
             collection_id="collection-1",
             tool_call_id="call-create",
         ),
-        CreatePaperExperimentRevisionArguments(
+        PaperExperimentRevisionToolRequest(
             draft_id=proposed.data["draft_id"],
             draft_digest=proposed.data["draft_digest"],
         ),
@@ -400,7 +400,7 @@ async def test_agent_experiment_revision_rejects_unknown_or_changed_draft():
     with pytest.raises(ValueError, match="not found"):
         await capability.execute(
             context,
-            CreatePaperExperimentRevisionArguments(
+            PaperExperimentRevisionToolRequest(
                 draft_id="pexp_draft_missing", draft_digest="a" * 64
             ),
         )

@@ -19,7 +19,7 @@ _VISIBLE_WARNING_LIMIT = 8
 _VISIBLE_FAILURE_LIMIT = 8
 
 
-class InspectResearchProcessArguments(BaseModel):
+class InspectResearchProcessToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
@@ -33,7 +33,7 @@ class InspectResearchProcessCapability:
             "reasoning and does not imply that Objective discovery or analysis ran."
         ),
         risk=ToolRisk.READ,
-        input_model=InspectResearchProcessArguments,
+        input_model=InspectResearchProcessToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, pipeline_run_service: Any) -> None:
@@ -43,7 +43,7 @@ class InspectResearchProcessCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        _arguments: InspectResearchProcessArguments,
+        _arguments: InspectResearchProcessToolRequest,
     ) -> ChatToolResult:
         collection = await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -174,6 +174,6 @@ class InspectResearchProcessCapability:
 
 
 __all__ = [
-    "InspectResearchProcessArguments",
+    "InspectResearchProcessToolRequest",
     "InspectResearchProcessCapability",
 ]

@@ -23,26 +23,26 @@ _QUALITY_INSPECTION_LIMIT = 12
 _QUALITY_TEXT_LIMIT = 500
 
 
-class ConfirmObjectiveArguments(BaseModel):
+class ConfirmObjectiveToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
 
 
-class StartObjectiveAnalysisArguments(BaseModel):
+class StartObjectiveAnalysisToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
     document_ids: list[str] = Field(min_length=1)
 
 
-class InspectObjectiveAnalysisArguments(BaseModel):
+class InspectObjectiveAnalysisToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
 
 
-class AssessObjectiveQualityArguments(BaseModel):
+class AssessObjectiveQualityToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
@@ -58,7 +58,7 @@ class ConfirmObjectiveCapability:
             "analysis."
         ),
         risk=ToolRisk.WRITE,
-        input_model=ConfirmObjectiveArguments,
+        input_model=ConfirmObjectiveToolRequest,
     )
 
     def __init__(self, *, objective_authoring_service: Any) -> None:
@@ -67,7 +67,7 @@ class ConfirmObjectiveCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: ConfirmObjectiveArguments,
+        arguments: ConfirmObjectiveToolRequest,
     ) -> ChatToolResult:
         objective = await self.objective_authoring_service.confirm_objective(
             collection_id=context.collection_id,
@@ -105,7 +105,7 @@ class StartObjectiveAnalysisCapability:
             "collection workspace and returns immediately after scheduling."
         ),
         risk=ToolRisk.WRITE,
-        input_model=StartObjectiveAnalysisArguments,
+        input_model=StartObjectiveAnalysisToolRequest,
     )
 
     def __init__(
@@ -122,7 +122,7 @@ class StartObjectiveAnalysisCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: StartObjectiveAnalysisArguments,
+        arguments: StartObjectiveAnalysisToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -188,7 +188,7 @@ class InspectObjectiveAnalysisCapability:
             "This read does not start or retry analysis."
         ),
         risk=ToolRisk.READ,
-        input_model=InspectObjectiveAnalysisArguments,
+        input_model=InspectObjectiveAnalysisToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, objective_analysis_service: Any) -> None:
@@ -198,7 +198,7 @@ class InspectObjectiveAnalysisCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: InspectObjectiveAnalysisArguments,
+        arguments: InspectObjectiveAnalysisToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -235,7 +235,7 @@ class AssessObjectiveQualityCapability:
             "a Finding, or a new quality judgment."
         ),
         risk=ToolRisk.READ,
-        input_model=AssessObjectiveQualityArguments,
+        input_model=AssessObjectiveQualityToolRequest,
     )
 
     def __init__(
@@ -250,7 +250,7 @@ class AssessObjectiveQualityCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: AssessObjectiveQualityArguments,
+        arguments: AssessObjectiveQualityToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -497,12 +497,12 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
 
 
 __all__ = [
-    "AssessObjectiveQualityArguments",
+    "AssessObjectiveQualityToolRequest",
     "AssessObjectiveQualityCapability",
-    "ConfirmObjectiveArguments",
+    "ConfirmObjectiveToolRequest",
     "ConfirmObjectiveCapability",
-    "InspectObjectiveAnalysisArguments",
+    "InspectObjectiveAnalysisToolRequest",
     "InspectObjectiveAnalysisCapability",
-    "StartObjectiveAnalysisArguments",
+    "StartObjectiveAnalysisToolRequest",
     "StartObjectiveAnalysisCapability",
 ]

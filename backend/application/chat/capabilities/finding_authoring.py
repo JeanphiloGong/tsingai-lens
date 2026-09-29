@@ -14,7 +14,7 @@ from application.core.objectives.finding_authoring_service import (
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-class CreateFindingVersionArguments(BaseModel):
+class CreateFindingVersionToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
@@ -24,7 +24,7 @@ class CreateFindingVersionArguments(BaseModel):
     parent_finding_id: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
-    def validate_authoring_mode(self) -> "CreateFindingVersionArguments":
+    def validate_authoring_mode(self) -> "CreateFindingVersionToolRequest":
         selected = self.selection_ids + self.comparison_group_ids
         if any(not value.strip() or len(value) > 128 for value in selected):
             raise ValueError("experiment reference IDs must be non-empty and at most 128 characters")
@@ -33,7 +33,7 @@ class CreateFindingVersionArguments(BaseModel):
         return self
 
 
-class CreateFindingDraftArguments(CreateFindingVersionArguments):
+class CreateFindingDraftToolRequest(CreateFindingVersionToolRequest):
     draft_id: str = Field(min_length=1, max_length=128)
 
 
@@ -45,13 +45,13 @@ class CreateFindingDraftCapability:
             "optional ComparisonGroups for researcher review."
         ),
         risk=ToolRisk.DRAFT,
-        input_model=CreateFindingDraftArguments,
+        input_model=CreateFindingDraftToolRequest,
     )
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreateFindingDraftArguments,
+        arguments: CreateFindingDraftToolRequest,
     ) -> ChatToolResult:
         draft = arguments.model_dump()
         refs = [
@@ -113,7 +113,7 @@ class CreateFindingVersionCapability:
             "requires explicit approval and never accepts Evidence IDs or a hand-written conclusion."
         ),
         risk=ToolRisk.WRITE,
-        input_model=CreateFindingVersionArguments,
+        input_model=CreateFindingVersionToolRequest,
     )
 
     def __init__(
@@ -126,7 +126,7 @@ class CreateFindingVersionCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreateFindingVersionArguments,
+        arguments: CreateFindingVersionToolRequest,
     ) -> ChatToolResult:
         result = await self.finding_authoring_service.create_selection_version(
             collection_id=context.collection_id,
@@ -177,8 +177,8 @@ class CreateFindingVersionCapability:
 
 
 __all__ = [
-    "CreateFindingDraftArguments",
+    "CreateFindingDraftToolRequest",
     "CreateFindingDraftCapability",
-    "CreateFindingVersionArguments",
+    "CreateFindingVersionToolRequest",
     "CreateFindingVersionCapability",
 ]

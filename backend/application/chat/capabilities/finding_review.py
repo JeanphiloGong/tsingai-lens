@@ -35,7 +35,7 @@ IssueType = Literal[
 CurationStatus = Literal["supported", "limited", "conflicted", "unsupported"]
 
 
-class RecordFindingFeedbackArguments(BaseModel):
+class RecordFindingFeedbackToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
@@ -46,7 +46,7 @@ class RecordFindingFeedbackArguments(BaseModel):
     note: str | None = Field(default=None, max_length=2_000)
 
     @model_validator(mode="after")
-    def _validate_decision(self) -> "RecordFindingFeedbackArguments":
+    def _validate_decision(self) -> "RecordFindingFeedbackToolRequest":
         if self.review_status == "correct" and self.issue_type != "none":
             raise ValueError("correct feedback cannot report an issue")
         if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
@@ -54,7 +54,7 @@ class RecordFindingFeedbackArguments(BaseModel):
         return self
 
 
-class CurateFindingArguments(BaseModel):
+class CurateFindingToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
@@ -85,7 +85,7 @@ class CurateFindingArguments(BaseModel):
     _parsed_finding: Finding | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
-    def _validate_complete_finding(self) -> "CurateFindingArguments":
+    def _validate_complete_finding(self) -> "CurateFindingToolRequest":
         direction = self.curated_finding.get("direction")
         if (
             not isinstance(direction, str)
@@ -131,7 +131,7 @@ class RecordFindingFeedbackCapability:
             "or Sources."
         ),
         risk=ToolRisk.WRITE,
-        input_model=RecordFindingFeedbackArguments,
+        input_model=RecordFindingFeedbackToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, finding_feedback_service: Any) -> None:
@@ -141,7 +141,7 @@ class RecordFindingFeedbackCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: RecordFindingFeedbackArguments,
+        arguments: RecordFindingFeedbackToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -184,7 +184,7 @@ class CurateFindingCapability:
             "Finding, identity, paper coverage, Evidence IDs, Sources, and lineage."
         ),
         risk=ToolRisk.WRITE,
-        input_model=CurateFindingArguments,
+        input_model=CurateFindingToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, finding_feedback_service: Any) -> None:
@@ -194,7 +194,7 @@ class CurateFindingCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CurateFindingArguments,
+        arguments: CurateFindingToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -247,8 +247,8 @@ def _finding_ref(
 
 
 __all__ = [
-    "CurateFindingArguments",
+    "CurateFindingToolRequest",
     "CurateFindingCapability",
-    "RecordFindingFeedbackArguments",
+    "RecordFindingFeedbackToolRequest",
     "RecordFindingFeedbackCapability",
 ]

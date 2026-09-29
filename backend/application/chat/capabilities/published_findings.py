@@ -17,7 +17,7 @@ ObjectiveId = Annotated[str, Field(min_length=1, max_length=160)]
 _OBJECTIVE_LIMIT = 12
 
 
-class QueryPublishedFindingsArguments(BaseModel):
+class QueryPublishedFindingsToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_ids: list[ObjectiveId] = Field(default_factory=list, max_length=12)
@@ -38,7 +38,7 @@ class QueryPublishedFindingsArguments(BaseModel):
         return normalized
 
 
-class InspectPublishedFindingArguments(BaseModel):
+class InspectPublishedFindingToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
@@ -59,7 +59,7 @@ class QueryPublishedFindingsCapability:
             "authorship."
         ),
         risk=ToolRisk.READ,
-        input_model=QueryPublishedFindingsArguments,
+        input_model=QueryPublishedFindingsToolRequest,
     )
 
     def __init__(
@@ -76,7 +76,7 @@ class QueryPublishedFindingsCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: QueryPublishedFindingsArguments,
+        arguments: QueryPublishedFindingsToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -290,7 +290,7 @@ class InspectPublishedFindingCapability:
             "or report historical review coverage as unknown."
         ),
         risk=ToolRisk.READ,
-        input_model=InspectPublishedFindingArguments,
+        input_model=InspectPublishedFindingToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, objective_analysis_service: Any,
@@ -302,7 +302,7 @@ class InspectPublishedFindingCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: InspectPublishedFindingArguments,
+        arguments: InspectPublishedFindingToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -405,8 +405,8 @@ class InspectPublishedFindingCapability:
 
 
 __all__ = [
-    "InspectPublishedFindingArguments",
+    "InspectPublishedFindingToolRequest",
     "InspectPublishedFindingCapability",
-    "QueryPublishedFindingsArguments",
+    "QueryPublishedFindingsToolRequest",
     "QueryPublishedFindingsCapability",
 ]

@@ -70,7 +70,7 @@ class ObjectiveDraftInput(BaseModel):
         return " ".join(value.split())
 
 
-class ProposeObjectiveDraftsArguments(BaseModel):
+class ProposeObjectiveDraftsToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     drafts: list[ObjectiveDraftInput] = Field(min_length=1, max_length=3)
@@ -86,7 +86,7 @@ class ProposeObjectiveDraftsCapability:
             "create a Core Objective."
         ),
         risk=ToolRisk.DRAFT,
-        input_model=ProposeObjectiveDraftsArguments,
+        input_model=ProposeObjectiveDraftsToolRequest,
     )
 
     def __init__(
@@ -103,7 +103,7 @@ class ProposeObjectiveDraftsCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: ProposeObjectiveDraftsArguments,
+        arguments: ProposeObjectiveDraftsToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -252,7 +252,7 @@ class ProposeObjectiveDraftsCapability:
 
 __all__ = [
     "ObjectiveDraftInput",
-    "ProposeObjectiveDraftsArguments",
+    "ProposeObjectiveDraftsToolRequest",
     "ProposeObjectiveDraftsCapability",
     "normalize_terms",
 ]

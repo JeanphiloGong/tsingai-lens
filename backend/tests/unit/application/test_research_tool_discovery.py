@@ -21,7 +21,7 @@ def test_initial_catalog_defers_read_parameters_even_without_intent_keywords():
     specs = select_tool_specs(registry, [message], [])
     assert [spec.name for spec in specs] == ["discover_research_tools"]
     assert "search_sources" in specs[0].description
-    assert "SearchSourcesArguments" not in str(specs[0].model_schema())
+    assert "SearchSourcesToolRequest" not in str(specs[0].model_schema())
 
 
 def test_search_sources_is_declared_as_a_parallel_safe_read():
@@ -499,10 +499,10 @@ async def test_reading_a_plan_section_keeps_selected_source_tools():
     {"objective_id": "objective-1", "plans": [{"plan_id": "another-plan"}]},
 ])
 async def test_plan_revision_rejects_a_parent_that_was_not_inspected(inspection):
-    from application.chat.capabilities.research_planning import ReviseResearchPlanArguments
+    from application.chat.capabilities.research_planning import ReviseResearchPlanToolRequest
     from tests.unit.application.test_chat_research_plan_capability import _plan_arguments, _source_snapshots
 
-    revision = _Capability("revise_research_plan", ToolRisk.WRITE, ReviseResearchPlanArguments)
+    revision = _Capability("revise_research_plan", ToolRisk.WRITE, ReviseResearchPlanToolRequest)
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(name="inspect_research_plans"),)),
         ModelTurn(tool_calls=(ModelToolCall(name="revise_research_plan", arguments={

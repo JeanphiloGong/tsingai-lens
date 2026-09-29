@@ -27,7 +27,7 @@ SourceType = Literal["text", "table", "figure"]
 ReadableSourceKind = Literal["text_window", "table", "figure"]
 
 
-class InspectDocumentSourcesArguments(BaseModel):
+class InspectDocumentSourcesToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     document_id: str = Field(min_length=1, max_length=240)
@@ -57,7 +57,7 @@ class InspectDocumentSourcesArguments(BaseModel):
         return list(dict.fromkeys(values))
 
 
-class SearchSourcesArguments(BaseModel):
+class SearchSourcesToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     document_ids: list[str] = Field(min_length=1, max_length=20)
@@ -87,7 +87,7 @@ class SearchSourcesArguments(BaseModel):
         return list(dict.fromkeys(values))
 
 
-class InspectTableArguments(BaseModel):
+class InspectTableToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     document_id: str = Field(min_length=1, max_length=240)
@@ -101,7 +101,7 @@ class InspectTableArguments(BaseModel):
         return value.strip()
 
 
-class ReadSourceArguments(BaseModel):
+class ReadSourceToolRequest(BaseModel):
     """Identify one canonical Source and request a bounded exact excerpt."""
 
     model_config = ConfigDict(extra="forbid")
@@ -130,7 +130,7 @@ class ReadSourceCapability:
             "row-aware inspection of an oversized table."
         ),
         risk=ToolRisk.READ,
-        input_model=ReadSourceArguments,
+        input_model=ReadSourceToolRequest,
         parallel_safe=True,
     )
 
@@ -141,7 +141,7 @@ class ReadSourceCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: ReadSourceArguments,
+        arguments: ReadSourceToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -252,7 +252,7 @@ class ReadSourceCapability:
         return result
 
     @staticmethod
-    def _source_record(document: Any, arguments: ReadSourceArguments) -> dict[str, Any] | None:
+    def _source_record(document: Any, arguments: ReadSourceToolRequest) -> dict[str, Any] | None:
         if arguments.source_kind == "text_window":
             item = next(
                 (block for block in document.blocks if block.block_id == arguments.source_ref),
@@ -315,7 +315,7 @@ class SearchSourcesCapability:
             "relevance; inspect the exact Source before making a scientific judgment."
         ),
         risk=ToolRisk.READ,
-        input_model=SearchSourcesArguments,
+        input_model=SearchSourcesToolRequest,
         parallel_safe=True,
     )
 
@@ -326,7 +326,7 @@ class SearchSourcesCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: SearchSourcesArguments,
+        arguments: SearchSourcesToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -459,7 +459,7 @@ class InspectTableCapability:
             "stable across windows. A table read is Source inspection, not Evidence."
         ),
         risk=ToolRisk.READ,
-        input_model=InspectTableArguments,
+        input_model=InspectTableToolRequest,
         parallel_safe=True,
     )
 
@@ -470,7 +470,7 @@ class InspectTableCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: InspectTableArguments,
+        arguments: InspectTableToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -657,7 +657,7 @@ class InspectDocumentSourcesCapability:
             "Select a heading or page and omit limit for automatic batching; continue with next_offset, and use read_source for any oversized truncated Source."
         ),
         risk=ToolRisk.READ,
-        input_model=InspectDocumentSourcesArguments,
+        input_model=InspectDocumentSourcesToolRequest,
         parallel_safe=True,
     )
 
@@ -668,7 +668,7 @@ class InspectDocumentSourcesCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: InspectDocumentSourcesArguments,
+        arguments: InspectDocumentSourcesToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -975,12 +975,12 @@ class InspectDocumentSourcesCapability:
 
 
 __all__ = [
-    "InspectDocumentSourcesArguments",
+    "InspectDocumentSourcesToolRequest",
     "InspectDocumentSourcesCapability",
-    "InspectTableArguments",
+    "InspectTableToolRequest",
     "InspectTableCapability",
-    "ReadSourceArguments",
+    "ReadSourceToolRequest",
     "ReadSourceCapability",
-    "SearchSourcesArguments",
+    "SearchSourcesToolRequest",
     "SearchSourcesCapability",
 ]

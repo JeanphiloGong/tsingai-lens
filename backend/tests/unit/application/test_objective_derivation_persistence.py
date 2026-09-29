@@ -6,7 +6,7 @@ import pytest
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.objective_candidate import (
-    CreateObjectiveCandidateArguments,
+    CreateObjectiveCandidateToolRequest,
     CreateObjectiveCandidateCapability,
 )
 from application.core.objectives.objective_authoring_service import (
@@ -271,7 +271,7 @@ async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call()
 
     result = await capability.execute(
         _context(),
-        CreateObjectiveCandidateArguments.model_validate(
+        CreateObjectiveCandidateToolRequest.model_validate(
             {
                 "question": "How does intermediate preheating affect fatigue life?",
                 "material_scope": ["Ti-6Al-4V"],

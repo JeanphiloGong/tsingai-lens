@@ -13,7 +13,7 @@ from application.chat.capabilities.contracts import (
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-class StartResearchProcessArguments(BaseModel):
+class StartResearchProcessToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     document_ids: list[str] = Field(default_factory=list)
@@ -33,7 +33,7 @@ class StartResearchProcessCapability:
             "to read progress."
         ),
         risk=ToolRisk.WRITE,
-        input_model=StartResearchProcessArguments,
+        input_model=StartResearchProcessToolRequest,
     )
 
     def __init__(
@@ -48,7 +48,7 @@ class StartResearchProcessCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: StartResearchProcessArguments,
+        arguments: StartResearchProcessToolRequest,
     ) -> ChatToolResult:
         collection = await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -131,6 +131,6 @@ class StartResearchProcessCapability:
 
 
 __all__ = [
-    "StartResearchProcessArguments",
+    "StartResearchProcessToolRequest",
     "StartResearchProcessCapability",
 ]

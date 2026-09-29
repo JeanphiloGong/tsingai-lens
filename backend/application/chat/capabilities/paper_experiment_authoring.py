@@ -15,7 +15,7 @@ from application.core.objectives.paper_experiment_authoring_service import (
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-class _PaperExperimentDraftArguments(BaseModel):
+class _PaperExperimentDraftFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
@@ -32,11 +32,11 @@ class _PaperExperimentDraftArguments(BaseModel):
         }
 
 
-class ProposePaperExperimentDraftArguments(_PaperExperimentDraftArguments):
+class PaperExperimentDraftToolRequest(_PaperExperimentDraftFields):
     pass
 
 
-class CreatePaperExperimentRevisionArguments(BaseModel):
+class PaperExperimentRevisionToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     draft_id: str = Field(min_length=1, max_length=128)
@@ -64,7 +64,7 @@ class ProposePaperExperimentDraftCapability:
             "scientific payload. The draft does not write a PaperExperiment."
         ),
         risk=ToolRisk.DRAFT,
-        input_model=ProposePaperExperimentDraftArguments,
+        input_model=PaperExperimentDraftToolRequest,
     )
 
     def __init__(self, *, authoring_service: PaperExperimentAuthoringService) -> None:
@@ -73,7 +73,7 @@ class ProposePaperExperimentDraftCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: ProposePaperExperimentDraftArguments,
+        arguments: PaperExperimentDraftToolRequest,
     ) -> ChatToolResult:
         prepared = await self.authoring_service.prepare(
             collection_id=context.collection_id,
@@ -124,7 +124,7 @@ class CreatePaperExperimentRevisionCapability:
             "the revision and selection atomically. Finding creation is a separate approved action."
         ),
         risk=ToolRisk.WRITE,
-        input_model=CreatePaperExperimentRevisionArguments,
+        input_model=PaperExperimentRevisionToolRequest,
     )
 
     def __init__(
@@ -139,7 +139,7 @@ class CreatePaperExperimentRevisionCapability:
     async def _stored_draft(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreatePaperExperimentRevisionArguments,
+        arguments: PaperExperimentRevisionToolRequest,
     ) -> tuple[str, str, dict[str, Any]]:
         if self.chat_repository is None:
             raise ValueError("paper experiment draft store is unavailable")
@@ -173,7 +173,7 @@ class CreatePaperExperimentRevisionCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreatePaperExperimentRevisionArguments,
+        arguments: PaperExperimentRevisionToolRequest,
     ) -> ChatToolResult:
         objective_id, document_id, raw_draft = await self._stored_draft(
             context, arguments
@@ -234,8 +234,8 @@ class CreatePaperExperimentRevisionCapability:
 
 
 __all__ = [
-    "CreatePaperExperimentRevisionArguments",
+    "PaperExperimentRevisionToolRequest",
     "CreatePaperExperimentRevisionCapability",
-    "ProposePaperExperimentDraftArguments",
+    "PaperExperimentDraftToolRequest",
     "ProposePaperExperimentDraftCapability",
 ]

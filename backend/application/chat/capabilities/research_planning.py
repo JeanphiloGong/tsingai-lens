@@ -22,7 +22,7 @@ from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-class ProposeResearchPlanArguments(ResearchPlanStructure):
+class ProposeResearchPlanToolRequest(ResearchPlanStructure):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     objective_id: str = Field(min_length=1, max_length=240)
@@ -49,7 +49,7 @@ class ProposeResearchPlanArguments(ResearchPlanStructure):
         return _unique_text(values)
 
     @model_validator(mode="after")
-    def _validate_variable_evidence_scope(self) -> "ProposeResearchPlanArguments":
+    def _validate_variable_evidence_scope(self) -> "ProposeResearchPlanToolRequest":
         required_lists = {
             "controls": self.controls,
             "fixed_conditions": self.fixed_conditions,
@@ -101,18 +101,18 @@ class ResearchPlanSourceSnapshot(BaseModel):
         return normalized
 
 
-class CreateResearchPlanArguments(ProposeResearchPlanArguments):
+class CreateResearchPlanToolRequest(ProposeResearchPlanToolRequest):
     source_snapshots: list[ResearchPlanSourceSnapshot] = Field(
         min_length=1,
         max_length=8,
     )
 
 
-class ReviseResearchPlanArguments(CreateResearchPlanArguments):
+class ReviseResearchPlanToolRequest(CreateResearchPlanToolRequest):
     parent_plan_id: str = Field(min_length=1, max_length=128)
 
 
-class InspectResearchPlansArguments(BaseModel):
+class InspectResearchPlansToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     objective_id: str = Field(min_length=1, max_length=240)
@@ -128,7 +128,7 @@ class InspectResearchPlansCapability:
             "design, provenance, status, and version lineage."
         ),
         risk=ToolRisk.READ,
-        input_model=InspectResearchPlansArguments,
+        input_model=InspectResearchPlansToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, experiment_plan_service: Any) -> None:
@@ -138,7 +138,7 @@ class InspectResearchPlansCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: InspectResearchPlansArguments,
+        arguments: InspectResearchPlansToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -207,7 +207,7 @@ class ProposeResearchPlanCapability:
             "Evidence IDs. This call does not persist or authorize the plan."
         ),
         risk=ToolRisk.DRAFT,
-        input_model=ProposeResearchPlanArguments,
+        input_model=ProposeResearchPlanToolRequest,
     )
 
     def __init__(
@@ -222,7 +222,7 @@ class ProposeResearchPlanCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: ProposeResearchPlanArguments,
+        arguments: ProposeResearchPlanToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -449,7 +449,7 @@ class CreateResearchPlanCapability:
             "Changed or stale sources fail without writing a plan."
         ),
         risk=ToolRisk.WRITE,
-        input_model=CreateResearchPlanArguments,
+        input_model=CreateResearchPlanToolRequest,
     )
 
     def __init__(
@@ -468,7 +468,7 @@ class CreateResearchPlanCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreateResearchPlanArguments,
+        arguments: CreateResearchPlanToolRequest,
     ) -> ChatToolResult:
         current, current_snapshots, error = await _approved_plan_draft(
             self._draft_capability,
@@ -519,7 +519,7 @@ class ReviseResearchPlanCapability:
             "require explicit user approval."
         ),
         risk=ToolRisk.WRITE,
-        input_model=ReviseResearchPlanArguments,
+        input_model=ReviseResearchPlanToolRequest,
     )
 
     def __init__(
@@ -538,7 +538,7 @@ class ReviseResearchPlanCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: ReviseResearchPlanArguments,
+        arguments: ReviseResearchPlanToolRequest,
     ) -> ChatToolResult:
         current, current_snapshots, error = await _approved_plan_draft(
             self._draft_capability,
@@ -594,7 +594,7 @@ class ReviseResearchPlanCapability:
 async def _approved_plan_draft(
     draft_capability: ProposeResearchPlanCapability,
     context: CapabilityExecutionContext,
-    arguments: CreateResearchPlanArguments | ReviseResearchPlanArguments,
+    arguments: CreateResearchPlanToolRequest | ReviseResearchPlanToolRequest,
 ) -> tuple[ChatToolResult, list[dict[str, Any]], ChatToolResult | None]:
     # Create/Revise arguments inherit the complete proposal contract. Pass the
     # already validated subtype through directly instead of serializing and
@@ -714,7 +714,7 @@ def _source_snapshot(finding: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _render_plan(
-    arguments: ProposeResearchPlanArguments,
+    arguments: ProposeResearchPlanToolRequest,
     *,
     selected_findings: list[dict[str, Any]],
     selected_evidence: list[dict[str, Any]],
@@ -818,7 +818,7 @@ def _plan_ref(
 
 def _draft_id(
     tool_call_id: str,
-    arguments: ProposeResearchPlanArguments,
+    arguments: ProposeResearchPlanToolRequest,
 ) -> str:
     identity = json.dumps(
         {
@@ -864,14 +864,14 @@ def _deduplicate_refs(refs: list[ChatResourceRef]) -> tuple[ChatResourceRef, ...
 
 
 __all__ = [
-    "CreateResearchPlanArguments",
+    "CreateResearchPlanToolRequest",
     "CreateResearchPlanCapability",
-    "InspectResearchPlansArguments",
+    "InspectResearchPlansToolRequest",
     "InspectResearchPlansCapability",
-    "ProposeResearchPlanArguments",
+    "ProposeResearchPlanToolRequest",
     "ProposeResearchPlanCapability",
     "ResearchPlanSourceSnapshot",
     "ResearchPlanVariable",
-    "ReviseResearchPlanArguments",
+    "ReviseResearchPlanToolRequest",
     "ReviseResearchPlanCapability",
 ]

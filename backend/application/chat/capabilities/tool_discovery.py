@@ -8,7 +8,7 @@ from application.chat.capabilities.contracts import CapabilityExecutionContext, 
 from domain.chat import ChatToolResult, ToolRisk
 
 
-class DiscoverResearchToolsArguments(BaseModel):
+class DiscoverResearchToolsToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     tool_names: list[str] = Field(
@@ -50,10 +50,10 @@ class DiscoverResearchToolsCapability:
                 "Answer greetings and general discussion directly without discovery.\n" + catalog
             ),
             risk=ToolRisk.READ,
-            input_model=DiscoverResearchToolsArguments,
+            input_model=DiscoverResearchToolsToolRequest,
         )
 
-    async def execute(self, context: CapabilityExecutionContext, arguments: DiscoverResearchToolsArguments) -> ChatToolResult:
+    async def execute(self, context: CapabilityExecutionContext, arguments: DiscoverResearchToolsToolRequest) -> ChatToolResult:
         names = list(dict.fromkeys(arguments.tool_names))
         if any(name not in self.tools for name in names):
             return ChatToolResult(

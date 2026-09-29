@@ -2653,13 +2653,13 @@ async def test_context_preparation_exhausting_allowance_finalizes_without_negati
 
 
 async def test_finding_recheck_can_choose_its_linked_source() -> None:
-    from application.chat.capabilities.document_sources import ReadSourceArguments
+    from application.chat.capabilities.document_sources import ReadSourceToolRequest
 
     source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-7"}
     inspect = _Capability("inspect_published_finding", ToolRisk.READ, result_data={
         "finding": {"finding_id": "finding-1"}, "evidence": [{"evidence_id": "evidence-1", **source}],
     })
-    read = _Capability("read_source", ToolRisk.READ, ReadSourceArguments, result_data={
+    read = _Capability("read_source", ToolRisk.READ, ReadSourceToolRequest, result_data={
         **source, "content_truncated": False, "source_digest": "a" * 64,
         "content": "Elongation increased and then decreased with temperature.",
     })
@@ -2686,7 +2686,7 @@ async def test_finding_recheck_can_choose_its_linked_source() -> None:
 
 
 async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan() -> None:
-    from application.chat.capabilities.document_sources import ReadSourceArguments
+    from application.chat.capabilities.document_sources import ReadSourceToolRequest
 
     source = {
         "document_id": "paper-1",
@@ -2698,7 +2698,7 @@ async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan(
         "evidence": [{"evidence_id": "evidence-1", **source}],
     })
     read = _Capability(
-        "read_source", ToolRisk.READ, ReadSourceArguments,
+        "read_source", ToolRisk.READ, ReadSourceToolRequest,
         result_data={**source, "content_truncated": False, "source_digest": "a" * 64,
                      "content": "The inspected evidence supports the correction."},
     )
@@ -2733,9 +2733,9 @@ async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan(
 
 @pytest.mark.parametrize("request_publication", [False, True])
 async def test_finding_review_can_draft_evidence_correction_before_rebuilding_finding(request_publication) -> None:
-    from application.chat.capabilities.document_sources import ReadSourceArguments
+    from application.chat.capabilities.document_sources import ReadSourceToolRequest
 
-    class EvidenceDraftArguments(ReadSourceArguments):
+    class EvidenceDraftToolRequest(ReadSourceToolRequest):
         source_digest: str
 
     source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-7"}
@@ -2744,13 +2744,13 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
         "evidence": [{"evidence_id": "evidence-1", **source,
                       "reported_result": {"direction": "decrease"}}],
     })
-    read = _Capability("read_source", ToolRisk.READ, ReadSourceArguments, result_data={
+    read = _Capability("read_source", ToolRisk.READ, ReadSourceToolRequest, result_data={
         **source, "content_truncated": False, "source_digest": "a" * 64,
         "content": "Elongation increased and then decreased as annealing temperature increased.",
     })
-    evidence_draft = _Capability("create_evidence_draft", ToolRisk.DRAFT, EvidenceDraftArguments)
+    evidence_draft = _Capability("create_evidence_draft", ToolRisk.DRAFT, EvidenceDraftToolRequest)
     finding_draft = _Capability("create_finding_draft", ToolRisk.DRAFT)
-    evidence_write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceDraftArguments)
+    evidence_write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceDraftToolRequest)
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall("inspect_published_finding", {}),)),
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
@@ -2790,17 +2790,17 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
 
 @pytest.mark.parametrize("write_before_read", [False, True])
 async def test_evidence_save_request_requires_real_approval_after_complete_read(write_before_read) -> None:
-    from application.chat.capabilities.document_sources import ReadSourceArguments
+    from application.chat.capabilities.document_sources import ReadSourceToolRequest
 
-    class EvidenceWriteArguments(ReadSourceArguments):
+    class EvidenceWriteToolRequest(ReadSourceToolRequest):
         source_digest: str
 
     source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-7"}
-    read = _Capability("read_source", ToolRisk.READ, ReadSourceArguments, result_data={
+    read = _Capability("read_source", ToolRisk.READ, ReadSourceToolRequest, result_data={
         **source, "content_truncated": False, "source_digest": "a" * 64,
         "content": "Elongation increased and then decreased as annealing temperature increased.",
     })
-    write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceWriteArguments)
+    write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceWriteToolRequest)
     model = _Model(
         *(
             [ModelTurn(tool_calls=(ModelToolCall(

@@ -10,6 +10,9 @@ from application.feedback.dataset_service import (
 )
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.task_datasets import (
+    DatasetCollectionItemResponse,
+    DatasetCollectionRequest,
+    DatasetCollectionResponse,
     TaskDatasetCreateRequest,
     TaskDatasetListResponse,
     TaskDatasetResponse,
@@ -96,6 +99,45 @@ async def get_feedback_dataset(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc
     return TaskDatasetResponse.model_validate(dataset.to_record())
+
+
+@router.post(
+    "/{dataset_id}/collections",
+    response_model=DatasetCollectionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def collect_feedback_cases(
+    dataset_id: str,
+    payload: DatasetCollectionRequest,
+    request: Request,
+) -> DatasetCollectionResponse:
+    try:
+        result = await _service(request).collect_cases_for_user(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            source_case_ids=tuple(payload.source_case_ids),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset or feedback case not found") from exc
+    except FeedbackDatasetError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return DatasetCollectionResponse(
+        operation_id=result.operation_id,
+        created_count=result.created_count,
+        existing_count=result.existing_count,
+        items=[
+            DatasetCollectionItemResponse(
+                sample_id=item.sample.sample_id,
+                source_case_id=item.sample.source_case_id,
+                status=item.sample.status,
+                job_id=item.job.job_id if item.job is not None else item.sample.active_job_id,
+            )
+            for item in result.items
+        ],
+    )
 
 
 __all__ = ["router"]

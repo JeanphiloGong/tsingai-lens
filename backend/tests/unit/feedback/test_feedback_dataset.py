@@ -9,6 +9,7 @@ from application.feedback.dataset_service import (
     FeedbackDatasetService,
 )
 from domain.feedback import Dataset
+from domain.feedback import FeedbackCase
 
 
 pytestmark = pytest.mark.anyio
@@ -44,6 +45,42 @@ class _Repository:
             if item.collection_id == collection_id
         ]
         return tuple(values[offset : offset + limit])
+
+
+class _Cases:
+    def __init__(self, case: FeedbackCase) -> None:
+        self.case = case
+
+    async def read_case(self, case_id: str):
+        return self.case if case_id == self.case.case_id else None
+
+
+class _Samples:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def collect(self, *, samples, jobs):
+        from application.repositories.feedback_dataset_sample_repository import (
+            CollectedDatasetSample,
+        )
+
+        self.calls.append((samples, jobs))
+        return tuple(CollectedDatasetSample(sample, job) for sample, job in zip(samples, jobs))
+
+
+def _source_case() -> FeedbackCase:
+    return FeedbackCase(
+        case_id="case-1",
+        collection_id="collection-1",
+        session_id="session-1",
+        anchor_message_id="answer-1",
+        source_signal_ids=(),
+        analysis_result_ids=(),
+        context_snapshot={"question": "Compare A and B."},
+        status="needs_annotation",
+        created_at="2026-09-29T00:00:00+00:00",
+        updated_at="2026-09-29T00:00:00+00:00",
+    )
 
 
 @pytest.mark.anyio
@@ -127,3 +164,36 @@ def test_dataset_domain_normalizes_name_and_rejects_unknown_type() -> None:
             created_at=now,
             updated_at=now,
         )
+
+
+@pytest.mark.anyio
+async def test_collect_cases_creates_one_pending_sample_job_and_is_explicit() -> None:
+    sample_repository = _Samples()
+    service = FeedbackDatasetService(
+        repository=_Repository(),
+        collection_service=_Collections(),
+        sample_repository=sample_repository,
+        case_repository=_Cases(_source_case()),
+    )
+    dataset = await service.create_for_user(
+        user_id="user-1",
+        collection_id="collection-1",
+        name="SFT",
+        task_type="sft",
+        construction_spec={},
+    )
+
+    collected = await service.collect_cases_for_user(
+        user_id="user-1",
+        dataset_id=dataset.dataset_id,
+        source_case_ids=("case-1",),
+    )
+
+    assert collected.created_count == 1
+    assert collected.existing_count == 0
+    assert len(sample_repository.calls) == 1
+    sample, job = sample_repository.calls[0][0][0], sample_repository.calls[0][1][0]
+    assert sample.status == "pending"
+    assert sample.active_job_id == job.job_id
+    assert job.job_type == "dataset_sample_build"
+    assert job.payload["dataset_id"] == dataset.dataset_id

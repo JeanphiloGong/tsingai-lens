@@ -31,6 +31,24 @@ from domain.feedback.annotation import AnnotationSeverity, DatasetUse, FeedbackA
 from domain.feedback.review_decision import ReviewDecision, ReviewDecisionValue
 from domain.feedback.dataset_snapshot import DatasetSnapshot, DatasetType
 from domain.feedback.dataset import DATASET_TASK_TYPES, Dataset, DatasetTaskType
+from domain.feedback.dataset_sample import (
+    DATASET_SAMPLE_BUILD_JOB_TYPE,
+    DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
+    DatasetSample,
+    DatasetSampleStatus,
+    build_job_payload,
+    sample_build_idempotency_key,
+    source_digest_for_case,
+)
+from domain.feedback.sample_revision import (
+    RevisionAuthorKind,
+    RevisionContent,
+    SFT_SCHEMA_VERSION,
+    SampleRevision,
+    SftRevisionContent,
+    content_digest_for,
+    parse_revision_content,
+)
 
 __all__ = [
     "AnalysisJob",
@@ -66,4 +84,18 @@ __all__ = [
     "DATASET_TASK_TYPES",
     "Dataset",
     "DatasetTaskType",
+    "DATASET_SAMPLE_BUILD_JOB_TYPE",
+    "DATASET_SAMPLE_BUILD_PAYLOAD_VERSION",
+    "DatasetSample",
+    "DatasetSampleStatus",
+    "build_job_payload",
+    "sample_build_idempotency_key",
+    "source_digest_for_case",
+    "RevisionAuthorKind",
+    "RevisionContent",
+    "SFT_SCHEMA_VERSION",
+    "SampleRevision",
+    "SftRevisionContent",
+    "content_digest_for",
+    "parse_revision_content",
 ]

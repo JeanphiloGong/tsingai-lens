@@ -352,6 +352,28 @@ decision, or reason returns `422 review_decision_identity_conflict`. Different
 users and cases are isolated, and requests without the header keep the
 append-only random decision identity.
 
+The maintained task-dataset flow is separate from an immutable historical
+snapshot. It starts with a fixed task type and creates samples from explicitly
+selected feedback cases:
+
+- `POST /api/v1/feedback-datasets`
+- `GET /api/v1/feedback-datasets?collection_id={collection_id}`
+- `GET /api/v1/feedback-datasets/{dataset_id}`
+- `POST /api/v1/feedback-datasets/{dataset_id}/collections`
+
+D1 accepts only `task_type: "sft"`; the dataset's Collection and task type are
+fixed at creation. The collection request contains `source_case_ids`; it is
+idempotent for an existing `(dataset_id, source_case_id)` pair and returns
+HTTP 202 with the sample and pending build-job identities. It does not ask the
+user to type IDs in the interface; the browser carries them from the selected
+case rows. The `dataset_sample_build` Worker reads the case's frozen context
+and readable evidence, writes an immutable `literature-sft.v1` candidate
+revision, and leaves the sample in `needs_confirmation`. Missing readable
+evidence or a candidate target produces `needs_input`; no Worker result
+automatically confirms training data. Internal message/source identities stay
+in revision provenance and are not inserted into model-facing context or
+evidence text.
+
 P6 dataset preparation and offline evaluation are read-only scripts over a
 frozen snapshot; they do not add an online training endpoint or modify Chat.
 

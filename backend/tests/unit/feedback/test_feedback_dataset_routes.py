@@ -93,3 +93,44 @@ def test_task_dataset_request_rejects_other_task_types_and_extra_fields() -> Non
             "task_type": "sft",
             "owner_id": "user-1",
         })
+
+
+def test_task_dataset_collection_returns_accepted_operation() -> None:
+    class Service(_Service):
+        async def collect_cases_for_user(self, **kwargs):
+            from application.repositories.feedback_dataset_sample_repository import (
+                CollectedDatasetSample,
+            )
+            from domain.feedback import DatasetSample
+
+            sample = DatasetSample.pending(
+                sample_id="sample-1",
+                dataset_id="fdset_1",
+                source_case_id=kwargs["source_case_ids"][0],
+                source_digest="a" * 64,
+                active_job_id="job-1",
+                now="2026-09-29T00:00:00+00:00",
+            )
+            return type(
+                "Result",
+                (),
+                {
+                    "operation_id": "collect-1",
+                    "created_count": 1,
+                    "existing_count": 0,
+                    "items": (CollectedDatasetSample(sample=sample, job=type("Job", (), {"job_id": "job-1"})()),),
+                },
+            )()
+
+    from controllers.schemas.task_datasets import DatasetCollectionRequest
+
+    response = asyncio.run(
+        task_datasets.collect_feedback_cases(
+            "fdset_1",
+            DatasetCollectionRequest(source_case_ids=["case-1"]),
+            _request(Service()),
+        )
+    )
+    assert response.operation_id == "collect-1"
+    assert response.items[0].sample_id == "sample-1"
+    assert response.items[0].job_id == "job-1"

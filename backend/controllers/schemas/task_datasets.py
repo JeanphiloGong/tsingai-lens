@@ -40,8 +40,31 @@ class TaskDatasetListResponse(BaseModel):
     offset: int
 
 
+class DatasetCollectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_case_ids: list[str] = Field(min_length=1, max_length=1000)
+
+
+class DatasetCollectionItemResponse(BaseModel):
+    sample_id: str
+    source_case_id: str
+    status: str
+    job_id: str | None = None
+
+
+class DatasetCollectionResponse(BaseModel):
+    operation_id: str
+    created_count: int
+    existing_count: int
+    items: list[DatasetCollectionItemResponse]
+
+
 __all__ = [
     "TaskDatasetCreateRequest",
     "TaskDatasetListResponse",
     "TaskDatasetResponse",
+    "DatasetCollectionItemResponse",
+    "DatasetCollectionRequest",
+    "DatasetCollectionResponse",
 ]

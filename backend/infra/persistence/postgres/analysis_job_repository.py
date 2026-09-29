@@ -21,7 +21,9 @@ from domain.feedback.tool_failure import (
     TOOL_FAILURE_PAYLOAD_VERSION,
     tool_failure_idempotency_key,
 )
+from domain.feedback.dataset_sample import DATASET_SAMPLE_BUILD_JOB_TYPE
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
 
 
 class PostgresAnalysisJobRepository:
@@ -323,6 +325,67 @@ class PostgresAnalysisJobRepository:
             row.status = "running"
             row.started_at = timestamp
             row.updated_at = timestamp
+            await session.flush()
+            return _job(row)
+
+    async def claim_next_dataset_sample_build_job(self, now: str) -> AnalysisJob | None:
+        """Claim exactly one sample build and mark its sample as building.
+
+        The sample status update is in the same transaction as the job claim,
+        so the UI never sees a running build whose sample still looks idle.
+        """
+
+        timestamp = _datetime(now)
+        async with self.session_factory.begin() as session:
+            row = await session.scalar(
+                select(AnalysisJobRow)
+                .where(
+                    AnalysisJobRow.job_type == DATASET_SAMPLE_BUILD_JOB_TYPE,
+                    AnalysisJobRow.status == "pending",
+                    AnalysisJobRow.available_at <= timestamp,
+                )
+                .order_by(
+                    AnalysisJobRow.available_at,
+                    AnalysisJobRow.created_at,
+                    AnalysisJobRow.job_id,
+                )
+                .with_for_update(skip_locked=True)
+                .limit(1)
+            )
+            if row is None:
+                return None
+            payload = dict(row.payload or {})
+            sample_id = str(payload.get("sample_id") or "").strip()
+            generation = payload.get("generation")
+            if not sample_id or not isinstance(generation, int) or generation < 1:
+                row.status = "failed"
+                row.finished_at = timestamp
+                row.updated_at = timestamp
+                row.error_code = "dataset_sample_build_payload_invalid"
+                await session.flush()
+                return _job(row)
+            sample = await session.scalar(
+                select(FeedbackDatasetSampleRow)
+                .where(FeedbackDatasetSampleRow.sample_id == sample_id)
+                .with_for_update()
+            )
+            if (
+                sample is None
+                or sample.generation != generation
+                or sample.active_job_id != row.job_id
+                or sample.status not in {"pending", "building"}
+            ):
+                row.status = "cancelled"
+                row.finished_at = timestamp
+                row.updated_at = timestamp
+                row.error_code = "sample_build_superseded"
+                await session.flush()
+                return _job(row)
+            row.status = "running"
+            row.started_at = timestamp
+            row.updated_at = timestamp
+            sample.status = "building"
+            sample.updated_at = timestamp
             await session.flush()
             return _job(row)
 

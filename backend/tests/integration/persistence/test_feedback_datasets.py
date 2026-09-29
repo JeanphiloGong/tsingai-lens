@@ -5,9 +5,14 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
@@ -17,6 +22,18 @@ from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from application.repositories.feedback_dataset_sample_repository import DatasetSampleActionConflict
 from domain.feedback.sample_revision import SampleRevision
+from infra.persistence.postgres.models.feedback import (
+    FeedbackAnnotationRow,
+    FeedbackCaseRow,
+    FeedbackDatasetSnapshotRow,
+    FeedbackReviewDecisionRow,
+)
+from infra.persistence.postgres.models.feedback_dataset import (
+    FeedbackDatasetMigrationRunRow,
+    FeedbackDatasetRow,
+    FeedbackDatasetSampleRow,
+    FeedbackSampleRevisionRow,
+)
 from infra.persistence.postgres.feedback_dataset_repository import PostgresFeedbackDatasetRepository
 from infra.persistence.postgres.feedback_dataset_sample_repository import PostgresFeedbackDatasetSampleRepository
 from infra.persistence.postgres.feedback_dataset_export_repository import (
@@ -28,6 +45,7 @@ from tests.integration.persistence.test_feedback_workbench import (
     USER_ID,
     feedback_chain,
 )
+from scripts.migrate_feedback_task_datasets import _legacy_digest, stable_id
 
 
 pytestmark = pytest.mark.anyio
@@ -250,3 +268,171 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     ), return_exceptions=True)
     assert sum(isinstance(result, DatasetSampleActionConflict) for result in restored_in_race) == 1
     assert sum(getattr(result, "status", None) == "needs_confirmation" for result in restored_in_race) == 1
+
+
+async def test_d7_migration_cli_is_one_way_idempotent_and_audited(
+    feedback_chain, postgres_session_factory
+) -> None:
+    """Exercise the real legacy-to-maintained-dataset cutover in PostgreSQL."""
+
+    chain = feedback_chain
+    legacy_snapshot_id = "legacy_snapshot_migration"
+    case_id = "legacy_case_migration"
+    annotation_id = "legacy_annotation_migration"
+    review_id = "legacy_review_migration"
+    created_at = datetime.fromisoformat("2026-09-28T00:00:00+00:00")
+    annotation_digest = "c" * 64
+    row = {
+        "messages": [
+            {"role": "user", "content": "Compare the preheating evidence in Paper A and Paper B."}
+        ],
+        "target": "Paper B reports preheating at 200 C in Figure 3.",
+        "evidence": [
+            {"document_title": "Paper B", "quote": "Figure 3 caption records preheating at 200 C."}
+        ],
+    }
+    async with postgres_session_factory() as session:
+        session.add(
+            FeedbackCaseRow(
+                case_id=case_id,
+                collection_id=COLLECTION_ID,
+                session_id=SESSION_ID,
+                anchor_message_id=chain.answer.message_id,
+                source_signal_ids=[],
+                analysis_result_ids=[],
+                signal_analysis_result_ids=[],
+                tool_failure_analysis_result_ids=[],
+                context_snapshot={
+                    "question": "Compare the preheating evidence in Paper A and Paper B.",
+                    "answer": "Paper B has no preheating information.",
+                },
+                status="accepted",
+                created_at=created_at,
+                updated_at=created_at,
+                annotation_digest=annotation_digest,
+            )
+        )
+        await session.flush()
+        session.add(
+            FeedbackAnnotationRow(
+                annotation_id=annotation_id,
+                case_id=case_id,
+                version=1,
+                problem_type="source_missing",
+                severity="high",
+                target=row["target"],
+                support_source_refs=["source-b-caption"],
+                dataset_uses=["sft"],
+                reason="The figure caption supplies the omitted evidence.",
+                annotation_digest=annotation_digest,
+                created_by=USER_ID,
+                created_at=created_at,
+                updated_at=created_at,
+            )
+        )
+        session.add(
+            FeedbackReviewDecisionRow(
+                decision_id=review_id,
+                case_id=case_id,
+                annotation_digest=annotation_digest,
+                decision="accept",
+                reason="Checked before the legacy snapshot was published.",
+                created_by=USER_ID,
+                seq=1,
+                created_at=created_at,
+            )
+        )
+        session.add(
+            FeedbackDatasetSnapshotRow(
+                dataset_id=legacy_snapshot_id,
+                owner_id=USER_ID,
+                collection_id=COLLECTION_ID,
+                dataset_type="sft",
+                rows=[row],
+                exclusions=[],
+                provenance={"items": [{"case_id": case_id, "row_digest": _legacy_digest(row)}]},
+                manifest={"dataset_id": legacy_snapshot_id},
+                manifest_digest="a" * 64,
+                provenance_digest="b" * 64,
+                content_digest="d" * 64,
+                row_count=1,
+                excluded_count=0,
+                created_at=created_at,
+            )
+        )
+        await session.commit()
+
+    backend_root = Path(__file__).resolve().parents[3]
+    migration_script = backend_root / "scripts" / "migrate_feedback_task_datasets.py"
+    environment = os.environ.copy()
+    environment["LENS_DATABASE_URL"] = environment["LENS_TEST_DATABASE_URL"]
+
+    def run(*args: str) -> dict[str, object]:
+        completed = subprocess.run(
+            [sys.executable, str(migration_script), *args],
+            cwd=backend_root,
+            env=environment,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+        return json.loads(completed.stdout)
+
+    dry_run = run()
+    assert dry_run["mode"] == "dry_run"
+    assert dry_run["sample_candidates"] == 1
+    assert dry_run["created_datasets"] == 0
+
+    first_apply = run("--apply")
+    assert first_apply["mode"] == "apply"
+    assert first_apply["created_datasets"] == 1
+    assert first_apply["created_samples"] == 1
+    assert first_apply["created_revisions"] == 1
+
+    migrated_dataset_id = stable_id("fdset_mig", legacy_snapshot_id)
+    async with postgres_session_factory() as session:
+        dataset = await session.get(FeedbackDatasetRow, migrated_dataset_id)
+        sample = await session.scalar(
+            select(FeedbackDatasetSampleRow).where(
+                FeedbackDatasetSampleRow.dataset_id == migrated_dataset_id,
+                FeedbackDatasetSampleRow.source_case_id == case_id,
+            )
+        )
+        assert dataset is not None
+        assert dataset.dataset_id != legacy_snapshot_id
+        assert sample is not None
+        assert sample.status == "needs_confirmation"
+        assert sample.current_revision_id is not None
+        original_revision_id = sample.current_revision_id
+        revision = await session.get(FeedbackSampleRevisionRow, original_revision_id)
+        assert revision is not None
+        assert revision.content["target"] == row["target"]
+
+    second_apply = run("--apply")
+    assert second_apply["mode"] == "apply"
+    assert second_apply["created_datasets"] == 0
+    assert second_apply["created_samples"] == 0
+    assert second_apply["created_revisions"] == 0
+    assert second_apply["existing_datasets"] == 1
+    assert second_apply["existing_samples"] == 1
+
+    async with postgres_session_factory() as session:
+        sample = await session.scalar(
+            select(FeedbackDatasetSampleRow).where(
+                FeedbackDatasetSampleRow.dataset_id == migrated_dataset_id,
+                FeedbackDatasetSampleRow.source_case_id == case_id,
+            )
+        )
+        assert sample is not None
+        assert sample.current_revision_id == original_revision_id
+        runs = list(
+            (
+                await session.scalars(
+                    select(FeedbackDatasetMigrationRunRow).order_by(
+                        FeedbackDatasetMigrationRunRow.created_at
+                    )
+                )
+            ).all()
+        )
+        assert [item.mode for item in runs] == ["dry_run", "apply", "apply"]
+        assert [item.status for item in runs] == ["planned", "applied", "applied"]

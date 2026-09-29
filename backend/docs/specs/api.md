@@ -287,20 +287,17 @@ The immutable message records and turn/stream contracts contain no feedback.
 The rating is not supplied directly to a model and does not itself assert that
 an answer is wrong. In the current feedback-workbench flow, a saved rating is
 an input signal for an internal analysis job; only a later human annotation,
-review decision, and immutable dataset snapshot can make it available to an
-evaluation or training export.
+review decision, confirmed DatasetSample revision, and immutable DatasetExport
+can make it available to an evaluation or training export.
 
 ### Feedback Analysis Workbench
 
-Snapshot creation accepts only `collection_id`, `dataset_type`, and
-`items: [{"case_id": "..."}]` (at most 500 selections). Retired `split` and
-`paper_families` inputs are rejected with 422. New exports use manifest
-`feedback-dataset.v3` and provenance `feedback-dataset-provenance.v2`;
-model-facing rows have no experiment split. Document and session identities
-remain in private provenance. Historical v2 snapshots keep their original
-bytes and digests. No stored snapshots are rewritten. A 201 response freezes
-the exclusion report even if no rows qualify; clients must inspect `row_count`
-and `excluded_count` instead of treating every 201 as a usable dataset.
+The current product flow turns a saved Chat signal into a reviewable,
+source-grounded case and then into a maintained, task-specific dataset. The
+old P5 `DatasetSnapshot` contract is no longer a product read path. D7 reads
+legacy snapshots only from the one-way migration script; after migration there
+is no old snapshot detail, download, or compatibility query. A retained legacy
+table or file is an operations archive, not a browser contract.
 
 The feedback workbench turns a saved Chat rating into a reviewable, source-
 grounded case. It does not rewrite the original messages or model-call audit:
@@ -310,10 +307,6 @@ grounded case. It does not rewrite the original messages or model-call audit:
 - `PATCH /api/v1/feedback-cases/{case_id}/annotation`
 - `POST /api/v1/feedback-cases/{case_id}/review`
 - `GET /api/v1/feedback-cases/{case_id}/review-decisions`
-- `POST /api/v1/dataset-snapshots`
-- `GET /api/v1/dataset-snapshots`
-- `GET /api/v1/dataset-snapshots/{dataset_id}`
-- `GET /api/v1/dataset-snapshots/{dataset_id}/jsonl`
 
 The authenticated user must be able to access the case's Collection. The
 current validation phase has no separate annotator, reviewer, or dataset-admin
@@ -326,8 +319,8 @@ Candidate analysis is available only through the case list/detail workbench and
 is an internal review signal. There is no candidate-analysis download endpoint
 and no default “approve everything” export. A case becomes downloadable only
 after the current annotation is reviewed and included in an immutable
-`DatasetSnapshot`; the snapshot JSONL contains model-facing fields and readable
-evidence, while audit identities remain in the snapshot's private provenance.
+`DatasetExport`; its model file contains readable evidence, while audit
+identities remain in the separate provenance sidecar.
 
 The flow is ordered:
 
@@ -337,8 +330,8 @@ Chat feedback
   -> candidate AnalysisResult and FeedbackCase
   -> human Annotation
   -> append-only ReviewDecision
-  -> immutable DatasetSnapshot
-  -> evaluation / sft / preference JSONL
+  -> task-specific DatasetSample revisions
+  -> confirmed DatasetExport / provenance sidecar
 ```
 
 Analysis is a candidate signal only. A failed worker records a technical job
@@ -365,6 +358,10 @@ selected feedback cases:
 - `PATCH /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}`
 - `POST /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}/confirm`
 - `POST /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}/actions`
+- `POST /api/v1/feedback-datasets/{dataset_id}/export-previews`
+- `POST /api/v1/feedback-datasets/{dataset_id}/exports`
+- `GET /api/v1/feedback-datasets/{dataset_id}/exports?limit={limit}&offset={offset}`
+- `GET /api/v1/feedback-datasets/{dataset_id}/exports/{export_id}/download?format=jsonl|json|provenance`
 
 D1 accepts only `task_type: "sft"`; the dataset's Collection and task type are
 fixed at creation. The collection request contains `source_case_ids`; it is
@@ -379,8 +376,54 @@ automatically confirms training data. Internal message/source identities stay
 in revision provenance and are not inserted into model-facing context or
 evidence text.
 
+The sample workbench reads the current immutable revision and the source case
+context. The SFT PATCH body contains `expected_revision_id` and the complete
+`literature-sft.v1` content; a successful edit appends a human revision and
+clears any previous confirmation. The confirm body contains the same expected
+revision ID. Confirmation is conditional on the sample still pointing at that
+revision, records the confirming user and time, and is idempotent when the same
+revision was already confirmed. A stale revision returns `409
+sample_revision_stale`; the browser keeps its draft and asks the user to reload
+or compare before submitting again. The interface presents questions,
+readable context, answer text, and evidence excerpts; users do not type sample,
+case, message, or source IDs.
+
+The actions endpoint accepts `action` (`rebuild`, `retry`, `discard`, or
+`restore`), `expected_revision_id`, and an optional `reason`; `rebuild` requires
+a non-empty reason. It requires an `Idempotency-Key` header. Reusing the same
+key and request returns the original action result; changing the request under
+the same key returns `409 sample_action_identity_conflict`. A changed sample
+revision or generation returns `409 sample_revision_stale`. Rebuild and retry
+create a new pending build job; discard invalidates any running build; restore
+returns to `needs_confirmation` only when the retained candidate still matches
+the current source, otherwise to `needs_input`. Neither action automatically
+confirms a sample. A late Worker result cannot replace a newer generation.
+
+The export flow always starts with `POST .../export-previews`. The server reads
+the current confirmed revisions, validates readable context and provenance, and
+stores a short-lived member digest. The response contains the requested count,
+exportable count, sample previews, and user-readable issues. Publishing requires
+the preview ID and digest plus an `Idempotency-Key`; without
+`allow_partial: true`, any issue returns `422` and no export is created. With
+explicit partial consent, only the valid members are published; invalid samples
+remain in the queue. If a revision or confirmation changes after preview,
+publishing returns `409 export_preview_stale` and the browser must run a new
+preview. An empty export is rejected.
+
+Each published export is immutable and has its own `export_id` and sequential
+version. `format=jsonl` and `format=json` contain only model-facing SFT rows:
+messages with the confirmed target as the final assistant message and readable
+document title/text context. They do not contain sample, case, session, message,
+source, or locator IDs. `format=provenance` downloads the separate trace sidecar
+with row keys, source/message identities, evidence records, and digests. The
+sidecar is for audit and later source lookup; it is not appended to the model
+prompt. Replaying the same idempotency key and publication digest returns the
+existing immutable export rather than creating another version.
+
 P6 dataset preparation and offline evaluation are read-only scripts over a
-frozen snapshot; they do not add an online training endpoint or modify Chat.
+published DatasetExport and its provenance sidecar; they do not add an online
+training endpoint or modify Chat. A legacy DatasetSnapshot can be consumed
+only by the D7 migration script, not by this product API.
 
 A user message may carry up to 12 `source_contexts` items selected from the
 same Collection's document reader. The item contains a stable Source resource

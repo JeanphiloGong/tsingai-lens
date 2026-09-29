@@ -366,6 +366,37 @@ class FeedbackDatasetExportMemberRow(Base):
     provenance_digest: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
+class FeedbackDatasetMigrationRunRow(Base):
+    """Audit record for one legacy feedback-dataset migration invocation."""
+
+    __tablename__ = "feedback_dataset_migration_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('dry_run', 'apply')",
+            name="feedback_dataset_migration_run_mode_valid",
+        ),
+        CheckConstraint(
+            "status IN ('planned', 'applied', 'failed')",
+            name="feedback_dataset_migration_run_status_valid",
+        ),
+        Index(
+            "ix_feedback_dataset_migration_runs_created",
+            "created_at",
+        ),
+    )
+
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    migration_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    summary: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 __all__ = [
     "FeedbackDatasetRow",
     "FeedbackDatasetSampleRow",
@@ -374,4 +405,5 @@ __all__ = [
     "FeedbackDatasetExportPreviewRow",
     "FeedbackDatasetExportRow",
     "FeedbackDatasetExportMemberRow",
+    "FeedbackDatasetMigrationRunRow",
 ]

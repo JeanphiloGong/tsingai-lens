@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -14,8 +14,7 @@ def _load_module(name: str, relative_path: str):
     backend_root = Path(__file__).resolve().parents[3]
     script_path = backend_root / "scripts" / "evaluation" / "feedback_dataset" / relative_path
     spec = importlib.util.spec_from_file_location(name, script_path)
-    assert spec is not None
-    assert spec.loader is not None
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)
@@ -24,22 +23,104 @@ def _load_module(name: str, relative_path: str):
 
 @pytest.fixture(scope="module")
 def prepare_module():
-    return _load_module("feedback_dataset_prepare", "prepare.py")
+    return _load_module("feedback_dataset_prepare_export", "prepare.py")
 
 
 @pytest.fixture(scope="module")
 def experiment_module():
-    return _load_module("feedback_dataset_experiment", "experiment.py")
+    return _load_module("feedback_dataset_experiment_export", "experiment.py")
 
 
 def _digest(value: object) -> str:
-    encoded = json.dumps(
-        value,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _jsonl_bytes(rows: list[dict]) -> bytes:
+    return b"".join(
+        (json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        for row in rows
+    )
+
+
+def _rows(dataset_type: str = "evaluation") -> list[dict]:
+    values = [
+        ("Paper A", "Source A supports the claim.", "tree-a"),
+        ("Paper B", "Source B reports a lower value.", "tree-b"),
+    ]
+    result: list[dict] = []
+    for title, quote, _tree in values:
+        base = {
+            "messages": [{"role": "user", "content": "核对来源中的结论。"}],
+            "context": [{"document_title": title, "text": quote}],
+            "evidence": [{"document_title": title, "text": quote}],
+        }
+        if dataset_type == "sft":
+            base["messages"] = [
+                *base["messages"],
+                {"role": "assistant", "content": quote},
+            ]
+        elif dataset_type == "preference":
+            base.update({"chosen": "基于来源的回答。", "rejected": "没有依据的回答。"})
+        else:
+            base.update(
+                {
+                    "reference": quote,
+                    "criteria": ["必须保留来源边界"],
+                    "evaluation_mode": "reference",
+                }
+            )
+        result.append(base)
+    return result
+
+
+def _bundle(tmp_path: Path, *, dataset_type: str = "evaluation") -> tuple[Path, dict]:
+    rows = _rows(dataset_type)
+    provenance = []
+    for index, row in enumerate(rows, start=1):
+        provenance.append(
+            {
+                "schema_version": "feedback-dataset-provenance.v1",
+                "row_key": hashlib.sha256(f"sample-{index}:revision-{index}".encode()).hexdigest(),
+                "row_digest": _digest(row),
+                "sample_id": f"sample-{index}",
+                "source_case_id": f"case-{index}",
+                "revision_id": f"revision-{index}",
+                "document_ids": [f"document-{index}"],
+                "session_tree_id": "tree-a" if index == 1 else "tree-b",
+                "source_refs": [f"source-{index}"],
+                "evidence_records": [{"document_id": f"document-{index}", "quote": "原文"}],
+            }
+        )
+    manifest = {
+        "manifest_schema_version": "feedback-dataset-export-manifest.v1",
+        "schema_version": {
+            "sft": "literature-sft.v1",
+            "preference": "literature-preference.v1",
+            "evaluation": "literature-evaluation.v1",
+        }[dataset_type],
+        "dataset_type": dataset_type,
+        "dataset_id": "dataset-1",
+        "collection_id": "collection-1",
+        "export_id": "export-1",
+        "export_no": 1,
+        "row_count": len(rows),
+        "main_file": "data.jsonl",
+        "provenance_file": "provenance.jsonl",
+        "member_digest": "a" * 64,
+        "preview_digest": "b" * 64,
+        "content_digest": hashlib.sha256(_jsonl_bytes(rows)).hexdigest(),
+        "provenance_digest": _digest(provenance),
+        "created_at": "2026-09-29T00:00:00+00:00",
+    }
+    manifest["manifest_digest"] = _digest(manifest)
+    source = tmp_path / "export"
+    source.mkdir()
+    (source / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (source / "data.jsonl").write_bytes(_jsonl_bytes(rows))
+    (source / "provenance.jsonl").write_bytes(_jsonl_bytes(provenance))
+    return source, manifest
 
 
 def _run_cli(script_name: str, *arguments: object) -> subprocess.CompletedProcess[str]:
@@ -54,798 +135,150 @@ def _run_cli(script_name: str, *arguments: object) -> subprocess.CompletedProces
     )
 
 
-def _snapshot(*, dataset_type: str = "evaluation", rows: list[dict] | None = None) -> dict:
-    rows = rows or [
-        {
-            "split": "train",
-            "record_type": dataset_type,
-            "input": "Which source supports the claim?",
-            "reference": "Source A supports the claim.",
-            "evidence": [
-                {
-                    "document_title": "Paper A",
-                    "quote": "Source A supports the claim.",
-                    "heading_path": "Results",
-                }
-            ],
-            "criteria": ["must cite source"],
-        },
-        {
-            "split": "eval",
-            "record_type": dataset_type,
-            "input": "What did source B report?",
-            "reference": "Source B reports a lower value.",
-            "evidence": [
-                {
-                    "document_title": "Paper B",
-                    "quote": "Source B reports a lower value.",
-                    "page": 4,
-                }
-            ],
-            "criteria": ["must preserve uncertainty"],
-        },
+def _eval_row_id(prepared_dir: Path) -> str:
+    return json.loads((prepared_dir / "eval.jsonl").read_text(encoding="utf-8").splitlines()[0])["row_id"]
+
+
+def _eval_rows(prepared_dir: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in (prepared_dir / "eval.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
-    if dataset_type == "sft":
-        for row in rows:
-            row.pop("input", None)
-            row.pop("reference", None)
-            row.pop("criteria", None)
-            row["messages"] = [{"role": "user", "content": "Answer the source question."}]
-            row["target"] = "The reviewed answer."
-    elif dataset_type == "preference":
-        for row in rows:
-            row.pop("input", None)
-            row.pop("reference", None)
-            row.pop("criteria", None)
-            row["prompt"] = [{"role": "user", "content": "Answer the source question."}]
-            row["chosen"] = "The reviewed answer."
-            row["rejected"] = "The original answer."
-
-    encoded = "".join(
-        json.dumps(row, ensure_ascii=True, sort_keys=True, separators=(",", ":")) + "\n"
-        for row in rows
-    ).encode("utf-8")
-    lineage = [
-        {
-            "case_id": f"case-{index + 1}",
-            "split": row["split"],
-            "source_refs": [f"source-{index + 1}"],
-            "paper_families": {f"family-{index + 1}": f"family-{index + 1}"},
-            "paper_family_keys": [f"family-{index + 1}"],
-            "session_tree_id": f"tree-{index + 1}",
-            "record_type": dataset_type,
-            "row_digest": _digest(row),
-        }
-        for index, row in enumerate(rows)
-    ]
-    provenance = {
-        "schema_version": "feedback-dataset-provenance.v1",
-        "collection_id": "collection-1",
-        "dataset_type": dataset_type,
-        "paper_families": {f"paper-{index + 1}": f"family-{index + 1}" for index in range(len(rows))},
-        "items": lineage,
-    }
-    provenance_digest = _digest(provenance)
-    exclusions: list[dict] = []
-    digest_basis = {
-        "schema_version": "feedback-dataset.v2",
-        "owner_id": "user-1",
-        "collection_id": "collection-1",
-        "dataset_type": dataset_type,
-        "rows": rows,
-        "exclusions": exclusions,
-        "provenance_digest": provenance_digest,
-    }
-    manifest_digest = _digest(digest_basis)
-    manifest = {
-        **digest_basis,
-        "dataset_id": "dataset-1",
-        "row_count": len(rows),
-        "excluded_count": 0,
-        "empty": False,
-        "manifest_digest": manifest_digest,
-        "content_digest": hashlib.sha256(encoded).hexdigest(),
-        "created_at": "2026-09-24T00:00:00+00:00",
-    }
-    return {
-        "dataset_id": "dataset-1",
-        "owner_id": "user-1",
-        "collection_id": "collection-1",
-        "dataset_type": dataset_type,
-        "rows": rows,
-        "exclusions": exclusions,
-        "provenance": provenance,
-        "manifest": manifest,
-        "manifest_digest": manifest_digest,
-        "provenance_digest": provenance_digest,
-        "content_digest": manifest["content_digest"],
-    }
 
 
-def _export_snapshot() -> dict:
-    snapshot = _snapshot()
-    snapshot["manifest"]["schema_version"] = "feedback-dataset.v3"
-    snapshot["provenance"]["schema_version"] = "feedback-dataset-provenance.v2"
-    snapshot["provenance"].pop("paper_families")
-    for index, (row, source) in enumerate(zip(snapshot["rows"], snapshot["provenance"]["items"])):
-        row.pop("split")
-        for key in ("split", "paper_families", "paper_family_keys"):
-            source.pop(key)
-        source["document_ids"] = [f"document-{index + 1}"]
-        source["row_digest"] = _digest(row)
-    payload = "".join(json.dumps(row, ensure_ascii=True, sort_keys=True, separators=(",", ":")) + "\n"
-                      for row in snapshot["rows"]).encode()
-    snapshot["content_digest"] = hashlib.sha256(payload).hexdigest()
-    snapshot["manifest"]["content_digest"] = snapshot["content_digest"]
-    _refresh_snapshot_digests(snapshot)
-    return snapshot
-
-
-def _training_plan(snapshot: dict) -> dict:
-    return {
-        "schema_version": "feedback-experiment-plan.v1",
-        "snapshot_manifest_digest": snapshot["manifest_digest"],
-        "mode": "train_eval",
-        "rows": [{"row_digest": _digest(row), "split": split,
-                  "input_document_ids": [f"document-{index + 1}"],
-                  "source_review_reason": "Checked full question and source scope."}
-                 for index, (row, split) in enumerate(zip(snapshot["rows"], ("train", "eval")))],
-        "document_groups": {"document-1": "paper-a", "document-2": "paper-b"},
-    }
-
-
-def test_new_export_cli_defaults_to_evaluation_and_freezes_plan(tmp_path, prepare_module):
-    snapshot = _export_snapshot()
-    source = tmp_path / "export.json"
-    source.write_text(json.dumps(snapshot))
-    out = tmp_path / "prepared"
-    result = _run_cli("prepare.py", source, out, "--revision", "test-revision")
+def test_export_cli_defaults_to_evaluation_and_keeps_sidecars_private(tmp_path, prepare_module):
+    source, manifest = _bundle(tmp_path)
+    output = tmp_path / "prepared"
+    result = _run_cli("prepare.py", source, output, "--revision", "test-revision")
     assert result.returncode == 0, result.stderr
-    prepared = prepare_module.load_prepared(out)
+    prepared = prepare_module.load_prepared(output)
     assert prepared["counts"] == {"train": 0, "eval": 2}
     assert prepared["experiment_mode"] == "evaluation_only"
-    assert json.loads((out / "snapshot.json").read_text()) == snapshot
-    report = tmp_path / "report.json"
-    result = _run_cli("experiment.py", out, report)
-    assert result.returncode == 0, result.stderr
-    assert json.loads(report.read_text())["status"] == "not_run"
-    plan = json.loads((out / "experiment-plan.json").read_text())
-    plan["rows"][0]["split"] = "train"
-    (out / "experiment-plan.json").write_text(json.dumps(plan))
-    with pytest.raises(prepare_module.SnapshotValidationError, match="experiment_plan_digest_mismatch"):
-        prepare_module.load_prepared(out)
+    assert prepared["export"]["export_id"] == "export-1"
+    assert json.loads((output / "export-manifest.json").read_text()) == manifest
+    row = json.loads((output / "eval.jsonl").read_text().splitlines()[0])
+    assert row["row_id"].startswith("row_")
+    assert "source_refs" not in row
+    assert "document_id" not in json.dumps(row, ensure_ascii=False)
 
 
-def test_training_plan_cli_binds_splits_without_mutating_snapshot(tmp_path, prepare_module):
-    snapshot = _export_snapshot()
-    source, plan_path = tmp_path / "export.json", tmp_path / "plan.json"
-    source.write_text(json.dumps(snapshot))
-    plan_path.write_text(json.dumps(_training_plan(snapshot)))
-    out = tmp_path / "prepared"
-    result = _run_cli("prepare.py", source, out, "--experiment-plan", plan_path)
-    assert result.returncode == 0, result.stderr
-    prepared = prepare_module.load_prepared(out)
-    assert prepared["counts"] == {"train": 1, "eval": 1}
-    assert all("split" not in row for row in json.loads((out / "snapshot.json").read_text())["rows"])
-
-
-@pytest.mark.parametrize("defect,expected", [
-    ("missing_group", "source_group_unknown"),
-    ("missing_review", "source_group_unknown"),
-    ("omitted_input", "source_group_unknown"),
-    ("same_paper", "split_leakage"),
-    ("same_session", "split_leakage"),
-    ("wrong_snapshot", "experiment_plan_snapshot_mismatch"),
-    ("duplicate", "experiment_row_unknown_or_duplicate"),
-    ("empty_train", "experiment_split_empty"),
-])
-def test_training_plan_rejects_uncertain_or_leaking_assignments(tmp_path, prepare_module, defect, expected):
-    snapshot = _export_snapshot()
-    if defect == "same_session":
-        snapshot["provenance"]["items"][1]["session_tree_id"] = "tree-1"
-        _refresh_snapshot_digests(snapshot)
-    plan = _training_plan(snapshot)
-    if defect == "missing_group":
-        plan["document_groups"].pop("document-2")
-    elif defect == "missing_review":
-        plan["rows"][0].pop("source_review_reason")
-    elif defect == "omitted_input":
-        plan["rows"][0]["input_document_ids"] = ["document-2"]
-    elif defect == "same_paper":
-        plan["document_groups"]["document-2"] = "paper-a"
-    elif defect == "wrong_snapshot":
-        plan["snapshot_manifest_digest"] = "a" * 64
-    elif defect == "duplicate":
-        plan["rows"].append(plan["rows"][0])
-    elif defect == "empty_train":
-        plan["rows"][0]["split"] = "eval"
-    source, plan_path = tmp_path / "export.json", tmp_path / "plan.json"
-    source.write_text(json.dumps(snapshot))
-    plan_path.write_text(json.dumps(plan))
-    out = tmp_path / "prepared"
-    with pytest.raises(prepare_module.SnapshotValidationError, match=expected):
-        prepare_module.prepare_snapshot(snapshot_path=source, output_dir=out, experiment_plan_path=plan_path)
-    assert not out.exists()
-
-
-def _refresh_snapshot_digests(snapshot: dict) -> None:
-    provenance = snapshot["provenance"]
-    provenance_digest = _digest(provenance)
-    snapshot["provenance_digest"] = provenance_digest
-    digest_basis = {
-        "schema_version": snapshot["manifest"]["schema_version"],
-        "owner_id": snapshot["owner_id"],
-        "collection_id": snapshot["collection_id"],
-        "dataset_type": snapshot["dataset_type"],
-        "rows": snapshot["rows"],
-        "exclusions": snapshot["exclusions"],
-        "provenance_digest": provenance_digest,
+def test_train_eval_plan_uses_export_digest_and_checks_source_isolation(tmp_path, prepare_module):
+    source, manifest = _bundle(tmp_path)
+    rows = [json.loads(line) for line in (source / "data.jsonl").read_text().splitlines()]
+    plan = {
+        "schema_version": "feedback-experiment-plan.v2",
+        "export_manifest_digest": manifest["manifest_digest"],
+        "mode": "train_eval",
+        "rows": [
+            {
+                "row_digest": _digest(rows[0]),
+                "split": "train",
+                "input_document_ids": ["document-1"],
+                "source_review_reason": "核对完整输入来源。",
+            },
+            {
+                "row_digest": _digest(rows[1]),
+                "split": "eval",
+                "input_document_ids": ["document-2"],
+                "source_review_reason": "核对版本身份。",
+            },
+        ],
+        "document_groups": {"document-1": "paper-a", "document-2": "paper-b"},
     }
-    manifest_digest = _digest(digest_basis)
-    snapshot["manifest_digest"] = manifest_digest
-    snapshot["manifest"].update(
-        {
-            **digest_basis,
-            "manifest_digest": manifest_digest,
-            "provenance_digest": provenance_digest,
-        }
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    prepared = prepare_module.prepare_export(
+        export_path=source,
+        output_dir=tmp_path / "prepared",
+        experiment_plan_path=plan_path,
     )
+    assert prepared["counts"] == {"train": 1, "eval": 1}
 
-
-def _eval_row_id(prepared_dir: Path) -> str:
-    line = (prepared_dir / "eval.jsonl").read_text(encoding="utf-8").splitlines()[0]
-    return str(json.loads(line)["row_id"])
-
-
-def test_prepare_materializes_split_files_and_loss_mask(tmp_path, prepare_module):
-    snapshot_path = tmp_path / "snapshot.json"
-    output_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot(dataset_type="sft")), encoding="utf-8")
-
-    result = prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=output_dir,
-        revision="abc123",
-        seed=7,
-    )
-
-    assert result["status"] == "ready"
-    assert result["snapshot"]["manifest_digest"] == _snapshot(dataset_type="sft")["manifest_digest"]
-    assert result["counts"] == {"train": 1, "eval": 1}
-    train_row = json.loads((output_dir / "train.jsonl").read_text(encoding="utf-8"))
-    assert train_row["loss_mask"]
-    assert len(train_row["loss_mask"]) == len(train_row["tokens"])
-    assert 0 in train_row["loss_mask"]
-    assert 1 in train_row["loss_mask"]
-    assert json.loads((output_dir / "prepared.json").read_text(encoding="utf-8"))["revision"] == "abc123"
-
-
-def test_prepare_generates_private_row_ids_for_clean_snapshot_rows(tmp_path, prepare_module):
-    snapshot_path = tmp_path / "snapshot.json"
-    output_dir = tmp_path / "prepared"
-    snapshot = _snapshot(dataset_type="sft")
-    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
-
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=output_dir,
-        revision="abc123",
-        seed=7,
-    )
-
-    public_row = json.loads((output_dir / "snapshot.json").read_text(encoding="utf-8"))["rows"][0]
-    prepared_row = json.loads((output_dir / "train.jsonl").read_text(encoding="utf-8"))
-    assert "row_id" not in public_row
-    assert "case_id" not in public_row
-    assert "source_refs" not in public_row
-    assert prepared_row["row_id"].startswith("row_")
-    assert prepared_row["evidence"][0]["document_title"] == "Paper A"
-
-
-def test_prepare_rejects_internal_identity_in_public_row(tmp_path, prepare_module):
-    rows = _snapshot()["rows"]
-    rows[0]["source_refs"] = ["source-leak"]
-    snapshot_path = tmp_path / "snapshot.json"
-    snapshot_path.write_text(json.dumps(_snapshot(rows=rows)), encoding="utf-8")
-
-    with pytest.raises(prepare_module.SnapshotValidationError, match="row_internal_field:source_refs"):
-        prepare_module.prepare_snapshot(
-            snapshot_path=snapshot_path,
-            output_dir=tmp_path / "prepared",
-            revision="abc123",
-            seed=7,
-        )
-
-
-def test_prepare_rejects_cross_split_session_tree_leakage(tmp_path, prepare_module):
-    snapshot = _snapshot()
-    snapshot["provenance"]["items"][1]["session_tree_id"] = snapshot["provenance"]["items"][0][
-        "session_tree_id"
-    ]
-    _refresh_snapshot_digests(snapshot)
-    snapshot_path = tmp_path / "snapshot.json"
-    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
-
+    plan["document_groups"]["document-2"] = "paper-a"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
     with pytest.raises(prepare_module.SnapshotValidationError, match="split_leakage"):
-        prepare_module.prepare_snapshot(
-            snapshot_path=snapshot_path,
-            output_dir=tmp_path / "prepared",
-            revision="abc123",
-            seed=7,
+        prepare_module.prepare_export(
+            export_path=source,
+            output_dir=tmp_path / "leaking",
+            experiment_plan_path=plan_path,
         )
 
 
-def test_prepare_rejects_context_overflow_without_truncation(tmp_path, prepare_module):
-    rows = _snapshot()["rows"]
-    rows[0]["input"] = "word " * 20
-    snapshot_path = tmp_path / "snapshot.json"
-    snapshot_path.write_text(json.dumps(_snapshot(rows=rows)), encoding="utf-8")
-
-    with pytest.raises(prepare_module.SnapshotValidationError, match="context_overflow"):
-        prepare_module.prepare_snapshot(
-            snapshot_path=snapshot_path,
-            output_dir=tmp_path / "prepared",
-            revision="abc123",
-            seed=7,
-            max_input_tokens=5,
-        )
+def test_legacy_snapshot_is_rejected_at_offline_boundary(tmp_path, prepare_module):
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(json.dumps({"dataset_id": "old", "rows": [], "manifest": {}}), encoding="utf-8")
+    with pytest.raises(prepare_module.SnapshotValidationError, match="export_manifest_schema_invalid"):
+        prepare_module.prepare_snapshot(snapshot_path=legacy, output_dir=tmp_path / "prepared")
 
 
-def test_experiment_records_not_run_without_prediction_artifact(tmp_path, prepare_module, experiment_module):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-
-    report = experiment_module.run_experiment(
-        prepared_dir=prepared_dir,
-        output_path=tmp_path / "report.json",
-    )
-
-    assert report["status"] == "not_run"
-    assert report["baseline"]["status"] == "not_run"
-    assert report["experiment"]["status"] == "not_run"
-    assert report["protocol"]["snapshot_manifest_digest"]
-    assert report["protocol"]["prepared_digest"]
-    assert report["run_manifest"]["status"] == "not_run"
-    assert report["run_manifest"]["artifacts"]["baseline_predictions"]["status"] == "missing"
-    assert report["deployment"]["status"] == "not_run"
-
-
-def test_experiment_keeps_partial_prediction_run_not_run(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    eval_row_id = _eval_row_id(prepared_dir)
-    baseline = tmp_path / "baseline.jsonl"
-    baseline.write_text(
-        json.dumps(
-            {"row_id": eval_row_id, "prediction": "Source B reports a lower value."}
-        )
-        + "\n",
+def test_tampering_data_or_provenance_is_rejected(tmp_path, prepare_module):
+    source, _manifest = _bundle(tmp_path)
+    (source / "data.jsonl").write_text(
+        (source / "data.jsonl").read_text(encoding="utf-8").replace("Source A", "Tampered", 1),
         encoding="utf-8",
     )
+    with pytest.raises(prepare_module.SnapshotValidationError, match="export_content_digest_mismatch"):
+        prepare_module.prepare_export(export_path=source, output_dir=tmp_path / "prepared")
 
-    report = experiment_module.run_experiment(
-        prepared_dir=prepared_dir,
-        output_path=tmp_path / "report.json",
-        baseline_predictions=baseline,
+
+def test_sft_export_derives_target_and_loss_mask(tmp_path, prepare_module):
+    source, _manifest = _bundle(tmp_path, dataset_type="sft")
+    output = tmp_path / "prepared"
+    prepare_module.prepare_export(export_path=source, output_dir=output, revision="r1")
+    row = json.loads((output / "eval.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert row["target"] == "Source A supports the claim."
+    assert len(row["loss_mask"]) == len(row["tokens"])
+    assert 0 in row["loss_mask"] and 1 in row["loss_mask"]
+    assert any(
+        token == "Source" and mask == 0
+        for token, mask in zip(row["tokens"], row["loss_mask"], strict=True)
     )
 
-    assert report["status"] == "not_run"
-    assert report["baseline"]["status"] == "completed"
-    assert report["experiment"]["status"] == "not_run"
-    assert report["comparison"]["status"] == "not_run"
 
-
-def test_experiment_compares_predictions_on_same_eval_rows(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
+def test_experiment_compares_predictions_against_same_export_eval_set(tmp_path, prepare_module, experiment_module):
+    source, manifest = _bundle(tmp_path, dataset_type="sft")
     prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    eval_row_id = _eval_row_id(prepared_dir)
+    prepare_module.prepare_export(export_path=source, output_dir=prepared_dir, revision="abc123", seed=7)
+    eval_rows = _eval_rows(prepared_dir)
     baseline = tmp_path / "baseline.jsonl"
     candidate = tmp_path / "candidate.jsonl"
     baseline.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."}) + "\n",
-        encoding="utf-8",
+        "".join(json.dumps({"row_id": row["row_id"], "prediction": row["target"]}) + "\n" for row in eval_rows)
     )
     candidate.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
-        encoding="utf-8",
+        "".join(json.dumps({"row_id": row["row_id"], "prediction": "wrong"}) + "\n" for row in eval_rows)
     )
-
     report = experiment_module.run_experiment(
         prepared_dir=prepared_dir,
         output_path=tmp_path / "report.json",
         baseline_predictions=baseline,
         experiment_predictions=candidate,
     )
-
     assert report["status"] == "completed"
+    assert report["protocol"]["export_id"] == "export-1"
+    assert report["run_manifest"]["export_manifest_digest"] == manifest["manifest_digest"]
     assert report["baseline"]["metrics"]["exact_match"] == 1.0
     assert report["experiment"]["metrics"]["exact_match"] == 0.0
-    assert report["comparison"]["exact_match_delta"] == -1.0
 
 
-def test_experiment_run_manifest_is_deterministic_and_records_input_artifacts(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
+def test_experiment_requires_new_export_digest_in_weight_manifest(tmp_path, prepare_module, experiment_module):
+    source, manifest = _bundle(tmp_path)
     prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    eval_row_id = _eval_row_id(prepared_dir)
-    baseline = tmp_path / "baseline.jsonl"
-    candidate = tmp_path / "candidate.jsonl"
-    baseline.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."}) + "\n",
-        encoding="utf-8",
-    )
-    candidate.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
-        encoding="utf-8",
-    )
-
-    first = experiment_module.run_experiment(
-        prepared_dir=prepared_dir,
-        output_path=tmp_path / "first.json",
-        baseline_predictions=baseline,
-        experiment_predictions=candidate,
-    )
-    second = experiment_module.run_experiment(
-        prepared_dir=prepared_dir,
-        output_path=tmp_path / "second.json",
-        baseline_predictions=baseline,
-        experiment_predictions=candidate,
-    )
-
-    manifest = first["run_manifest"]
-    assert first["run_manifest"]["run_id"] == second["run_manifest"]["run_id"]
-    assert manifest["prepared_digest"] == first["protocol"]["prepared_digest"]
-    assert manifest["comparison_status"] == "completed"
-    baseline_artifact = manifest["artifacts"]["baseline_predictions"]
-    assert baseline_artifact["status"] == "provided"
-    assert baseline_artifact["sha256"] == hashlib.sha256(baseline.read_bytes()).hexdigest()
-    assert baseline_artifact["byte_size"] == baseline.stat().st_size
-    assert baseline_artifact["line_count"] == 1
-    assert "path" not in baseline_artifact
-
-
-def test_experiment_run_id_changes_when_prediction_bytes_change(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    eval_row_id = _eval_row_id(prepared_dir)
-    baseline = tmp_path / "baseline.jsonl"
-    candidate = tmp_path / "candidate.jsonl"
-    baseline.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."}) + "\n",
-        encoding="utf-8",
-    )
-    candidate.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
-        encoding="utf-8",
-    )
-    first = experiment_module.run_experiment(
-        prepared_dir=prepared_dir,
-        output_path=tmp_path / "first.json",
-        baseline_predictions=baseline,
-        experiment_predictions=candidate,
-    )
-    candidate.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "a different wrong answer"}) + "\n",
-        encoding="utf-8",
-    )
-    second = experiment_module.run_experiment(
-        prepared_dir=prepared_dir,
-        output_path=tmp_path / "second.json",
-        baseline_predictions=baseline,
-        experiment_predictions=candidate,
-    )
-
-    assert first["run_manifest"]["run_id"] != second["run_manifest"]["run_id"]
-    assert first["run_manifest"]["artifacts"]["experiment_predictions"]["sha256"] != second[
-        "run_manifest"
-    ]["artifacts"]["experiment_predictions"]["sha256"]
-
-
-def test_experiment_records_weight_manifest_as_validated_metadata(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot = _snapshot()
-    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
+    prepare_module.prepare_export(export_path=source, output_dir=prepared_dir, revision="abc123", seed=7)
     weights = tmp_path / "weights.json"
     weights.write_text(
-        json.dumps(
-            {
-                "model_id": "candidate-1",
-                "snapshot_manifest_digest": snapshot["manifest_digest"],
-                "revision": "abc123",
-                "seed": 7,
-            }
-        ),
+        json.dumps({
+            "model_id": "candidate-1",
+            "export_manifest_digest": manifest["manifest_digest"],
+            "revision": "abc123",
+            "seed": 7,
+        }),
         encoding="utf-8",
     )
-
     report = experiment_module.run_experiment(
         prepared_dir=prepared_dir,
         output_path=tmp_path / "report.json",
         weights_manifest=weights,
     )
-
     assert report["weights"]["status"] == "validated"
-    assert report["weights"]["artifact"]["status"] == "provided"
-    assert report["weights"]["artifact"]["sha256"] == hashlib.sha256(
-        weights.read_bytes()
-    ).hexdigest()
-    assert report["run_manifest"]["artifacts"]["weights_manifest"]["byte_size"] == weights.stat().st_size
-    assert report["deployment"]["status"] == "not_run"
-    assert report["status"] == "not_run"
-
-
-def test_evaluation_without_reference_is_reported_as_unscorable(experiment_module):
-    rows = [{"row_id": "row-1", "reference": None}]
-    metrics = experiment_module._metrics(
-        rows,
-        {"row-1": {"prediction": ""}},
-        dataset_type="evaluation",
-    )
-
-    assert metrics["evaluated"] == 1
-    assert metrics["scoreable"] == 0
-    assert metrics["reference_missing"] == 1
-    assert metrics["exact_match"] is None
-
-
-def test_experiment_rejects_prediction_set_that_changes_eval_rows(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    predictions = tmp_path / "predictions.jsonl"
-    predictions.write_text(json.dumps({"row_id": "unknown", "prediction": "x"}) + "\n", encoding="utf-8")
-
-    with pytest.raises(experiment_module.ExperimentProtocolError, match="eval_row_ids"):
-        experiment_module.run_experiment(
-            prepared_dir=prepared_dir,
-            output_path=tmp_path / "report.json",
-            baseline_predictions=predictions,
-        )
-
-
-def test_experiment_rejects_weight_manifest_from_different_snapshot(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot = _snapshot()
-    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    weight_manifest = tmp_path / "weights.json"
-    weight_manifest.write_text(
-        json.dumps(
-            {
-                "snapshot_manifest_digest": "0" * 64,
-                "revision": "abc123",
-                "seed": 7,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(experiment_module.ExperimentProtocolError, match="weight_snapshot_digest"):
-        experiment_module.run_experiment(
-            prepared_dir=prepared_dir,
-            output_path=tmp_path / "report.json",
-            weights_manifest=weight_manifest,
-        )
-
-
-def test_experiment_rechecks_snapshot_before_consuming_prepared_rows(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    tampered = json.loads((prepared_dir / "snapshot.json").read_text(encoding="utf-8"))
-    tampered["rows"][1]["input"] = "tampered"
-    (prepared_dir / "snapshot.json").write_text(json.dumps(tampered), encoding="utf-8")
-
-    with pytest.raises(experiment_module.ExperimentProtocolError, match="mismatch"):
-        experiment_module.run_experiment(
-            prepared_dir=prepared_dir,
-            output_path=tmp_path / "report.json",
-        )
-
-
-def test_experiment_rejects_prepared_metadata_tampering(
-    tmp_path, prepare_module, experiment_module
-):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepare_module.prepare_snapshot(
-        snapshot_path=snapshot_path,
-        output_dir=prepared_dir,
-        revision="abc123",
-        seed=7,
-    )
-    prepared = json.loads((prepared_dir / "prepared.json").read_text(encoding="utf-8"))
-    prepared["revision"] = "attacker-revision"
-    (prepared_dir / "prepared.json").write_text(
-        json.dumps(prepared), encoding="utf-8"
-    )
-
-    with pytest.raises(experiment_module.ExperimentProtocolError, match="prepared_digest"):
-        experiment_module.run_experiment(
-            prepared_dir=prepared_dir,
-            output_path=tmp_path / "report.json",
-        )
-
-
-def test_cli_prepare_to_experiment_round_trip(tmp_path):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-
-    prepared = _run_cli(
-        "prepare.py",
-        snapshot_path,
-        prepared_dir,
-        "--revision",
-        "cli-revision",
-        "--seed",
-        13,
-    )
-    assert prepared.returncode == 0, prepared.stderr
-    assert json.loads(prepared.stdout)["status"] == "ready"
-    eval_row_id = _eval_row_id(prepared_dir)
-
-    not_run_report = tmp_path / "not-run.json"
-    not_run = _run_cli("experiment.py", prepared_dir, not_run_report)
-    assert not_run.returncode == 0, not_run.stderr
-    assert json.loads(not_run.stdout)["status"] == "not_run"
-    assert json.loads(not_run_report.read_text(encoding="utf-8"))["status"] == "not_run"
-
-    baseline = tmp_path / "baseline.jsonl"
-    candidate = tmp_path / "candidate.jsonl"
-    baseline.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "Source B reports a lower value."})
-        + "\n",
-        encoding="utf-8",
-    )
-    candidate.write_text(
-        json.dumps({"row_id": eval_row_id, "prediction": "wrong"}) + "\n",
-        encoding="utf-8",
-    )
-    complete_report = tmp_path / "complete.json"
-    complete = _run_cli(
-        "experiment.py",
-        prepared_dir,
-        complete_report,
-        "--baseline-predictions",
-        baseline,
-        "--experiment-predictions",
-        candidate,
-    )
-    assert complete.returncode == 0, complete.stderr
-    report = json.loads(complete.stdout)
-    assert report["status"] == "completed"
-    assert report["comparison"]["exact_match_delta"] == -1.0
-    assert report["run_manifest"]["run_id"]
-    persisted = json.loads(complete_report.read_text(encoding="utf-8"))
-    assert persisted["status"] == "completed"
-    assert persisted["run_manifest"]["run_id"] == report["run_manifest"]["run_id"]
-
-
-def test_cli_rejects_lineage_and_prepared_metadata_tampering(tmp_path):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepared = _run_cli("prepare.py", snapshot_path, prepared_dir, "--revision", "cli-revision")
-    assert prepared.returncode == 0, prepared.stderr
-
-    stored_snapshot = json.loads((prepared_dir / "snapshot.json").read_text(encoding="utf-8"))
-    stored_snapshot["provenance"]["items"][0]["source_refs"] = ["tampered-source"]
-    (prepared_dir / "snapshot.json").write_text(
-        json.dumps(stored_snapshot), encoding="utf-8"
-    )
-    lineage_check = _run_cli("experiment.py", prepared_dir, tmp_path / "lineage.json")
-    assert lineage_check.returncode != 0
-    assert "provenance_digest_mismatch" in lineage_check.stderr
-
-    # Recreate a clean directory so the prepared metadata check is isolated
-    # from the previous snapshot corruption.
-    prepared = _run_cli("prepare.py", snapshot_path, prepared_dir, "--revision", "cli-revision")
-    assert prepared.returncode == 0, prepared.stderr
-    prepared_metadata = json.loads((prepared_dir / "prepared.json").read_text(encoding="utf-8"))
-    prepared_metadata["revision"] = "tampered-revision"
-    (prepared_dir / "prepared.json").write_text(
-        json.dumps(prepared_metadata), encoding="utf-8"
-    )
-    metadata_check = _run_cli("experiment.py", prepared_dir, tmp_path / "metadata.json")
-    assert metadata_check.returncode != 0
-    assert "prepared_digest_mismatch" in metadata_check.stderr
-
-
-def test_cli_rejects_prediction_rows_outside_frozen_eval_set(tmp_path):
-    snapshot_path = tmp_path / "snapshot.json"
-    prepared_dir = tmp_path / "prepared"
-    snapshot_path.write_text(json.dumps(_snapshot()), encoding="utf-8")
-    prepared = _run_cli("prepare.py", snapshot_path, prepared_dir, "--revision", "cli-revision")
-    assert prepared.returncode == 0, prepared.stderr
-    predictions = tmp_path / "predictions.jsonl"
-    predictions.write_text(
-        json.dumps({"row_id": "unknown", "prediction": "x"}) + "\n",
-        encoding="utf-8",
-    )
-
-    result = _run_cli(
-        "experiment.py",
-        prepared_dir,
-        tmp_path / "report.json",
-        "--baseline-predictions",
-        predictions,
-    )
-    assert result.returncode != 0
-    assert "eval_row_ids_mismatch" in result.stderr

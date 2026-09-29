@@ -146,18 +146,18 @@ This node owns the Collection route family.
   distinguishes chat ratings, later user corrections, and failed tool calls,
   then shows the question, answer, inspected Sources, omitted candidates, and
   AI candidate analysis without exposing internal signal or message IDs. The
-  same route owns human annotation and review actions; dataset snapshot and
-  download actions remain under `feedback/datasets`. Candidate analysis stays
-  inside the workbench as an internal review signal; only an accepted case in
-  an immutable dataset snapshot can be downloaded as model-facing JSONL.
+  same route owns human annotation and review actions; task dataset collection,
+  sample confirmation, and export actions live under `feedback/datasets`.
+  Candidate analysis stays inside the workbench as an internal review signal;
+  only a confirmed sample revision can be published as model-facing JSONL.
   The validation scenario uses two open-access Nature Communications papers:
   Martin et al. (2019), DOI `10.1038/s41467-019-10009-2`, on keyhole pore
   formation at scan-velocity changes, and Pham et al. (2020), DOI
   `10.1038/s41467-020-14453-3`, on scan strategy and side-branching. The
   detail view keeps their material, process variable, outcome, page, DOI, and
   Source excerpt together so a reviewer can judge comparability from the
-  papers themselves. Only an accepted annotation can enter a frozen dataset
-  snapshot and its JSONL download.
+  papers themselves. Only an accepted annotation can be collected into a
+  task-specific dataset sample.
 
 ## Objective Interaction
 
@@ -169,9 +169,10 @@ the local draft. Users operate on questions, answers, and evidence text; sample,
 case, message, and source identities remain browser request parameters rather
 than visible labels. A reviewer can send a candidate back with a reason, retry
 a failed build, discard a sample, or restore it to an unconfirmed state. The
-queue keeps discarded and incomplete samples reachable for recovery. Historical
-snapshot creation and download remain a legacy surface until the D7 cutover
-removes its product read-back entry points.
+The queue keeps discarded and incomplete samples reachable for recovery. The
+former snapshot page and download endpoints are not product surfaces after
+D7; legacy snapshots are read only by the migration script and may remain
+only in an operations archive.
 
 The SFT page's export section is a separate delivery step after confirmation. It
 requests a server-side preflight, shows the count of valid rows and each issue,

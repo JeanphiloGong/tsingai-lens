@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a reproducible offline comparison against a prepared P5 snapshot."""
+"""Run a reproducible offline comparison against a prepared DatasetExport."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Compare prediction artifacts on the exact evaluation split from a "
-            "prepared feedback snapshot."
+            "prepared DatasetExport."
         )
     )
     parser.add_argument("prepared_dir", type=Path)
@@ -139,9 +139,9 @@ def run_experiment(
 
 
 def _protocol_metadata(prepared: dict[str, Any]) -> dict[str, Any]:
-    snapshot = prepared.get("snapshot")
-    if not isinstance(snapshot, dict):
-        raise ExperimentProtocolError("prepared_snapshot_missing")
+    export = prepared.get("export")
+    if not isinstance(export, dict):
+        raise ExperimentProtocolError("prepared_export_missing")
     rows_by_split = prepared.get("rows_by_split")
     if not isinstance(rows_by_split, dict):
         raise ExperimentProtocolError("prepared_rows_missing")
@@ -156,12 +156,13 @@ def _protocol_metadata(prepared: dict[str, Any]) -> dict[str, Any]:
         "experiment_mode": prepared.get("experiment_mode", "historical"),
         "experiment_plan_digest": prepared.get("experiment_plan_digest"),
         "prepared_digest": prepared.get("prepared_digest"),
-        "snapshot_id": snapshot.get("dataset_id"),
-        "collection_id": snapshot.get("collection_id"),
-        "snapshot_manifest_digest": snapshot.get("manifest_digest"),
-        "snapshot_provenance_digest": snapshot.get("provenance_digest"),
-        "snapshot_content_digest": snapshot.get("content_digest"),
-        "dataset_type": snapshot.get("dataset_type"),
+        "dataset_id": export.get("dataset_id"),
+        "export_id": export.get("export_id"),
+        "collection_id": export.get("collection_id"),
+        "export_manifest_digest": export.get("manifest_digest"),
+        "export_provenance_digest": export.get("provenance_digest"),
+        "export_content_digest": export.get("content_digest"),
+        "dataset_type": export.get("dataset_type"),
         "revision": prepared.get("revision"),
         "seed": prepared.get("seed"),
         "tokenizer": prepared.get("tokenizer"),
@@ -194,8 +195,8 @@ def _validate_weights_manifest(
         raise ExperimentProtocolError(f"weights_manifest_malformed_json:{exc.lineno}") from exc
     if not isinstance(value, dict):
         raise ExperimentProtocolError("weights_manifest_object_required")
-    if value.get("snapshot_manifest_digest") != protocol["snapshot_manifest_digest"]:
-        raise ExperimentProtocolError("weight_snapshot_digest_mismatch")
+    if value.get("export_manifest_digest") != protocol["export_manifest_digest"]:
+        raise ExperimentProtocolError("weight_export_digest_mismatch")
     if value.get("revision") != protocol["revision"]:
         raise ExperimentProtocolError("weight_revision_mismatch")
     if value.get("seed") != protocol["seed"]:
@@ -204,7 +205,7 @@ def _validate_weights_manifest(
         "status": "validated",
         "path": str(weight_path),
         "model_id": value.get("model_id"),
-        "snapshot_manifest_digest": value["snapshot_manifest_digest"],
+        "export_manifest_digest": value["export_manifest_digest"],
         "revision": value["revision"],
         "seed": value["seed"],
         "artifact": {
@@ -269,10 +270,11 @@ def _run_manifest(
     return {
         "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
         "run_id": _digest(basis),
-        "snapshot_id": protocol["snapshot_id"],
-        "snapshot_manifest_digest": protocol["snapshot_manifest_digest"],
-        "snapshot_provenance_digest": protocol["snapshot_provenance_digest"],
-        "snapshot_content_digest": protocol["snapshot_content_digest"],
+        "dataset_id": protocol["dataset_id"],
+        "export_id": protocol["export_id"],
+        "export_manifest_digest": protocol["export_manifest_digest"],
+        "export_provenance_digest": protocol["export_provenance_digest"],
+        "export_content_digest": protocol["export_content_digest"],
         "prepared_digest": protocol["prepared_digest"],
         "dataset_type": protocol["dataset_type"],
         "revision": protocol["revision"],

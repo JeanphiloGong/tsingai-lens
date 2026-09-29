@@ -14,6 +14,7 @@ from domain.feedback import (
     SftRevisionContent,
     build_job_payload,
     sample_build_idempotency_key,
+    source_digest_for_case,
 )
 
 
@@ -96,7 +97,7 @@ def _sample() -> DatasetSample:
         sample_id="sample-1",
         dataset_id="fdset-1",
         source_case_id="case-1",
-        source_digest="a" * 64,
+        source_digest=source_digest_for_case(_case().to_record()),
         active_job_id="job-1",
         now="2026-09-29T00:00:00+00:00",
     )
@@ -125,12 +126,13 @@ def _case() -> FeedbackCase:
 
 
 def _job() -> AnalysisJob:
+    source_digest = source_digest_for_case(_case().to_record())
     payload = build_job_payload(
         dataset_id="fdset-1",
         sample_id="sample-1",
         generation=1,
         spec_version=1,
-        source_digest="a" * 64,
+        source_digest=source_digest,
     )
     return AnalysisJob(
         job_id="job-1",
@@ -142,7 +144,7 @@ def _job() -> AnalysisJob:
             sample_id="sample-1",
             generation=1,
             spec_version=1,
-            source_digest="a" * 64,
+            source_digest=source_digest,
         ),
         available_at="2026-09-29T00:00:00+00:00",
         created_at="2026-09-29T00:00:00+00:00",
@@ -185,6 +187,26 @@ async def test_worker_leaves_missing_material_as_needs_input() -> None:
     assert result.status == "succeeded"
     assert samples.completed["outcome"] == "needs_input"
     assert samples.sample.status == "needs_input"
+
+
+async def test_worker_rejects_source_changed_after_collect() -> None:
+    samples = _Samples(_sample())
+    jobs = _Jobs(_job())
+    cases = _Cases()
+    cases.read_case = lambda case_id: _missing_case(case_id)
+
+    result = await DatasetSampleBuildWorker(
+        job_repository=jobs,
+        dataset_repository=_Datasets(),
+        sample_repository=samples,
+        case_repository=cases,
+        builder=SftSampleBuilder(),
+    ).run_once()
+
+    assert result.status == "succeeded"
+    assert samples.completed["outcome"] == "needs_input"
+    assert samples.completed["missing_reasons"] == ("source_changed_since_collection",)
+    assert samples.revision is None
 
 
 async def _missing_case(case_id: str):

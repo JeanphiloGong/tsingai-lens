@@ -39,6 +39,8 @@ export type DatasetSample = {
 	confirmed_at: string | null;
 };
 
+export type DatasetSampleAction = 'rebuild' | 'retry' | 'discard' | 'restore';
+
 export type DatasetSampleRevision = {
 	revision_id: string;
 	sample_id: string;
@@ -167,6 +169,26 @@ export async function confirmDatasetSample(
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ expected_revision_id: expectedRevisionId })
+		}
+	)) as DatasetSample;
+}
+
+export async function actOnDatasetSample(
+	datasetId: string,
+	sampleId: string,
+	input: {
+		action: DatasetSampleAction;
+		expected_revision_id: string | null;
+		reason?: string;
+	},
+	idempotencyKey: string
+) {
+	return (await requestJson(
+		`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}/actions`,
+		{
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+			body: JSON.stringify(input)
 		}
 	)) as DatasetSample;
 }

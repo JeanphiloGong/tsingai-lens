@@ -212,8 +212,46 @@ class FeedbackSampleRevisionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class FeedbackSampleActionRow(Base):
+    """One user operation and its idempotent result at submission time."""
+
+    __tablename__ = "feedback_sample_actions"
+    __table_args__ = (
+        UniqueConstraint("sample_id", "idempotency_key", name="uq_feedback_sample_actions_key"),
+        CheckConstraint("generation >= 1", name="feedback_sample_action_generation_positive"),
+        CheckConstraint("length(request_digest) = 64", name="feedback_sample_action_digest_length"),
+        CheckConstraint(
+            "action IN ('rebuild', 'retry', 'discard', 'restore')",
+            name="feedback_sample_action_type_valid",
+        ),
+        Index("ix_feedback_sample_actions_sample_created", "sample_id", "created_at"),
+    )
+
+    action_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sample_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("feedback_dataset_samples.sample_id", ondelete="CASCADE"), nullable=False
+    )
+    actor_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("auth_users.user_id", ondelete="RESTRICT"), nullable=False
+    )
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expected_revision_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    previous_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    next_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("analysis_jobs.job_id", ondelete="SET NULL"), nullable=True
+    )
+    result_sample: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 __all__ = [
     "FeedbackDatasetRow",
     "FeedbackDatasetSampleRow",
     "FeedbackSampleRevisionRow",
+    "FeedbackSampleActionRow",
 ]

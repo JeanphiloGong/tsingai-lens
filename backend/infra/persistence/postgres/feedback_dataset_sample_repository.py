@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -11,13 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from application.repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
+    DatasetSampleActionConflict,
     DatasetSampleRevisionConflict,
 )
 from domain.feedback.analysis_job import AnalysisJob
-from domain.feedback.dataset_sample import DatasetSample
+from domain.feedback.dataset_sample import DatasetSample, SampleAction, ensure_action_allowed
 from domain.feedback.sample_revision import SampleRevision, parse_revision_content
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
 from infra.persistence.postgres.models.feedback_dataset import (
+    FeedbackSampleActionRow,
     FeedbackDatasetSampleRow,
     FeedbackSampleRevisionRow,
 )
@@ -161,9 +164,10 @@ class PostgresFeedbackDatasetSampleRepository:
                 raise FileNotFoundError("dataset sample not found")
             if row.current_revision_id != expected_revision_id:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
-            if row.status in {"discarded", "build_failed", "needs_input"}:
+            if row.status not in {"needs_confirmation", "confirmed"}:
                 raise ValueError("sample_not_editable")
             session.add(_revision_row(revision))
+            await session.flush()
             row.current_revision_id = revision.revision_id
             row.confirmed_revision_id = None
             row.confirmed_by = None
@@ -195,6 +199,8 @@ class PostgresFeedbackDatasetSampleRepository:
                 return _sample(row)
             if row.current_revision_id != expected_revision_id:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
+            if row.status != "needs_confirmation":
+                raise ValueError("sample_not_confirmable")
             revision = await session.get(FeedbackSampleRevisionRow, expected_revision_id)
             if revision is None or revision.sample_id != sample_id:
                 raise ValueError("sample_revision_missing")
@@ -205,6 +211,116 @@ class PostgresFeedbackDatasetSampleRepository:
             row.updated_at = timestamp
             await session.flush()
             return _sample(row)
+
+    async def apply_action(
+        self,
+        *,
+        dataset_id: str,
+        sample_id: str,
+        expected_revision_id: str | None,
+        expected_generation: int,
+        action: SampleAction,
+        reason: str | None,
+        actor_id: str,
+        idempotency_key: str,
+        request_digest: str,
+        source_digest: str | None,
+        job: AnalysisJob | None,
+        now: str,
+    ) -> DatasetSample:
+        timestamp = _datetime(now)
+        async with self.session_factory.begin() as session:
+            row = await session.scalar(
+                select(FeedbackDatasetSampleRow)
+                .where(
+                    FeedbackDatasetSampleRow.dataset_id == dataset_id,
+                    FeedbackDatasetSampleRow.sample_id == sample_id,
+                )
+                .with_for_update()
+            )
+            if row is None:
+                raise FileNotFoundError("dataset sample not found")
+            previous_action = await session.scalar(
+                select(FeedbackSampleActionRow).where(
+                    FeedbackSampleActionRow.sample_id == sample_id,
+                    FeedbackSampleActionRow.idempotency_key == idempotency_key,
+                )
+            )
+            if previous_action is not None:
+                if (
+                    previous_action.request_digest != request_digest
+                    or previous_action.actor_id != actor_id
+                ):
+                    raise DatasetSampleActionConflict("sample_action_identity_conflict")
+                return DatasetSample(**previous_action.result_sample)
+            if row.generation != expected_generation or row.current_revision_id != expected_revision_id:
+                raise DatasetSampleActionConflict("sample_revision_stale")
+            ensure_action_allowed(row.status, action)
+            previous_status = row.status
+            generation = row.generation + 1
+            if action in {"rebuild", "retry"}:
+                if job is None or source_digest is None:
+                    raise ValueError("sample build action requires a job and source digest")
+                if (
+                    job.status != "pending"
+                    or job.payload.get("sample_id") != sample_id
+                    or job.payload.get("generation") != generation
+                    or job.payload.get("source_digest") != source_digest
+                ):
+                    raise ValueError("sample build action job identity is invalid")
+                session.add(_job_row(job))
+                row.status = "pending"
+                row.active_job_id = job.job_id
+                row.source_digest = source_digest
+                row.missing_reasons = []
+            elif action == "discard":
+                if job is not None:
+                    raise ValueError("discard cannot create a job")
+                row.status = "discarded"
+                row.active_job_id = None
+            else:
+                if job is not None or source_digest is None:
+                    raise ValueError("restore requires current source identity and no job")
+                current = (
+                    await session.get(FeedbackSampleRevisionRow, row.current_revision_id)
+                    if row.current_revision_id else None
+                )
+                has_current_content = (
+                    current is not None
+                    and current.sample_id == sample_id
+                    and current.input_digest == source_digest
+                )
+                row.status = "needs_confirmation" if has_current_content else "needs_input"
+                row.active_job_id = None
+                row.source_digest = source_digest
+                row.missing_reasons = [] if has_current_content else ["source_changed_or_incomplete"]
+            row.generation = generation
+            row.confirmed_revision_id = None
+            row.confirmed_by = None
+            row.confirmed_at = None
+            row.updated_at = timestamp
+            await session.flush()
+            result = _sample(row)
+            session.add(
+                FeedbackSampleActionRow(
+                    action_id=f"action_{uuid4().hex[:32]}",
+                    sample_id=sample_id,
+                    actor_id=actor_id,
+                    action=action,
+                    idempotency_key=idempotency_key,
+                    request_digest=request_digest,
+                    expected_revision_id=expected_revision_id,
+                    previous_status=previous_status,
+                    next_status=row.status,
+                    generation=generation,
+                    reason=reason,
+                    job_id=job.job_id if job else None,
+                    result_sample=result.to_record(),
+                    created_at=timestamp,
+                )
+            )
+            await session.flush()
+            return result
 
     async def complete_build(
         self,
@@ -234,7 +350,11 @@ class PostgresFeedbackDatasetSampleRepository:
             job_row = await session.get(AnalysisJobRow, job.job_id, with_for_update=True)
             if row is None or job_row is None:
                 raise FileNotFoundError("sample build identity not found")
-            if row.generation != generation or row.active_job_id != job.job_id:
+            if (
+                row.generation != generation
+                or row.active_job_id != job.job_id
+                or row.source_digest != job.payload.get("source_digest")
+            ):
                 if job_row.status in {"pending", "running"}:
                     _finish_job(
                         job_row,
@@ -246,15 +366,21 @@ class PostgresFeedbackDatasetSampleRepository:
                 return None
             if job_row.status in {"succeeded", "failed", "cancelled"}:
                 return _sample(row)
+            if job_row.status != "running" or row.status not in {"pending", "building"}:
+                raise ValueError("sample build is not running")
 
             if outcome == "candidate":
                 assert revision is not None
                 if revision.sample_id != sample_id:
                     raise ValueError("revision does not belong to sample")
                 session.add(_revision_row(revision))
+                await session.flush()
                 row.current_revision_id = revision.revision_id
                 row.status = "needs_confirmation"
                 row.active_job_id = None
+                row.confirmed_revision_id = None
+                row.confirmed_by = None
+                row.confirmed_at = None
                 row.missing_reasons = []
                 _finish_job(
                     job_row,
@@ -266,6 +392,9 @@ class PostgresFeedbackDatasetSampleRepository:
             elif outcome == "needs_input":
                 row.status = "needs_input"
                 row.active_job_id = None
+                row.confirmed_revision_id = None
+                row.confirmed_by = None
+                row.confirmed_at = None
                 row.missing_reasons = list(
                     dict.fromkeys(item.strip() for item in missing_reasons if item.strip())
                 )
@@ -279,6 +408,9 @@ class PostgresFeedbackDatasetSampleRepository:
             else:
                 row.status = "build_failed"
                 row.active_job_id = None
+                row.confirmed_revision_id = None
+                row.confirmed_by = None
+                row.confirmed_at = None
                 row.missing_reasons = [error_code or "sample_build_failed"]
                 _finish_job(
                     job_row,
@@ -334,14 +466,14 @@ def _sample(row: FeedbackDatasetSampleRow) -> DatasetSample:
         current_revision_id=row.current_revision_id,
         confirmed_revision_id=row.confirmed_revision_id,
         generation=row.generation,
-                    source_digest=row.source_digest,
-                    active_job_id=row.active_job_id,
-                    missing_reasons=tuple(row.missing_reasons or ()),
-                    created_at=_iso(row.created_at),
-                    updated_at=_iso(row.updated_at),
-                    confirmed_by=row.confirmed_by,
-                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
-                )
+        source_digest=row.source_digest,
+        active_job_id=row.active_job_id,
+        missing_reasons=tuple(row.missing_reasons or ()),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+        confirmed_by=row.confirmed_by,
+        confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+    )
 
 
 def _revision(row: FeedbackSampleRevisionRow) -> SampleRevision:

@@ -360,6 +360,11 @@ selected feedback cases:
 - `GET /api/v1/feedback-datasets?collection_id={collection_id}`
 - `GET /api/v1/feedback-datasets/{dataset_id}`
 - `POST /api/v1/feedback-datasets/{dataset_id}/collections`
+- `GET /api/v1/feedback-datasets/{dataset_id}/samples?status={status}&limit={limit}&offset={offset}`
+- `GET /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}`
+- `PATCH /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}`
+- `POST /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}/confirm`
+- `POST /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}/actions`
 
 D1 accepts only `task_type: "sft"`; the dataset's Collection and task type are
 fixed at creation. The collection request contains `source_case_ids`; it is

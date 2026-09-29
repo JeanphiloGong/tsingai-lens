@@ -13,6 +13,7 @@ from application.repositories.feedback_dataset_repository import (
 )
 from application.repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
+    DatasetSampleActionConflict,
     DatasetSampleRevisionConflict,
     FeedbackDatasetSampleRepository,
 )
@@ -21,7 +22,9 @@ from domain.feedback.dataset_sample import (
     DATASET_SAMPLE_BUILD_JOB_TYPE,
     DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
     DatasetSample,
+    SampleAction,
     build_job_payload,
+    sample_action_digest,
     sample_build_idempotency_key,
     source_digest_for_case,
 )
@@ -371,6 +374,96 @@ class FeedbackDatasetService:
             )
         except DatasetSampleRevisionConflict as exc:
             raise FeedbackDatasetConflict(str(exc)) from exc
+
+    async def apply_sample_action_for_user(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        sample_id: str,
+        action: SampleAction,
+        expected_revision_id: str | None,
+        reason: str | None,
+        idempotency_key: str,
+    ) -> DatasetSample:
+        dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
+        self._require_sft(dataset)
+        repository = self._sample_repository()
+        sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
+        if sample is None:
+            raise FileNotFoundError(f"dataset sample not found: {sample_id}")
+        if action not in {"rebuild", "retry", "discard", "restore"}:
+            raise FeedbackDatasetError("sample_action_invalid")
+        cleaned_reason = (reason or "").strip() or None
+        if action == "rebuild" and not cleaned_reason:
+            raise FeedbackDatasetError("sample_rebuild_reason_required")
+        if cleaned_reason and len(cleaned_reason) > 2000:
+            raise FeedbackDatasetError("sample_action_reason_too_long")
+        if not idempotency_key.strip() or len(idempotency_key) > 128:
+            raise FeedbackDatasetError("sample_action_key_invalid")
+
+        now = datetime.now(timezone.utc).isoformat()
+        source_digest: str | None = None
+        if action in {"rebuild", "retry", "restore"}:
+            case = await self._case_repository().read_case(sample.source_case_id)
+            if case is None or case.collection_id != dataset.collection_id:
+                raise FeedbackDatasetError("sample_source_case_missing")
+            if case.status == "withdrawn":
+                raise FeedbackDatasetError("sample_source_case_withdrawn")
+            source_digest = source_digest_for_case(case.to_record())
+
+        job: AnalysisJob | None = None
+        if action in {"rebuild", "retry"}:
+            assert source_digest is not None
+            generation = sample.generation + 1
+            payload = build_job_payload(
+                dataset_id=dataset_id,
+                sample_id=sample_id,
+                generation=generation,
+                spec_version=dataset.spec_version,
+                source_digest=source_digest,
+            )
+            if cleaned_reason:
+                payload["review_note"] = cleaned_reason
+            job = AnalysisJob(
+                job_id=f"job_{uuid4().hex[:32]}",
+                job_type=DATASET_SAMPLE_BUILD_JOB_TYPE,
+                payload_version=DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
+                payload=payload,
+                status="pending",
+                idempotency_key=sample_build_idempotency_key(
+                    sample_id=sample_id,
+                    generation=generation,
+                    spec_version=dataset.spec_version,
+                    source_digest=source_digest,
+                ),
+                available_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        try:
+            return await repository.apply_action(
+                dataset_id=dataset_id,
+                sample_id=sample_id,
+                expected_revision_id=expected_revision_id,
+                expected_generation=sample.generation,
+                action=action,
+                reason=cleaned_reason,
+                actor_id=user_id,
+                idempotency_key=idempotency_key,
+                request_digest=sample_action_digest(
+                    action=action,
+                    expected_revision_id=expected_revision_id,
+                    reason=cleaned_reason,
+                ),
+                source_digest=source_digest,
+                job=job,
+                now=now,
+            )
+        except DatasetSampleActionConflict as exc:
+            raise FeedbackDatasetConflict(str(exc)) from exc
+        except ValueError as exc:
+            raise FeedbackDatasetError(str(exc)) from exc
 
     async def _read_related_revision(
         self,

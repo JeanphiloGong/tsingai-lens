@@ -167,8 +167,11 @@ an editable candidate answer; saving appends a human revision and confirming
 binds that exact revision. A stale revision returns a conflict without losing
 the local draft. Users operate on questions, answers, and evidence text; sample,
 case, message, and source identities remain browser request parameters rather
-than visible labels. Historical snapshot creation and download remain a legacy
-surface until the D7 cutover removes its product read-back entry points.
+than visible labels. A reviewer can send a candidate back with a reason, retry
+a failed build, discard a sample, or restore it to an unconfirmed state. The
+queue keeps discarded and incomplete samples reachable for recovery. Historical
+snapshot creation and download remain a legacy surface until the D7 cutover
+removes its product read-back entry points.
 
 The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
 Opening "AI summary" requests one short paragraph; it has no categorized

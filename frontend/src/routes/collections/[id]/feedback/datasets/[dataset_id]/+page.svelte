@@ -4,11 +4,13 @@
 	import { errorMessage, isHttpStatusError } from '../../../../../_shared/api';
 	import {
 		confirmDatasetSample,
+		actOnDatasetSample,
 		fetchDatasetSample,
 		fetchDatasetSamples,
 		fetchFeedbackDataset,
 		updateDatasetSample,
 		type DatasetSample,
+		type DatasetSampleAction,
 		type DatasetSampleDetail,
 		type FeedbackDataset,
 		type SftRevisionContent
@@ -23,6 +25,8 @@
 	let detailLoading = false;
 	let saving = false;
 	let confirming = false;
+	let acting = false;
+	let pendingAction: { key: string; sampleId: string; action: DatasetSampleAction; reason: string } | null = null;
 	let error = '';
 	let editorError = '';
 	let notice = '';
@@ -51,6 +55,8 @@
 		detailLoading = false;
 		saving = false;
 		confirming = false;
+		acting = false;
+		pendingAction = null;
 		error = '';
 		editorError = '';
 		notice = '';
@@ -103,7 +109,7 @@
 	}
 
 	async function saveSample(event: CustomEvent<{ content: SftRevisionContent }>) {
-		if (!sampleDetail?.sample.current_revision_id || saving || confirming) return;
+		if (!sampleDetail?.sample.current_revision_id || saving || confirming || acting) return;
 		const generation = loadGeneration;
 		saving = true;
 		editorError = '';
@@ -126,7 +132,7 @@
 	}
 
 	async function confirmSample(event: CustomEvent<{ next: boolean }>) {
-		if (!sampleDetail?.sample.current_revision_id || confirming || saving) return;
+		if (!sampleDetail?.sample.current_revision_id || confirming || saving || acting) return;
 		const generation = loadGeneration;
 		const sampleId = sampleDetail.sample.sample_id;
 		const revisionId = sampleDetail.sample.current_revision_id;
@@ -151,6 +157,37 @@
 			}
 		} finally {
 			if (generation === loadGeneration) confirming = false;
+		}
+	}
+
+	async function performAction(event: CustomEvent<{ action: DatasetSampleAction; reason?: string }>) {
+		if (!sampleDetail || saving || confirming || acting) return;
+		const generation = loadGeneration;
+		const sampleId = sampleDetail.sample.sample_id;
+		const action = event.detail.action;
+		const reason = (event.detail.reason ?? '').trim();
+		const samePending = pendingAction?.sampleId === sampleId && pendingAction.action === action && pendingAction.reason === reason;
+		const key = samePending ? pendingAction!.key : crypto.randomUUID();
+		pendingAction = { key, sampleId, action, reason };
+		acting = true;
+		editorError = '';
+		notice = '';
+		try {
+			await actOnDatasetSample(datasetId, sampleId, {
+				action,
+				expected_revision_id: sampleDetail.sample.current_revision_id,
+				...(reason ? { reason } : {})
+			}, key);
+			pendingAction = null;
+			await reloadSelected(generation, action === 'discard' ? '样本已丢弃，可在队列中恢复。' : action === 'restore' ? '样本已恢复，请重新核对后确认。' : '构建任务已提交。');
+		} catch (err) {
+			if (generation === loadGeneration) {
+				editorError = isHttpStatusError(err, 409)
+					? '样本状态已变化，请刷新后再操作。'
+					: errorMessage(err);
+			}
+		} finally {
+			if (generation === loadGeneration) acting = false;
 		}
 	}
 
@@ -252,7 +289,7 @@
 				{:else if editorError && !sampleDetail}
 					<div class="detail-error" role="alert"><TriangleAlert size={22} aria-hidden="true" /><p>{editorError}</p><button type="button" on:click={() => selectedSample && selectSample(selectedSample)}>重新加载</button></div>
 				{:else}
-					<SftAnnotation sample={sampleDetail} {saving} {confirming} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} />
+					<SftAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
 				{/if}
 			</section>
 		</div>

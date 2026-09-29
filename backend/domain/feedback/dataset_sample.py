@@ -20,6 +20,34 @@ DatasetSampleStatus = Literal[
     "discarded",
     "build_failed",
 ]
+SampleAction = Literal["rebuild", "retry", "discard", "restore"]
+
+_ALLOWED_ACTIONS: dict[DatasetSampleStatus, frozenset[SampleAction]] = {
+    "pending": frozenset({"discard"}),
+    "building": frozenset({"discard"}),
+    "needs_confirmation": frozenset({"rebuild", "discard"}),
+    "needs_input": frozenset({"rebuild", "discard"}),
+    "build_failed": frozenset({"retry", "discard"}),
+    "confirmed": frozenset({"rebuild", "discard"}),
+    "discarded": frozenset({"restore"}),
+}
+
+
+def ensure_action_allowed(status: DatasetSampleStatus, action: SampleAction) -> None:
+    if action not in _ALLOWED_ACTIONS.get(status, frozenset()):
+        raise ValueError("sample_action_not_allowed")
+
+
+def sample_action_digest(
+    *, action: SampleAction, expected_revision_id: str | None, reason: str | None
+) -> str:
+    payload = {
+        "action": action,
+        "expected_revision_id": expected_revision_id,
+        "reason": (reason or "").strip(),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -172,7 +200,10 @@ __all__ = [
     "DATASET_SAMPLE_BUILD_PAYLOAD_VERSION",
     "DatasetSample",
     "DatasetSampleStatus",
+    "SampleAction",
     "build_job_payload",
+    "ensure_action_allowed",
+    "sample_action_digest",
     "sample_build_idempotency_key",
     "source_digest_for_case",
 ]

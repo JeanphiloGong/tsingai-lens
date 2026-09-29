@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 
 from application.feedback.dataset_service import (
     DatasetSampleDetail,
@@ -21,6 +21,7 @@ from controllers.schemas.task_datasets import (
     DatasetSampleSourceCaseResponse,
     DatasetSampleSummaryResponse,
     SampleConfirmRequest,
+    SampleActionRequest,
     SampleRevisionUpdateRequest,
     TaskDatasetCreateRequest,
     TaskDatasetListResponse,
@@ -256,6 +257,42 @@ async def confirm_dataset_sample(
         raise HTTPException(
             status_code=409,
             detail={"code": str(exc), "message": "sample has a newer revision"},
+        ) from exc
+    except FeedbackDatasetError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": str(exc), "message": str(exc)},
+        ) from exc
+    return _sample_response(result)
+
+
+@router.post(
+    "/{dataset_id}/samples/{sample_id}/actions",
+    response_model=DatasetSampleSummaryResponse,
+)
+async def act_on_dataset_sample(
+    dataset_id: str,
+    sample_id: str,
+    payload: SampleActionRequest,
+    request: Request,
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+) -> DatasetSampleSummaryResponse:
+    try:
+        result = await _service(request).apply_sample_action_for_user(
+            user_id=await current_user_id(request),
+            dataset_id=dataset_id,
+            sample_id=sample_id,
+            action=payload.action,
+            expected_revision_id=payload.expected_revision_id,
+            reason=payload.reason,
+            idempotency_key=idempotency_key,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="dataset sample not found") from exc
+    except FeedbackDatasetConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": str(exc), "message": "sample changed; reload and retry"},
         ) from exc
     except FeedbackDatasetError as exc:
         raise HTTPException(

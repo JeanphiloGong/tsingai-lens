@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from domain.feedback.analysis_job import AnalysisJob
-from domain.feedback.dataset_sample import DatasetSample
+from domain.feedback.dataset_sample import DatasetSample, SampleAction
 from domain.feedback.sample_revision import SampleRevision
 
 
@@ -18,6 +18,10 @@ class CollectedDatasetSample:
 
 class DatasetSampleRevisionConflict(ValueError):
     """The sample changed after the caller read its current revision."""
+
+
+class DatasetSampleActionConflict(ValueError):
+    """An action key or the sample generation changed."""
 
 
 BuildCompletionKind = Literal["candidate", "needs_input", "failed"]
@@ -66,6 +70,23 @@ class FeedbackDatasetSampleRepository(Protocol):
         confirmed_at: str,
     ) -> DatasetSample: ...
 
+    async def apply_action(
+        self,
+        *,
+        dataset_id: str,
+        sample_id: str,
+        expected_revision_id: str | None,
+        expected_generation: int,
+        action: SampleAction,
+        reason: str | None,
+        actor_id: str,
+        idempotency_key: str,
+        request_digest: str,
+        source_digest: str | None,
+        job: AnalysisJob | None,
+        now: str,
+    ) -> DatasetSample: ...
+
     async def complete_build(
         self,
         *,
@@ -84,5 +105,6 @@ __all__ = [
     "BuildCompletionKind",
     "CollectedDatasetSample",
     "DatasetSampleRevisionConflict",
+    "DatasetSampleActionConflict",
     "FeedbackDatasetSampleRepository",
 ]

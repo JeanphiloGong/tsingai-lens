@@ -23,6 +23,7 @@ from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetRow,
     FeedbackDatasetSampleRow,
     FeedbackSampleRevisionRow,
+    FeedbackSampleActionRow,
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
@@ -98,6 +99,7 @@ __all__ = [
     "FeedbackDatasetRow",
     "FeedbackDatasetSampleRow",
     "FeedbackSampleRevisionRow",
+    "FeedbackSampleActionRow",
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",

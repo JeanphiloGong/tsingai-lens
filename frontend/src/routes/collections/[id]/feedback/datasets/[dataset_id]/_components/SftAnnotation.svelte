@@ -1,22 +1,25 @@
 <script lang="ts">
-	import { Check, ChevronDown, FileText, Save, ShieldCheck, TriangleAlert } from '@lucide/svelte';
+	import { Check, ChevronDown, FileText, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
 	import { createEventDispatcher } from 'svelte';
-	import type { DatasetSampleDetail, SftRevisionContent } from '../../../../../../_shared/feedbackDatasets';
+	import type { DatasetSampleAction, DatasetSampleDetail, SftRevisionContent } from '../../../../../../_shared/feedbackDatasets';
 
 	export let sample: DatasetSampleDetail | null = null;
 	export let saving = false;
 	export let confirming = false;
+	export let acting = false;
 	export let error = '';
 	export let notice = '';
 
 	const dispatch = createEventDispatcher<{
 		save: { content: SftRevisionContent };
 		confirm: { next: boolean };
+		action: { action: DatasetSampleAction; reason?: string };
 	}>();
 
 	let loadedRevisionId = '';
 	let target = '';
 	let evidence: Array<{ document_title: string; text: string }> = [];
+	let rebuildReason = '';
 
 	$: if (sample?.current_revision?.revision_id && sample.current_revision.revision_id !== loadedRevisionId) {
 		loadedRevisionId = sample.current_revision.revision_id;
@@ -25,7 +28,12 @@
 	}
 
 	$: currentRevision = sample?.current_revision ?? null;
-	$: canConfirm = Boolean(currentRevision && sample?.sample.status === 'needs_confirmation' && !saving && !confirming);
+	$: draftChanged = Boolean(currentRevision && (
+		target.trim() !== currentRevision.content.target ||
+		JSON.stringify(evidence) !== JSON.stringify(currentRevision.content.evidence)
+	));
+	$: canConfirm = Boolean(currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged && !saving && !confirming && !acting);
+	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed';
 
 	function content(): SftRevisionContent | null {
 		if (!currentRevision) return null;
@@ -49,6 +57,12 @@
 
 	function confirm(next: boolean) {
 		if (canConfirm) dispatch('confirm', { next });
+	}
+
+	function act(action: DatasetSampleAction) {
+		if (acting || saving || confirming) return;
+		if (action === 'rebuild' && !rebuildReason.trim()) return;
+		dispatch('action', { action, reason: rebuildReason.trim() || undefined });
 	}
 
 	function formatSource(source: Record<string, unknown>) {
@@ -87,14 +101,18 @@
 				{#if sample.sample.status === 'confirmed'}
 					<span class="status status--confirmed"><ShieldCheck size={14} aria-hidden="true" />已确认</span>
 				{:else}
-					<span class="status">待确认</span>
+					<span class="status">{sample.sample.status === 'needs_confirmation' ? '待确认' : sample.sample.status === 'needs_input' ? '待补充' : sample.sample.status === 'build_failed' ? '构建失败' : sample.sample.status === 'discarded' ? '已丢弃' : '构建中'}</span>
 				{/if}
 			</div>
-			<label for="sft-target">回答内容</label>
-			<textarea id="sft-target" bind:value={target} rows="12" disabled={saving || confirming}></textarea>
+			{#if currentRevision}
+				<label for="sft-target">回答内容</label>
+				<textarea id="sft-target" bind:value={target} rows="12" disabled={!canEdit || saving || confirming || acting}></textarea>
+			{:else}
+				<p class="missing">当前还没有完整候选。请核对右侧缺失信息，再重新构建。</p>
+			{/if}
 
-			<div class="actions" aria-label="样本操作">
-				<button class="primary" type="button" on:click={save} disabled={saving || confirming || !target.trim()}>
+			{#if canEdit}<div class="actions" aria-label="样本操作">
+				<button class="primary" type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !target.trim()}>
 					<Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}
 				</button>
 				<button type="button" on:click={() => confirm(false)} disabled={!canConfirm}>
@@ -103,6 +121,18 @@
 				<button type="button" on:click={() => confirm(true)} disabled={!canConfirm}>
 					确认并下一条
 				</button>
+			</div>{/if}
+			{#if draftChanged}<p class="draft-note" role="status">有未保存的修改，保存后才能确认。</p>{/if}
+			{#if sample.sample.status === 'needs_confirmation' || sample.sample.status === 'confirmed' || sample.sample.status === 'needs_input'}
+				<div class="rebuild-area">
+					<label for="rebuild-reason">退回意见</label>
+					<textarea id="rebuild-reason" bind:value={rebuildReason} rows="3" maxlength="2000" placeholder="说明应核对的条件或缺失来源" disabled={acting}></textarea>
+					<button type="button" on:click={() => act('rebuild')} disabled={acting || saving || confirming || !rebuildReason.trim()}><RotateCcw size={16} aria-hidden="true" />退回重建</button>
+				</div>
+			{/if}
+			<div class="recovery-actions">
+				{#if sample.sample.status === 'build_failed'}<button type="button" on:click={() => act('retry')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />重试构建</button>{/if}
+				{#if sample.sample.status === 'discarded'}<button type="button" on:click={() => act('restore')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />恢复样本</button>{:else}<button type="button" on:click={() => act('discard')} disabled={acting || saving || confirming}><Trash2 size={16} aria-hidden="true" />丢弃样本</button>{/if}
 			</div>
 			{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 			{#if error}<p class="error" role="alert"><TriangleAlert size={15} aria-hidden="true" />{error}</p>{/if}
@@ -116,9 +146,9 @@
 				{#each evidence as item, index}
 					<article class="evidence-card">
 						<label for={`evidence-title-${index}`}>文献标题</label>
-						<input id={`evidence-title-${index}`} bind:value={item.document_title} disabled={saving || confirming} />
+						<input id={`evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} />
 						<label for={`evidence-text-${index}`}>片段</label>
-						<textarea id={`evidence-text-${index}`} bind:value={item.text} rows="6" disabled={saving || confirming}></textarea>
+						<textarea id={`evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea>
 					</article>
 				{:else}
 					<p class="missing">当前候选没有可读证据，不能确认。</p>
@@ -169,6 +199,11 @@
 	.actions button:hover:not(:disabled) { border-color: #0f766e; color: #0f766e; }
 	.actions button.primary { border-color: #0f766e; background: #0f766e; color: #fff; }
 	.actions button:disabled { cursor: not-allowed; opacity: .48; }
+	.draft-note { color: #9a6700; font-size: 13px; }
+	.rebuild-area { margin-top: 22px; border-top: 1px solid #e7edf3; padding-top: 10px; }
+	.rebuild-area button, .recovery-actions button { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; margin-top: 10px; border: 1px solid #b8c4d3; border-radius: 6px; background: #fff; color: #304057; padding: 7px 11px; cursor: pointer; }
+	.rebuild-area button:disabled, .recovery-actions button:disabled { cursor: not-allowed; opacity: .48; }
+	.recovery-actions { display: flex; gap: 8px; margin-top: 12px; }
 	.notice { margin: 14px 0 0; color: #0f766e; font-size: 13px; }
 	.error { display: flex; gap: 7px; align-items: flex-start; margin: 14px 0 0; color: #b42318; font-size: 13px; }
 	.aside-note { margin: -4px 0 18px; color: #68778a; font-size: 12px; line-height: 1.55; }

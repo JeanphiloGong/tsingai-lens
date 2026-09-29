@@ -83,6 +83,14 @@ class SampleConfirmRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1, max_length=64)
 
 
+class SampleActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["rebuild", "retry", "discard", "restore"]
+    expected_revision_id: str | None = Field(default=None, max_length=64)
+    reason: str | None = Field(default=None, max_length=2000)
+
+
 class DatasetSampleSummaryResponse(BaseModel):
     sample_id: str
     dataset_id: str
@@ -155,6 +163,7 @@ __all__ = [
     "DatasetSampleSourceCaseResponse",
     "DatasetSampleSummaryResponse",
     "SampleConfirmRequest",
+    "SampleActionRequest",
     "SampleRevisionUpdateRequest",
     "SftRevisionContentRequest",
 ]

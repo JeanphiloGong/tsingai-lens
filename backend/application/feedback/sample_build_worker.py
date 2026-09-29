@@ -23,6 +23,8 @@ from domain.feedback import (
     DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
     SampleRevision,
 )
+from domain.feedback.dataset_sample import source_digest_for_case
+from domain.feedback.sample_revision import content_digest_for
 
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,17 @@ class DatasetSampleBuildWorker:
             case = await self.case_repository.read_case(sample.source_case_id)
             if case is None or case.collection_id != dataset.collection_id:
                 raise ValueError("dataset_sample_build_case_missing")
+            if source_digest_for_case(case.to_record()) != source_digest:
+                await self.sample_repository.complete_build(
+                    job=job,
+                    sample_id=sample_id,
+                    generation=generation,
+                    revision=None,
+                    outcome="needs_input",
+                    missing_reasons=("source_changed_since_collection",),
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                )
+                return await self._read_finished(job, status="succeeded", result_id=sample_id)
             annotation = await self.case_repository.read_annotation(case.case_id)
             built = await self.builder.build(
                 dataset=dataset,
@@ -98,11 +111,29 @@ class DatasetSampleBuildWorker:
                 )
                 return await self._read_finished(job, status="succeeded", result_id=sample_id)
 
+            previous = (
+                await self.sample_repository.read_revision(sample.current_revision_id)
+                if sample.current_revision_id else None
+            )
+            if (
+                payload.get("review_note")
+                and previous is not None
+                and previous.content_digest == content_digest_for(built.content)
+            ):
+                await self.sample_repository.complete_build(
+                    job=job,
+                    sample_id=sample_id,
+                    generation=generation,
+                    revision=None,
+                    outcome="needs_input",
+                    missing_reasons=("candidate_unchanged_after_rebuild",),
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                )
+                return await self._read_finished(job, status="succeeded", result_id=sample_id)
+
             revision_no = 1
-            if sample.current_revision_id:
-                previous = await self.sample_repository.read_revision(sample.current_revision_id)
-                if previous is not None:
-                    revision_no = previous.revision_no + 1
+            if previous is not None:
+                revision_no = previous.revision_no + 1
             revision = SampleRevision.build_worker(
                 revision_id=f"revision_{uuid4().hex[:32]}",
                 sample_id=sample_id,
@@ -110,7 +141,10 @@ class DatasetSampleBuildWorker:
                 content=built.content,
                 input_digest=sample.source_digest,
                 construction_spec_version=dataset.spec_version,
-                provenance=built.provenance,
+                provenance={
+                    **built.provenance,
+                    **({"review_note": payload["review_note"]} if payload.get("review_note") else {}),
+                },
                 created_at=datetime.now(timezone.utc).isoformat(),
                 job_id=job.job_id,
             )

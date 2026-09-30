@@ -142,12 +142,11 @@ This node owns the Collection route family.
   sessions keep their own permission record and must be changed from the
   conversation control.
 - `collections/[id]/feedback/+page.svelte`
-  Feedback workbench for server-generated cases in the current Collection. It
-  distinguishes chat ratings, later user corrections, and failed tool calls,
-  then shows the question, answer, inspected Sources, omitted candidates, and
-  AI candidate analysis without exposing internal signal or message IDs. The
-  same route owns human annotation and review actions; task dataset collection,
-  sample confirmation, and export actions live under `feedback/datasets`.
+  Task dataset entry for the current Collection, grouped into SFT, preference,
+  and evaluation tabs. Creating a dataset opens its task-specific sample editor
+  under `feedback/datasets/[dataset_id]`. The collection picker shows real case
+  questions and document titles, submits selected cases for construction, and
+  automatically refreshes pending builds without replacing an editable draft.
   Candidate analysis stays inside the workbench as an internal review signal;
   only a confirmed sample revision can be published as model-facing JSONL.
   The validation scenario uses two open-access Nature Communications papers:
@@ -156,8 +155,8 @@ This node owns the Collection route family.
   `10.1038/s41467-020-14453-3`, on scan strategy and side-branching. The
   detail view keeps their material, process variable, outcome, page, DOI, and
   Source excerpt together so a reviewer can judge comparability from the
-  papers themselves. Only an accepted annotation can be collected into a
-  task-specific dataset sample.
+  papers themselves. Incomplete cases can be collected; the builder identifies
+  missing inputs instead of pretending they are confirmed training examples.
 
 ## Objective Interaction
 
@@ -168,14 +167,15 @@ binds that exact revision. A stale revision returns a conflict without losing
 the local draft. Users operate on questions, answers, and evidence text; sample,
 case, message, and source identities remain browser request parameters rather
 than visible labels. A reviewer can send a candidate back with a reason, retry
-a failed build, discard a sample, or restore it to an unconfirmed state. The
+a failed build, discard a sample, or restore it to an unconfirmed state.
 The queue keeps discarded and incomplete samples reachable for recovery. The
 former snapshot page and download endpoints are not product surfaces after
 D7; legacy snapshots are read only by the migration script and may remain
 only in an operations archive.
 
-The SFT page's export section is a separate delivery step after confirmation. It
-requests a server-side preflight, shows the count of valid rows and each issue,
+The task page's collapsible export section is a separate delivery step after
+confirmation. Users select confirmed samples individually or select the full
+confirmed queue. The request freezes that selection, shows the count of valid rows and each issue,
 and lets the user open an affected sample or explicitly publish only the valid
 rows. Publishing freezes the confirmed revision set; later edits create a new
 export rather than changing an earlier file. JSONL and JSON downloads contain

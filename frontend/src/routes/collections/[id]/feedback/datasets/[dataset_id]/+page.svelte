@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import {
 		ArrowLeft,
@@ -12,8 +13,11 @@
 		TriangleAlert
 	} from '@lucide/svelte';
 	import { errorMessage, isHttpStatusError } from '../../../../../_shared/api';
+	import { t } from '../../../../../_shared/i18n';
+	import { fetchFeedbackCases, type FeedbackCaseSummary } from '../../../../../_shared/feedbackCases';
 	import {
 		confirmDatasetSample,
+		collectDatasetCases,
 		actOnDatasetSample,
 		downloadFeedbackDatasetExport,
 		fetchFeedbackDatasetExports,
@@ -58,6 +62,78 @@
 	let downloadingExport = '';
 	let loadedDatasetId = '';
 	let loadGeneration = 0;
+	let collectOpen = false;
+	let cases: FeedbackCaseSummary[] = [];
+	let caseOffset = 0;
+	let casesLoading = false;
+	let collecting = false;
+	let collectError = '';
+	let chosenCases: string[] = [];
+	let chosenExports: string[] = [];
+	let polling = false;
+	let caseQuestions: Record<string, string> = {};
+
+	async function readSamples() {
+		const requestedDatasetId = datasetId;
+		const items: DatasetSample[] = [];
+		let response;
+		do {
+			response = await fetchDatasetSamples(requestedDatasetId, { limit: 200, offset: items.length });
+			items.push(...response.items);
+		} while (response.items.length === 200 && items.length < response.total);
+		return { items };
+	}
+	$: collectedCases = new Set(samples.map((item) => item.source_case_id));
+	$: exportSelection = chosenExports.filter((id) => samples.some((item) => item.sample_id === id && item.status === 'confirmed'));
+
+	onMount(() => {
+		const timer = setInterval(() => { void pollBuilds(); }, 2500);
+		return () => clearInterval(timer);
+	});
+
+	async function pollBuilds() {
+		if (polling || loading || !samples.some((item) => ['pending', 'building'].includes(item.status))) return;
+		polling = true;
+		const generation = loadGeneration;
+		try {
+			const response = await readSamples();
+			if (generation !== loadGeneration) return;
+			samples = response.items;
+			const updated = samples.find((item) => item.sample_id === selectedSample?.sample_id);
+			if (updated && ['pending', 'building'].includes(selectedSample?.status ?? '') && updated.status !== selectedSample?.status) await selectSample(updated, generation);
+		} catch (err) { if (generation === loadGeneration) error = errorMessage(err); }
+		finally { polling = false; }
+	}
+
+	async function openCases(offset = 0) {
+		collectOpen = true;
+		casesLoading = true;
+		collectError = '';
+		const generation = loadGeneration;
+		try {
+			const response = await fetchFeedbackCases(collectionId, { limit: 50, offset });
+			if (generation !== loadGeneration) return;
+			cases = response.items;
+			caseQuestions = { ...caseQuestions, ...Object.fromEntries(cases.map((item) => [item.case_id, item.question_preview])) };
+			caseOffset = offset;
+		} catch (err) { collectError = errorMessage(err); }
+		finally { casesLoading = false; }
+	}
+
+	async function collectCases() {
+		if (collecting || !chosenCases.length) return;
+		const generation = loadGeneration;
+		collecting = true;
+		collectError = '';
+		try {
+			await collectDatasetCases(datasetId, chosenCases);
+			if (generation !== loadGeneration) return;
+			chosenCases = [];
+			collectOpen = false;
+			await load();
+		} catch (err) { collectError = errorMessage(err); }
+		finally { collecting = false; }
+	}
 
 	$: collectionId = $page.params.id ?? '';
 	$: datasetId = $page.params.dataset_id ?? '';
@@ -73,6 +149,10 @@
 	}
 
 	function reset() {
+		caseQuestions = {};
+		collectOpen = false;
+		chosenCases = [];
+		chosenExports = [];
 		dataset = null;
 		samples = [];
 		selectedSample = null;
@@ -102,7 +182,7 @@
 		try {
 			const [loadedDataset, response] = await Promise.all([
 				fetchFeedbackDataset(datasetId),
-				fetchDatasetSamples(datasetId, { limit: 200 })
+				readSamples()
 			]);
 			if (generation !== loadGeneration) return;
 			dataset = loadedDataset;
@@ -119,6 +199,7 @@
 				: undefined;
 			const first = current ?? samples.find((item) => item.status === 'needs_confirmation') ?? samples[0];
 			if (first) await selectSample(first, generation);
+			else if (!collectOpen) await openCases();
 		} catch (err) {
 			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
@@ -132,13 +213,13 @@
 	}
 
 	async function runExportPreview() {
-		if (exportLoading || exportPublishing || confirmedCount === 0) return;
+		if (exportLoading || exportPublishing || exportSelection.length === 0) return;
 		exportLoading = true;
 		exportError = '';
 		exportNotice = '';
 		allowPartialExport = false;
 		try {
-			exportPreview = await previewFeedbackDatasetExport(datasetId);
+			exportPreview = await previewFeedbackDatasetExport(datasetId, exportSelection);
 			if (exportPreview.issues.length === 0) {
 				exportNotice = '预检完成，所有已确认样本都可以导出。';
 			}
@@ -211,6 +292,7 @@
 			const detail = await fetchDatasetSample(datasetId, item.sample_id);
 			if (generation !== loadGeneration || item.sample_id !== selectedSample?.sample_id) return;
 			sampleDetail = detail;
+			caseQuestions = { ...caseQuestions, [item.source_case_id]: detail.source_case.question };
 		} catch (err) {
 			if (generation === loadGeneration) editorError = errorMessage(err);
 		} finally {
@@ -306,7 +388,7 @@
 		const sampleId = sampleDetail.sample.sample_id;
 		const [detail, response] = await Promise.all([
 			fetchDatasetSample(datasetId, sampleId),
-			fetchDatasetSamples(datasetId, { limit: 200 })
+			readSamples()
 		]);
 		if (generation !== loadGeneration) return;
 		sampleDetail = detail;
@@ -360,7 +442,7 @@
 <main class="page-shell">
 	<header class="page-header">
 		<div>
-			<a class="back-link" href={`/collections/${encodeURIComponent(collectionId)}/feedback/datasets`}>
+			<a class="back-link" href={`/collections/${encodeURIComponent(collectionId)}/feedback`}>
 				<ArrowLeft size={16} aria-hidden="true" />返回数据集
 			</a>
 			<div class="eyebrow">{taskLabel(dataset?.task_type)}</div>
@@ -368,6 +450,7 @@
 			<p class="lede">核对 Worker 生成的候选内容，按任务类型修改后确认。</p>
 		</div>
 		<div class="header-actions">
+			<button class="primary-button primary-button--compact" type="button" on:click={() => openCases()}><FileText size={16} aria-hidden="true" />{$t('taskDatasets.collect')}</button>
 			{#if dataset}<span class="spec">构建规则 v{dataset.spec_version}</span>{/if}
 			<button class="icon-button" type="button" on:click={refresh} disabled={loading} title="刷新样本队列" aria-label="刷新样本队列">
 				<span class:spin={loading}><RefreshCw size={17} aria-hidden="true" /></span>
@@ -381,6 +464,24 @@
 	{#if loading}
 		<div class="loading" role="status"><span></span><span></span><span></span></div>
 	{:else}
+		{#if collectOpen}
+			<section class="collection-panel" aria-labelledby="collect-title">
+				<div class="collection-heading"><h2 id="collect-title">{$t('taskDatasets.collectTitle')}</h2><button class="link-button" type="button" on:click={() => collectOpen = false}>{$t('taskDatasets.close')}</button></div>
+				{#if collectError}<p role="alert">{collectError}</p>{/if}
+				{#if casesLoading}<p role="status">…</p>{:else}
+					<div class="case-options">
+						{#each cases as item (item.case_id)}
+							<label class="case-option" class:already-collected={collectedCases.has(item.case_id)}>
+								<input type="checkbox" value={item.case_id} bind:group={chosenCases} disabled={collectedCases.has(item.case_id) || collecting} />
+								<span><strong>{item.question_preview || item.answer_preview}</strong><small>{item.document_titles.join(' · ')}</small></span>
+								{#if collectedCases.has(item.case_id)}<small>{$t('taskDatasets.collected')}</small>{/if}
+							</label>
+						{:else}<p>{$t('taskDatasets.collectEmpty')}</p>{/each}
+					</div>
+				{/if}
+				<div class="collection-footer"><div><button class="link-button" type="button" on:click={() => openCases(caseOffset - 50)} disabled={caseOffset === 0 || casesLoading}>{$t('taskDatasets.previous')}</button><button class="link-button" type="button" on:click={() => openCases(caseOffset + 50)} disabled={cases.length < 50 || casesLoading}>{$t('taskDatasets.next')}</button></div><button class="primary-button primary-button--compact" type="button" on:click={collectCases} disabled={collecting || !chosenCases.length}>{$t('taskDatasets.collectBuild')} ({chosenCases.length})</button></div>
+			</section>
+		{/if}
 			<section class="summary-strip" aria-label="样本状态">
 				<div><strong>{samples.length}</strong><span>全部样本</span></div>
 				<div class="summary--attention"><strong>{pendingCount}</strong><span>待确认</span></div>
@@ -388,16 +489,19 @@
 				<div class="summary--done"><strong>{confirmedCount}</strong><span>已确认</span></div>
 			</section>
 
-			<section class="export-panel" aria-labelledby="export-title">
+			<details class="export-panel">
+				<summary>{$t('taskDatasets.exportTitle')} · {confirmedCount}</summary>
 				<div class="export-heading">
 					<div>
 						<div class="eyebrow">交付训练文件</div>
 						<h2 id="export-title">导出已确认样本</h2>
-						<p>先检查当前确认版本，再发布一个不可变导出。主文件只放模型可读内容，追溯信息单独下载。</p>
+						<p>{$t('taskDatasets.selected', { count: exportSelection.length })}</p>
 					</div>
 					<div class="export-heading-meta">
 						<span class="export-count"><ShieldCheck size={15} aria-hidden="true" />{confirmedCount} 条已确认</span>
-						<button class="secondary-button" type="button" on:click={runExportPreview} disabled={exportLoading || exportPublishing || confirmedCount === 0}>
+						<span>{$t('taskDatasets.selected', { count: exportSelection.length })}</span>
+						<button class="secondary-button" type="button" on:click={() => { chosenExports = samples.filter((item) => item.status === 'confirmed').map((item) => item.sample_id); exportPreview = null; }} disabled={confirmedCount === 0}>{$t('taskDatasets.selectAll')}</button>
+						<button class="secondary-button" type="button" on:click={runExportPreview} disabled={exportLoading || exportPublishing || exportSelection.length === 0}>
 							<FileJson size={16} aria-hidden="true" />{exportLoading ? '正在检查…' : '检查导出'}
 						</button>
 					</div>
@@ -473,7 +577,7 @@
 						{/each}
 					</div>
 				{/if}
-			</section>
+			</details>
 
 			<div class="workbench">
 			<aside class="queue" aria-labelledby="queue-title">
@@ -486,13 +590,16 @@
 				{:else}
 					<div class="queue-list">
 						{#each samples as item (item.sample_id)}
+							<div class="queue-row">
+								{#if item.status === 'confirmed'}<input type="checkbox" aria-label={$t('taskDatasets.selectExport')} value={item.sample_id} bind:group={chosenExports} on:change={() => exportPreview = null} />{/if}
 							<button class:active={selectedSample?.sample_id === item.sample_id} class="queue-item" type="button" on:click={() => selectSample(item)}>
 								<span class="queue-icon">
 									{#if item.status === 'confirmed'}<CheckCircle2 size={16} aria-hidden="true" />{:else if item.status === 'pending' || item.status === 'building'}<Clock3 size={16} aria-hidden="true" />{:else}<FileText size={16} aria-hidden="true" />{/if}
 								</span>
-								<span class="queue-copy"><strong>{item.status === 'needs_confirmation' ? '候选回答' : statusLabel(item.status)}</strong><small>更新于 {formatDate(item.updated_at)}</small></span>
+								<span class="queue-copy"><strong title={caseQuestions[item.source_case_id]}>{caseQuestions[item.source_case_id] || statusLabel(item.status)}</strong><small>更新于 {formatDate(item.updated_at)}</small></span>
 								<span class="queue-status queue-status--{item.status}">{statusLabel(item.status)}</span>
 							</button>
+							</div>
 						{/each}
 					</div>
 				{/if}
@@ -518,6 +625,19 @@
 </main>
 
 <style>
+	.export-panel > summary { cursor: pointer; font-size: 14px; font-weight: 700; color: #0f766e; padding: 8px 0; }
+	.collection-panel { border-top: 1px solid #dbe3ec; border-bottom: 1px solid #dbe3ec; padding: 18px 0; margin-bottom: 20px; }
+	.collection-heading, .collection-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+	.collection-heading h2 { font-size: 18px; margin: 0; }
+	.case-options { max-height: 340px; overflow: auto; margin: 14px 0; }
+	.case-option { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #e0e7ef; padding: 14px 8px; cursor: pointer; }
+	.case-option span { flex: 1; min-width: 0; display: grid; gap: 5px; overflow-wrap: anywhere; }
+	.case-option strong { font-size: 14px; }
+	.case-option small { font-size: 12px; color: #657387; }
+	.already-collected { opacity: .6; }
+	.queue-row { display: flex; align-items: center; }
+	.queue-row > input { flex: 0 0 auto; margin-left: 12px; }
+	.queue-row .queue-item { flex: 1; min-width: 0; }
 	:global(body) { background: #f4f7fa; }
 	:global(button) { font: inherit; }
 	.page-shell { max-width: 1480px; margin: 0 auto; padding: 28px 28px 72px; color: #172033; }

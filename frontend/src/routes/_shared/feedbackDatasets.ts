@@ -192,6 +192,13 @@ function samplePath(datasetId: string, suffix = '') {
 	return `${datasetPath(datasetId)}/samples${suffix}`;
 }
 
+export async function collectDatasetCases(datasetId: string, sourceCaseIds: string[]) {
+	return await requestJson(`${datasetPath(datasetId)}/collections`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ source_case_ids: sourceCaseIds })
+	}) as { created_count: number; existing_count: number };
+}
+
 export async function fetchDatasetSamples(
 	datasetId: string,
 	options: { status?: string; limit?: number; offset?: number } = {}
@@ -262,11 +269,11 @@ export async function actOnDatasetSample(
 	)) as DatasetSample;
 }
 
-export async function previewFeedbackDatasetExport(datasetId: string) {
+export async function previewFeedbackDatasetExport(datasetId: string, sampleIds?: string[]) {
 	return (await requestJson(`${datasetPath(datasetId)}/export-previews`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({})
+		body: JSON.stringify({ sample_ids: sampleIds })
 	})) as DatasetExportPreview;
 }
 

@@ -8,7 +8,10 @@ function json(body: unknown, status = 200) {
 	return { status, contentType: 'application/json', body: JSON.stringify(body) };
 }
 
-async function mockTaskDataset(page: Page) {
+async function mockTaskDataset(page: Page, startEmpty = false) {
+	await page.addInitScript(() => localStorage.setItem('retrieval.lang', 'zh'));
+	let empty = startEmpty;
+	let buildingReads = 0;
 	let revision = 1;
 	let generation = 1;
 	let target = '基于图注证据生成的候选正确回答。';
@@ -28,6 +31,19 @@ async function mockTaskDataset(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}` && request.method() === 'GET') {
 			return route.fulfill(json({ collection_id: collectionId, name: 'Feedback fixture', status: 'ready', documents: [] }));
 		}
+		if (path === '/api/v1/feedback-datasets') {
+			const dataset = { dataset_id: datasetId, collection_id: collectionId, name: '预热条件问答纠错', task_type: 'sft', construction_spec: {}, spec_version: 1, created_by: 'user_feedback', created_at: '2026-09-29T00:00:00Z', updated_at: '2026-09-29T00:00:00Z' };
+			return route.fulfill(json(request.method() === 'POST' ? dataset : { items: [], limit: 200, offset: 0 }));
+		}
+		if (path === '/api/v1/feedback-cases') {
+			return route.fulfill(json({items: [{case_id: 'case_1', question_preview: '比较文献 A、B 的预热条件。', answer_preview: '文献 B 没有预热。', document_titles: ['文献 B']}], limit: 50, offset: 0}));
+		}
+		if (path === `/api/v1/feedback-datasets/${datasetId}/collections`) {
+			expect(request.postDataJSON().source_case_ids).toEqual(['case_1']);
+			empty = false;
+			status = 'pending';
+			return route.fulfill(json({created_count: 1, existing_count: 0}, 202));
+		}
 		if (path === `/api/v1/feedback-datasets/${datasetId}` && request.method() === 'GET') {
 			return route.fulfill(json({
 				dataset_id: datasetId, collection_id: collectionId, name: '预热条件问答纠错', task_type: 'sft',
@@ -36,6 +52,8 @@ async function mockTaskDataset(page: Page) {
 			}));
 		}
 		if (path === `/api/v1/feedback-datasets/${datasetId}/samples` && request.method() === 'GET') {
+			if (empty) return route.fulfill(json({items: [], total: 0, limit: 200, offset: 0}));
+			if (startEmpty && status === 'pending' && ++buildingReads > 1) status = 'needs_confirmation';
 			return route.fulfill(json({
 				items: [{ sample_id: sampleId, dataset_id: datasetId, source_case_id: 'case_1', status,
 					current_revision_id: `revision_${revision}`, confirmed_revision_id: status === 'confirmed' ? `revision_${revision}` : null,
@@ -86,6 +104,23 @@ async function mockTaskDataset(page: Page) {
 	});
 	return { actions, setStatus: (next: string) => { status = next; } };
 }
+
+test('create a dataset, collect a case, and receive a built SFT candidate', async ({ page }) => {
+	await mockTaskDataset(page, true);
+	await page.addInitScript(() => localStorage.setItem('retrieval.lang', 'zh'));
+	await page.goto(`/collections/${collectionId}/feedback`);
+	await expect(page.getByRole('button', {name: /回答偏好/})).toBeVisible();
+	await expect(page.getByRole('button', {name: /评测/})).toBeVisible();
+	await page.locator('#dataset-name').fill('testsft');
+	await page.getByRole('button', {name: '创建数据集', exact: true}).click();
+	await expect(page).toHaveURL(new RegExp(`/feedback/datasets/${datasetId}$`));
+	await page.getByRole('button', {name: '收集案例', exact: true}).click();
+	await page.getByRole('checkbox', {name: /比较文献/}).check();
+	await page.getByRole('button', {name: /收集并构建/}).click();
+	await expect(page.getByRole('textbox', {name: '回答内容'})).toHaveValue('基于图注证据生成的候选正确回答。');
+	await page.getByRole('button', {name: '确认样本', exact: true}).click();
+	await page.getByRole('checkbox', {name: '选择导出此样本'}).check();
+});
 
 for (const width of [1440, 390]) {
 	test(`SFT sample editor is usable at ${width}px`, async ({ page }, testInfo) => {

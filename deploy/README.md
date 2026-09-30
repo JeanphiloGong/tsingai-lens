@@ -1,7 +1,7 @@
 # TsingAI-Lens Deploy Bundle
 
 This directory is the minimal self-hosted runtime bundle for Lens. It runs the
-published Lens images with one internal PostgreSQL service and three internal
+published Lens images with one internal PostgreSQL service and four internal
 analysis Worker services.
 
 This is the repository's only Docker Compose entrypoint. For source-tree
@@ -215,11 +215,11 @@ Application startup never creates or changes database schema.
 ./scripts/lens ps
 ```
 
-`./scripts/lens up` starts the backend, frontend, PostgreSQL, and the three
+`./scripts/lens up` starts the backend, frontend, PostgreSQL, and the four
 analysis Workers together. The Workers are long-running processes built from
 the backend image; they do not expose HTTP ports and are not started by a Chat
 request. The backend only records a pending `analysis_jobs` row, and the
-matching Worker claims it and writes the analysis result.
+matching Worker claims it and writes the analysis result or dataset sample.
 
 The expected service names are:
 
@@ -230,6 +230,7 @@ frontend
 feedback-analysis-worker
 correction-signal-analysis-worker
 tool-failure-analysis-worker
+dataset-sample-worker
 ```
 
 Inspect a particular Worker when a job remains pending:
@@ -238,13 +239,15 @@ Inspect a particular Worker when a job remains pending:
 ./scripts/lens logs feedback-analysis-worker
 ./scripts/lens logs correction-signal-analysis-worker
 ./scripts/lens logs tool-failure-analysis-worker
+./scripts/lens logs dataset-sample-worker
 ```
 
 Stopping a Worker leaves newly created jobs in `pending`; starting the service
 again lets it continue polling. Docker's `restart: unless-stopped` restarts a
-Worker container after a process failure. The current Worker scripts do not
-provide automatic retry or stale-`running` recovery; those are separate task
-reliability features.
+Worker container after a process failure. Each claimed job has a database lease
+(`worker_id`, `lease_expires_at`, `heartbeat_at`, and `lease_version`). When a
+Worker exits, the next Worker pass returns an expired `running` job to
+`pending`; dataset sample jobs also return from `building` to `pending`.
 
 Open:
 
@@ -271,7 +274,7 @@ http://localhost:8080
 Command mapping:
 
 - `doctor` checks Docker, Compose, password shape, PostgreSQL readiness,
-  Alembic head state, the data directory, all three analysis Workers, and
+  Alembic head state, the data directory, all four analysis Workers, and
   frontend/backend reachability.
 - `up` runs `docker compose up -d`.
 - `down` runs `docker compose down`.
@@ -298,7 +301,8 @@ docker compose --env-file .env -f compose.yml stop \
   frontend backend \
   feedback-analysis-worker \
   correction-signal-analysis-worker \
-  tool-failure-analysis-worker
+  tool-failure-analysis-worker \
+  dataset-sample-worker
 docker compose --env-file .env -f compose.yml pull
 docker compose --env-file .env -f compose.yml up -d postgres
 docker compose --env-file .env -f compose.yml run --rm backend alembic upgrade head
@@ -335,7 +339,8 @@ docker compose --env-file .env -f compose.yml stop \
   frontend backend \
   feedback-analysis-worker \
   correction-signal-analysis-worker \
-  tool-failure-analysis-worker
+  tool-failure-analysis-worker \
+  dataset-sample-worker
 docker compose --env-file .env -f compose.yml exec -T postgres \
   psql --set=ON_ERROR_STOP=1 --username=lens --dbname=postgres \
   --command='DROP DATABASE IF EXISTS lens WITH (FORCE)' \

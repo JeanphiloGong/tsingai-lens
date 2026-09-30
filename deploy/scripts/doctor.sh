@@ -123,7 +123,8 @@ if [ "$COMPOSE_READY" -eq 1 ]; then
     for worker in \
       feedback-analysis-worker \
       correction-signal-analysis-worker \
-      tool-failure-analysis-worker
+      tool-failure-analysis-worker \
+      dataset-sample-worker
     do
       if printf '%s\n' "$RUNNING_SERVICES" | grep -qx "$worker"; then
         pass "$worker container is running"

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import os
+import socket
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -31,8 +33,15 @@ class PostgresAnalysisJobRepository:
 
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    lease_seconds = 900
+
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        worker_id: str | None = None,
+    ) -> None:
         self.session_factory = session_factory
+        self.worker_id = (worker_id or f"{socket.gethostname()}:{os.getpid()}")[:100]
 
     async def enqueue_feedback_analysis(
         self,
@@ -255,7 +264,7 @@ class PostgresAnalysisJobRepository:
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == "feedback_analysis",
-                    AnalysisJobRow.status == "pending",
+                    _claimable_job_filter(timestamp),
                     AnalysisJobRow.available_at <= timestamp,
                 )
                 .order_by(
@@ -270,6 +279,7 @@ class PostgresAnalysisJobRepository:
                 return None
             row.status = "running"
             row.started_at = timestamp
+            _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
             await session.flush()
             return _job(row)
@@ -283,7 +293,7 @@ class PostgresAnalysisJobRepository:
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == CORRECTION_SIGNAL_JOB_TYPE,
-                    AnalysisJobRow.status == "pending",
+                    _claimable_job_filter(timestamp),
                     AnalysisJobRow.available_at <= timestamp,
                 )
                 .order_by(
@@ -298,6 +308,7 @@ class PostgresAnalysisJobRepository:
                 return None
             row.status = "running"
             row.started_at = timestamp
+            _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
             await session.flush()
             return _job(row)
@@ -309,7 +320,7 @@ class PostgresAnalysisJobRepository:
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == TOOL_FAILURE_JOB_TYPE,
-                    AnalysisJobRow.status == "pending",
+                    _claimable_job_filter(timestamp),
                     AnalysisJobRow.available_at <= timestamp,
                 )
                 .order_by(
@@ -324,6 +335,7 @@ class PostgresAnalysisJobRepository:
                 return None
             row.status = "running"
             row.started_at = timestamp
+            _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
             await session.flush()
             return _job(row)
@@ -341,7 +353,7 @@ class PostgresAnalysisJobRepository:
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == DATASET_SAMPLE_BUILD_JOB_TYPE,
-                    AnalysisJobRow.status == "pending",
+                    _claimable_job_filter(timestamp),
                     AnalysisJobRow.available_at <= timestamp,
                 )
                 .order_by(
@@ -383,6 +395,7 @@ class PostgresAnalysisJobRepository:
                 return _job(row)
             row.status = "running"
             row.started_at = timestamp
+            _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
             sample.status = "building"
             sample.updated_at = timestamp
@@ -464,9 +477,53 @@ class PostgresAnalysisJobRepository:
             row.finished_at = None
             row.result_id = None
             row.error_code = None
+            _clear_lease(row)
             row.updated_at = timestamp
             await session.flush()
             return _job(row)
+
+    async def recover_expired_jobs(self, now: str) -> int:
+        """Return jobs whose worker lease expired to the pending queue."""
+
+        timestamp = _datetime(now)
+        recovered = 0
+        async with self.session_factory.begin() as session:
+            rows = await session.scalars(
+                select(AnalysisJobRow)
+                .where(
+                    AnalysisJobRow.status == "running",
+                    AnalysisJobRow.lease_expires_at.is_not(None),
+                    AnalysisJobRow.lease_expires_at <= timestamp,
+                )
+                .with_for_update(skip_locked=True)
+            )
+            for row in rows:
+                row.status = "pending"
+                row.available_at = timestamp
+                row.started_at = None
+                row.finished_at = None
+                row.result_id = None
+                row.error_code = "worker_lease_expired"
+                _clear_lease(row)
+                row.updated_at = timestamp
+                if row.job_type == DATASET_SAMPLE_BUILD_JOB_TYPE:
+                    sample_id = str((row.payload or {}).get("sample_id") or "").strip()
+                    if sample_id:
+                        sample = await session.scalar(
+                            select(FeedbackDatasetSampleRow)
+                            .where(
+                                FeedbackDatasetSampleRow.sample_id == sample_id,
+                                FeedbackDatasetSampleRow.active_job_id == row.job_id,
+                                FeedbackDatasetSampleRow.status == "building",
+                            )
+                            .with_for_update()
+                        )
+                        if sample is not None:
+                            sample.status = "pending"
+                            sample.updated_at = timestamp
+                recovered += 1
+            await session.flush()
+        return recovered
 
     async def cancel_feedback_analysis_jobs(
         self,
@@ -565,6 +622,7 @@ class PostgresAnalysisJobRepository:
             row.updated_at = timestamp
             row.result_id = result_id
             row.error_code = error_code
+            _clear_lease(row)
             await session.flush()
             return _job(row)
 
@@ -603,6 +661,36 @@ def _ensure_feedback_identity(row: AnalysisJobRow, feedback_id: str) -> None:
         raise ValueError("idempotency key is already bound to another analysis input")
 
 
+def _claimable_job_filter(timestamp: datetime):
+    return or_(
+        AnalysisJobRow.status == "pending",
+        and_(
+            AnalysisJobRow.status == "running",
+            AnalysisJobRow.lease_expires_at.is_not(None),
+            AnalysisJobRow.lease_expires_at <= timestamp,
+        ),
+    )
+
+
+def _assign_lease(
+    row: AnalysisJobRow,
+    timestamp: datetime,
+    worker_id: str,
+    lease_seconds: int,
+) -> None:
+    row.worker_id = worker_id
+    row.lease_expires_at = timestamp + timedelta(seconds=lease_seconds)
+    row.heartbeat_at = timestamp
+    row.lease_version = int(row.lease_version or 0) + 1
+    row.error_code = None
+
+
+def _clear_lease(row: AnalysisJobRow) -> None:
+    row.worker_id = None
+    row.lease_expires_at = None
+    row.heartbeat_at = None
+
+
 def _ensure_correction_identity(
     row: AnalysisJobRow, payload: dict[str, str]
 ) -> None:
@@ -632,6 +720,10 @@ def _job(row: AnalysisJobRow) -> AnalysisJob:
         finished_at=_optional_iso(row.finished_at),
         result_id=row.result_id,
         error_code=row.error_code,
+        worker_id=row.worker_id,
+        lease_expires_at=_optional_iso(row.lease_expires_at),
+        heartbeat_at=_optional_iso(row.heartbeat_at),
+        lease_version=row.lease_version,
     )
 
 

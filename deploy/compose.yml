@@ -73,6 +73,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  dataset-sample-worker:
+    image: ${LENS_BACKEND_IMAGE:-jeanphilo/tsingai-lens-backend}:${LENS_VERSION:?Set LENS_VERSION in .env}
+    env_file:
+      - ./backend.env
+    environment:
+      LENS_DATABASE_URL: "postgresql+psycopg://lens:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/lens"
+    volumes:
+      - ./data/backend:/app/data:Z
+    command: ["python", "scripts/dataset_sample_worker.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     image: ${LENS_FRONTEND_IMAGE:-jeanphilo/tsingai-lens-frontend}:${LENS_VERSION:?Set LENS_VERSION in .env}
     ports:

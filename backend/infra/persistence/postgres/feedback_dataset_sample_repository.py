@@ -473,6 +473,10 @@ def _job_row(job: AnalysisJob) -> AnalysisJobRow:
         idempotency_key=job.idempotency_key,
         created_at=_datetime(job.created_at),
         updated_at=_datetime(job.updated_at),
+        worker_id=job.worker_id,
+        lease_expires_at=_datetime(job.lease_expires_at) if job.lease_expires_at else None,
+        heartbeat_at=_datetime(job.heartbeat_at) if job.heartbeat_at else None,
+        lease_version=job.lease_version,
     )
 
 
@@ -489,6 +493,13 @@ def _finish_job(
     row.updated_at = finished_at
     row.result_id = result_id
     row.error_code = error_code
+    _clear_lease(row)
+
+
+def _clear_lease(row: AnalysisJobRow) -> None:
+    row.worker_id = None
+    row.lease_expires_at = None
+    row.heartbeat_at = None
 
 
 def _sample(row: FeedbackDatasetSampleRow) -> DatasetSample:

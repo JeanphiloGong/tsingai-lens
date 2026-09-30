@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -53,6 +53,64 @@ pytestmark = pytest.mark.anyio
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+@pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
+async def test_missing_candidate_first_revision_confirmation_and_export(
+    task_type, feedback_chain, postgres_session_factory
+) -> None:
+    chain = feedback_chain
+    await chain.chat_service.set_message_feedback_for_user(
+        SESSION_ID, chain.answer.message_id, USER_ID, rating="not_helpful", reason="incorrect", comment="Check preheating.")
+    await FeedbackAnalysisWorker(job_repository=chain.jobs, case_repository=chain.cases,
+        handler=FeedbackAnalysisHandler(chat_repository=chain.chat)).run_once()
+    case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
+    datasets = PostgresFeedbackDatasetRepository(postgres_session_factory)
+    samples = PostgresFeedbackDatasetSampleRepository(postgres_session_factory)
+    service = FeedbackDatasetService(repository=datasets, collection_service=chain.collection_service,
+        sample_repository=samples, case_repository=chain.cases)
+    dataset = await service.create_for_user(user_id=USER_ID, collection_id=COLLECTION_ID,
+        name=f"Preheating {task_type}", task_type=task_type, construction_spec={})
+    collected = await service.collect_cases_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,))
+    sample_id = collected.items[0].sample.sample_id
+    await DatasetSampleBuildWorker(job_repository=chain.jobs, dataset_repository=datasets,
+        sample_repository=samples, case_repository=chain.cases, builder=SftSampleBuilder()).run_once()
+    sample = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id)
+    assert sample.status == "needs_input" and sample.current_revision_id is None
+    content = {"schema_version": f"literature-{task_type}.v1",
+        "messages": [{"role": "user", "content": "Compare A and B's preheating."}],
+        "context": [{"document_title": "Paper B", "text": "Preheated at 200 C."}],
+        "evidence": [{"document_title": "Paper B", "text": "Preheated at 200 C."}]}
+    if task_type == "sft":
+        content["target"] = "Paper B was preheated at 200 C."
+    elif task_type == "preference":
+        content.update(response_a="No preheating.", response_b="Preheated at 200 C.",
+            suggested_preference=None, human_preference="b", rationale="Supported by the caption.")
+    else:
+        content.update(reference="Preheated at 200 C.", criteria=["Reports 200 C without inventing A's condition."],
+            evaluation_mode="reference")
+    from application.feedback.dataset_service import FeedbackDatasetConflict
+    with pytest.raises(FeedbackDatasetConflict, match="stale"):
+        await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
+            expected_revision_id=None, expected_generation=sample.generation + 1, content=content)
+    saved = await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
+        expected_revision_id=None, expected_generation=sample.generation, content=content)
+    assert saved.status == "needs_confirmation" and saved.confirmed_revision_id is None
+    with pytest.raises(FeedbackDatasetConflict, match="stale"):
+        await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
+            expected_revision_id=None, expected_generation=sample.generation, content=content)
+    await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
+        expected_revision_id=saved.current_revision_id)
+    exports = FeedbackDatasetExportService(dataset_service=service, sample_repository=samples,
+        repository=PostgresFeedbackDatasetExportRepository(postgres_session_factory))
+    preview = await exports.preview_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[sample_id])
+    assert preview.exportable_count == 1 and not preview.issues
+    published = await exports.publish_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id,
+        preview_id=preview.preview_id, preview_digest=preview.preview_digest, allow_partial=False, idempotency_key="first-export")
+    _, data, _, _ = await exports.download_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id,
+        export_id=published.export_id, format="jsonl")
+    row = json.loads(data)
+    assert "sample_id" not in row and "source_ref" not in json.dumps(row)
 
 
 async def test_rebuild_discard_restore_and_late_worker_result(
@@ -128,6 +186,17 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     assert rebuilt.generation == 2 and rebuilt.status == "pending"
     rebuild_job = await chain.jobs.claim_next_dataset_sample_build_job(_now())
     assert rebuild_job is not None and rebuild_job.status == "running"
+    recovery_time = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert await chain.jobs.recover_expired_jobs(recovery_time.isoformat()) == 1
+    recovered_sample = await samples.read_sample(
+        dataset_id=dataset.dataset_id, sample_id=sample_id
+    )
+    assert recovered_sample is not None and recovered_sample.status == "pending"
+    reclaimed_job = await chain.jobs.claim_next_dataset_sample_build_job(
+        (recovery_time + timedelta(seconds=1)).isoformat()
+    )
+    assert reclaimed_job is not None and reclaimed_job.status == "running"
+    assert reclaimed_job.lease_version == rebuild_job.lease_version + 1
 
     discarded = await service.apply_sample_action_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
@@ -145,12 +214,14 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         input_digest=previous.input_digest,
         construction_spec_version=dataset.spec_version,
         provenance=previous.provenance,
-        created_at=_now(),
+        created_at=(recovery_time + timedelta(seconds=2)).isoformat(),
         job_id=rebuild_job.job_id,
     )
     assert await samples.complete_build(
         job=rebuild_job, sample_id=sample_id, generation=2,
-        revision=late_revision, outcome="candidate", finished_at=_now(),
+        revision=late_revision,
+        outcome="candidate",
+        finished_at=(recovery_time + timedelta(seconds=2)).isoformat(),
     ) is None
     assert (await chain.jobs.read_job(rebuild_job.job_id)).status == "cancelled"
     unchanged = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id)

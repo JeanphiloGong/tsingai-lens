@@ -363,30 +363,63 @@ selected feedback cases:
 - `GET /api/v1/feedback-datasets/{dataset_id}/exports?limit={limit}&offset={offset}`
 - `GET /api/v1/feedback-datasets/{dataset_id}/exports/{export_id}/download?format=jsonl|json|provenance|manifest`
 
-D1 accepts only `task_type: "sft"`; the dataset's Collection and task type are
-fixed at creation. The collection request contains `source_case_ids`; it is
+Creation accepts `task_type: "sft"`, `"preference"` or `"evaluation"`; the
+dataset's Collection and task type are fixed at creation. The collection request contains `source_case_ids`; it is
 idempotent for an existing `(dataset_id, source_case_id)` pair and returns
 HTTP 202 with the sample and pending build-job identities. It does not ask the
 user to type IDs in the interface; the browser carries them from the selected
 case rows. The `dataset_sample_build` Worker reads the case's frozen context
-and readable evidence, writes an immutable `literature-sft.v1` candidate
-revision, and leaves the sample in `needs_confirmation`. Missing readable
-evidence or a candidate target produces `needs_input`; no Worker result
+and readable evidence, writes an immutable task-specific candidate
+revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
+builders use the configured model to generate missing answers or criteria from
+the readable evidence; rebuild notes are passed to the same construction step.
+Missing evidence or an explicit model abstention produces `needs_input`;
+provider errors and invalid responses produce `build_failed`. No Worker result
 automatically confirms training data. Internal message/source identities stay
 in revision provenance and are not inserted into model-facing context or
 evidence text.
 
+All four Worker types use the shared `analysis_jobs` envelope. A claim records
+`worker_id`, `lease_expires_at`, `heartbeat_at`, and an incremented
+`lease_version`; terminal completion clears the lease fields. Each Worker
+recovers expired `running` jobs before claiming new work. For a dataset sample,
+recovery also changes the linked sample from `building` back to `pending`, so a
+container restart cannot leave the sample permanently stuck.
+
+Natural-language correction analysis includes the first final answer following
+the challenge, stopping before the next user turn. It retains both original
+and corrected answers and successful source reads. Preference construction
+uses those persisted answers under one review question and readable context;
+this does not imply their original provider requests were identical. A missing
+or identical second answer remains `needs_input` rather than being fabricated.
+
 The sample workbench reads the current immutable revision and the source case
-context. The SFT PATCH body contains `expected_revision_id` and the complete
-`literature-sft.v1` content; a successful edit appends a human revision and
-clears any previous confirmation. The confirm body contains the same expected
-revision ID. Confirmation is conditional on the sample still pointing at that
+context. The PATCH body contains `expected_revision_id` and the complete
+task-specific content; a successful edit appends a human revision and
+clears any previous confirmation. For a `needs_input` sample without a revision,
+send `expected_revision_id: null`, `expected_generation` from the loaded sample,
+and complete task-specific content. This creates the first human revision and
+transitions to `needs_confirmation`, without confirming it. Generation is also
+checked under the row lock, preventing an old editor from overwriting a rebuild.
+The service recomputes the source case digest before saving or confirming; if
+the case changed after collection, it returns `409 sample_source_stale` and
+requires collecting a fresh sample.
+The browser provides editors for all three tasks, including missing questions,
+answers, criteria, and add/remove controls for readable evidence. The confirm
+body contains the same expected revision ID. Confirmation is conditional on the
+sample still pointing at that
 revision, records the confirming user and time, and is idempotent when the same
 revision was already confirmed. A stale revision returns `409
 sample_revision_stale`; the browser keeps its draft and asks the user to reload
 or compare before submitting again. The interface presents questions,
 readable context, answer text, and evidence excerpts; users do not type sample,
 case, message, or source IDs.
+
+An edited excerpt retains known Source provenance only when its title and text
+match the stored case evidence. New or replacement text is recorded as a
+human-supplied excerpt with the annotator's identity, without assigning it an
+unverified Source ID. The training content contains readable text in either
+case; the audit distinction remains in internal provenance.
 
 The actions endpoint accepts `action` (`rebuild`, `retry`, `discard`, or
 `restore`), `expected_revision_id`, and an optional `reason`; `rebuild` requires

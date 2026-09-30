@@ -54,6 +54,9 @@ class DatasetSampleBuildWorker:
 
     async def run_once(self) -> Any | None:
         now = datetime.now(timezone.utc).isoformat()
+        recover = getattr(self.job_repository, "recover_expired_jobs", None)
+        if callable(recover):
+            await recover(now=now)
         job = await self.job_repository.claim_next_dataset_sample_build_job(now=now)
         if job is None:
             return None
@@ -107,6 +110,7 @@ class DatasetSampleBuildWorker:
                 sample=sample,
                 case=case,
                 annotation=annotation,
+                review_note=payload.get("review_note"),
             )
             missing_reasons = getattr(built, "missing_reasons", None)
             if missing_reasons is not None and not hasattr(built, "content"):

@@ -30,6 +30,9 @@ async def _insert_job(
     job_type: str = "feedback_analysis",
     status: str = "pending",
     result_id: str | None = None,
+    lease_expires_at: datetime | None = None,
+    worker_id: str | None = None,
+    lease_version: int = 0,
 ) -> None:
     started_at = BASE_TIME if status in {"running", "succeeded", "failed", "cancelled"} else None
     finished_at = (
@@ -53,6 +56,10 @@ async def _insert_job(
                 idempotency_key=f"idempotency-{job_id}",
                 created_at=BASE_TIME,
                 updated_at=finished_at or BASE_TIME,
+                worker_id=worker_id,
+                lease_expires_at=lease_expires_at,
+                heartbeat_at=BASE_TIME if worker_id else None,
+                lease_version=lease_version,
             )
         )
 
@@ -92,6 +99,43 @@ async def test_failed_feedback_analysis_job_can_be_requeued_and_claimed(
     assert claimed_again is not None
     assert claimed_again.job_id == claimed.job_id
     assert claimed_again.status == "running"
+
+
+async def test_expired_running_job_is_recovered_and_claimed_again(
+    postgres_session_factory,
+) -> None:
+    repository = PostgresAnalysisJobRepository(
+        postgres_session_factory,
+        worker_id="worker-next",
+    )
+    await _insert_job(
+        postgres_session_factory,
+        job_id="job-expired",
+        status="running",
+        worker_id="worker-crashed",
+        lease_expires_at=BASE_TIME + timedelta(seconds=5),
+        lease_version=1,
+    )
+
+    recovery_time = BASE_TIME + timedelta(seconds=6)
+    assert await repository.recover_expired_jobs(recovery_time.isoformat()) == 1
+    recovered = await repository.read_job("job-expired")
+    assert recovered is not None
+    assert recovered.status == "pending"
+    assert recovered.error_code == "worker_lease_expired"
+    assert recovered.worker_id is None
+    assert recovered.lease_expires_at is None
+
+    claimed = await repository.claim_next_feedback_analysis_job(
+        (recovery_time + timedelta(seconds=1)).isoformat()
+    )
+    assert claimed is not None
+    assert claimed.status == "running"
+    assert claimed.worker_id == "worker-next"
+    assert claimed.heartbeat_at == "2026-09-24T00:00:07+00:00"
+    assert claimed.lease_expires_at == "2026-09-24T00:15:07+00:00"
+    assert claimed.lease_version == 2
+    assert claimed.error_code is None
 
 
 @pytest.mark.parametrize(

@@ -34,6 +34,9 @@ class CorrectionSignalAnalysisWorker:
 
     async def run_once(self) -> Any | None:
         now = datetime.now(timezone.utc).isoformat()
+        recover = getattr(self.job_repository, "recover_expired_jobs", None)
+        if callable(recover):
+            await recover(now=now)
         job = await self.job_repository.claim_next_correction_signal_analysis_job(now=now)
         if job is None:
             return None

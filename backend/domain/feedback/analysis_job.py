@@ -24,12 +24,18 @@ class AnalysisJob:
     finished_at: str | None = None
     result_id: str | None = None
     error_code: str | None = None
+    worker_id: str | None = None
+    lease_expires_at: str | None = None
+    heartbeat_at: str | None = None
+    lease_version: int = 0
 
     def __post_init__(self) -> None:
         if not self.job_id or not self.job_type:
             raise ValueError("analysis job identity is required")
         if self.payload_version < 1:
             raise ValueError("analysis job payload version must be positive")
+        if self.lease_version < 0:
+            raise ValueError("analysis job lease version must be non-negative")
         if not self.idempotency_key:
             raise ValueError("analysis job idempotency key is required")
         object.__setattr__(self, "payload", dict(self.payload))

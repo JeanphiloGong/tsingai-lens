@@ -96,5 +96,7 @@ class AnalysisJobRepository(Protocol):
         offset: int = 0,
     ) -> tuple[AnalysisJob, ...]: ...
 
+    async def recover_expired_jobs(self, now: str) -> int: ...
+
 
 __all__ = ["AnalysisJobRepository"]

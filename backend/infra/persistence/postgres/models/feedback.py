@@ -120,6 +120,12 @@ class AnalysisJobRow(Base):
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    worker_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class FeedbackAnalysisResultRow(Base):

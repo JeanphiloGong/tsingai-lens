@@ -31,6 +31,7 @@ from controllers.schemas.task_datasets import (
     DatasetExportIssueResponse,
     DatasetExportListResponse,
     DatasetExportPreviewResponse,
+    DatasetExportPreviewRequest,
     DatasetExportPreviewRowResponse,
     DatasetExportPublishRequest,
     DatasetExportSummaryResponse,
@@ -239,10 +240,12 @@ async def get_feedback_dataset(
 async def preview_feedback_dataset_export(
     dataset_id: str,
     request: Request,
+    payload: DatasetExportPreviewRequest | None = None,
 ) -> DatasetExportPreviewResponse:
     try:
         preview = await _export_service(request).preview_for_user(
-            user_id=await current_user_id(request), dataset_id=dataset_id
+            user_id=await current_user_id(request), dataset_id=dataset_id,
+            sample_ids=payload.sample_ids if payload else None,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc

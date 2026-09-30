@@ -399,16 +399,20 @@ returns to `needs_confirmation` only when the retained candidate still matches
 the current source, otherwise to `needs_input`. Neither action automatically
 confirms a sample. A late Worker result cannot replace a newer generation.
 
-The export flow always starts with `POST .../export-previews`. The server reads
-the current confirmed revisions, validates readable context and provenance, and
+The export flow always starts with `POST .../export-previews`. Its optional body
+`{"sample_ids": ["sample_123"]}` selects confirmed samples in this dataset.
+Omitting `sample_ids` selects all confirmed samples; an empty list, duplicates,
+or an unavailable sample returns `422`. The browser explicitly sends its selection.
+The server reads the selected confirmed revisions, validates readable context and provenance, and
 stores a short-lived member digest. The response contains the requested count,
 exportable count, sample previews, and user-readable issues. Publishing requires
 the preview ID and digest plus an `Idempotency-Key`; without
 `allow_partial: true`, any issue returns `422` and no export is created. With
 explicit partial consent, only the valid members are published; invalid samples
-remain in the queue. If a revision or confirmation changes after preview,
+remain in the queue. If a selected revision or confirmation changes after preview,
 publishing returns `409 export_preview_stale` and the browser must run a new
-preview. An empty export is rejected.
+preview. Unselected sample changes do not invalidate the preview or add rows to
+the export. An empty export is rejected.
 
 Each published export is immutable and has its own `export_id` and sequential
 version. `format=jsonl` and `format=json` contain only model-facing SFT rows:

@@ -65,10 +65,16 @@ class FeedbackDatasetExportService:
         self.repository = repository
 
     async def preview_for_user(
-        self, *, user_id: str, dataset_id: str
+        self, *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
     ) -> ExportPreview:
         dataset = await self._read_dataset(user_id, dataset_id)
         members = await self.sample_repository.read_confirmed_members(dataset_id=dataset_id)
+        if sample_ids is not None:
+            selected = set(sample_ids)
+            available = {item.sample.sample_id for item in members}
+            if not selected or len(selected) != len(sample_ids) or not selected <= available:
+                raise DatasetExportError("export_sample_selection_invalid")
+            members = tuple(item for item in members if item.sample.sample_id in selected)
         export_members = tuple(_export_member(item) for item in members)
         issues = tuple(
             issue
@@ -115,6 +121,8 @@ class FeedbackDatasetExportService:
             _export_member(item)
             for item in await self.sample_repository.read_confirmed_members(dataset_id=dataset_id)
         )
+        selected = {member.sample_id for member in preview.members}
+        current = tuple(member for member in current if member.sample_id in selected)
         if member_digest(current) != member_digest(preview.members):
             raise DatasetExportError("export_preview_stale")
         issues_by_sample = {issue.sample_id for issue in preview.issues}

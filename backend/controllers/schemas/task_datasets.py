@@ -38,6 +38,12 @@ class TaskDatasetListResponse(BaseModel):
     offset: int
 
 
+class DatasetExportPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sample_ids: list[str] | None = Field(default=None, min_length=1, max_length=1000)
+
+
 class DatasetCollectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

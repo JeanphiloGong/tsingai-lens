@@ -117,9 +117,11 @@ class PostgresFeedbackDatasetExportRepository:
                 raise DatasetExportConflict("export_preview_expired")
 
             current_members = await _read_current_members(session, draft.dataset_id)
+            preview_members = tuple(_member(record) for record in (preview.members or ()))
+            selected = {member.sample_id for member in preview_members}
+            current_members = tuple(member for member in current_members if member.sample_id in selected)
             if member_digest(current_members) != draft.member_digest:
                 raise DatasetExportConflict("export_preview_stale")
-            preview_members = tuple(_member(record) for record in (preview.members or ()))
             if member_digest(preview_members) != draft.member_digest:
                 raise DatasetExportConflict("export_preview_stale")
 

@@ -177,7 +177,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         repository=exports,
     )
     preview = await export_service.preview_for_user(
-        user_id=USER_ID, dataset_id=dataset.dataset_id
+        user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[sample_id]
     )
     assert preview.requested_count == 1
     assert preview.exportable_count == 1

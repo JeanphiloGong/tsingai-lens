@@ -241,6 +241,37 @@ def _service(
     )
 
 
+async def test_selected_export_ignores_unselected_changes_but_rejects_selected_changes():
+    samples = _Samples(_member(1), _member(2))
+    service = _service(samples, _Exports())
+    preview = await service.preview_for_user(
+        user_id="user-1", dataset_id="fdset_export_test", sample_ids=["sample-1"]
+    )
+    assert [item.sample_id for item in preview.members] == ["sample-1"]
+    samples.members = [samples.members[0]]
+    export = await service.publish_for_user(
+        user_id="user-1", dataset_id="fdset_export_test",
+        preview_id=preview.preview_id, preview_digest=preview.preview_digest,
+        allow_partial=False, idempotency_key="selected-export",
+    )
+    assert export.row_count == 1
+    samples.members = []
+    with pytest.raises(DatasetExportError, match="export_preview_stale"):
+        await service.publish_for_user(
+            user_id="user-1", dataset_id="fdset_export_test",
+            preview_id=preview.preview_id, preview_digest=preview.preview_digest,
+            allow_partial=False, idempotency_key="changed-export",
+        )
+
+
+@pytest.mark.parametrize("selection", [[], ["sample-1", "sample-1"], ["foreign-sample"]])
+async def test_export_rejects_invalid_selection(selection):
+    with pytest.raises(DatasetExportError, match="export_sample_selection_invalid"):
+        await _service(_Samples(_member()), _Exports()).preview_for_user(
+            user_id="user-1", dataset_id="fdset_export_test", sample_ids=selection
+        )
+
+
 def _content_member(content, *, sample_id: str, dataset_id: str = "fdset_export_test") -> ConfirmedDatasetMember:
     sample = DatasetSample(
         sample_id=sample_id,

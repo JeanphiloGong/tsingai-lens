@@ -66,6 +66,35 @@ Collection. An Objective selects experiment content through
 
 ## Model authoring boundary
 
+Agent maintenance uses a successful `propose_paper_experiment_draft` result as
+the review artifact, followed by exact approval of
+`create_paper_experiment_revision` with that draft ID and digest. A prose
+summary after a failed proposal is not a stored, reviewable experiment draft.
+Saving a reviewed draft must preserve its scientific content; changed or
+reduced content requires renewed review.
+
+Complete canonical Source reads remain usable across user turns in the same
+session. Before accepting a proposal, the capability compares every cited
+Source's current content digest with the session's complete reading records.
+Unread or changed Sources return exact locators for further reading. Reading
+one passage does not complete the other cited passages, and repairing a read
+or Objective prerequisite must not remove supported measurements or
+comparisons from a requested complete experiment.
+
+Partial records remain valid archival input, but acceptance and persistence
+do not certify complete coverage. A revision with no measurements cannot
+produce an Objective Selection. Saving an experiment reports the actual
+contents and eligible Selection IDs; Finding publication remains a separate
+approved action.
+
+A measurement must supply a reported scalar `value` or qualitative
+`result_text`; the unused field may be omitted or null. Omitting both is
+rejected. Variant `missing_dimensions` records unresolved distinctions needed
+to identify the object or group uniquely within that experiment. Those entries
+block an exact variant binding. Other unreported scientific context belongs in
+notes or unresolved issues; it must not turn an already distinguished cohort
+and treatment group into an unidentified object.
+
 The provider returns content only. Its Draft may use local
 `variant_key`, `test_key`, `measurement_key`, and `comparison_key` values to
 refer to records within that one response. It must not return formal

@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
+from application.chat.capability_policy import complete_source_reads, _successful_results_by_name
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
@@ -118,7 +119,12 @@ class _PaperExperimentVariantToolField(BaseModel):
     )
     missing_dimensions: list[str] = Field(
         default_factory=list,
-        description="Identity dimensions the source leaves unresolved.",
+        description=(
+            "Missing distinctions that prevent uniquely identifying this object/group "
+            "within the experiment. Any entry makes its identity partial. Put other "
+            "unreported context (such as powder oxygen or scan strategy when the source "
+            "already identifies the cohort and treatment group) in notes instead."
+        ),
     )
     identity_evidence: list[str] = Field(
         default_factory=list,
@@ -214,11 +220,13 @@ class _PaperExperimentMeasurementToolField(BaseModel):
     test_key: str | None = Field(default=None, description="Response-local test key, when known.")
     outcome: str = Field(min_length=1, description="Measured or observed outcome label.")
     value: str | int | float | bool | None = Field(
-        description="Reported scalar value; use null when the result is qualitative.",
+        default=None,
+        description="Reported scalar value; supply value or result_text. Omit or use null for a qualitative result.",
     )
     unit: str | None = Field(default=None, description="Reported measurement unit.")
     result_text: str | None = Field(
-        description="Verbatim qualitative result; use null when value is populated.",
+        default=None,
+        description="Verbatim qualitative result; supply result_text or value. Omit or use null when value is populated.",
     )
     statistics: dict[str, Any] = Field(
         default_factory=dict,
@@ -463,7 +471,10 @@ class _PaperExperimentDraftExperimentField(BaseModel):
 class _PaperExperimentDraftFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    objective_id: str = Field(min_length=1, max_length=240)
+    objective_id: str = Field(
+        min_length=1, max_length=240,
+        description="Existing confirmed Objective ID from get_collection_context; never invent a draft-only Objective ID.",
+    )
     document_id: str = Field(min_length=1, max_length=240)
     experiments: list[_PaperExperimentDraftExperimentField] = Field(
         default_factory=list,
@@ -506,7 +517,14 @@ class ProposePaperExperimentDraftCapability:
         name="propose_paper_experiment_draft",
         description=(
             "Validate a source-grounded PaperExperiment draft after reading the "
-            "complete Sources for one paper. Use only response-local experiment, "
+            "complete Sources for one paper. Obtain the existing confirmed Objective "
+            "ID from get_collection_context. Reuse complete reads from this session "
+            "when their canonical content is unchanged. Read every cited Source; "
+            "one passage does not cover the paper. For a complete experiment request, "
+            "include all source-supported variants, tests, measurements and comparisons "
+            "before proposing a save. When correcting an Objective or Source error, "
+            "preserve the scientific payload and repair only the failed prerequisite; "
+            "do not shrink the draft to pass validation. Use only response-local experiment, "
             "variant, test, measurement and comparison keys plus supplied Sxxx "
             "source labels. Each experiment must provide label and scope_description; "
             "each variant must provide variant_key, variant_label, and source_labels; "
@@ -533,8 +551,9 @@ class ProposePaperExperimentDraftCapability:
         input_model=PaperExperimentDraftToolRequest,
     )
 
-    def __init__(self, *, authoring_service: PaperExperimentAuthoringService) -> None:
+    def __init__(self, *, authoring_service: PaperExperimentAuthoringService, chat_repository: Any) -> None:
         self.authoring_service = authoring_service
+        self.chat_repository = chat_repository
 
     async def execute(
         self,
@@ -548,6 +567,37 @@ class ProposePaperExperimentDraftCapability:
             document_id=arguments.document_id,
             raw_draft=arguments.raw_draft(),
         )
+        messages = await self.chat_repository.read_messages(context.session_id)
+        completed = complete_source_reads(_successful_results_by_name(messages))
+        labels: set[str] = set()
+
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key.endswith("source_labels") and isinstance(child, list):
+                        labels.update(item for item in child if isinstance(item, str))
+                    elif key == "source_label" and isinstance(child, str):
+                        labels.add(child)
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+
+        collect(arguments.raw_draft())
+        missing = []
+        for label in sorted(labels):
+            source = prepared.output.output.source_labels[label]
+            identity = (arguments.document_id, source["source_kind"], source["source_ref"],
+                        prepared.source_digests[source["source_ref"]])
+            if identity not in completed:
+                missing.append({"source_label": label, "source_kind": source["source_kind"], "source_ref": source["source_ref"]})
+        if missing:
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status="failed", error_code="source_read_incomplete",
+                error_message=("Read the current complete canonical Sources listed in sources_to_read. "
+                               "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."),
+                data={"document_id": arguments.document_id, "sources_to_read": missing},
+            )
         draft_id = _draft_id(context, prepared.draft_digest)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
@@ -584,10 +634,16 @@ class CreatePaperExperimentRevisionCapability:
         name="create_paper_experiment_revision",
         description=(
             "After the exact PaperExperiment draft has been reviewed and approved, "
-            "create one immutable PaperExperiment revision and its Objective "
-            "Selection. Submit the stored draft ID and digest. The service "
+            "create one immutable PaperExperiment revision and any scientifically "
+            "eligible Objective Selections. Submit the stored draft ID and digest "
+            "unchanged; this saves exactly that draft, not the latest prose description. "
+            "Partial records may be saved, but empty measurements cannot create a "
+            "Selection. Do not substitute a reduced draft for a reviewed complete one. The service "
             "reloads the prepared Source, resolves formal identities, and writes "
-            "the revision and selection atomically. Finding creation is a separate approved action."
+            "the revision and eligible selections atomically. Report the actual saved "
+            "variant, test, measurement and comparison counts and returned selection_ids; "
+            "do not redraft or reread after a successful save unless requested. "
+            "Finding creation is a separate approved action."
         ),
         risk=ToolRisk.WRITE,
         input_model=PaperExperimentRevisionToolRequest,

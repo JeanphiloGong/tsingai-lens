@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from hashlib import sha256
 
 import pytest
 from pydantic import ValidationError
@@ -17,7 +18,7 @@ from application.chat.capabilities.paper_experiment_authoring import (
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
-from domain.chat import ChatMessage, ChatToolResult
+from domain.chat import ChatMessage, ChatToolRequest, ChatToolResult
 from domain.core.research_objective import ObjectiveAnalysis, PaperContribution, ResearchObjective
 
 
@@ -214,8 +215,6 @@ def test_agent_request_schema_describes_the_complete_scientific_graph() -> None:
     assert {
         "measurement_key",
         "outcome",
-        "value",
-        "result_text",
         "source_labels",
     }.issubset(measurement_schema["required"])
 
@@ -261,6 +260,35 @@ def test_agent_request_rejects_measurement_without_a_reported_result() -> None:
                     ],
                 }
             ],
+        )
+
+
+@pytest.mark.parametrize("reported_result", [{"value": 0}, {"result_text": "Ductile dimples"}])
+def test_agent_request_accepts_numeric_or_qualitative_result_without_unused_field(reported_result) -> None:
+    request = PaperExperimentDraftToolRequest(
+        objective_id="objective-1",
+        document_id="paper-1",
+        experiments=[{
+            "label": "316L tensile series",
+            "scope_description": "One source-reported specimen cohort.",
+            "measurements": [{
+                "measurement_key": "m1", "outcome": "reported result",
+                "source_labels": ["S001"], **reported_result,
+            }],
+        }],
+    )
+    measurement = request.raw_draft()["experiments"][0]["measurements"][0]
+    assert all(measurement[key] == value for key, value in reported_result.items())
+
+
+def test_agent_request_rejects_omitted_numeric_and_qualitative_result() -> None:
+    with pytest.raises(ValidationError, match="measurement requires value or result_text"):
+        PaperExperimentDraftToolRequest(
+            objective_id="objective-1", document_id="paper-1",
+            experiments=[{
+                "label": "316L tensile series", "scope_description": "One specimen cohort.",
+                "measurements": [{"measurement_key": "m1", "outcome": "elongation", "source_labels": ["S001"]}],
+            }],
         )
 
 
@@ -542,8 +570,60 @@ def _prepared_for_capability(draft):
     return SimpleNamespace(
         draft_digest="a" * 64,
         source_fingerprint="prep-1",
-        output=SimpleNamespace(output=SimpleNamespace(experiments=(experiment,))),
+        source_digests={"block-1": sha256(b"Methods").hexdigest()},
+        output=SimpleNamespace(output=SimpleNamespace(experiments=(experiment,), source_labels={
+            "S001": {"source_ref": "block-1", "source_kind": "text_window"},
+        })),
     )
+
+
+def _read_messages(content="Methods", complete=True):
+    return (
+        ChatMessage.assistant_tool_calls(message_id="read-request", session_id="session-1", content="", created_at="2026-09-30T00:00:00Z",
+            tool_calls=(ChatToolRequest(tool_call_id="read-1", name="read_source", arguments={}, position=0),)),
+        ChatMessage.from_tool_result(message_id="read-result", session_id="session-1", created_at="2026-09-30T00:00:01Z",
+            result=ChatToolResult(tool_call_id="read-1", status="succeeded", data={
+                "document_id": "paper-1", "source_kind": "text_window", "source_ref": "block-1",
+                "source_digest": sha256(content.encode()).hexdigest(), "content": content, "content_truncated": not complete,
+            })),
+    )
+
+
+@pytest.mark.parametrize(("content", "complete", "expected_status"), [
+    ("Methods", True, "succeeded"),
+    ("Old Methods", True, "failed"),
+    ("Methods", False, "failed"),
+])
+async def test_experiment_draft_requires_current_complete_read_for_every_cited_source(content, complete, expected_status):
+    draft = _draft()
+    authoring = _AuthoringStub(_prepared_for_capability(draft))
+    capability = ProposePaperExperimentDraftCapability(authoring_service=authoring, chat_repository=_ChatRepository(_read_messages(content, complete)))
+    result = await capability.execute(
+        CapabilityExecutionContext(session_id="session-1", user_id="user-1", collection_id="collection-1", tool_call_id="draft-1"),
+        PaperExperimentDraftToolRequest(objective_id="objective-1", document_id="paper-1", **draft),
+    )
+    assert result.status.value == expected_status
+    assert not authoring.write_calls
+    if expected_status == "failed":
+        assert result.error_code == "source_read_incomplete"
+        assert result.data["sources_to_read"] == [{"source_label": "S001", "source_kind": "text_window", "source_ref": "block-1"}]
+        assert "Keep the experiment facts" in result.error_message
+
+
+async def test_experiment_draft_does_not_treat_one_read_as_coverage_for_another_source():
+    draft = _draft()
+    prepared = _prepared_for_capability(draft)
+    prepared.output.output.source_labels["S002"] = {"source_ref": "results-1", "source_kind": "text_window"}
+    prepared.source_digests["results-1"] = sha256(b"Results").hexdigest()
+    draft["experiments"][0]["measurements"][0]["source_labels"] = ["S002"]
+    result = await ProposePaperExperimentDraftCapability(
+        authoring_service=_AuthoringStub(prepared), chat_repository=_ChatRepository(_read_messages()),
+    ).execute(
+        CapabilityExecutionContext(session_id="session-1", user_id="user-1", collection_id="collection-1", tool_call_id="draft-1"),
+        PaperExperimentDraftToolRequest(objective_id="objective-1", document_id="paper-1", **draft),
+    )
+    assert result.status.value == "failed"
+    assert result.data["sources_to_read"] == [{"source_label": "S002", "source_kind": "text_window", "source_ref": "results-1"}]
 
 
 @pytest.mark.anyio
@@ -557,7 +637,7 @@ async def test_agent_experiment_draft_can_only_be_published_from_stored_digest()
         tool_call_id="call-propose",
     )
     proposed = await ProposePaperExperimentDraftCapability(
-        authoring_service=authoring
+        authoring_service=authoring, chat_repository=_ChatRepository(_read_messages())
     ).execute(
         context,
         PaperExperimentDraftToolRequest(

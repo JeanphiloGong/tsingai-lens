@@ -611,6 +611,9 @@ class ResearchAgentRunner:
                         tool_names,
                         calls,
                         successful_results=capability_policy.active_successful_results_by_name(messages),
+                        prior_experiment_draft=next(iter(reversed(
+                            capability_policy._successful_results_by_name(messages).get("propose_paper_experiment_draft", ())
+                        )), None),
                     )
                     if stage_content is not None:
                         decision_messages = (*decision_messages, ChatMessage.user(
@@ -1134,7 +1137,7 @@ class ResearchAgentRunner:
                              ("document_id", "source_kind", "source_ref", "source_digest"))
             if identity not in completed:
                 continue
-            record = {key: source[key] for key in ("source_kind", "source_ref", "source_digest", "page", "heading_path", "content_offset")
+            record = {key: source[key] for key in ("source_label", "source_kind", "source_ref", "source_digest", "page", "heading_path", "content_offset")
                       if isinstance(source.get(key), (str, int))}
             content = source.get("content")
             if isinstance(content, str) and content:

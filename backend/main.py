@@ -808,6 +808,7 @@ async def build_application_runtime(
                                 (
                                     ProposePaperExperimentDraftCapability(
                                         authoring_service=paper_experiment_authoring_service,
+                                        chat_repository=chat_repository,
                                     ),
                                     CreatePaperExperimentRevisionCapability(
                                         authoring_service=paper_experiment_authoring_service,

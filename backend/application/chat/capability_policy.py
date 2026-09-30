@@ -14,7 +14,8 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from application.chat import intent_policy
-from application.chat.capabilities import AgentContext, CapabilityRegistry, ToolSpec
+from application.chat.capabilities.contracts import AgentContext, ToolSpec
+from application.chat.capabilities.registry import CapabilityRegistry
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
@@ -153,12 +154,14 @@ def validate_batch(
         document_id = str(call.arguments.get("document_id") or "").strip()
         if not any(
             item[0] == document_id
-            for item in complete_source_reads(successful_results)
+            for item in complete_source_reads(_successful_results_by_name(messages))
         ):
             return (
                 (
                     "source_read_incomplete",
-                    "Read at least one complete canonical Source for the paper before proposing a PaperExperiment draft.",
+                    "Read the complete canonical Sources supporting the experiment before proposing its draft. "
+                    "Completed reads from this session can be reused when their content is unchanged. "
+                    "Keep the experiment facts while repairing the read prerequisites; do not delete measurements or comparisons to bypass them.",
                 ),
                 validated_arguments,
             )
@@ -587,6 +590,7 @@ def stage_instruction(
     calls: list[ChatToolCall],
     *,
     successful_results: Mapping[str, list[Mapping[str, Any]]],
+    prior_experiment_draft: Mapping[str, Any] | None = None,
 ) -> str | None:
     """Return factual execution observations without prescribing a route."""
     observations: dict[str, Any] = {}
@@ -602,6 +606,14 @@ def stage_instruction(
             drafts[name] = values[-1]
     if drafts:
         observations["latest_transient_results"] = drafts
+    elif prior_experiment_draft and set(tool_names).intersection({
+        "propose_paper_experiment_draft", "create_paper_experiment_revision",
+    }):
+        observations["prior_experiment_draft"] = {
+            key: prior_experiment_draft[key]
+            for key in ("draft_id", "draft_digest", "objective_id", "document_id", "experiment_count")
+            if key in prior_experiment_draft
+        }
 
     if calls and calls[-1].status is ToolCallStatus.FAILED:
         observations["latest_failure"] = {

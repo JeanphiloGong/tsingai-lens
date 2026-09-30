@@ -33,6 +33,7 @@ class PreparedPaperExperimentDraft:
     output: ReconciledPaperExperimentOutput
     source_fingerprint: str
     draft_digest: str
+    source_digests: Mapping[str, str]
 
 
 def _canonical_digest(value: Mapping[str, Any]) -> str:
@@ -163,10 +164,11 @@ class PaperExperimentAuthoringService:
         ).strip()
         if not source_fingerprint:
             raise ValueError("prepared Source document has no fingerprint")
+        source_payloads = _source_payloads(document)
         bundle = build_source_bundle(
             document_id=document_id,
             source_fingerprint=source_fingerprint,
-            source_payloads=_source_payloads(document),
+            source_payloads=source_payloads,
         )
         output = PaperExperimentModelOutput.from_model_mapping(
             raw_draft,
@@ -192,6 +194,12 @@ class PaperExperimentAuthoringService:
             output=reconciled,
             source_fingerprint=source_fingerprint,
             draft_digest=digest,
+            source_digests={
+                str(source["source_ref"]): sha256(
+                    str(source["_canonical_content"]).encode("utf-8")
+                ).hexdigest()
+                for source in source_payloads
+            },
         )
 
     async def write(

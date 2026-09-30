@@ -11,7 +11,7 @@ from application.chat import (
     ModelTurn,
     ResearchAgentRunner,
 )
-from application.chat.capability_policy import select_tool_specs, validate_batch
+from application.chat.capability_policy import select_tool_specs, stage_instruction, validate_batch
 from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
@@ -19,7 +19,7 @@ from application.chat.capabilities.document_sources import (
     ReadSourceToolRequest,
     SearchSourcesCapability,
 )
-from domain.chat import ChatMessage, ChatToolCall, ToolPermissionMode, ToolRisk
+from domain.chat import ChatMessage, ChatToolCall, ChatToolRequest, ChatToolResult, ToolPermissionMode, ToolRisk
 from tests.unit.application.test_research_agent_runner import _Capability, _Model, _context
 
 
@@ -92,6 +92,41 @@ async def test_source_reads_expose_the_authoring_label_catalog():
         ),
     )
     assert read.data["source_label"] == "S002"
+
+
+def test_experiment_draft_reuses_prior_turn_complete_source_reads():
+    from application.chat.capabilities.paper_experiment_authoring import PaperExperimentDraftToolRequest
+
+    drafter = _Capability("propose_paper_experiment_draft", ToolRisk.DRAFT, PaperExperimentDraftToolRequest)
+    request = ChatToolRequest(tool_call_id="read-1", name="read_source", arguments={}, position=0)
+    messages = [
+        ChatMessage.user(message_id="u1", session_id="chat-1", content="Prepare the experiment draft.", created_at="2026-09-30T00:00:00Z"),
+        ChatMessage.assistant_tool_calls(message_id="a1", session_id="chat-1", content="", tool_calls=(request,), created_at="2026-09-30T00:00:01Z"),
+        ChatMessage.from_tool_result(message_id="t1", session_id="chat-1", created_at="2026-09-30T00:00:02Z", result=ChatToolResult(
+            tool_call_id="read-1", status="succeeded", data={
+                "document_id": "paper-1", "source_kind": "text_window", "source_ref": "methods-1",
+                "source_digest": "a" * 64, "content": "Methods", "content_truncated": False,
+            },
+        )),
+        ChatMessage.user(message_id="u2", session_id="chat-1", content="Save that complete experiment draft.", created_at="2026-09-30T00:01:00Z"),
+    ]
+    call = ChatToolCall.requested(tool_call_id="draft-1", session_id="chat-1", assistant_message_id="a2",
+        name=drafter.spec.name, risk=ToolRisk.DRAFT, arguments={"objective_id": "objective-1", "document_id": "paper-1"})
+
+    error, _ = validate_batch(CapabilityRegistry((drafter,)), ((call, drafter),), messages)
+
+    assert error is None
+    error, _ = validate_batch(CapabilityRegistry((drafter,)), ((call, drafter),), [messages[-1]])
+    assert error[0] == "source_read_incomplete"
+
+
+def test_saving_experiment_retains_prior_draft_identity_without_granting_approval():
+    draft = {"draft_id": "reviewed-experiment", "draft_digest": "a" * 64,
+             "objective_id": "objective-1", "document_id": "paper-1", "experiment_count": 1}
+    instruction = stage_instruction(("create_paper_experiment_revision",), [], successful_results={}, prior_experiment_draft=draft)
+    assert json.loads(instruction.split("\n", 1)[1])["prior_experiment_draft"] == draft
+    assert "not saved or approved" in instruction
+    assert stage_instruction(("query_published_findings",), [], successful_results={}, prior_experiment_draft=draft) is None
 
 
 def test_no_tool_wording_does_not_hide_default_discovery():

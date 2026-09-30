@@ -173,6 +173,51 @@ async def test_worker_publishes_candidate_as_needs_confirmation() -> None:
     assert samples.revision is not None
 
 
+@pytest.mark.parametrize("task_type", ["sft", "evaluation"])
+async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task_type: str) -> None:
+    from application.feedback.evaluation_sample_builder import EvaluationSampleBuilder
+
+    case = replace(_case(), context_snapshot={
+        key: value for key, value in _case().context_snapshot.items() if key != "candidate_target"
+    })
+    sample = replace(_sample(), source_digest=source_digest_for_case(case.to_record()))
+    samples = _Samples(sample)
+
+    class Cases(_Cases):
+        async def read_case(self, case_id: str):
+            return case
+
+    class Generator:
+        model_name = "test-model"
+
+        async def generate(self, **kwargs):
+            assert kwargs["task_type"] == task_type
+            assert kwargs["context"][0]["text"] == "证据原文"
+            assert kwargs["review_note"] == "核对比较条件"
+            if task_type == "sft":
+                return {"target": "基于原文生成的回答", "missing_reasons": []}
+            return {"reference": "基于原文生成的回答", "criteria": ["必须说明比较条件"], "missing_reasons": []}
+
+    job = _job_for_case(case)
+    job = replace(job, payload={**job.payload, "review_note": "核对比较条件"})
+    generator = Generator()
+    builder = SftSampleBuilder(generator=generator) if task_type == "sft" else EvaluationSampleBuilder(generator=generator)
+    result = await DatasetSampleBuildWorker(
+        job_repository=_Jobs(job),
+        dataset_repository=_Datasets(replace(_dataset(), task_type=task_type)),
+        sample_repository=samples,
+        case_repository=Cases(),
+        builders={task_type: builder},
+    ).run_once()
+
+    assert result.status == "succeeded"
+    assert samples.sample.status == "needs_confirmation"
+    assert samples.sample.confirmed_revision_id is None
+    assert samples.revision.author_kind == "worker"
+    assert samples.revision.provenance["builder"] == "test-model"
+    assert samples.revision.provenance["review_note"] == "核对比较条件"
+
+
 async def test_worker_leaves_missing_material_as_needs_input() -> None:
     samples = _Samples(replace(_sample(), source_digest="b" * 64))
     job = replace(_job(), payload={**_job().payload, "source_digest": "b" * 64})

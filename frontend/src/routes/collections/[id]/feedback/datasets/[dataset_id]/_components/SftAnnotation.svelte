@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Check, ChevronDown, FileText, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
+	import { Check, ChevronDown, FileText, Plus, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
+	import { initialAnnotationEvidence } from './annotationInput';
 	import { createEventDispatcher } from 'svelte';
 	import { t } from '../../../../../../_shared/i18n';
 	import type { DatasetSampleAction, DatasetSampleDetail, SftRevisionContent } from '../../../../../../_shared/feedbackDatasets';
@@ -19,31 +20,36 @@
 
 	let loadedRevisionId = '';
 	let target = '';
+	let question = '';
 	let evidence: Array<{ document_title: string; text: string }> = [];
 	let rebuildReason = '';
 
-	$: if (sample?.current_revision?.revision_id && sample.current_revision.revision_id !== loadedRevisionId) {
-		loadedRevisionId = sample.current_revision.revision_id;
-		const content = sample.current_revision.content as SftRevisionContent;
-		target = content.target;
-		evidence = content.evidence.map((item) => ({ ...item }));
+	$: inputKey = sample ? `${sample.sample.sample_id}:${sample.current_revision?.revision_id ?? sample.sample.generation}` : '';
+	$: if (sample && inputKey !== loadedRevisionId) {
+		loadedRevisionId = inputKey;
+		const content = sample.current_revision?.content as SftRevisionContent | undefined;
+		question = content?.messages.filter(item => item.role === 'user').at(-1)?.content ?? sample.source_case.question;
+		target = content?.target ?? String(sample.source_case.context_snapshot.corrected_answer ?? sample.source_case.context_snapshot.candidate_target ?? '');
+		evidence = content ? content.evidence.map((item) => ({ ...item })) : initialAnnotationEvidence(sample);
+		rebuildReason = '';
 	}
 
 	$: currentRevision = sample?.current_revision ?? null;
 	$: currentContent = currentRevision?.content as SftRevisionContent | undefined;
-	$: draftChanged = Boolean(currentRevision && (
+	$: draftChanged = (canEdit && !currentRevision) || Boolean(currentRevision && (
 		target.trim() !== currentContent?.target ||
 		JSON.stringify(evidence) !== JSON.stringify(currentContent?.evidence)
 	));
-	$: canConfirm = Boolean(currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged && !saving && !confirming && !acting);
-	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed';
+	$: canConfirm = Boolean(currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged && complete && !saving && !confirming && !acting);
+	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed' || sample?.sample.status === 'needs_input';
+	$: complete = Boolean(question.trim() && target.trim() && evidence.length && evidence.every(item => item.document_title.trim() && item.text.trim()));
 
 	function content(): SftRevisionContent | null {
-		if (!currentRevision) return null;
+		if (!sample) return null;
 		return {
 			schema_version: currentContent?.schema_version ?? 'literature-sft.v1',
-			messages: currentContent?.messages ?? [],
-			context: currentContent?.context ?? [],
+			messages: currentContent?.messages ?? [{ role: 'user', content: question.trim() }],
+			context: evidence.map(item => ({ document_title: item.document_title.trim(), text: item.text.trim() })),
 			target: target.trim(),
 			evidence: evidence.map((item) => ({
 				document_title: item.document_title.trim(),
@@ -54,7 +60,7 @@
 
 	function save() {
 		const next = content();
-		if (!next || !next.target || next.evidence.some((item) => !item.document_title || !item.text)) return;
+		if (!canEdit || !complete || !next) return;
 		dispatch('save', { content: next });
 	}
 
@@ -84,7 +90,7 @@
 		<section class="question-column" aria-labelledby="question-title">
 			<div class="section-kicker">输入</div>
 			<h2 id="question-title">研究问题</h2>
-			<p class="question">{sample.source_case.question || '暂无可读问题'}</p>
+			{#if !currentRevision && canEdit}<label for="sft-question">{$t('taskDatasets.questionContent')}</label><textarea id="sft-question" bind:value={question} rows="3" disabled={saving || confirming || acting}></textarea>{:else}<p class="question">{question || '暂无可读问题'}</p>{/if}
 			<details class="original-answer">
 				<summary><ChevronDown size={15} aria-hidden="true" />原始回答</summary>
 				<p>{sample.source_case.answer || '暂无原始回答'}</p>
@@ -107,7 +113,7 @@
 					<span class="status">{sample.sample.status === 'needs_confirmation' ? '待确认' : sample.sample.status === 'needs_input' ? '待补充' : sample.sample.status === 'build_failed' ? '构建失败' : sample.sample.status === 'discarded' ? '已丢弃' : '构建中'}</span>
 				{/if}
 			</div>
-			{#if currentRevision}
+			{#if currentRevision || canEdit}
 				<label for="sft-target">回答内容</label>
 				<textarea id="sft-target" bind:value={target} rows="12" disabled={!canEdit || saving || confirming || acting}></textarea>
 			{:else}
@@ -115,7 +121,7 @@
 			{/if}
 
 			{#if canEdit}<div class="actions" aria-label="样本操作">
-				<button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !target.trim()}>
+				<button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !complete}>
 					<Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}
 				</button>
 				<button class:primary={!draftChanged} type="button" on:click={() => confirm(false)} disabled={!canConfirm}>
@@ -154,11 +160,13 @@
 						<input id={`evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} />
 						<label for={`evidence-text-${index}`}>片段</label>
 						<textarea id={`evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea>
+						{#if canEdit}<button class="evidence-remove" type="button" aria-label={`${$t('taskDatasets.removeEvidence')} ${index + 1}`} title={$t('taskDatasets.removeEvidence')} on:click={() => evidence = evidence.filter((_, i) => i !== index)} disabled={saving || confirming || acting}><Trash2 size={15} aria-hidden="true" /></button>{/if}
 					</article>
 				{:else}
 					<p class="missing">当前候选没有可读证据，不能确认。</p>
 				{/each}
 			</div>
+			{#if canEdit}<button class="evidence-add" type="button" on:click={() => evidence = [...evidence, { document_title: '', text: '' }]} disabled={saving || confirming || acting}><Plus size={15} aria-hidden="true" />{$t('taskDatasets.addEvidence')}</button>{/if}
 			{#if sample.sample.missing_reasons.length}
 				<div class="missing-box">
 					<strong>还需要补充</strong>
@@ -178,6 +186,9 @@
 {/if}
 
 <style>
+	.evidence-add, .evidence-remove { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); cursor: pointer; }
+	.evidence-add { margin-top: 12px; }
+	.evidence-remove { width: 32px; height: 32px; margin-top: 6px; }
 	.sample-options { margin-top: 24px; border-top: 1px solid var(--border-default); padding-top: 12px; }
 	.sample-options > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 	.sample-options .rebuild-area { border-top: 0; margin-top: 12px; }

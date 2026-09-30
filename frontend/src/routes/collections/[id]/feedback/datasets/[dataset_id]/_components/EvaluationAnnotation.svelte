@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Check, ChevronDown, FileText, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
+	import { Check, ChevronDown, FileText, Plus, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
+	import { initialAnnotationEvidence } from './annotationInput';
 	import { createEventDispatcher } from 'svelte';
 	import { t } from '../../../../../../_shared/i18n';
 	import type { DatasetSampleAction, DatasetSampleDetail, EvaluationRevisionContent } from '../../../../../../_shared/feedbackDatasets';
@@ -19,42 +20,47 @@
 
 	let loadedRevisionId = '';
 	let reference = '';
+	let question = '';
 	let criteriaText = '';
 	let evaluationMode: 'reference' | 'rubric' = 'reference';
 	let evidence: Array<{ document_title: string; text: string }> = [];
 	let rebuildReason = '';
 
-	$: if (sample?.current_revision?.revision_id && sample.current_revision.revision_id !== loadedRevisionId) {
-		loadedRevisionId = sample.current_revision.revision_id;
-		const content = sample.current_revision.content as EvaluationRevisionContent;
-		reference = content.reference;
-		criteriaText = content.criteria.join('\n');
-		evaluationMode = content.evaluation_mode;
-		evidence = content.evidence.map((item) => ({ ...item }));
+	$: inputKey = sample ? `${sample.sample.sample_id}:${sample.current_revision?.revision_id ?? sample.sample.generation}` : '';
+	$: if (sample && inputKey !== loadedRevisionId) {
+		loadedRevisionId = inputKey;
+		const content = sample.current_revision?.content as EvaluationRevisionContent | undefined;
+		question = content?.messages.filter(item => item.role === 'user').at(-1)?.content ?? sample.source_case.question;
+		reference = content?.reference ?? String(sample.source_case.context_snapshot.evaluation_reference ?? sample.source_case.context_snapshot.corrected_answer ?? '');
+		criteriaText = content?.criteria.join('\n') ?? '';
+		evaluationMode = content?.evaluation_mode ?? 'reference';
+		evidence = content ? content.evidence.map((item) => ({ ...item })) : initialAnnotationEvidence(sample);
+		rebuildReason = '';
 	}
 
 	$: currentRevision = sample?.current_revision ?? null;
 	$: currentContent = currentRevision?.content as EvaluationRevisionContent | undefined;
 	$: criteria = criteriaText.split('\n').map((item) => item.trim()).filter(Boolean);
-	$: draftChanged = Boolean(currentContent && (
+	$: draftChanged = (canEdit && !currentContent) || Boolean(currentContent && (
 		reference.trim() !== currentContent.reference ||
 		JSON.stringify(criteria) !== JSON.stringify(currentContent.criteria) ||
 		evaluationMode !== currentContent.evaluation_mode ||
 		JSON.stringify(evidence) !== JSON.stringify(currentContent.evidence)
 	));
-	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed';
+	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed' || sample?.sample.status === 'needs_input';
+	$: complete = Boolean(question.trim() && criteria.length && (evaluationMode === 'rubric' || reference.trim()) && evidence.length && evidence.every(item => item.document_title.trim() && item.text.trim()));
 	$: canConfirm = Boolean(
-		currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged &&
+		currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged && complete &&
 		criteria.length && (evaluationMode === 'rubric' || reference.trim()) &&
 		!saving && !confirming && !acting
 	);
 
 	function content(): EvaluationRevisionContent | null {
-		if (!currentContent) return null;
+		if (!sample) return null;
 		return {
 			schema_version: 'literature-evaluation.v1',
-			messages: currentContent.messages,
-			context: currentContent.context,
+			messages: currentContent?.messages ?? [{ role: 'user', content: question.trim() }],
+			context: evidence.map(item => ({ document_title: item.document_title.trim(), text: item.text.trim() })),
 			reference: reference.trim(),
 			criteria,
 			evaluation_mode: evaluationMode,
@@ -64,7 +70,7 @@
 
 	function save() {
 		const next = content();
-		if (!next || !next.criteria.length || (next.evaluation_mode === 'reference' && !next.reference) || next.evidence.some((item) => !item.document_title || !item.text)) return;
+		if (!canEdit || !complete || !next) return;
 		dispatch('save', { content: next });
 	}
 
@@ -80,19 +86,20 @@
 {:else}
 	<div class="annotation-grid">
 		<section class="question-column" aria-labelledby="evaluation-question-title">
-			<div class="section-kicker">测试输入</div><h2 id="evaluation-question-title">研究问题</h2><p class="question">{sample.source_case.question || '暂无可读问题'}</p>
+			<div class="section-kicker">测试输入</div><h2 id="evaluation-question-title">研究问题</h2>
+			{#if !currentRevision && canEdit}<label for="evaluation-question">{$t('taskDatasets.questionContent')}</label><textarea id="evaluation-question" bind:value={question} rows="3" disabled={saving || confirming || acting}></textarea>{:else}<p class="question">{question || '暂无可读问题'}</p>{/if}
 			<details class="original-answer"><summary><ChevronDown size={15} aria-hidden="true" />原始回答</summary><p>{sample.source_case.answer || '暂无原始回答'}</p></details>
 			<div class="source-meta"><span>评测模式</span><small>{evaluationMode === 'rubric' ? '评分标准' : '参考答案'}</small></div>
 		</section>
 
 		<section class="editor-column" aria-labelledby="evaluation-editor-title">
 			<div class="section-heading"><div><div class="section-kicker">人工确认</div><h2 id="evaluation-editor-title">评测标准</h2></div>{#if sample.sample.status === 'confirmed'}<span class="status status--confirmed"><ShieldCheck size={14} aria-hidden="true" />已确认</span>{:else}<span class="status">{sample.sample.status === 'needs_confirmation' ? '待确认' : sample.sample.status === 'needs_input' ? '待补充' : sample.sample.status === 'build_failed' ? '构建失败' : sample.sample.status === 'discarded' ? '已丢弃' : '构建中'}</span>{/if}</div>
-			{#if currentRevision}
+			{#if currentRevision || canEdit}
 				<label for="evaluation-mode">评测模式</label><select id="evaluation-mode" bind:value={evaluationMode} disabled={!canEdit || saving || confirming || acting}><option value="reference">参考答案</option><option value="rubric">评分标准</option></select>
 				<label for="evaluation-reference">参考答案{evaluationMode === 'rubric' ? '（可选）' : ''}</label><textarea id="evaluation-reference" bind:value={reference} rows="6" disabled={!canEdit || saving || confirming || acting} placeholder="写出可判定的参考结果"></textarea>
 				<label for="evaluation-criteria">评分标准（每行一条）</label><textarea id="evaluation-criteria" aria-label="评分标准" bind:value={criteriaText} rows="8" disabled={!canEdit || saving || confirming || acting} placeholder="必须指出文献 B 的预热条件\n引用对应图注证据\n不能推广到未测试的工艺条件"></textarea>
 			{:else}<p class="missing">当前还没有可判定的评测标准。请补充标准后重新构建。</p>{/if}
-			{#if canEdit}<div class="actions"><button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !criteria.length || (evaluationMode === 'reference' && !reference.trim())}><Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}</button><button class:primary={!draftChanged} type="button" on:click={() => dispatch('confirm', { next: false })} disabled={!canConfirm}><Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}</button><button type="button" on:click={() => dispatch('confirm', { next: true })} disabled={!canConfirm}>确认并下一条</button></div>{/if}
+			{#if canEdit}<div class="actions"><button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !complete}><Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}</button><button class:primary={!draftChanged} type="button" on:click={() => dispatch('confirm', { next: false })} disabled={!canConfirm}><Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}</button><button type="button" on:click={() => dispatch('confirm', { next: true })} disabled={!canConfirm}>确认并下一条</button></div>{/if}
 			{#if draftChanged}<p class="draft-note" role="status">有未保存的修改，保存后才能确认。</p>{/if}
 			<details class="sample-options"><summary>{$t('taskDatasets.moreActions')}</summary>
 			{#if sample.sample.status === 'needs_confirmation' || sample.sample.status === 'confirmed' || sample.sample.status === 'needs_input'}<div class="rebuild-area"><label for="evaluation-rebuild-reason">退回意见</label><textarea id="evaluation-rebuild-reason" bind:value={rebuildReason} rows="3" maxlength="2000" placeholder="说明应核对的条件或缺失来源" disabled={acting}></textarea><button type="button" on:click={() => act('rebuild')} disabled={acting || saving || confirming || !rebuildReason.trim()}><RotateCcw size={16} aria-hidden="true" />退回重建</button></div>{/if}
@@ -101,11 +108,25 @@
 			{#if notice}<p class="notice" role="status">{notice}</p>{/if}{#if error}<p class="error" role="alert"><TriangleAlert size={15} aria-hidden="true" />{error}</p>{/if}
 		</section>
 
-		<aside class="evidence-column" aria-labelledby="evaluation-evidence-title"><div class="section-kicker">核对</div><h2 id="evaluation-evidence-title">参考证据</h2><p class="aside-note">参考答案和评分标准必须能回到这里显示的文献片段；内部来源编号不会进入评测内容。</p><div class="evidence-list">{#each evidence as item, index}<article class="evidence-card"><label for={`evaluation-evidence-title-${index}`}>文献标题</label><input id={`evaluation-evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} /><label for={`evaluation-evidence-text-${index}`}>片段</label><textarea id={`evaluation-evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea></article>{:else}<p class="missing">当前候选没有可读证据，不能确认。</p>{/each}</div>{#if sample.sample.missing_reasons.length}<div class="missing-box"><strong>还需要补充</strong><ul>{#each sample.sample.missing_reasons as reason}<li>{reason}</li>{/each}</ul></div>{/if}</aside>
+		<aside class="evidence-column" aria-labelledby="evaluation-evidence-title">
+			<div class="section-kicker">核对</div><h2 id="evaluation-evidence-title">参考证据</h2><p class="aside-note">文献片段（{evidence.length}）</p>
+			<div class="evidence-list">
+				{#each evidence as item, index}<article class="evidence-card">
+					<label for={`evaluation-evidence-title-${index}`}>文献标题</label><input id={`evaluation-evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} />
+					<label for={`evaluation-evidence-text-${index}`}>片段</label><textarea id={`evaluation-evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea>
+					{#if canEdit}<button class="evidence-remove" type="button" aria-label={`${$t('taskDatasets.removeEvidence')} ${index + 1}`} title={$t('taskDatasets.removeEvidence')} on:click={() => evidence = evidence.filter((_, i) => i !== index)} disabled={saving || confirming || acting}><Trash2 size={15} aria-hidden="true" /></button>{/if}
+				</article>{:else}<p class="missing">当前候选没有可读证据，不能确认。</p>{/each}
+			</div>
+			{#if canEdit}<button class="evidence-add" type="button" on:click={() => evidence = [...evidence, { document_title: '', text: '' }]} disabled={saving || confirming || acting}><Plus size={15} aria-hidden="true" />{$t('taskDatasets.addEvidence')}</button>{/if}
+			{#if sample.sample.missing_reasons.length}<div class="missing-box"><strong>还需要补充</strong><ul>{#each sample.sample.missing_reasons as reason}<li>{reason}</li>{/each}</ul></div>{/if}
+		</aside>
 	</div>
 {/if}
 
 <style>
+	.evidence-add, .evidence-remove { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); cursor: pointer; }
+	.evidence-add { margin-top: 12px; }
+	.evidence-remove { width: 32px; height: 32px; margin-top: 6px; }
 	.sample-options { margin-top: 24px; border-top: 1px solid var(--border-default); padding-top: 12px; }
 	.sample-options > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 	.sample-options .rebuild-area { border-top: 0; margin-top: 12px; }

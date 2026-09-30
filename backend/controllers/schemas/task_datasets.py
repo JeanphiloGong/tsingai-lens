@@ -113,7 +113,8 @@ RevisionContentRequest = Annotated[
 class SampleRevisionUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    expected_revision_id: str = Field(min_length=1, max_length=64)
+    expected_revision_id: str | None = Field(max_length=64)
+    expected_generation: int | None = Field(default=None, ge=1)
     content: RevisionContentRequest
 
 

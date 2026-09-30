@@ -9,12 +9,18 @@ from application.feedback.sample_builder_support import (
     question_from_snapshot,
     readable_sources,
     snapshot_digest,
+    SampleContentGenerator,
+    generation_missing_reasons,
 )
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.dataset import Dataset
 from domain.feedback.dataset_sample import DatasetSample
 from domain.feedback.feedback_case import FeedbackCase
-from domain.feedback.sample_revision import EvaluationRevisionContent, EvaluationMode
+from domain.feedback.sample_revision import (
+    EvaluationRevisionContent,
+    EvaluationMode,
+    strip_internal_references,
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +37,9 @@ class EvaluationBuildNeedsInput:
 class EvaluationSampleBuilder:
     model_name = "deterministic-evidence-evaluation-v1"
 
+    def __init__(self, *, generator: SampleContentGenerator | None = None) -> None:
+        self.generator = generator
+
     async def build(
         self,
         *,
@@ -38,6 +47,7 @@ class EvaluationSampleBuilder:
         sample: DatasetSample,
         case: FeedbackCase,
         annotation: FeedbackAnnotation | None,
+        review_note: str | None = None,
     ) -> EvaluationBuildCandidate | EvaluationBuildNeedsInput:
         snapshot = dict(case.context_snapshot or {})
         question = question_from_snapshot(snapshot)
@@ -49,6 +59,26 @@ class EvaluationSampleBuilder:
             return EvaluationBuildNeedsInput(("evaluation_mode_invalid",))
         criteria = _criteria(snapshot)
         reference = _reference(snapshot)
+        generated = False
+        if sources and self.generator is not None and (not criteria or (mode == "reference" and not reference) or review_note):
+            value = await self.generator.generate(
+                task_type="evaluation", question=question, context=sources, snapshot=snapshot,
+                construction_spec=dataset.construction_spec, review_note=review_note,
+            )
+            reasons = generation_missing_reasons(value)
+            if reasons:
+                return EvaluationBuildNeedsInput(reasons)
+            raw_criteria = value.get("criteria")
+            if not isinstance(raw_criteria, list) or any(not isinstance(item, str) or not item.strip() for item in raw_criteria):
+                raise ValueError("sample_generation_criteria_invalid")
+            criteria = tuple(dict.fromkeys(strip_internal_references(item) for item in raw_criteria))
+            reference_value = value.get("reference", "")
+            if not isinstance(reference_value, str):
+                raise ValueError("sample_generation_reference_invalid")
+            reference = strip_internal_references(reference_value)
+            if not criteria or (mode == "reference" and not reference):
+                raise ValueError("sample_generation_evaluation_incomplete")
+            generated = True
         missing: list[str] = []
         if not sources:
             missing.append("readable_evidence_missing")
@@ -71,7 +101,7 @@ class EvaluationSampleBuilder:
             evidence=context,
         )
         provenance = {
-            "builder": self.model_name,
+            "builder": self.generator.model_name if generated else self.model_name,
             "collection_id": dataset.collection_id,
             "dataset_id": dataset.dataset_id,
             "source_case_id": case.case_id,
@@ -91,7 +121,7 @@ class EvaluationSampleBuilder:
 
 def validate_evaluation(value: Mapping[str, Any]) -> EvaluationRevisionContent:
     criteria = tuple(
-        str(item).strip()
+        strip_internal_references(item)
         for item in value.get("criteria", ())
         if str(item).strip()
     )
@@ -118,12 +148,12 @@ def _criteria(snapshot: Mapping[str, Any]) -> tuple[str, ...]:
         values = [values]
     if not isinstance(values, (list, tuple)):
         return ()
-    return tuple(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+    return tuple(dict.fromkeys(strip_internal_references(item) for item in values if str(item).strip()))
 
 
 def _reference(snapshot: Mapping[str, Any]) -> str:
-    for key in ("evaluation_reference", "reference", "reference_answer", "candidate_target"):
-        value = str(snapshot.get(key) or "").strip()
+    for key in ("evaluation_reference", "reference", "reference_answer", "candidate_target", "corrected_answer"):
+        value = strip_internal_references(snapshot.get(key))
         if value:
             return value
     return ""

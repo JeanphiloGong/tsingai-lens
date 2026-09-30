@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, Mapping, cast
 from uuid import uuid4
 
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
@@ -36,6 +36,7 @@ from domain.feedback.sample_revision import (
     SampleRevision,
     content_digest_for,
     parse_revision_content,
+    sanitize_revision_content_mapping,
 )
 
 
@@ -299,8 +300,9 @@ class FeedbackDatasetService:
         user_id: str,
         dataset_id: str,
         sample_id: str,
-        expected_revision_id: str,
+        expected_revision_id: str | None,
         content: dict[str, Any],
+        expected_generation: int | None = None,
     ) -> DatasetSample:
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
         self._require_supported(dataset)
@@ -310,30 +312,70 @@ class FeedbackDatasetService:
             raise FileNotFoundError(f"dataset sample not found: {sample_id}")
         if sample.current_revision_id != expected_revision_id:
             raise FeedbackDatasetConflict("sample_revision_stale")
-        current = await repository.read_revision(expected_revision_id)
-        if current is None or current.sample_id != sample_id:
+        if expected_generation is not None and sample.generation != expected_generation:
+            raise FeedbackDatasetConflict("sample_revision_stale")
+        if sample.status not in {"needs_input", "needs_confirmation", "confirmed"}:
+            raise FeedbackDatasetError("sample_not_editable")
+        if expected_revision_id is None and expected_generation is None:
+            raise FeedbackDatasetError("sample_generation_required")
+        current = await repository.read_revision(expected_revision_id) if expected_revision_id else None
+        if expected_revision_id and (current is None or current.sample_id != sample_id):
             raise FeedbackDatasetError("sample_current_revision_missing")
         try:
-            parsed = parse_revision_content(content)
+            parsed = parse_revision_content(sanitize_revision_content_mapping(content))
         except ValueError as exc:
             raise FeedbackDatasetError(str(exc)) from exc
         if parsed.schema_version != _schema_for_task(dataset.task_type):
             raise FeedbackDatasetError("sample_content_task_type_mismatch")
+        case = await self._case_repository().read_case(sample.source_case_id)
+        if case is None or case.collection_id != dataset.collection_id:
+            raise FeedbackDatasetError("sample_source_case_missing")
+        if case.status == "withdrawn":
+            raise FeedbackDatasetError("sample_source_case_withdrawn")
+        if source_digest_for_case(case.to_record()) != sample.source_digest:
+            raise FeedbackDatasetConflict("sample_source_stale")
+        snapshot = case.context_snapshot
+        prior_provenance = current.provenance if current else {}
+        source_records = [
+            *prior_provenance.get("evidence_records", []),
+            *snapshot.get("inspected_sources", []),
+            *snapshot.get("requested_scope", []),
+        ]
+        # Bind edited excerpts to exact known text, never retain an old source
+        # identity for replacement text supplied by the annotator.
+        evidence_records = []
+        for item in parsed.evidence:
+            original = next((record for record in source_records if isinstance(record, Mapping)
+                and str(record.get("document_title") or record.get("title") or "").strip() == item["document_title"]
+                and str(record.get("quote") or record.get("text") or record.get("content") or "").strip() == item["text"]), None)
+            evidence_records.append({
+                **(dict(original) if original else {}),
+                "document_title": item["document_title"], "quote": item["text"],
+                "audit_basis": "human_selected_case_evidence" if original else "human_supplied_excerpt",
+                "annotated_by": user_id,
+            })
+        provenance = {
+            **prior_provenance,
+            "collection_id": dataset.collection_id, "source_case_id": case.case_id,
+            "session_id": case.session_id, "anchor_message_id": case.anchor_message_id,
+            "corrected_message_id": snapshot.get("corrected_message_id"),
+            "evidence_records": evidence_records,
+            "source_refs": list(dict.fromkeys(str(item.get("source_ref") or item.get("table_ref"))
+                for item in evidence_records if item.get("source_ref") or item.get("table_ref"))),
+            "edited_from_revision_id": current.revision_id if current else None,
+            "edited_by": user_id,
+        }
         now = datetime.now(timezone.utc).isoformat()
         revision = SampleRevision(
             revision_id=f"revision_{uuid4().hex[:32]}",
             sample_id=sample_id,
-            revision_no=current.revision_no + 1,
+            revision_no=current.revision_no + 1 if current else 1,
             author_kind="human",
             content=parsed,
             content_digest=content_digest_for(parsed),
             input_digest=sample.source_digest,
             construction_spec_version=dataset.spec_version,
-            provenance={
-                **current.provenance,
-                "edited_from_revision_id": current.revision_id,
-                "edited_by": user_id,
-            },
+            provenance=provenance,
             created_at=now,
             created_by=user_id,
             job_id=None,
@@ -342,6 +384,7 @@ class FeedbackDatasetService:
             return await repository.append_human_revision(
                 sample_id=sample_id,
                 expected_revision_id=expected_revision_id,
+                expected_generation=sample.generation,
                 revision=revision,
                 updated_at=now,
             )
@@ -369,6 +412,13 @@ class FeedbackDatasetService:
             raise FeedbackDatasetError("sample_current_revision_missing")
         if revision.content.schema_version != _schema_for_task(dataset.task_type):
             raise FeedbackDatasetError("sample_content_invalid")
+        case = await self._case_repository().read_case(sample.source_case_id)
+        if case is None or case.collection_id != dataset.collection_id:
+            raise FeedbackDatasetError("sample_source_case_missing")
+        if case.status == "withdrawn":
+            raise FeedbackDatasetError("sample_source_case_withdrawn")
+        if source_digest_for_case(case.to_record()) != sample.source_digest:
+            raise FeedbackDatasetConflict("sample_source_stale")
         now = datetime.now(timezone.utc).isoformat()
         try:
             return await repository.confirm_revision(

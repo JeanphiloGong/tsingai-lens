@@ -116,3 +116,38 @@ async def test_builder_does_not_invent_target_or_evidence() -> None:
         "readable_evidence_missing",
         "candidate_target_missing",
     )
+
+
+async def test_builder_generates_a_target_from_readable_evidence() -> None:
+    class Generator:
+        model_name = "test-grounded-model"
+
+        async def generate(self, **inputs):
+            assert inputs["task_type"] == "sft"
+            assert inputs["context"] == ({"document_title": "B", "text": "Preheated at 200 C."},)
+            return {"target": "Paper B used preheating at 200 C."}
+
+    result = await SftSampleBuilder(generator=Generator()).build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": "What preheating did B use?", "answer": "No preheating.",
+                    "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
+    )
+    assert isinstance(result, SftBuildCandidate)
+    assert result.content.target == "Paper B used preheating at 200 C."
+    assert result.provenance["target_origin"] == "model_candidate"
+
+
+async def test_generator_can_abstain_without_inventing_missing_conditions() -> None:
+    class Generator:
+        model_name = "test-grounded-model"
+
+        async def generate(self, **inputs):
+            return {"missing_reasons": ["preheating_condition_not_in_evidence"]}
+
+    result = await SftSampleBuilder(generator=Generator()).build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": "What preheating did B use?",
+                    "inspected_sources": [{"document_title": "B", "quote": "Tensile tests were performed."}]}),
+    )
+    assert isinstance(result, SftBuildNeedsInput)
+    assert result.missing_reasons == ("preheating_condition_not_in_evidence",)

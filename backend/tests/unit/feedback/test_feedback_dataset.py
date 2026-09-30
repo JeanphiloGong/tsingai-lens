@@ -9,7 +9,7 @@ from application.feedback.dataset_service import (
     FeedbackDatasetService,
 )
 from domain.feedback import Dataset
-from domain.feedback import FeedbackCase
+from domain.feedback import FeedbackCase, source_digest_for_case
 
 
 pytestmark = pytest.mark.anyio
@@ -81,6 +81,59 @@ def _source_case() -> FeedbackCase:
         created_at="2026-09-29T00:00:00+00:00",
         updated_at="2026-09-29T00:00:00+00:00",
     )
+
+
+@pytest.mark.parametrize("excerpt", ["Preheated at 200 C.", "Preheated at 250 C."])
+async def test_needs_input_can_save_its_first_complete_human_revision(excerpt: str) -> None:
+    from dataclasses import replace
+    from domain.feedback import DatasetSample
+    from application.feedback.dataset_service import FeedbackDatasetConflict
+
+    class Samples:
+        sample = None
+        revision = None
+
+        async def read_sample(self, **kwargs):
+            return self.sample
+
+        async def append_human_revision(self, **kwargs):
+            self.revision = kwargs["revision"]
+            self.sample = replace(self.sample, status="needs_confirmation", current_revision_id=self.revision.revision_id)
+            return self.sample
+
+    samples = Samples()
+    case = replace(_source_case(), context_snapshot={
+        **_source_case().context_snapshot,
+        "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C.", "source_ref": "source-b"}],
+    })
+    service = FeedbackDatasetService(repository=_Repository(), collection_service=_Collections(),
+                                     sample_repository=samples, case_repository=_Cases(case))
+    dataset = await service.create_for_user(user_id="user-1", collection_id="collection-1", name="SFT",
+                                           task_type="sft", construction_spec={})
+    samples.sample = replace(DatasetSample.pending(sample_id="sample-1", dataset_id=dataset.dataset_id,
+        source_case_id="case-1", source_digest=source_digest_for_case(case.to_record()), active_job_id="job-1", now=datetime.now(timezone.utc).isoformat()),
+        status="needs_input", active_job_id=None)
+    content = {"schema_version": "literature-sft.v1", "messages": [{"role": "user", "content": "Compare A and B."}],
+               "context": [{"document_title": "B", "text": excerpt}],
+               "target": excerpt, "evidence": [{"document_title": "B", "text": excerpt}]}
+    saved = await service.update_sample(user_id="user-1", dataset_id=dataset.dataset_id, sample_id="sample-1",
+        expected_revision_id=None, expected_generation=1, content=content)
+    assert saved.status == "needs_confirmation"
+    assert samples.revision.revision_no == 1
+    assert samples.revision.author_kind == "human"
+    assert saved.confirmed_revision_id is None
+    record = samples.revision.provenance["evidence_records"][0]
+    assert record["annotated_by"] == "user-1"
+    if excerpt == "Preheated at 200 C.":
+        assert record["source_ref"] == "source-b"
+        assert samples.revision.provenance["source_refs"] == ["source-b"]
+    else:
+        assert record["audit_basis"] == "human_supplied_excerpt"
+        assert "source_ref" not in record
+        assert samples.revision.provenance["source_refs"] == []
+    with pytest.raises(FeedbackDatasetConflict, match="stale"):
+        await service.update_sample(user_id="user-1", dataset_id=dataset.dataset_id, sample_id="sample-1",
+            expected_revision_id=None, expected_generation=1, content=content)
 
 
 @pytest.mark.anyio

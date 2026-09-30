@@ -3152,6 +3152,9 @@ const translations: Record<Language, Translations> = {
 			reasonOther: 'Could not include this selection'
 		},
 		taskDatasets: {
+			addEvidence: 'Add evidence excerpt',
+			removeEvidence: 'Remove evidence excerpt',
+			questionContent: 'Question',
 			eyebrow: 'Training data workspace',
 			collect: 'Collect cases',
 			collectTitle: 'Choose source cases',
@@ -6203,6 +6206,9 @@ const translations: Record<Language, Translations> = {
 			reasonOther: '无法纳入此选择'
 		},
 		taskDatasets: {
+			addEvidence: '添加证据片段',
+			removeEvidence: '删除证据片段',
+			questionContent: '问题内容',
 			eyebrow: '训练数据工作台',
 			collect: '收集案例',
 			collectTitle: '选择案例素材',

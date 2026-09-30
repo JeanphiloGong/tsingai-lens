@@ -176,7 +176,8 @@ class PostgresFeedbackDatasetSampleRepository:
         self,
         *,
         sample_id: str,
-        expected_revision_id: str,
+        expected_revision_id: str | None,
+        expected_generation: int | None = None,
         revision: SampleRevision,
         updated_at: str,
     ) -> DatasetSample:
@@ -193,8 +194,12 @@ class PostgresFeedbackDatasetSampleRepository:
                 raise FileNotFoundError("dataset sample not found")
             if row.current_revision_id != expected_revision_id:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
-            if row.status not in {"needs_confirmation", "confirmed"}:
-                raise ValueError("sample_not_editable")
+            if expected_generation is not None and row.generation != expected_generation:
+                raise DatasetSampleRevisionConflict("sample_revision_stale")
+            if row.status not in {"needs_input", "needs_confirmation", "confirmed"}:
+                raise DatasetSampleRevisionConflict("sample_not_editable")
+            if expected_revision_id is None and expected_generation is None:
+                raise ValueError("sample_generation_required")
             session.add(_revision_row(revision))
             await session.flush()
             row.current_revision_id = revision.revision_id

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import re
 from typing import Any, Literal, Mapping, TypeAlias
 
 
@@ -31,6 +32,27 @@ _INTERNAL_CONTENT_KEYS = frozenset(
         "block_id",
     }
 )
+
+# Model-facing rows contain readable paper text, while source/message identities
+# belong to revision provenance. Providers can copy an identity from the
+# question despite the prompt prohibiting it, so enforce the boundary here.
+_INTERNAL_REFERENCE = re.compile(
+    r"(?i)(?:`?(?:blk|tbl)_doc_[a-z0-9_]+`?|`?(?:doc|msg|call|case|session|feedback|source_ref|analysis|job)_[a-z0-9_-]+`?)"
+)
+_SOURCE_CITATION = re.compile(
+    r"(?i)[(（]\s*(?:source|来源)\s*[:：]?\s*`?(?:blk|tbl)_doc_[a-z0-9_]+`?\s*[)）]"
+)
+
+
+def strip_internal_references(value: Any) -> str:
+    """Remove internal identities from text exported to a model."""
+
+    text = str(value or "").strip()
+    text = _SOURCE_CITATION.sub("", text)
+    text = _INTERNAL_REFERENCE.sub("", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]+([，。；：、,.])", r"\1", text)
+    return text.strip()
 
 
 @dataclass(frozen=True)
@@ -335,6 +357,36 @@ def parse_revision_content(value: Mapping[str, Any]) -> RevisionContent:
     if schema_version == EVALUATION_SCHEMA_VERSION:
         return EvaluationRevisionContent.from_mapping(value)
     raise ValueError("unsupported sample revision schema")
+
+
+def sanitize_revision_content_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Clean newly submitted model-facing text before it becomes immutable."""
+
+    result = json.loads(json.dumps(dict(value), ensure_ascii=False))
+    result["messages"] = [
+        {**dict(item), "content": strip_internal_references(item.get("content"))}
+        for item in result.get("messages") or ()
+        if isinstance(item, Mapping)
+    ]
+    for key in ("context", "evidence"):
+        result[key] = [
+            {
+                **dict(item),
+                "document_title": strip_internal_references(item.get("document_title")),
+                "text": strip_internal_references(item.get("text")),
+            }
+            for item in result.get(key) or ()
+            if isinstance(item, Mapping)
+        ]
+    for key in ("target", "reference", "rationale", "response_a", "response_b"):
+        if isinstance(result.get(key), str):
+            result[key] = strip_internal_references(result[key])
+    if isinstance(result.get("criteria"), list):
+        result["criteria"] = [
+            strip_internal_references(item) if isinstance(item, str) else item
+            for item in result["criteria"]
+        ]
+    return result
 
 
 def _message(value: Any) -> dict[str, str]:

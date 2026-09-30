@@ -4,13 +4,31 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 from domain.feedback.annotation import FeedbackAnnotation
+from domain.feedback.sample_revision import strip_internal_references
+
+
+class SampleContentGenerator(Protocol):
+    model_name: str
+
+    async def generate(
+        self, *, task_type: str, question: str, context: tuple[dict[str, str], ...],
+        snapshot: Mapping[str, Any], construction_spec: Mapping[str, Any],
+        review_note: str | None = None,
+    ) -> dict[str, Any]: ...
+
+
+def generation_missing_reasons(value: Mapping[str, Any]) -> tuple[str, ...]:
+    reasons = value.get("missing_reasons", [])
+    if not isinstance(reasons, list) or any(not isinstance(item, str) or not item.strip() for item in reasons):
+        raise ValueError("sample_generation_invalid_missing_reasons")
+    return tuple(dict.fromkeys(item.strip()[:500] for item in reasons))
 
 
 def question_from_snapshot(snapshot: Mapping[str, Any]) -> str:
-    return str(snapshot.get("question") or "").strip()
+    return strip_internal_references(snapshot.get("question"))
 
 
 def readable_sources(
@@ -36,8 +54,8 @@ def readable_sources(
     for raw, audit_basis in candidates:
         if not isinstance(raw, Mapping):
             continue
-        title = str(raw.get("document_title") or raw.get("title") or "").strip()
-        text = str(raw.get("quote") or raw.get("text") or raw.get("content") or "").strip()
+        title = strip_internal_references(raw.get("document_title") or raw.get("title"))
+        text = strip_internal_references(raw.get("quote") or raw.get("text") or raw.get("content"))
         if not title or not text:
             continue
         key = (title, text)

@@ -96,3 +96,22 @@ def test_rubric_does_not_require_unique_reference() -> None:
         "evidence": [{"document_title": "文献", "text": "原文"}],
     })
     assert content.evaluation_mode == "rubric"
+
+
+async def test_builder_generates_reference_and_executable_criteria() -> None:
+    class Generator:
+        model_name = "test-grounded-model"
+
+        async def generate(self, **inputs):
+            assert inputs["task_type"] == "evaluation"
+            return {"reference": "B was preheated at 200 C.",
+                    "criteria": ["Identifies B's 200 C preheating", "Does not invent A's condition"]}
+
+    result = await EvaluationSampleBuilder(generator=Generator()).build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": "Compare A and B's preheating.",
+                    "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
+    )
+    assert isinstance(result, EvaluationBuildCandidate)
+    assert result.content.reference == "B was preheated at 200 C."
+    assert len(result.content.criteria) == 2

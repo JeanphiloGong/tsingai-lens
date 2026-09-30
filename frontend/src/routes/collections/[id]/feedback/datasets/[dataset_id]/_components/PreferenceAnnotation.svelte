@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Check, ChevronDown, FileText, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
+	import { Check, ChevronDown, FileText, Plus, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
+	import { initialAnnotationEvidence } from './annotationInput';
 	import { createEventDispatcher } from 'svelte';
 	import { t } from '../../../../../../_shared/i18n';
 	import type {
@@ -24,6 +25,7 @@
 
 	let loadedRevisionId = '';
 	let responseA = '';
+	let question = '';
 	let responseB = '';
 	let humanPreference: PreferenceChoice | null = null;
 	let evidence: Array<{ document_title: string; text: string }> = [];
@@ -35,28 +37,32 @@
 		['unclear', '无法判断']
 	];
 
-	$: if (sample?.current_revision?.revision_id && sample.current_revision.revision_id !== loadedRevisionId) {
-		loadedRevisionId = sample.current_revision.revision_id;
-		const content = sample.current_revision.content as PreferenceRevisionContent;
-		responseA = content.response_a;
-		responseB = content.response_b;
-		humanPreference = content.human_preference;
-		evidence = content.evidence.map((item) => ({ ...item }));
+	$: inputKey = sample ? `${sample.sample.sample_id}:${sample.current_revision?.revision_id ?? sample.sample.generation}` : '';
+	$: if (sample && inputKey !== loadedRevisionId) {
+		loadedRevisionId = inputKey;
+		const content = sample.current_revision?.content as PreferenceRevisionContent | undefined;
+		question = content?.messages.filter(item => item.role === 'user').at(-1)?.content ?? sample.source_case.question;
+		responseA = content?.response_a ?? sample.source_case.answer;
+		responseB = content?.response_b ?? String(sample.source_case.context_snapshot.corrected_answer ?? sample.source_case.context_snapshot.candidate_target ?? '');
+		humanPreference = content?.human_preference ?? null;
+		evidence = content ? content.evidence.map((item) => ({ ...item })) : initialAnnotationEvidence(sample);
+		rebuildReason = '';
 	}
 
 	$: currentRevision = sample?.current_revision ?? null;
 	$: currentContent = currentRevision?.content as PreferenceRevisionContent | undefined;
-	$: draftChanged = Boolean(currentContent && (
+	$: draftChanged = (canEdit && !currentContent) || Boolean(currentContent && (
 		responseA.trim() !== currentContent.response_a ||
 		responseB.trim() !== currentContent.response_b ||
 		humanPreference !== currentContent.human_preference ||
 		JSON.stringify(evidence) !== JSON.stringify(currentContent.evidence)
 	));
-	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed';
+	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed' || sample?.sample.status === 'needs_input';
+	$: complete = Boolean(question.trim() && responseA.trim() && responseB.trim() && responseA.trim() !== responseB.trim() && evidence.length && evidence.every(item => item.document_title.trim() && item.text.trim()));
 	$: canConfirm = Boolean(
 		currentRevision &&
 		sample?.sample.status === 'needs_confirmation' &&
-		!draftChanged &&
+		!draftChanged && complete &&
 		humanPreference &&
 		responseA.trim() &&
 		responseB.trim() &&
@@ -65,15 +71,15 @@
 	);
 
 	function content(): PreferenceRevisionContent | null {
-		if (!currentContent) return null;
+		if (!sample) return null;
 		return {
 			schema_version: 'literature-preference.v1',
-			messages: currentContent.messages,
-			context: currentContent.context,
+			messages: currentContent?.messages ?? [{ role: 'user', content: question.trim() }],
+			context: evidence.map(item => ({ document_title: item.document_title.trim(), text: item.text.trim() })),
 			response_a: responseA.trim(),
 			response_b: responseB.trim(),
-			suggested_preference: currentContent.suggested_preference,
-			rationale: currentContent.rationale,
+			suggested_preference: currentContent?.suggested_preference ?? null,
+			rationale: currentContent?.rationale ?? '',
 			evidence: evidence.map((item) => ({ document_title: item.document_title.trim(), text: item.text.trim() })),
 			human_preference: humanPreference
 		};
@@ -81,7 +87,7 @@
 
 	function save() {
 		const next = content();
-		if (!next || !next.response_a || !next.response_b || next.response_a === next.response_b || next.evidence.some((item) => !item.document_title || !item.text)) return;
+		if (!canEdit || !complete || !next) return;
 		dispatch('save', { content: next });
 	}
 
@@ -99,14 +105,14 @@
 		<section class="question-column" aria-labelledby="preference-question-title">
 			<div class="section-kicker">输入条件</div>
 			<h2 id="preference-question-title">研究问题</h2>
-			<p class="question">{sample.source_case.question || '暂无可读问题'}</p>
+			{#if !currentRevision && canEdit}<label for="preference-question">{$t('taskDatasets.questionContent')}</label><textarea id="preference-question" bind:value={question} rows="3" disabled={saving || confirming || acting}></textarea>{:else}<p class="question">{question || '暂无可读问题'}</p>{/if}
 			<details class="original-answer"><summary><ChevronDown size={15} aria-hidden="true" />原始回答</summary><p>{sample.source_case.answer || '暂无原始回答'}</p></details>
 			<div class="source-meta"><span>建议偏好仅供参考</span><small>{currentContent?.suggested_preference ?? '未提供'}</small></div>
 		</section>
 
 		<section class="editor-column" aria-labelledby="preference-answer-title">
 			<div class="section-heading"><div><div class="section-kicker">人工选择</div><h2 id="preference-answer-title">回答对照</h2></div>{#if sample.sample.status === 'confirmed'}<span class="status status--confirmed"><ShieldCheck size={14} aria-hidden="true" />已确认</span>{:else}<span class="status">{sample.sample.status === 'needs_confirmation' ? '待确认' : sample.sample.status === 'needs_input' ? '待补充' : sample.sample.status === 'build_failed' ? '构建失败' : sample.sample.status === 'discarded' ? '已丢弃' : '构建中'}</span>{/if}</div>
-			{#if currentRevision}
+			{#if currentRevision || canEdit}
 				<div class="response-grid">
 					<label><span>回答 A</span><textarea aria-label="回答 A" bind:value={responseA} rows="8" disabled={!canEdit || saving || confirming || acting}></textarea></label>
 					<label><span>回答 B</span><textarea aria-label="回答 B" bind:value={responseB} rows="8" disabled={!canEdit || saving || confirming || acting}></textarea></label>
@@ -117,7 +123,7 @@
 					{/each}
 				</div></fieldset>
 			{:else}<p class="missing">当前还没有完整的回答对。请补充输入条件后重新构建。</p>{/if}
-			{#if canEdit}<div class="actions"><button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !responseA.trim() || !responseB.trim() || responseA.trim() === responseB.trim()}><Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}</button><button class:primary={!draftChanged} type="button" on:click={() => dispatch('confirm', { next: false })} disabled={!canConfirm}><Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}</button><button type="button" on:click={() => dispatch('confirm', { next: true })} disabled={!canConfirm}>确认并下一条</button></div>{/if}
+			{#if canEdit}<div class="actions"><button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !complete}><Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}</button><button class:primary={!draftChanged} type="button" on:click={() => dispatch('confirm', { next: false })} disabled={!canConfirm}><Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}</button><button type="button" on:click={() => dispatch('confirm', { next: true })} disabled={!canConfirm}>确认并下一条</button></div>{/if}
 			{#if draftChanged}<p class="draft-note" role="status">有未保存的修改，保存后才能确认。</p>{/if}
 			<details class="sample-options"><summary>{$t('taskDatasets.moreActions')}</summary>
 			{#if sample.sample.status === 'needs_confirmation' || sample.sample.status === 'confirmed' || sample.sample.status === 'needs_input'}<div class="rebuild-area"><label for="preference-rebuild-reason">退回意见</label><textarea id="preference-rebuild-reason" bind:value={rebuildReason} rows="3" maxlength="2000" placeholder="说明应核对的条件或缺失来源" disabled={acting}></textarea><button type="button" on:click={() => act('rebuild')} disabled={acting || saving || confirming || !rebuildReason.trim()}><RotateCcw size={16} aria-hidden="true" />退回重建</button></div>{/if}
@@ -126,11 +132,25 @@
 			{#if notice}<p class="notice" role="status">{notice}</p>{/if}{#if error}<p class="error" role="alert"><TriangleAlert size={15} aria-hidden="true" />{error}</p>{/if}
 		</section>
 
-		<aside class="evidence-column" aria-labelledby="preference-evidence-title"><div class="section-kicker">核对</div><h2 id="preference-evidence-title">共同证据</h2><p class="aside-note">两个回答必须使用同一问题、上下文和可读证据；内部来源编号不会进入训练内容。</p><div class="evidence-list">{#each evidence as item, index}<article class="evidence-card"><label for={`preference-evidence-title-${index}`}>文献标题</label><input id={`preference-evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} /><label for={`preference-evidence-text-${index}`}>片段</label><textarea id={`preference-evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea></article>{:else}<p class="missing">当前候选没有可读证据，不能确认。</p>{/each}</div>{#if sample.sample.missing_reasons.length}<div class="missing-box"><strong>还需要补充</strong><ul>{#each sample.sample.missing_reasons as reason}<li>{reason}</li>{/each}</ul></div>{/if}</aside>
+		<aside class="evidence-column" aria-labelledby="preference-evidence-title">
+			<div class="section-kicker">核对</div><h2 id="preference-evidence-title">共同证据</h2><p class="aside-note">文献片段（{evidence.length}）</p>
+			<div class="evidence-list">
+				{#each evidence as item, index}<article class="evidence-card">
+					<label for={`preference-evidence-title-${index}`}>文献标题</label><input id={`preference-evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} />
+					<label for={`preference-evidence-text-${index}`}>片段</label><textarea id={`preference-evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea>
+					{#if canEdit}<button class="evidence-remove" type="button" aria-label={`${$t('taskDatasets.removeEvidence')} ${index + 1}`} title={$t('taskDatasets.removeEvidence')} on:click={() => evidence = evidence.filter((_, i) => i !== index)} disabled={saving || confirming || acting}><Trash2 size={15} aria-hidden="true" /></button>{/if}
+				</article>{:else}<p class="missing">当前候选没有可读证据，不能确认。</p>{/each}
+			</div>
+			{#if canEdit}<button class="evidence-add" type="button" on:click={() => evidence = [...evidence, { document_title: '', text: '' }]} disabled={saving || confirming || acting}><Plus size={15} aria-hidden="true" />{$t('taskDatasets.addEvidence')}</button>{/if}
+			{#if sample.sample.missing_reasons.length}<div class="missing-box"><strong>还需要补充</strong><ul>{#each sample.sample.missing_reasons as reason}<li>{reason}</li>{/each}</ul></div>{/if}
+		</aside>
 	</div>
 {/if}
 
 <style>
+	.evidence-add, .evidence-remove { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); cursor: pointer; }
+	.evidence-add { margin-top: 12px; }
+	.evidence-remove { width: 32px; height: 32px; margin-top: 6px; }
 	.sample-options { margin-top: 24px; border-top: 1px solid var(--border-default); padding-top: 12px; }
 	.sample-options > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 	.sample-options .rebuild-area { border-top: 0; margin-top: 12px; }

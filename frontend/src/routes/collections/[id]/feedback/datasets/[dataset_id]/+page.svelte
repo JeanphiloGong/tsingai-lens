@@ -302,7 +302,7 @@
 	}
 
 	async function saveSample(event: CustomEvent<{ content: RevisionContent }>) {
-		if (!sampleDetail?.sample.current_revision_id || saving || confirming || acting) return;
+		if (!sampleDetail || saving || confirming || acting) return;
 		const generation = loadGeneration;
 		saving = true;
 		editorError = '';
@@ -310,6 +310,7 @@
 		try {
 			await updateDatasetSample(datasetId, sampleDetail.sample.sample_id, {
 				expected_revision_id: sampleDetail.sample.current_revision_id,
+				expected_generation: sampleDetail.sample.generation,
 				content: event.detail.content
 			});
 			await reloadSelected(generation, '修改已保存，请重新确认这个版本。');

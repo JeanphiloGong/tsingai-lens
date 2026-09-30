@@ -125,7 +125,7 @@ class FeedbackAnalysisHandler:
         coverage = build_evidence_coverage(
             messages,
             answer,
-            audit=await _read_chat_coverage_audit(
+            audit=await read_chat_coverage_audit(
                 self.chat_repository,
                 feedback.session_id,
                 messages,
@@ -207,7 +207,7 @@ def _previous_user_question(messages: tuple[ChatMessage, ...], answer: ChatMessa
     return prior[-1] if prior else ""
 
 
-async def _read_chat_coverage_audit(
+async def read_chat_coverage_audit(
     repository: ChatRepository,
     session_id: str,
     messages: tuple[ChatMessage, ...],
@@ -278,4 +278,5 @@ __all__ = [
     "FeedbackAnalysisEngine",
     "FeedbackAnalysisHandler",
     "RuleBasedFeedbackAnalysisEngine",
+    "read_chat_coverage_audit",
 ]

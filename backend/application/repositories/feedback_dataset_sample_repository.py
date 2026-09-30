@@ -66,7 +66,8 @@ class FeedbackDatasetSampleRepository(Protocol):
         self,
         *,
         sample_id: str,
-        expected_revision_id: str,
+        expected_revision_id: str | None,
+        expected_generation: int | None = None,
         revision: SampleRevision,
         updated_at: str,
     ) -> DatasetSample: ...

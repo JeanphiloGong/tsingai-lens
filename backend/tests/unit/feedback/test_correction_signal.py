@@ -192,6 +192,51 @@ async def test_handler_produces_unresolved_candidate_without_inventing_target():
     assert source_ids == (result.signal_id,)
 
 
+async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
+    from tests.unit.feedback.test_source_coverage import _trajectory
+    from application.feedback.preference_sample_builder import PreferenceSampleBuilder, PreferenceBuildCandidate
+    from domain.feedback import Dataset, DatasetSample, FeedbackCase
+    from datetime import datetime, timezone
+
+    source_turn, _, _ = _trajectory(answer_message_id="answer-2", tool_request_message_id="read-after-challenge")
+    original = _messages()
+    messages = original + (
+        replace(source_turn[1], created_at="2026-09-25T00:00:04+00:00"),
+        replace(source_turn[2], created_at="2026-09-25T00:00:05+00:00"),
+        replace(source_turn[3], content="Paper B was preheated at 200 C.",
+                created_at="2026-09-25T00:00:06+00:00"),
+    )
+    result, snapshot, _ = await CorrectionSignalAnalysisHandler(
+        chat_repository=_Chat(messages)
+    ).handle(_job(original))
+    assert snapshot["corrected_answer"] == "Paper B was preheated at 200 C."
+    assert snapshot["corrected_message_id"] == "answer-2"
+    assert "answer-2" in result.related_message_ids
+    assert snapshot["inspected_sources"][0]["quote"] == "The exact passage."
+    now = datetime.now(timezone.utc)
+    dataset = Dataset("fdset-1", "collection-1", "Preference", "preference", {}, 1, "user-1", now, now)
+    sample = DatasetSample.pending(sample_id="sample-1", dataset_id="fdset-1", source_case_id="case-1",
+                                   source_digest="a" * 64, active_job_id="job-1", now=now.isoformat())
+    case = FeedbackCase("case-1", "collection-1", "session-1", "answer-1", (), (), snapshot,
+                        "needs_annotation", now.isoformat(), now.isoformat())
+    built = await PreferenceSampleBuilder().build(dataset=dataset, sample=sample, case=case, annotation=None)
+    assert isinstance(built, PreferenceBuildCandidate)
+    assert built.content.response_b == snapshot["corrected_answer"]
+    assert built.content.human_preference is None
+
+
+async def test_challenge_does_not_link_an_answer_from_a_later_question():
+    original = _messages()
+    messages = original + (
+        ChatMessage.user(message_id="next-question", session_id="session-1", content="Another question",
+                         created_at="2026-09-25T00:00:04+00:00"),
+        ChatMessage.assistant(message_id="next-answer", session_id="session-1", content="Unrelated answer",
+                              created_at="2026-09-25T00:00:05+00:00"),
+    )
+    _, snapshot, _ = await CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages)).handle(_job(original))
+    assert not snapshot.get("corrected_answer")
+
+
 async def test_handler_keeps_selected_context_requested_until_a_read_is_verified():
     selected = ChatSourceContext(
         resource_ref=ChatResourceRef(

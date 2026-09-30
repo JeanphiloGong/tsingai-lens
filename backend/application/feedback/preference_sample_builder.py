@@ -15,7 +15,11 @@ from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.dataset import Dataset
 from domain.feedback.dataset_sample import DatasetSample
 from domain.feedback.feedback_case import FeedbackCase
-from domain.feedback.sample_revision import PreferenceRevisionContent, PreferenceChoice
+from domain.feedback.sample_revision import (
+    PreferenceRevisionContent,
+    PreferenceChoice,
+    strip_internal_references,
+)
 
 
 @dataclass(frozen=True)
@@ -41,24 +45,25 @@ class PreferenceSampleBuilder:
         sample: DatasetSample,
         case: FeedbackCase,
         annotation: FeedbackAnnotation | None,
+        review_note: str | None = None,
     ) -> PreferenceBuildCandidate | PreferenceBuildNeedsInput:
         snapshot = dict(case.context_snapshot or {})
         question = question_from_snapshot(snapshot)
         if not question:
             return PreferenceBuildNeedsInput(("question_missing",))
         sources, source_provenance = readable_sources(snapshot, annotation)
-        response_a = _first_text(
+        response_a = strip_internal_references(_first_text(
             snapshot,
             "response_a",
             "original_answer",
             "answer",
-        )
-        response_b = _first_text(
+        ))
+        response_b = strip_internal_references(_first_text(
             snapshot,
             "response_b",
             "corrected_answer",
             "candidate_target",
-        )
+        ))
         missing: list[str] = []
         if not sources:
             missing.append("readable_evidence_missing")
@@ -94,6 +99,8 @@ class PreferenceSampleBuilder:
             "source_case_id": case.case_id,
             "session_id": case.session_id,
             "anchor_message_id": case.anchor_message_id,
+            "corrected_message_id": snapshot.get("corrected_message_id"),
+            "pairing_basis": snapshot.get("pairing_basis", "same_case_review_input"),
             "source_signal_ids": list(case.source_signal_ids),
             "analysis_result_ids": list(case.analysis_result_ids),
             "signal_analysis_result_ids": list(case.signal_analysis_result_ids),
@@ -114,8 +121,8 @@ def validate_preference(value: Mapping[str, Any]) -> PreferenceRevisionContent:
 
     if value.get("input_digest_a") != value.get("input_digest_b"):
         raise ValueError("preference_inputs_differ")
-    response_a = str(value.get("response_a") or "").strip()
-    response_b = str(value.get("response_b") or "").strip()
+    response_a = strip_internal_references(value.get("response_a"))
+    response_b = strip_internal_references(value.get("response_b"))
     if not response_a or not response_b:
         raise ValueError("preference_response_missing")
     if response_a == response_b:
@@ -127,7 +134,7 @@ def _first_text(snapshot: Mapping[str, Any], *keys: str) -> str:
     for key in keys:
         value = str(snapshot.get(key) or "").strip()
         if value:
-            return value
+            return strip_internal_references(value)
     return ""
 
 
@@ -153,7 +160,7 @@ def _rationale(snapshot: Mapping[str, Any]) -> str:
         analysis.get("rationale") if isinstance(analysis, Mapping) else None,
         analysis.get("reason") if isinstance(analysis, Mapping) else None,
     )
-    return next((str(value).strip() for value in values if str(value or "").strip()), "")
+    return next((strip_internal_references(value) for value in values if str(value or "").strip()), "")
 
 
 __all__ = [

@@ -434,6 +434,7 @@ async def update_dataset_sample(
             dataset_id=dataset_id,
             sample_id=sample_id,
             expected_revision_id=payload.expected_revision_id,
+            expected_generation=payload.expected_generation,
             content=payload.content.model_dump(mode="json"),
         )
     except FileNotFoundError as exc:

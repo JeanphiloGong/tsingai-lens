@@ -166,15 +166,23 @@ This node owns the Collection route family.
 ## Objective Interaction
 
 The maintained feedback dataset page opens a fixed task dataset and shows its
-sample queue. For SFT, the page keeps the question and readable evidence beside
+sample queue. SFT and evaluation candidates are generated from the case's
+readable evidence; preference candidates use the original and corrected
+answers when both exist. For SFT, the page keeps the question and readable evidence beside
 an editable candidate answer; saving appends a human revision and confirming
 binds that exact revision. A stale revision returns a conflict without losing
 the local draft. Users operate on questions, answers, and evidence text; sample,
 case, message, and source identities remain browser request parameters rather
 than visible labels. A reviewer can send a candidate back with a reason, retry
 a failed build, discard a sample, or restore it to an unconfirmed state.
-The queue keeps discarded and incomplete samples reachable for recovery. The
-former snapshot page and download endpoints are not product surfaces after
+The queue keeps discarded and incomplete samples reachable for recovery. All
+three task editors also open for `needs_input` samples without a revision.
+Users can complete a missing question, answer pair or reference and criteria,
+and add or remove readable evidence excerpts. Saving complete input creates
+the first human revision with the loaded generation as a concurrency check;
+confirmation is a separate action. Editing evidence also updates the model's
+context, so the export cannot retain a stale excerpt.
+The former snapshot page and download endpoints are not product surfaces after
 D7; legacy snapshots are read only by the migration script and may remain
 only in an operations archive.
 

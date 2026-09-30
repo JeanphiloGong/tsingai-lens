@@ -148,6 +148,7 @@ from application.repositories.comparison_group_repository import ComparisonGroup
 from application.repositories.experiment_finding_repository import ExperimentFindingRepository
 from application.repositories.transaction import RepositoryTransactionFactory
 from infra.llm.chat_model import OpenAIChatModel
+from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -629,15 +630,16 @@ async def build_application_runtime(
             and feedback_dataset_sample_repository is not None
             and feedback_case_repository is not None
         ):
+            sample_generator = OpenAIFeedbackSampleGenerator()
             dataset_sample_build_worker = DatasetSampleBuildWorker(
                 job_repository=analysis_job_repository,
                 dataset_repository=feedback_dataset_repository,
                 sample_repository=feedback_dataset_sample_repository,
                 case_repository=feedback_case_repository,
                 builders={
-                    "sft": SftSampleBuilder(),
+                    "sft": SftSampleBuilder(generator=sample_generator),
                     "preference": PreferenceSampleBuilder(),
-                    "evaluation": EvaluationSampleBuilder(),
+                    "evaluation": EvaluationSampleBuilder(generator=sample_generator),
                 },
             )
 

@@ -9,11 +9,13 @@ from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.dataset import Dataset
 from domain.feedback.dataset_sample import DatasetSample
 from domain.feedback.feedback_case import FeedbackCase
-from domain.feedback.sample_revision import SftRevisionContent
+from domain.feedback.sample_revision import SftRevisionContent, strip_internal_references
 from application.feedback.sample_builder_support import (
     question_from_snapshot,
     readable_sources,
     snapshot_digest,
+    SampleContentGenerator,
+    generation_missing_reasons,
 )
 
 
@@ -40,18 +42,17 @@ class SftSampleBuilderProtocol(Protocol):
         sample: DatasetSample,
         case: FeedbackCase,
         annotation: FeedbackAnnotation | None,
+        review_note: str | None = None,
     ) -> SftBuildCandidate | SftBuildNeedsInput: ...
 
 
 class SftSampleBuilder:
-    """Turn already persisted evidence coverage into a model-readable sample.
-
-    This first implementation is deterministic.  A provider-backed candidate
-    generator can implement the same protocol later, but it must still use
-    the fixed evidence records and return a candidate for human confirmation.
-    """
+    """Use persisted corrections or generate a grounded candidate for review."""
 
     model_name = "deterministic-evidence-candidate-v1"
+
+    def __init__(self, *, generator: SampleContentGenerator | None = None) -> None:
+        self.generator = generator
 
     async def build(
         self,
@@ -60,6 +61,7 @@ class SftSampleBuilder:
         sample: DatasetSample,
         case: FeedbackCase,
         annotation: FeedbackAnnotation | None,
+        review_note: str | None = None,
     ) -> SftBuildCandidate | SftBuildNeedsInput:
         snapshot = dict(case.context_snapshot or {})
         question = question_from_snapshot(snapshot)
@@ -72,6 +74,19 @@ class SftSampleBuilder:
             missing.append("readable_evidence_missing")
 
         target, target_origin = _candidate_target(snapshot, annotation)
+        generated = False
+        if readable_sources_value and self.generator is not None and (not target or review_note):
+            value = await self.generator.generate(
+                task_type="sft", question=question, context=readable_sources_value,
+                snapshot=snapshot, construction_spec=dataset.construction_spec, review_note=review_note,
+            )
+            reasons = generation_missing_reasons(value)
+            if reasons:
+                return SftBuildNeedsInput(reasons)
+            if not isinstance(value.get("target"), str) or not value["target"].strip():
+                raise ValueError("sample_generation_target_invalid")
+            target, target_origin = value["target"].strip(), "model_candidate"
+            generated = True
         if not target:
             missing.append("candidate_target_missing")
         if missing:
@@ -85,7 +100,7 @@ class SftSampleBuilder:
             evidence=tuple(readable_sources_value),
         )
         provenance = {
-            "builder": self.model_name,
+            "builder": self.generator.model_name if generated else self.model_name,
             "collection_id": dataset.collection_id,
             "dataset_id": dataset.dataset_id,
             "source_case_id": case.case_id,
@@ -108,13 +123,13 @@ def _candidate_target(
     snapshot: Mapping[str, Any], annotation: FeedbackAnnotation | None
 ) -> tuple[str, str]:
     if annotation is not None and annotation.target:
-        return annotation.target.strip(), "human_annotation"
+        return strip_internal_references(annotation.target), "human_annotation"
     for origin, value in (
         ("case_candidate", snapshot.get("candidate_target")),
         ("analysis_candidate", (snapshot.get("analysis") or {}).get("suggested_target")),
         ("corrected_message", snapshot.get("corrected_answer")),
     ):
-        target = str(value or "").strip()
+        target = strip_internal_references(value)
         if target:
             return target, origin
     return "", "missing"

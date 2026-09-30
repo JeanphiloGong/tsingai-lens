@@ -9,7 +9,8 @@ import json
 from typing import Any, Protocol
 from uuid import uuid4
 
-from application.feedback.analysis_handler import AnalysisInputError
+from application.feedback.analysis_handler import AnalysisInputError, read_chat_coverage_audit
+from application.feedback.source_coverage import build_evidence_coverage
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.feedback import (
     CORRECTION_SIGNAL_JOB_TYPE,
@@ -148,20 +149,35 @@ class CorrectionSignalAnalysisHandler:
             content=canonical_trigger_content,
             created_at=trigger.created_at,
         )
-        coverage = _coverage_from_messages(messages, anchor)
+        corrected = None
+        for item in messages[positions[trigger_id] + 1:]:
+            if item.role is ChatMessageRole.USER:
+                break
+            if item.role is ChatMessageRole.ASSISTANT and item.content and not item.tool_calls:
+                if item.session_id != session_id:
+                    raise AnalysisInputError("correction_signal_cross_session")
+                corrected = item
+                break
+        related_end = positions[corrected.message_id] + 1 if corrected else positions[trigger_id] + 1
+        related_messages = messages[:related_end]
+        audit = await read_chat_coverage_audit(self.chat_repository, session_id, related_messages)
+        coverage = build_evidence_coverage(related_messages, anchor, audit=audit)
+        corrected_coverage = build_evidence_coverage(related_messages, corrected, audit=audit) if corrected else None
         draft = await self.engine.analyze(
             signal=signal,
             session=session,
             anchor=anchor,
             trigger=trigger,
-            messages=messages,
+            messages=related_messages,
             coverage=coverage,
         )
         input_payload = {
             "signal": signal.to_record(),
             "anchor": anchor.to_record(),
             "coverage": coverage.to_record(),
-            "related_message_ids": [item.message_id for item in messages[: positions[trigger_id] + 1]],
+            "related_message_ids": [item.message_id for item in related_messages],
+            "corrected_answer": corrected.to_record() if corrected else None,
+            "corrected_coverage": corrected_coverage.to_record() if corrected_coverage else None,
         }
         input_digest = sha256(
             json.dumps(
@@ -183,7 +199,7 @@ class CorrectionSignalAnalysisHandler:
             problem_type=draft.problem_type,  # type: ignore[arg-type]
             confidence=draft.confidence,
             related_message_ids=tuple(
-                item.message_id for item in messages[: positions[trigger_id] + 1]
+                item.message_id for item in related_messages
             ),
             suggested_evidence=draft.suggested_evidence,
             suggested_target=draft.suggested_target,
@@ -197,7 +213,9 @@ class CorrectionSignalAnalysisHandler:
             "answer": anchor.content,
             "correction_signal": signal.to_record(),
             "requested_scope": list(coverage.requested_scope),
-            "inspected_sources": list(coverage.inspected_sources),
+            "inspected_sources": list(coverage.inspected_sources) + (
+                list(corrected_coverage.inspected_sources) if corrected_coverage else []
+            ),
             "omitted_candidates": list(coverage.omitted_candidates),
             "claim_support": list(coverage.claim_support),
             "gaps": list(coverage.gaps),
@@ -207,9 +225,17 @@ class CorrectionSignalAnalysisHandler:
                 "problem_type": result.problem_type,
                 "confidence": result.confidence,
                 "suggested_target": None,
-                "resolution": "unresolved_candidate",
+                "resolution": "correction_response_available" if corrected else "unresolved_candidate",
             },
         }
+        if corrected is not None:
+            context_snapshot.update({
+                "corrected_answer": corrected.content,
+                "corrected_message_id": corrected.message_id,
+                "corrected_evidence_coverage": corrected_coverage.to_record(),
+                "original_message_id": anchor.message_id,
+                "pairing_basis": "same_case_review_input",
+            })
         return result, context_snapshot, (signal.signal_id,)
 
 
@@ -222,55 +248,6 @@ def _previous_user_question(
         if item.role is ChatMessageRole.USER and item.created_at <= answer.created_at
     ]
     return prior[-1] if prior else ""
-
-
-def _coverage_from_messages(
-    messages: tuple[ChatMessage, ...], answer: ChatMessage
-) -> EvidenceCoverage:
-    requested: dict[str, dict[str, Any]] = {}
-    for message in messages:
-        if message.role is not ChatMessageRole.USER or message.created_at > answer.created_at:
-            continue
-        for source in message.source_contexts:
-            record = source.to_record()
-            document_id = str(record.get("document_id") or "")
-            if document_id:
-                requested_key = ":".join(
-                    str(record.get(field) or "")
-                    for field in ("document_id", "source_kind", "source_ref")
-                )
-                requested.setdefault(
-                    requested_key,
-                    {
-                        **record,
-                        "origin": "user_selected_context",
-                        "verified_by_tool": False,
-                    },
-                )
-    requested_scope = tuple(requested.values())
-    omitted = tuple(
-        {
-            **item,
-            "reason": "selected_context_not_verified",
-        }
-        for item in requested_scope
-    )
-    gaps = (
-        (
-            "model Source-read audit is unavailable; selected context is only a "
-            "coverage signal",
-        )
-        if requested_scope
-        else ("no verifiable Source context was recorded",)
-    )
-    return EvidenceCoverage(
-        requested_scope=requested_scope,
-        inspected_sources=(),
-        omitted_candidates=omitted,
-        claim_support=(),
-        gaps=gaps,
-        coverage_status="partial" if requested_scope else "unknown",
-    )
 
 
 __all__ = [

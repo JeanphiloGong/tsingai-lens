@@ -290,3 +290,22 @@ def test_task_dataset_sample_routes_keep_revision_and_confirmation_contract() ->
         )
     )
     assert confirmed.status == "confirmed"
+
+
+def test_first_revision_request_passes_null_revision_and_generation_to_service() -> None:
+    class Service(_Service):
+        async def update_sample(self, **kwargs):
+            assert kwargs["expected_revision_id"] is None
+            assert kwargs["expected_generation"] == 3
+            assert kwargs["user_id"] == "user-1"
+            return _sample()
+
+    payload = SampleRevisionUpdateRequest.model_validate({
+        "expected_revision_id": None,
+        "expected_generation": 3,
+        "content": _revision().content.to_record(),
+    })
+    response = asyncio.run(task_datasets.update_dataset_sample(
+        "fdset_1", "sample-1", payload, _request(Service()),
+    ))
+    assert response.status == "needs_confirmation"

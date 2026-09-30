@@ -226,7 +226,7 @@ export async function fetchDatasetSample(datasetId: string, sampleId: string) {
 export async function updateDatasetSample(
 	datasetId: string,
 	sampleId: string,
-	input: { expected_revision_id: string; content: RevisionContent }
+	input: { expected_revision_id: string | null; expected_generation?: number; content: RevisionContent }
 ) {
 	return (await requestJson(`${samplePath(datasetId)}/${encodeURIComponent(sampleId)}`, {
 		method: 'PATCH',

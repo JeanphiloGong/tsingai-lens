@@ -16,6 +16,7 @@ from domain.feedback import (
     SampleRevision,
     SftRevisionContent,
     content_digest_for,
+    source_digest_for_case,
 )
 
 
@@ -40,8 +41,11 @@ class _Datasets:
 
 
 class _Cases:
+    def __init__(self) -> None:
+        self.case = _case()
+
     async def read_case(self, case_id: str):
-        return _case() if case_id == "case-1" else None
+        return self.case if case_id == "case-1" else None
 
 
 class _Samples:
@@ -107,7 +111,7 @@ def _sample() -> DatasetSample:
         current_revision_id="revision-1",
         confirmed_revision_id=None,
         generation=1,
-        source_digest="a" * 64,
+        source_digest=source_digest_for_case(_case().to_record()),
         active_job_id=None,
         missing_reasons=(),
         created_at="2026-09-29T00:00:00+00:00",
@@ -161,12 +165,12 @@ def _case() -> FeedbackCase:
     )
 
 
-def _service(samples: _Samples) -> FeedbackDatasetService:
+def _service(samples: _Samples, cases: _Cases | None = None) -> FeedbackDatasetService:
     return FeedbackDatasetService(
         repository=_Datasets(),
         collection_service=_Collections(),
         sample_repository=samples,
-        case_repository=_Cases(),
+        case_repository=cases or _Cases(),
     )
 
 
@@ -225,4 +229,49 @@ async def test_confirmation_binds_current_revision_and_stale_edit_is_rejected() 
                 "target": "晚到修改",
                 "evidence": [{"document_title": "文献 A", "text": "原文"}],
             },
+        )
+
+
+@pytest.mark.anyio
+async def test_edit_rejects_sample_when_source_case_digest_changed() -> None:
+    samples = _Samples()
+    cases = _Cases()
+    service = _service(samples, cases)
+    cases.case = replace(
+        cases.case,
+        context_snapshot={**cases.case.context_snapshot, "answer": "更新后的回答"},
+    )
+
+    with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
+        await service.update_sample(
+            user_id="user-1",
+            dataset_id="fdset-1",
+            sample_id="sample-1",
+            expected_revision_id="revision-1",
+            content={
+                "schema_version": "literature-sft.v1",
+                "messages": [{"role": "user", "content": "比较 A、B。"}],
+                "context": [{"document_title": "文献 A", "text": "原文"}],
+                "target": "新的人工回答",
+                "evidence": [{"document_title": "文献 A", "text": "原文"}],
+            },
+        )
+
+
+@pytest.mark.anyio
+async def test_confirmation_rejects_sample_when_source_case_digest_changed() -> None:
+    samples = _Samples()
+    cases = _Cases()
+    service = _service(samples, cases)
+    cases.case = replace(
+        cases.case,
+        context_snapshot={**cases.case.context_snapshot, "answer": "更新后的回答"},
+    )
+
+    with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
+        await service.confirm_sample(
+            user_id="user-1",
+            dataset_id="fdset-1",
+            sample_id="sample-1",
+            expected_revision_id="revision-1",
         )

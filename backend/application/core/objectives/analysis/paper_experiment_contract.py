@@ -1210,13 +1210,6 @@ def assess_draft_readiness(
                 measurement_reasons.append(
                     f"measurement {key} test identity is not exact"
                 )
-            elif (
-                str(test.get("protocol_completeness") or "unknown").casefold()
-                != "complete"
-            ):
-                measurement_reasons.append(
-                    f"measurement {key} test protocol is not complete"
-                )
             elif test.get("outcome_scope") and not _outcome_matches(
                 measurement.get("outcome"),
                 tuple(str(item) for item in test.get("outcome_scope") or ()),
@@ -2481,7 +2474,14 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
         )
         variant_resolution = variant_resolutions.get(variant_key, "unbound")
         test_resolution = test_resolutions.get(test_key, "unbound")
-        protocol_complete = test_resolution == "exact"
+        outcome_scope = tuple(
+            str(item).strip()
+            for item in test_record.get("outcome_scope") or ()
+            if str(item).strip()
+        )
+        outcome_scope_matches = not outcome_scope or _outcome_matches(
+            measurement.get("outcome"), outcome_scope
+        )
         exact = bool(
             variant_key
             and variant_key in variant_keys
@@ -2490,7 +2490,8 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
             and variant_resolution == "exact"
             and variant_refs
             and test_refs
-            and protocol_complete
+            and test_resolution == "exact"
+            and outcome_scope_matches
         )
         scope = dict(measurement.get("measurement_scope") or {})
         resolution = "exact" if exact else (
@@ -2527,8 +2528,10 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
                 "target_ref": f"measurements/{measurement_key}",
                 "description": (
                     "Measurement is retained as a reported fact but is not exact: "
-                    "both result-level edges and a complete applicable protocol are "
-                    "required before strict comparison."
+                    "both result-level binding edges and a concrete, "
+                    "outcome-applicable test identity are required before strict "
+                    "comparison; protocol completeness remains a recorded "
+                    "limitation."
                 ),
                 "binding_resolution": resolution,
             }
@@ -2735,12 +2738,11 @@ def _test_has_concrete_protocol(test: Mapping[str, Any]) -> bool:
 def _test_binding_resolution(
     test: Mapping[str, Any], all_tests: Sequence[Mapping[str, Any]] = ()
 ) -> str:
-    """Classify test identity and protocol completeness conservatively."""
+    """Classify concrete test identity; completeness is diagnostic metadata."""
 
     if not test:
         return "unbound"
     specificity = _normalized_label(test.get("protocol_specificity"))
-    completeness = _normalized_label(test.get("protocol_completeness"))
     category = _normalized_label(test.get("test_type") or test.get("property_type"))
     concrete = _test_has_concrete_protocol(test)
     if not concrete:
@@ -2757,10 +2759,9 @@ def _test_binding_resolution(
         return "ambiguous" if sibling_specific else "category"
     if specificity in {"partial", "unknown", "category", "broad"}:
         return "partial"
-    if completeness != "complete":
-        return "partial"
-    # ``exact`` is accepted only after concrete protocol evidence and complete
-    # applicability are both present.  A model cannot self-certify a category.
+    # ``exact`` requires concrete protocol evidence and an exact specificity
+    # declaration.  Whether the protocol applies to a particular outcome is
+    # checked at the measurement edge; completeness remains a limitation.
     return "exact"
 
 

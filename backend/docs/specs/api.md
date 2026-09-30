@@ -661,6 +661,28 @@ approval. The production Research Agent currently exposes these capabilities:
   document, resolves the authoritative Source catalog and fingerprint, and
   rejects Lens-owned IDs, versions, ownership fields, and validation status in
   the draft. The result is review-only and does not write a PaperExperiment;
+  its input schema requires each experiment's `label` and
+  `scope_description`, each variant's local `variant_key`, paper-reported
+  `variant_label`, and Source labels, and each test condition's local
+  `test_key`, `test_type`, Source labels, and protocol
+  specificity/completeness; reported temperature, rate, duration, and
+  replication values belong in the test condition's structured `parameters`.
+  When the Source explicitly binds that protocol to the experiment, the draft
+  must include `binding_source_labels`. Missing measurement-level binding,
+  non-concrete test identity, or an explicit outcome-scope mismatch prevents
+  that measurement from entering a Selection. Partial or unknown protocol
+  completeness is retained as limitation metadata and does not by itself block
+  a Selection when the identity and result-level binding are sufficient.
+  Each measurement requires a local key, outcome, reported value or result
+  text, and Source labels, and the schema uses typed `comparisons` and
+  `reported_interpretations` records. A comparison must name both local
+  variants, both sides' measurement keys, and its Source-backed binding labels;
+  an interpretation must include its author statement, `kind` (`result_summary`,
+  `mechanism_hypothesis`, or `limitation`), and Source labels. Test conditions
+  expose method, standard, structured parameters, and source-grounded protocol
+  specificity/completeness so the model can report temperature, rate,
+  replication, and other required context. Formal identities, binding/status
+  fields, SourceReference objects, and analysis ownership remain service-owned;
 - `create_paper_experiment_revision` is a separate `write` capability for an
   approved, unchanged PaperExperiment draft. Lens revalidates the draft digest,
   confirmed Objective, active analysis, current Source fingerprint, and user
@@ -1069,11 +1091,13 @@ different specimens merely because they share a group label, or silently
 average repeated measurements.
 
 A partial PaperExperiment revision that has no eligible Objective Selection is
-kept as an archive for later targeted rereading. It is intentionally absent
-from these Selection-based analysis projections, so an incomplete archive
-cannot appear as usable Evidence or a Finding. Such a revision remains
-discoverable through the PaperExperiment repository/document lineage rather
-than through an Objective analysis export.
+kept as an archive for later targeted rereading. A partial revision can still
+have an eligible Selection for a concrete, source-bound Objective slice; only
+the unresolved measurements are absent from these Selection-based projections.
+An incomplete archive without an eligible slice cannot appear as usable
+Evidence or a Finding. Such a revision remains discoverable through the
+PaperExperiment repository/document lineage rather than through an Objective
+analysis export.
 
 These are additive capabilities. Existing route paths, request parameters,
 authentication, task states, and response meanings remain frozen while the

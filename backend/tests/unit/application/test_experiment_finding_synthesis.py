@@ -33,6 +33,8 @@ def _revision(
     alloy: str = "316L",
     factors: tuple[str, ...] = ("preheat",),
     binding_status: str = "bound",
+    protocol_completeness: str = "complete",
+    missing_parameters: tuple[str, ...] = (),
 ) -> PaperExperimentRevision:
     source = {
         "document_id": document_id,
@@ -93,6 +95,8 @@ def _revision(
                             "unit": "C",
                         }
                     ],
+                    "protocol_completeness": protocol_completeness,
+                    "missing_parameters": list(missing_parameters),
                     "binding_status": "direct",
                 }
             ],
@@ -180,6 +184,26 @@ def test_synthesizes_single_study_finding_from_selected_comparison() -> None:
     assert finding.synthesis_status == "single_study"
     assert finding.assertion_strength == "associative"
     assert finding.paper_contributions == ()
+
+
+def test_partial_protocol_remains_eligible_but_limits_finding() -> None:
+    result = _synthesize(
+        (
+            _revision(
+                "experiment-a",
+                "paper-a",
+                protocol_completeness="partial",
+                missing_parameters=("fixture alignment",),
+            ),
+        ),
+        (_selection("experiment-a", "a"),),
+    )
+
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.selection_ids == ("selection-a",)
+    assert finding.certainty == 0.6
+    assert any("protocol" in item.casefold() for item in finding.limitations)
 
 
 def test_groups_aligned_cross_paper_comparisons_and_reports_agreement() -> None:

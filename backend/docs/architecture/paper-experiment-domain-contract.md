@@ -49,12 +49,14 @@ Collection. An Objective selects experiment content through
 - Reported values remain separate from derived differences or trends.
 - Unknown conditions and source conflicts remain explicit; defaults cannot fill
   them.
-- Test identity and protocol completeness are separate. `tensile`, `XRD`, or
+- Test identity and protocol coverage are separate. `tensile`, `XRD`, or
   `mechanical test` can be a category-level fact while missing method
-  parameters keep the measurement out of a protocol-sensitive comparison.
-  A category-level test can therefore be retained for search and audit, but
-  it cannot provide an `exact` test edge; an exact edge requires
-  `protocol_completeness=complete` and result-level binding evidence.
+  identity keeps the measurement out of a protocol-sensitive comparison. A
+  category-level test can therefore be retained for search and audit, but it
+  cannot provide an `exact` test edge. A concrete, outcome-applicable identity
+  with result-level binding evidence is sufficient for an exact edge;
+  `protocol_completeness=partial|unknown` remains recorded limitation metadata
+  and does not by itself block a Selection.
 - A comparison group does not store another copy of measurement values.
 - A Finding can be traced through its selections to a fixed experiment revision
   and Source.
@@ -165,8 +167,10 @@ If a measurement cannot be bound uniquely, its local key is left empty and a
 targeted unresolved issue points to the missing row, caption, footnote, or
 Methods scope. The result may be written to a partial revision and revisited by
 a later bounded reread; it cannot silently become a bound revision. A category-level test
-identity may be stored for search and audit, but `protocol_completeness` remains
-an independent analysis constraint.
+identity may be stored for search and audit, while `protocol_completeness` and
+`missing_parameters` remain source-coverage metadata. An explicit outcome-scope
+mismatch or missing result-level binding still blocks that measurement from a
+Selection.
 
 Table extraction is intentionally narrower: the model returns complete table
 rows (row identity, headers, values, units, and source labels). The service

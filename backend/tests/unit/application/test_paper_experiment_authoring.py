@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 
 import pytest
+from pydantic import ValidationError
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.paper_experiment_authoring import (
@@ -65,6 +66,9 @@ def _draft() -> dict:
         "experiments": [
             {
                 "series_key": "series-a",
+                "label": "Control experiment",
+                "scope_description": "Control treatment measured for the requested outcome.",
+                "design_type": "parallel",
                 "scope_kind": "parent",
                 "experimental_variants": [
                     {
@@ -85,6 +89,7 @@ def _draft() -> dict:
                         "variant_key": "control",
                         "outcome": "outcome",
                         "value": 1,
+                        "result_text": None,
                         "unit": "unit",
                         "source_labels": ["S001"],
                     }
@@ -103,6 +108,11 @@ def test_agent_request_schema_describes_structured_test_parameters() -> None:
     assert "Structured test parameters" in serialized
     assert "strain_rate" in serialized
     assert "test_attributes" in serialized
+    parameters_schema = schema["function"]["parameters"]
+    test_condition_schema = parameters_schema["$defs"][
+        "_PaperExperimentTestConditionToolField"
+    ]
+    assert "protocol_completeness" not in test_condition_schema["required"]
 
     request = PaperExperimentDraftToolRequest(
         objective_id="objective-1",
@@ -111,10 +121,15 @@ def test_agent_request_schema_describes_structured_test_parameters() -> None:
         experiments=[
             {
                 "series_key": "series-a",
+                "label": "Tensile series",
+                "scope_description": "One tensile test condition.",
                 "test_conditions": [
                     {
                         "test_key": "tensile-1",
                         "test_type": "tensile",
+                        "source_labels": ["S001"],
+                        "protocol_specificity": "exact",
+                        "protocol_completeness": "complete",
                         "parameters": [
                             {"name": "temperature", "value": 25, "unit": "C"},
                             {"name": "strain_rate", "value": 0.001, "unit": "1/s"},
@@ -128,6 +143,127 @@ def test_agent_request_schema_describes_structured_test_parameters() -> None:
     assert raw["experiments"][0]["test_conditions"][0]["parameters"][1]["name"] == "strain_rate"
 
 
+def test_agent_request_allows_omitted_protocol_completeness() -> None:
+    draft = deepcopy(_draft())
+    draft["experiments"][0]["test_conditions"].append(
+        {
+            "test_key": "tensile-1",
+            "test_type": "tensile",
+            "source_labels": ["S001"],
+            "protocol_specificity": "exact",
+            "parameters": [],
+        }
+    )
+
+    request = PaperExperimentDraftToolRequest(
+        objective_id="objective-1",
+        document_id="paper-1",
+        **draft,
+    )
+
+    test_condition = request.experiments[0].test_conditions[0]
+    assert test_condition.protocol_completeness == "unknown"
+    assert "protocol_completeness" not in request.raw_draft()["experiments"][0][
+        "test_conditions"
+    ][0]
+
+
+def test_agent_request_schema_describes_the_complete_scientific_graph() -> None:
+    tool_schema = ProposePaperExperimentDraftCapability.spec.model_schema()
+    schema = tool_schema["function"]["parameters"]
+    description = tool_schema["function"]["description"]
+    assert "label and scope_description" in description
+    assert all(
+        phrase in description
+        for phrase in (
+            "statement",
+            "kind (result_summary, mechanism_hypothesis, or limitation)",
+            "source_labels",
+        )
+    )
+    experiment_schema = schema["$defs"]["_PaperExperimentDraftExperimentField"]
+    comparison_schema = schema["$defs"]["_PaperExperimentComparisonToolField"]
+    interpretation_schema = schema[
+        "$defs"
+    ]["_PaperExperimentReportedInterpretationToolField"]
+    measurement_schema = schema["$defs"]["_PaperExperimentMeasurementToolField"]
+
+    assert {"label", "scope_description"}.issubset(experiment_schema["required"])
+    assert "design_type" in experiment_schema["properties"]
+    assert experiment_schema["properties"]["comparisons"]["items"]["$ref"].endswith(
+        "_PaperExperimentComparisonToolField"
+    )
+    assert experiment_schema["properties"]["reported_interpretations"]["items"][
+        "$ref"
+    ].endswith("_PaperExperimentReportedInterpretationToolField")
+    assert comparison_schema["additionalProperties"] is False
+    assert {
+        "comparison_key",
+        "baseline_variant_key",
+        "target_variant_key",
+        "outcome",
+        "baseline_measurement_keys",
+        "target_measurement_keys",
+        "source_labels",
+        "binding_source_labels",
+    }.issubset(comparison_schema["required"])
+    assert interpretation_schema["additionalProperties"] is False
+    assert {"statement", "kind", "source_labels"}.issubset(
+        interpretation_schema["required"]
+    )
+    assert {
+        "measurement_key",
+        "outcome",
+        "value",
+        "result_text",
+        "source_labels",
+    }.issubset(measurement_schema["required"])
+
+
+def test_agent_request_rejects_missing_interpretation_kind_and_experiment_scope() -> None:
+    with pytest.raises(ValidationError):
+        PaperExperimentDraftToolRequest(
+            objective_id="objective-1",
+            document_id="paper-1",
+            experiments=[
+                {
+                    "series_key": "series-a",
+                    "scope_kind": "parent",
+                    "experimental_variants": [],
+                    "test_conditions": [],
+                    "measurements": [],
+                    "comparisons": [],
+                    "reported_interpretations": [
+                        {"statement": "The treatment improved the outcome.", "source_labels": ["S001"]}
+                    ],
+                }
+            ],
+        )
+
+
+def test_agent_request_rejects_measurement_without_a_reported_result() -> None:
+    with pytest.raises(ValidationError, match="measurement requires value or result_text"):
+        PaperExperimentDraftToolRequest(
+            objective_id="objective-1",
+            document_id="paper-1",
+            experiments=[
+                {
+                    "label": "Tensile series",
+                    "scope_description": "One tensile test condition.",
+                    "measurements": [
+                        {
+                            "measurement_key": "m1",
+                            "outcome": "elongation",
+                            "value": None,
+                            "result_text": None,
+                            "source_labels": ["S001"],
+                        }
+                    ],
+                }
+            ],
+        )
+
+
 @pytest.mark.anyio
 async def test_agent_request_parameters_survive_authoring_prepare() -> None:
     draft = deepcopy(_draft())
@@ -135,6 +271,9 @@ async def test_agent_request_parameters_survive_authoring_prepare() -> None:
         {
             "test_key": "tensile-1",
             "test_type": "tensile",
+            "source_labels": ["S001"],
+            "protocol_specificity": "exact",
+            "protocol_completeness": "complete",
             "parameters": [
                 {"name": "temperature", "value": 25, "unit": "C"},
                 {"name": "strain_rate", "value": 0.001, "unit": "1/s"},

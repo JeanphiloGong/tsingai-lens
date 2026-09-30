@@ -188,6 +188,9 @@ def _selected_study(
     test_types = frozenset(
         _normalize_term(item.test_type) for item in tests if _normalize_term(item.test_type)
     )
+    incomplete_protocol = any(
+        item.protocol_completeness.casefold() != "complete" for item in tests
+    )
     variants = _comparison_variants(revision, selected)
     subject_values = _attribute_values(
         attribute
@@ -209,6 +212,14 @@ def _selected_study(
             *selection.missing_context,
             *(reason for item in selected for reason in item.reasons),
             *_attribution_limitations(attribution_scope),
+            *(
+                (
+                    "Test protocol has unreported parameters; the Finding is "
+                    "limited to the reported outcome and conditions.",
+                )
+                if incomplete_protocol
+                else ()
+            ),
         )
     )
     incomplete = bool(
@@ -217,6 +228,7 @@ def _selected_study(
         or not units
         or not test_types
         or not subject_values
+        or incomplete_protocol
     )
     return _SelectedStudy(
         selection=selection,

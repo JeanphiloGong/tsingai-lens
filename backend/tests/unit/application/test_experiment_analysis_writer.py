@@ -519,6 +519,45 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
     assert len(analyses.graphs) == 2
 
 
+async def test_writer_keeps_selection_for_exact_partial_protocol() -> None:
+    """A concrete protocol may remain partial without blocking this slice."""
+
+    writer, _, _ = _writer()
+    base = _draft_output("paper-a")
+    payload = deepcopy(base.output.experiments[0].payload)
+    payload["test_conditions"][0].update(
+        {
+            "protocol_completeness": "partial",
+            "missing_parameters": ["fixture alignment"],
+        }
+    )
+    experiment = reconcile_model_output(
+        PaperExperimentModelOutput.from_mapping(
+            {
+                "document_id": base.output.document_id,
+                "source_fingerprint": base.output.source_fingerprint,
+                "source_labels": base.output.source_labels,
+                "experiments": [payload],
+            }
+        ),
+        accepted_experiment_keys=("series-1",),
+    )
+
+    result = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(experiment,),
+    )
+
+    assert len(result.revisions) == 1
+    assert len(result.selections) == 1
+    assert len(result.findings) == 1
+    test_condition = result.revisions[0].revision.test_conditions[0]
+    assert test_condition.protocol_completeness == "partial"
+    assert test_condition.missing_parameters == ("fixture alignment",)
+
+
 async def test_single_experiment_writer_commits_revision_and_selection_only():
     writer, revisions, analyses = _writer()
     result = await writer.write_single_experiment_revision(

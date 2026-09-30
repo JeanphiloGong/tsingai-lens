@@ -65,6 +65,13 @@ numbers, `SourceReference` records, or final `binding_status`, `direction`,
 validation. A model-provided `identity_specificity=exact` or
 `protocol_completeness=complete` is advisory and cannot promote a broad label.
 
+`protocol_completeness` and `missing_parameters` record how much protocol
+coverage the Source provides. `partial` or `unknown` coverage alone does not
+block an Objective Selection. A measurement still needs a concrete sample and
+test identity, Source-backed variant and test binding edges, and an explicit
+`outcome_scope` (when present) that includes the reported outcome. Missing
+protocol details remain visible as a limitation on the resulting Finding.
+
 The gates are intentionally separate:
 
 1. **Content gate:** a reported result has a value/text and a reviewable Source.
@@ -89,9 +96,10 @@ other `*_id`/`*_ids` field remain prohibited outside those maps; the service
 still allocates all formal IDs after the source and boundary gates.
 
 Failure at a gate is visible. The revision can retain an auditable partial
-archive, but it cannot create a strict selection or Finding from the blocked
-content. A provider or parser failure is recorded as a technical failure and is
-retryable; it is never converted into scientific absence.
+archive, and an exact source-bound subset may still create a Selection and
+Finding; the blocked measurements remain out of that slice. A provider or
+parser failure is recorded as a technical failure and is retryable; it is never
+converted into scientific absence.
 
 ## Handling Known Extraction Failures
 

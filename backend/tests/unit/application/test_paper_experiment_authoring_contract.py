@@ -785,6 +785,148 @@ def test_split_binding_sources_are_merged_and_mark_exact_revision_bound() -> Non
     assert revision.measurements[0].binding_status == "direct"
 
 
+def _readiness_output(
+    *,
+    protocol_completeness: str = "complete",
+    missing_parameters: list[str] | None = None,
+    outcome_scope: list[str] | None = None,
+    include_test_binding: bool = True,
+):
+    """Build one objective-ready draft with a concrete, source-bound test.
+
+    Protocol completeness is deliberately varied independently from test
+    identity.  A source can identify an applicable tensile protocol while
+    leaving a non-essential parameter unreported; the objective gate should
+    retain that limitation without discarding an otherwise closed result.
+    """
+
+    payload = _output_payload()
+    experiment = payload["experiments"][0]
+    experiment["scope_kind"] = "parent"
+    test = experiment["test_conditions"][0]
+    test.update(
+        {
+            "method": "uniaxial tensile test",
+            "standard": "ASTM E8/E8M",
+            "protocol_specificity": "exact",
+            "protocol_completeness": protocol_completeness,
+            "outcome_scope": outcome_scope or ["elongation"],
+            "binding_source_labels": ["methods"],
+        }
+    )
+    if missing_parameters is not None:
+        test["missing_parameters"] = missing_parameters
+    for measurement in experiment["measurements"]:
+        measurement["variant_binding_source_labels"] = ["methods"]
+        if include_test_binding:
+            measurement["test_binding_source_labels"] = ["methods"]
+    experiment["comparisons"] = [
+        {
+            "comparison_key": "preheat-comparison",
+            "baseline_variant_key": "np",
+            "target_variant_key": "p150",
+            "outcome": "elongation",
+            "baseline_measurement_keys": ["np-elongation"],
+            "target_measurement_keys": ["p150-elongation"],
+            "changed_variables": [
+                {
+                    "name": "preheating",
+                    "baseline_value": 0,
+                    "target_value": 150,
+                    "unit": "C",
+                }
+            ],
+            "source_labels": ["table"],
+        }
+    ]
+    return _reconciled_output(payload)
+
+
+def _readiness_objective(*, outcome: str = "elongation") -> ResearchObjective:
+    return ResearchObjective.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "question": "Does preheating affect the reported outcome?",
+            "material_scope": ["316L"],
+            "variables": ["preheating"],
+            "outcomes": [outcome],
+            "confidence": 1.0,
+        }
+    )
+
+
+@pytest.mark.parametrize("protocol_completeness", ["partial", "unknown"])
+def test_readiness_allows_incomplete_protocol_when_identity_and_scope_are_exact(
+    protocol_completeness: str,
+) -> None:
+    """Unreported optional parameters remain metadata, not a global block."""
+
+    readiness = assess_draft_readiness(
+        _readiness_output(
+            protocol_completeness=protocol_completeness,
+            missing_parameters=["fixture alignment"],
+        ),
+        objective=_readiness_objective(),
+    )
+
+    assert readiness.ready
+    assert readiness.selected_measurement_keys == (
+        "np-elongation",
+        "p150-elongation",
+    )
+    assert readiness.selected_comparison_keys == ("preheat-comparison",)
+
+    revision = bind_model_output(
+        _readiness_output(
+            protocol_completeness=protocol_completeness,
+            missing_parameters=["fixture alignment"],
+        ),
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+    assert revision.binding_status == "bound"
+    assert all(item.binding_status == "direct" for item in revision.measurements)
+
+
+def test_readiness_requires_measurement_test_binding_even_with_exact_protocol() -> None:
+    readiness = assess_draft_readiness(
+        _readiness_output(include_test_binding=False),
+        objective=_readiness_objective(),
+    )
+
+    assert not readiness.ready
+    assert any(
+        "test_binding_source_labels" in item for item in readiness.missing_context
+    )
+
+
+def test_readiness_rejects_measurement_outside_test_outcome_scope() -> None:
+    output = _readiness_output(outcome_scope=["yield_strength"])
+    readiness = assess_draft_readiness(
+        output,
+        objective=_readiness_objective(),
+    )
+
+    assert not readiness.ready
+    assert any(
+        "outside its test outcome scope" in item
+        for item in readiness.missing_context
+    )
+
+    revision = bind_model_output(
+        output,
+        experiment_ids=["exp-1"],
+        experiment_versions=[1],
+        document_id="doc-1",
+        source_fingerprint="prep-1",
+    )[0]
+    assert revision.binding_status == "partial"
+    assert all(item.binding_status == "uncertain" for item in revision.measurements)
+
+
 def test_split_evidence_and_scope_metadata_survive_revision_binding() -> None:
     payload = _output_payload()
     experiment = payload["experiments"][0]

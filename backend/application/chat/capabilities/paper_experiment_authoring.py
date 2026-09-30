@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from hashlib import sha256
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
 from application.core.objectives.paper_experiment_authoring_service import (
@@ -41,13 +41,42 @@ class _ScientificAttributeToolField(BaseModel):
     )
 
 
+class _ScientificVariableToolField(BaseModel):
+    """A source-reported factor that differs between comparison sides."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(
+        min_length=1,
+        description="Changed factor name, such as preheating or dose.",
+    )
+    baseline_value: str | int | float | bool | None = Field(
+        default=None,
+        description="Source-reported value for the baseline variant, if stated.",
+    )
+    target_value: str | int | float | bool | None = Field(
+        default=None,
+        description="Source-reported value for the target variant, if stated.",
+    )
+    unit: str | None = Field(
+        default=None,
+        description="Unit shared by the reported baseline and target values, if any.",
+    )
+
+
 class _PaperExperimentVariantToolField(BaseModel):
     """One response-local experimental variant; extra scientific fields are allowed."""
 
     model_config = ConfigDict(extra="allow")
 
-    variant_key: str | None = Field(default=None, description="Response-local variant key.")
-    variant_label: str | None = Field(default=None, description="Human-readable variant label.")
+    variant_key: str = Field(
+        min_length=1,
+        description="Required response-local key used by measurements and comparisons.",
+    )
+    variant_label: str = Field(
+        min_length=1,
+        description="Required paper-reported label for this object or group.",
+    )
     subject_attributes: list[_ScientificAttributeToolField] = Field(
         default_factory=list,
         description="Material, specimen, or population attributes reported for this variant.",
@@ -60,6 +89,45 @@ class _PaperExperimentVariantToolField(BaseModel):
         default_factory=list,
         description="Other source-reported state attributes for this variant.",
     )
+    population_scope: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional paper-reported population or specimen scope. Keep paper-native "
+            "identifiers inside reported_identifiers; do not put Lens IDs here."
+        ),
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the variant identity or attributes.",
+    )
+    binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels that explicitly bind this variant to its experiment scope; "
+            "leave empty only when that relationship is not stated."
+        ),
+    )
+    identity_specificity: Literal[
+        "exact", "partial", "category", "broad", "unknown"
+    ] = Field(
+        default="unknown",
+        description=(
+            "Source-grounded identity detail: exact only when the paper distinguishes "
+            "this object/group from its peers; otherwise partial or unknown."
+        ),
+    )
+    missing_dimensions: list[str] = Field(
+        default_factory=list,
+        description="Identity dimensions the source leaves unresolved.",
+    )
+    identity_evidence: list[str] = Field(
+        default_factory=list,
+        description="Short source-grounded notes explaining the identity classification.",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Other source-grounded limitations for this variant.",
+    )
 
 
 class _PaperExperimentTestConditionToolField(BaseModel):
@@ -67,7 +135,10 @@ class _PaperExperimentTestConditionToolField(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    test_key: str | None = Field(default=None, description="Response-local test key.")
+    test_key: str = Field(
+        min_length=1,
+        description="Required response-local key used by measurements.",
+    )
     test_type: str = Field(
         min_length=1,
         description="Test or characterization category, such as tensile or microscopy.",
@@ -86,18 +157,221 @@ class _PaperExperimentTestConditionToolField(BaseModel):
         default_factory=list,
         description="Outcome labels measured or characterized by this test.",
     )
+    population_scope: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional paper-reported scope of objects to which this protocol applies.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the test identity, method, or parameters.",
+    )
+    binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels that explicitly connect this test protocol to the reported "
+            "experiment scope; leave empty when that relationship is not stated."
+        ),
+    )
+    protocol_specificity: Literal[
+        "exact", "partial", "category", "broad", "unknown"
+    ] = Field(
+        description=(
+            "Source-grounded protocol identity: exact only for a concrete method or "
+            "standard, not a category such as 'mechanical test'."
+        ),
+    )
+    protocol_completeness: Literal["complete", "partial", "unknown"] = Field(
+        default="unknown",
+        description=(
+            "Source coverage for the listed outcomes: complete when the reported "
+            "protocol details are sufficient for interpretation, partial when details "
+            "are missing, or unknown when coverage cannot be determined. This is "
+            "diagnostic metadata; do not invent missing parameters."
+        ),
+    )
+    missing_parameters: list[str] = Field(
+        default_factory=list,
+        description="Protocol parameters needed for interpretation but absent from the source.",
+    )
+    protocol_evidence: list[str] = Field(
+        default_factory=list,
+        description="Short source-grounded notes supporting protocol specificity/completeness.",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Other source-grounded limitations for this test condition.",
+    )
 
 
 class _PaperExperimentMeasurementToolField(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
-    measurement_key: str | None = Field(default=None, description="Response-local measurement key.")
+    measurement_key: str = Field(
+        min_length=1,
+        description="Required response-local key used by comparisons and interpretations.",
+    )
     variant_key: str | None = Field(default=None, description="Response-local variant key, when known.")
     test_key: str | None = Field(default=None, description="Response-local test key, when known.")
     outcome: str = Field(min_length=1, description="Measured or observed outcome label.")
-    value: str | int | float | bool | None = Field(default=None, description="Reported value, if numeric or scalar.")
+    value: str | int | float | bool | None = Field(
+        description="Reported scalar value; use null when the result is qualitative.",
+    )
     unit: str | None = Field(default=None, description="Reported measurement unit.")
-    result_text: str | None = Field(default=None, description="Reported qualitative result when no scalar value exists.")
+    result_text: str | None = Field(
+        description="Verbatim qualitative result; use null when value is populated.",
+    )
+    statistics: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Reported statistics such as error, range, or n. Keep the source's "
+            "statistical meaning; do not turn n into a separate measurement."
+        ),
+    )
+    measurement_scope: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Reported scope such as specimen/group, replicate, time, or location. "
+            "Keep paper-native identifiers inside reported_identifiers."
+        ),
+    )
+    result_kind: Literal["measured", "observed", "simulated", "predicted", "unknown"] = Field(
+        default="measured",
+        description="Nature of the reported result; use observed for qualitative observations.",
+    )
+    reported_sample_label: str | None = Field(
+        default=None,
+        description="Verbatim sample/row wording when variant_key is unresolved.",
+    )
+    reported_test_label: str | None = Field(
+        default=None,
+        description="Verbatim test/method wording when test_key is unresolved.",
+    )
+    candidate_variant_keys: list[str] = Field(
+        default_factory=list,
+        description="Possible local variant keys when exact result ownership is unresolved.",
+    )
+    candidate_test_keys: list[str] = Field(
+        default_factory=list,
+        description="Possible local test keys when exact protocol ownership is unresolved.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the reported value or result text.",
+    )
+    variant_binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels proving this result belongs to variant_key. Required for "
+            "exact binding; leave empty when the source only gives a broad scope."
+        ),
+    )
+    test_binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sxxx labels proving this result was obtained under test_key. Required "
+            "for exact binding; leave empty when the source does not connect them."
+        ),
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Other source-grounded limitations for this measurement.",
+    )
+
+    @model_validator(mode="after")
+    def _require_reported_result(self) -> "_PaperExperimentMeasurementToolField":
+        if self.value is None and not self.result_text:
+            raise ValueError("measurement requires value or result_text")
+        return self
+
+
+class _PaperExperimentComparisonToolField(BaseModel):
+    """One typed same-paper comparison between two local variants."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    comparison_key: str = Field(
+        min_length=1,
+        description="Required response-local comparison key.",
+    )
+    baseline_variant_key: str = Field(
+        min_length=1,
+        description="Local key of the baseline/control variant.",
+    )
+    target_variant_key: str = Field(
+        min_length=1,
+        description="Local key of the target/treated variant.",
+    )
+    outcome: str = Field(
+        min_length=1,
+        description="One outcome shared by both comparison sides.",
+    )
+    baseline_measurement_keys: list[str] = Field(
+        min_length=1,
+        description="Local measurement keys reported for the baseline side.",
+    )
+    target_measurement_keys: list[str] = Field(
+        min_length=1,
+        description="Local measurement keys reported for the target side.",
+    )
+    changed_variables: list[_ScientificVariableToolField] = Field(
+        default_factory=list,
+        description=(
+            "Factors that differ between the two sides. Include every jointly changed "
+            "factor; do not claim isolated causation from one difference alone."
+        ),
+    )
+    matched_conditions: list[_ScientificAttributeToolField] = Field(
+        default_factory=list,
+        description="Conditions the source explicitly holds equal on both sides.",
+    )
+    reported_statement: str | None = Field(
+        default=None,
+        description="Optional verbatim author statement about this comparison.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels supporting the comparison or author statement.",
+    )
+    binding_source_labels: list[str] = Field(
+        min_length=1,
+        description=(
+            "Sxxx labels proving that the referenced measurements form this comparison; "
+            "do not use a model-local key as evidence."
+        ),
+    )
+
+
+class _PaperExperimentReportedInterpretationToolField(BaseModel):
+    """A paper author's interpretation, kept separate from a Lens Finding."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    interpretation_key: str | None = Field(
+        default=None,
+        description="Optional response-local key for referring to this interpretation.",
+    )
+    statement: str = Field(
+        min_length=1,
+        description="The author's source-grounded statement, not a Lens-generated Finding.",
+    )
+    kind: Literal["result_summary", "mechanism_hypothesis", "limitation"] = Field(
+        description=(
+            "Interpretation type: result_summary, mechanism_hypothesis, or limitation. "
+            "This field is required even when the statement is short."
+        ),
+    )
+    measurement_keys: list[str] = Field(
+        default_factory=list,
+        description="Local measurements discussed by the author's statement.",
+    )
+    comparison_keys: list[str] = Field(
+        default_factory=list,
+        description="Local comparisons discussed by the author's statement.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1,
+        description="Sxxx labels containing the author's statement.",
+    )
 
 
 class _PaperExperimentDraftExperimentField(BaseModel):
@@ -105,8 +379,53 @@ class _PaperExperimentDraftExperimentField(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    label: str = Field(
+        min_length=1,
+        description="Required human-readable name for this experiment series.",
+    )
+    scope_description: str = Field(
+        min_length=1,
+        description=(
+            "Required boundary description: which variants, tests, outcomes, and "
+            "paper scope this experiment covers."
+        ),
+    )
     series_key: str | None = Field(default=None, description="Response-local experiment series key.")
-    scope_kind: str | None = Field(default=None, description="Experiment scope, such as parent or unknown.")
+    scope_kind: Literal[
+        "parent",
+        "matrix",
+        "selected_stratum",
+        "follow_up",
+        "physical_split",
+        "split",
+        "independent",
+        "unknown",
+    ] = Field(
+        default="unknown",
+        description=(
+            "Boundary category for this response-local experiment. Use parent for the "
+            "main paper series; use unknown when the source does not establish a boundary."
+        ),
+    )
+    parent_series_key: str | None = Field(
+        default=None,
+        description="Prior response-local parent key for selected_stratum or follow_up scopes.",
+    )
+    scope_selector: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Optional source-grounded selector for a selected/follow-up scope, such as "
+            "selected_levels, fixed_attributes, or test_scope_labels."
+        ),
+    )
+    split_evidence: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Source-label records supporting an independent physical split.",
+    )
+    design_type: Literal["parallel", "factorial", "dose_response", "observational", "unknown"] = Field(
+        default="unknown",
+        description="Paper-supported design shape; use unknown when the design is not stated.",
+    )
     experimental_variants: list[_PaperExperimentVariantToolField] = Field(
         default_factory=list,
         description="Variants or groups reconstructed from the paper.",
@@ -123,13 +442,19 @@ class _PaperExperimentDraftExperimentField(BaseModel):
         default_factory=list,
         description="Source-reported measurements or qualitative observations.",
     )
-    comparisons: list[dict[str, Any]] = Field(
+    comparisons: list[_PaperExperimentComparisonToolField] = Field(
         default_factory=list,
-        description="Within-paper comparisons using response-local keys and source labels.",
+        description=(
+            "Typed within-paper comparisons. Every comparison must name both local "
+            "variants, both sides' measurement keys, and source-backed relation labels."
+        ),
     )
-    reported_interpretations: list[dict[str, Any]] = Field(
+    reported_interpretations: list[_PaperExperimentReportedInterpretationToolField] = Field(
         default_factory=list,
-        description="Source-reported interpretations, kept distinct from Lens Findings.",
+        description=(
+            "Typed paper-author interpretations. Always provide statement, kind, and "
+            "source labels; these are not Lens Findings."
+        ),
     )
     source_labels: list[str] = Field(default_factory=list, description="Sxxx labels supporting this experiment.")
     unresolved_issues: list[dict[str, Any]] = Field(default_factory=list, description="Unknown or unresolved source facts.")
@@ -183,9 +508,26 @@ class ProposePaperExperimentDraftCapability:
             "Validate a source-grounded PaperExperiment draft after reading the "
             "complete Sources for one paper. Use only response-local experiment, "
             "variant, test, measurement and comparison keys plus supplied Sxxx "
-            "source labels. This is a review-only draft; do not include formal IDs, "
-            "fingerprints, versions, collection IDs, or objective IDs inside the "
-            "scientific payload. The draft does not write a PaperExperiment."
+            "source labels. Each experiment must provide label and scope_description; "
+            "each variant must provide variant_key, variant_label, and source_labels; "
+            "each test condition must provide test_key, test_type, source_labels, "
+            "and protocol_specificity, and should provide protocol_completeness when "
+            "the Source supports that assessment, with temperature, "
+            "rate, duration, replication, and other reported protocol values in "
+            "parameters. When a Source explicitly binds the test protocol to this "
+            "experiment, include binding_source_labels; mark completeness partial "
+            "when details are absent and list them in missing_parameters; incomplete "
+            "coverage is retained as a limitation and does not by itself prevent "
+            "Selection when the protocol identity, outcome scope, and measurement "
+            "binding edges are sufficient; "
+            "each comparison must provide both variant keys, both measurement-key "
+            "lists, outcome, source_labels, and binding_source_labels; each reported "
+            "interpretation must provide statement, kind (result_summary, "
+            "mechanism_hypothesis, or limitation), and source_labels. "
+            "Measurements must provide a local key, outcome, value or result_text, "
+            "and source_labels. This is a review-only draft; do not include formal "
+            "IDs, fingerprints, versions, collection IDs, or objective IDs inside "
+            "the scientific payload. The draft does not write a PaperExperiment."
         ),
         risk=ToolRisk.DRAFT,
         input_model=PaperExperimentDraftToolRequest,

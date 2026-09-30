@@ -106,9 +106,16 @@ _DRAFT_SCHEMA_HINT: dict[str, Any] = {
                 {
                     "test_key": None,
                     "test_type": "paper-reported method",
+                    "method": "reported method or instrument",
+                    "standard": "reported standard, if any",
                     "parameters": [],
+                    "outcome_scope": ["requested outcome"],
                     "source_labels": ["S001"],
                     "binding_source_labels": ["S001"],
+                    "protocol_specificity": "exact",
+                    "protocol_completeness": "partial",
+                    "missing_parameters": [],
+                    "protocol_evidence": [],
                 }
             ],
             "measurements": [

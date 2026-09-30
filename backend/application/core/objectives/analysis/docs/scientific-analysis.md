@@ -180,14 +180,17 @@ bind_model_output runs only on a ReconciledPaperExperimentOutput. It:
 An exact measurement requires all of the following:
 
 1. a local sample key and a concrete, non-ambiguous sample identity;
-2. a local test key and a concrete, complete, outcome-applicable protocol;
+2. a local test key and a concrete, outcome-applicable protocol identity;
 3. a result Source reference; and
 4. a distinct Source-backed binding edge for the sample and test.
 
 Missing one edge, a generic category-only test, duplicate sample labels, or
-missing protocol dimensions yields uncertain/partial, not direct. A revision is
-bound only when its measurements satisfy the binding rules; a revision with
-retained but unresolved measurements is partial.
+an explicit outcome-scope mismatch yields uncertain/partial, not direct. The
+`protocol_completeness` and `missing_parameters` fields remain source-coverage
+metadata: a concrete protocol can be selected with partial or unknown coverage,
+but the resulting Finding carries that limitation. A revision is bound only
+when its measurements satisfy the binding rules; a revision with retained but
+unresolved measurements is partial.
 
 Paper-native identifiers are preserved without becoming Lens identities. The
 Draft may carry a domain-specific name such as `stimulus_id`, `condition_id`,
@@ -255,10 +258,12 @@ and writes immutable revisions atomically. It does not copy legacy Evidence into
 the new graph.
 
 Ready experiment outputs can produce ObjectiveExperimentSelection records.
-Partial outputs are persisted for audit but do not create selections. Selection
-is per Objective slice: unrelated partial measurements in the same revision do
-not block a ready, exact slice, and a broad measurement cannot enter merely
-because another result in the revision is ready.
+Partial outputs are persisted for audit and may also create selections for an
+exact, source-bound Objective slice. Selection is per Objective slice:
+unresolved measurements in the same revision do not block a ready slice, and a
+broad measurement cannot enter merely because another result in the revision is
+ready. Partial or unknown protocol coverage remains visible as a Finding
+limitation.
 
 ## 9. Finding synthesis
 

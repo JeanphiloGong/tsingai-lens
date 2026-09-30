@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from hashlib import sha256
 import json
-from typing import Any, Protocol
+import re
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from application.feedback.analysis_handler import AnalysisInputError, read_chat_coverage_audit
@@ -29,6 +30,8 @@ class CorrectionSignalAnalysisDraft:
     confidence: float
     suggested_evidence: tuple[str, ...]
     suggested_target: str | None
+    task_relation: Literal["same_task", "different_task", "uncertain"] = "uncertain"
+    task_relation_reason: str = ""
 
 
 class CorrectionSignalAnalysisEngine(Protocol):
@@ -72,6 +75,8 @@ class RuleBasedCorrectionSignalAnalysisEngine:
             # A user challenge is not a verified corrected answer.  Human
             # annotation must supply a target before any dataset use.
             suggested_target=None,
+            task_relation=_rule_task_relation(_previous_user_question(messages, anchor), trigger.content),
+            task_relation_reason="Conservative correction-only rule; ambiguous instructions require review.",
         )
 
 
@@ -149,28 +154,39 @@ class CorrectionSignalAnalysisHandler:
             content=canonical_trigger_content,
             created_at=trigger.created_at,
         )
+        original_question = _previous_user_question(messages, anchor)
+        challenge_messages = messages[:positions[trigger_id] + 1]
+        audit = await read_chat_coverage_audit(self.chat_repository, session_id, challenge_messages)
+        coverage = build_evidence_coverage(challenge_messages, anchor, audit=audit)
+        draft = await self.engine.analyze(
+            signal=signal, session=session, anchor=anchor, trigger=trigger,
+            messages=challenge_messages, coverage=coverage,
+        )
+        if draft.task_relation not in {"same_task", "different_task", "uncertain"}:
+            raise ValueError("correction_signal_task_relation_invalid")
+        task_relation = draft.task_relation if original_question.strip() else "uncertain"
+        same_task = task_relation == "same_task"
         corrected = None
-        for item in messages[positions[trigger_id] + 1:]:
-            if item.role is ChatMessageRole.USER:
-                break
-            if item.role is ChatMessageRole.ASSISTANT and item.content and not item.tool_calls:
-                if item.session_id != session_id:
-                    raise AnalysisInputError("correction_signal_cross_session")
-                corrected = item
-                break
+        if same_task:
+            for item in messages[positions[trigger_id] + 1:]:
+                if item.role is ChatMessageRole.USER:
+                    break
+                if item.role is ChatMessageRole.ASSISTANT and item.content and not item.tool_calls:
+                    if item.session_id != session_id:
+                        raise AnalysisInputError("correction_signal_cross_session")
+                    corrected = item
+                    break
         related_end = positions[corrected.message_id] + 1 if corrected else positions[trigger_id] + 1
         related_messages = messages[:related_end]
         audit = await read_chat_coverage_audit(self.chat_repository, session_id, related_messages)
         coverage = build_evidence_coverage(related_messages, anchor, audit=audit)
         corrected_coverage = build_evidence_coverage(related_messages, corrected, audit=audit) if corrected else None
-        draft = await self.engine.analyze(
-            signal=signal,
-            session=session,
-            anchor=anchor,
-            trigger=trigger,
-            messages=related_messages,
-            coverage=coverage,
-        )
+        pairing_assessment = {
+            "task_relation": task_relation,
+            "reason": draft.task_relation_reason,
+            "original_question": original_question,
+            "followup": canonical_trigger_content,
+        }
         input_payload = {
             "signal": signal.to_record(),
             "anchor": anchor.to_record(),
@@ -178,6 +194,7 @@ class CorrectionSignalAnalysisHandler:
             "related_message_ids": [item.message_id for item in related_messages],
             "corrected_answer": corrected.to_record() if corrected else None,
             "corrected_coverage": corrected_coverage.to_record() if corrected_coverage else None,
+            "pairing_assessment": pairing_assessment,
         }
         input_digest = sha256(
             json.dumps(
@@ -209,9 +226,10 @@ class CorrectionSignalAnalysisHandler:
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         context_snapshot = {
-            "question": _previous_user_question(messages, anchor),
+            "question": original_question,
             "answer": anchor.content,
             "correction_signal": signal.to_record(),
+            "pairing_assessment": pairing_assessment,
             "requested_scope": list(coverage.requested_scope),
             "inspected_sources": list(coverage.inspected_sources) + (
                 list(corrected_coverage.inspected_sources) if corrected_coverage else []
@@ -225,7 +243,15 @@ class CorrectionSignalAnalysisHandler:
                 "problem_type": result.problem_type,
                 "confidence": result.confidence,
                 "suggested_target": None,
-                "resolution": "correction_response_available" if corrected else "unresolved_candidate",
+                "resolution": (
+                    "correction_response_available"
+                    if corrected
+                    else "unresolved_candidate"
+                    if same_task
+                    else "task_scope_changed"
+                    if task_relation == "different_task"
+                    else "task_scope_uncertain"
+                ),
             },
         }
         if corrected is not None:
@@ -234,7 +260,8 @@ class CorrectionSignalAnalysisHandler:
                 "corrected_message_id": corrected.message_id,
                 "corrected_evidence_coverage": corrected_coverage.to_record(),
                 "original_message_id": anchor.message_id,
-                "pairing_basis": "same_case_review_input",
+                "corrected_question": original_question,
+                "pairing_basis": "task_scope_assessed_review_input",
             })
         return result, context_snapshot, (signal.signal_id,)
 
@@ -242,12 +269,52 @@ class CorrectionSignalAnalysisHandler:
 def _previous_user_question(
     messages: tuple[ChatMessage, ...], answer: ChatMessage
 ) -> str:
+    answer_position = next(
+        (index for index, item in enumerate(messages) if item.message_id == answer.message_id), 0
+    )
     prior = [
         item.content
-        for item in messages
-        if item.role is ChatMessageRole.USER and item.created_at <= answer.created_at
+        for item in messages[:answer_position]
+        if item.role is ChatMessageRole.USER
     ]
     return prior[-1] if prior else ""
+
+
+_TASK_SCOPE_CHANGE_MARKERS = (
+    "只总结",
+    "仅总结",
+    "只介绍",
+    "仅介绍",
+    "只回答",
+    "仅回答",
+    "只说",
+    "仅说",
+    "改为",
+    "改成",
+    "换成",
+    "另一个问题",
+    "换个问题",
+    "only summarize",
+    "just summarize",
+    "answer only",
+    "focus only on",
+    "change the question",
+)
+
+
+def _rule_task_relation(
+    question: str, challenge: str
+) -> Literal["same_task", "different_task", "uncertain"]:
+    """Accept only explicit corrections without a new task instruction."""
+
+    if not question.strip():
+        return "uncertain"
+    normalized = " ".join(challenge.casefold().split())
+    if any(marker.casefold() in normalized for marker in _TASK_SCOPE_CHANGE_MARKERS):
+        return "different_task"
+    if re.search(r"[?？]|比较|总结|分析|生成|计算|怎么|为什么|\b(compare|summarize|calculate|instead|how|what|which)\b", normalized):
+        return "uncertain"
+    return "same_task" if is_correction_challenge(normalized) else "uncertain"
 
 
 __all__ = [

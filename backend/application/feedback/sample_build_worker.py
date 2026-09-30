@@ -105,12 +105,17 @@ class DatasetSampleBuildWorker:
             task_builder = self.builders.get(dataset.task_type)
             if task_builder is None:
                 raise ValueError("unsupported_dataset_task_type")
+            previous = (
+                await self.sample_repository.read_revision(sample.current_revision_id)
+                if sample.current_revision_id else None
+            )
             built = await task_builder.build(
                 dataset=dataset,
                 sample=sample,
                 case=case,
                 annotation=annotation,
                 review_note=payload.get("review_note"),
+                **({"previous_revision": previous} if dataset.task_type == "preference" else {}),
             )
             missing_reasons = getattr(built, "missing_reasons", None)
             if missing_reasons is not None and not hasattr(built, "content"):
@@ -135,10 +140,6 @@ class DatasetSampleBuildWorker:
             if content is None or not isinstance(provenance, dict) or content.schema_version != expected_schema:
                 raise ValueError("dataset_sample_build_content_task_mismatch")
 
-            previous = (
-                await self.sample_repository.read_revision(sample.current_revision_id)
-                if sample.current_revision_id else None
-            )
             if (
                 payload.get("review_note")
                 and previous is not None

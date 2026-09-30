@@ -149,6 +149,7 @@ from application.repositories.experiment_finding_repository import ExperimentFin
 from application.repositories.transaction import RepositoryTransactionFactory
 from infra.llm.chat_model import OpenAIChatModel
 from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
+from infra.llm.correction_signal_analysis import OpenAICorrectionSignalAnalysisEngine
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -569,10 +570,14 @@ async def build_application_runtime(
             and feedback_case_repository is not None
             and chat_repository is not None
         ):
+            correction_engine = OpenAICorrectionSignalAnalysisEngine()
             correction_signal_analysis_worker = CorrectionSignalAnalysisWorker(
                 job_repository=analysis_job_repository,
                 case_repository=feedback_case_repository,
-                handler=CorrectionSignalAnalysisHandler(chat_repository=chat_repository),
+                handler=CorrectionSignalAnalysisHandler(
+                    chat_repository=chat_repository, engine=correction_engine,
+                    model_name=correction_engine.model_name,
+                ),
             )
 
         tool_failure_analysis_worker = overrides.tool_failure_analysis_worker
@@ -638,7 +643,7 @@ async def build_application_runtime(
                 case_repository=feedback_case_repository,
                 builders={
                     "sft": SftSampleBuilder(generator=sample_generator),
-                    "preference": PreferenceSampleBuilder(),
+                    "preference": PreferenceSampleBuilder(generator=sample_generator),
                     "evaluation": EvaluationSampleBuilder(generator=sample_generator),
                 },
             )

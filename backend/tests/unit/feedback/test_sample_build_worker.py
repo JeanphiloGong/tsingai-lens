@@ -6,6 +6,7 @@ import pytest
 
 from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
+from application.feedback.preference_sample_builder import PreferenceSampleBuilder
 from domain.feedback import (
     AnalysisJob,
     Dataset,
@@ -15,6 +16,8 @@ from domain.feedback import (
     build_job_payload,
     sample_build_idempotency_key,
     source_digest_for_case,
+    PreferenceRevisionContent,
+    SampleRevision,
 )
 
 
@@ -169,7 +172,7 @@ async def test_worker_publishes_candidate_as_needs_confirmation() -> None:
     assert samples.revision is not None
 
 
-@pytest.mark.parametrize("task_type", ["sft", "evaluation"])
+@pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
 async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task_type: str) -> None:
     from application.feedback.evaluation_sample_builder import EvaluationSampleBuilder
 
@@ -178,6 +181,21 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
     })
     sample = replace(_sample(), source_digest=source_digest_for_case(case.to_record()))
     samples = _Samples(sample)
+    if task_type == "preference":
+        previous = SampleRevision.build_worker(
+            revision_id="previous-revision", sample_id=sample.sample_id, revision_no=1,
+            content=PreferenceRevisionContent.from_mapping({
+                "schema_version": "literature-preference.v1",
+                "messages": [{"role": "user", "content": "比较 A、B。"}],
+                "context": [{"document_title": "文献 B", "text": "证据原文"}],
+                "evidence": [{"document_title": "文献 B", "text": "证据原文"}],
+                "response_a": "当前回答 A", "response_b": "当前回答 B", "rationale": "旧理由",
+            }), input_digest=sample.source_digest, construction_spec_version=1,
+            provenance={"evidence_records": [{"source_ref": "blk-1"}]},
+            created_at="2026-09-29T00:00:00+00:00", job_id="previous-job",
+        )
+        samples.revision = previous
+        samples.sample = replace(sample, current_revision_id=previous.revision_id)
 
     class Cases(_Cases):
         async def read_case(self, case_id: str):
@@ -192,12 +210,18 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
             assert kwargs["review_note"] == "核对比较条件"
             if task_type == "sft":
                 return {"target": "基于原文生成的回答", "missing_reasons": []}
+            if task_type == "preference":
+                assert kwargs["snapshot"]["response_a"] == "当前回答 A"
+                assert kwargs["snapshot"]["response_b"] == "当前回答 B"
+                return {"response_a": "当前回答 A", "response_b": "修正后的回答 B",
+                    "suggested_preference": "b", "rationale": "按意见核对了条件。", "missing_reasons": []}
             return {"reference": "基于原文生成的回答", "criteria": ["必须说明比较条件"], "missing_reasons": []}
 
     job = _job_for_case(case)
     job = replace(job, payload={**job.payload, "review_note": "核对比较条件"})
     generator = Generator()
-    builder = SftSampleBuilder(generator=generator) if task_type == "sft" else EvaluationSampleBuilder(generator=generator)
+    builder = {"sft": SftSampleBuilder, "preference": PreferenceSampleBuilder,
+        "evaluation": EvaluationSampleBuilder}[task_type](generator=generator)
     result = await DatasetSampleBuildWorker(
         job_repository=_Jobs(job),
         dataset_repository=_Datasets(replace(_dataset(), task_type=task_type)),
@@ -212,6 +236,10 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
     assert samples.revision.author_kind == "worker"
     assert samples.revision.provenance["builder"] == "test-model"
     assert samples.revision.provenance["review_note"] == "核对比较条件"
+    if task_type == "preference":
+        assert samples.revision.revision_no == 2
+        assert samples.revision.provenance["reviewed_revision_id"] == "previous-revision"
+        assert samples.revision.content.human_preference is None
 
 
 async def test_worker_leaves_missing_material_as_needs_input() -> None:

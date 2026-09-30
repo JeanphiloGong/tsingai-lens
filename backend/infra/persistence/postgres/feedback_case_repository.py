@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -88,7 +89,9 @@ class PostgresFeedbackCaseRepository:
                     )
                 )
                 if context_snapshot:
-                    row.context_snapshot = deepcopy(context_snapshot)
+                    row.context_snapshot = _merge_context_snapshot(
+                        row.context_snapshot, context_snapshot
+                    )
                 if row.status not in {"accepted", "withdrawn"}:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
@@ -159,7 +162,9 @@ class PostgresFeedbackCaseRepository:
                     )
                 )
                 if context_snapshot:
-                    row.context_snapshot = deepcopy(context_snapshot)
+                    row.context_snapshot = _merge_context_snapshot(
+                        row.context_snapshot, context_snapshot, replace_correction=True
+                    )
                 if row.status not in {"accepted", "withdrawn"}:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
@@ -231,7 +236,9 @@ class PostgresFeedbackCaseRepository:
                     )
                 )
                 if context_snapshot:
-                    row.context_snapshot = deepcopy(context_snapshot)
+                    row.context_snapshot = _merge_context_snapshot(
+                        row.context_snapshot, context_snapshot
+                    )
                 if row.status not in {"accepted", "withdrawn"}:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
@@ -841,6 +848,39 @@ def _review_decision(row: FeedbackReviewDecisionRow) -> ReviewDecision:
         seq=row.seq,
         created_at=_iso(row.created_at),
     )
+
+
+def _merge_context_snapshot(
+    existing: dict[str, Any] | None, incoming: dict[str, Any], *, replace_correction: bool = False
+) -> dict[str, Any]:
+    """Merge source projections without erasing facts from another signal."""
+
+    merged = deepcopy(existing or {})
+    correction_keys = {
+        "correction_signal", "corrected_answer", "corrected_message_id",
+        "corrected_evidence_coverage", "original_message_id", "pairing_basis",
+        "pairing_assessment", "corrected_question",
+    }
+    # A new correction analysis is authoritative for its own answer pair.
+    # Other signal types cannot clear or replace that pair.
+    if replace_correction:
+        for key in correction_keys:
+            merged.pop(key, None)
+    coverage_keys = {
+        "requested_scope", "inspected_sources", "omitted_candidates", "claim_support", "gaps",
+    }
+    for key, value in incoming.items():
+        if key in correction_keys and not replace_correction and key in merged:
+            continue
+        if key in coverage_keys:
+            values = [*(merged.get(key) or []), *(value or [])]
+            unique = {
+                json.dumps(item, ensure_ascii=False, sort_keys=True): item for item in values
+            }
+            merged[key] = deepcopy(list(unique.values()))
+        elif value is not None and value != "":
+            merged[key] = deepcopy(value)
+    return merged
 
 
 def _ordered_unique(values: tuple[str, ...]) -> tuple[str, ...]:

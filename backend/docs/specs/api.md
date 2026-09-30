@@ -372,7 +372,13 @@ case rows. The `dataset_sample_build` Worker reads the case's frozen context
 and readable evidence, writes an immutable task-specific candidate
 revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
 builders use the configured model to generate missing answers or criteria from
-the readable evidence; rebuild notes are passed to the same construction step.
+the readable evidence. Preference rebuilds pass the review note and the current
+answer pair to the configured model when its source digest and construction
+version still match, preserving the review input and recording which revision
+was reviewed. A changed source is rebuilt from the current case evidence.
+The model may revise the requested answer or its
+suggestion and rationale; it cannot supply a human preference. An invalid or
+unchanged result does not become a new confirmed sample.
 Missing evidence or an explicit model abstention produces `needs_input`;
 provider errors and invalid responses produce `build_failed`. No Worker result
 automatically confirms training data. Internal message/source identities stay
@@ -385,13 +391,28 @@ All four Worker types use the shared `analysis_jobs` envelope. A claim records
 recovers expired `running` jobs before claiming new work. For a dataset sample,
 recovery also changes the linked sample from `building` back to `pending`, so a
 container restart cannot leave the sample permanently stuck.
+Dataset build completion checks the claimed `worker_id`, `lease_version`, and
+unexpired lease under the job row lock before any sample or job mutation.
+An abandoned Worker cannot save a candidate, report failure, or cancel the
+replacement claim; its return value reflects the persisted job state.
 
-Natural-language correction analysis includes the first final answer following
-the challenge, stopping before the next user turn. It retains both original
-and corrected answers and successful source reads. Preference construction
-uses those persisted answers under one review question and readable context;
-this does not imply their original provider requests were identical. A missing
-or identical second answer remains `needs_input` rather than being fabricated.
+Natural-language correction analysis first assesses whether the follow-up
+preserves the original research task (papers, comparison scope, outcome and
+requested response). Only `same_task` allows linking the first final answer
+following the challenge, stopping before the next user turn. Changed or
+uncertain tasks retain the signal and assessment without a corrected-answer
+pair. The runtime uses the configured model for this assessment; the local
+rule engine accepts only conservative correction-only cases.
+Preference construction requires the recorded task assessment for a Chat
+correction pair and rejects differing questions or supplied input digests.
+Its equal input digests describe the fixed review input, not proof of identical
+original provider requests. Missing, identical or unverified pairs produce
+`needs_input`.
+
+Case updates merge the context from different signal types, retaining readable
+source observations and correction-owned fields when rating or tool-failure
+analysis arrives. A new correction analysis replaces its own pairing fields,
+so a withdrawn or changed-task pairing cannot survive as an old correction.
 
 The sample workbench reads the current immutable revision and the source case
 context. The PATCH body contains `expected_revision_id` and the complete

@@ -12,9 +12,10 @@ from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 from domain.feedback.sample_revision import strip_internal_references
 
 
-SAMPLE_PROMPT_VERSION = "feedback-sample-construction.v1"
+SAMPLE_PROMPT_VERSION = "feedback-sample-construction.v2"
 _TASK_OUTPUTS = {
     "sft": '{"target":"corrected answer", "missing_reasons":[]}',
+    "preference": '{"response_a":"answer A", "response_b":"answer B", "suggested_preference":null, "rationale":"", "missing_reasons":[]}',
     "evaluation": '{"reference":"reference answer", "criteria":["specific verifiable criterion"], "missing_reasons":[]}',
 }
 _SYSTEM_PROMPT = """Construct an unapproved literature dataset candidate for human review.
@@ -24,6 +25,16 @@ answer is not proof. Do not invent missing measurements, conditions, sources or 
 Preserve experimental conditions, units, comparison limits and uncertainty. If a part of the
 question is not supported, state that limit in the answer rather than guessing.
 For SFT, draft a complete evidence-grounded corrected answer to the original question.
+For Preference, response_a and response_b are two candidate answers being reviewed
+against the fixed original question and context. Preserve their positions. Recheck
+the pair against the review note; preserve existing text unless a specific revision
+is requested. Revise only the requested answer using the supplied evidence. Preserve
+their meaningful difference; if a valid comparable pair cannot be retained, abstain.
+Return an optional preference suggestion and a rationale addressing the review note.
+suggested_preference must be exactly "a", "b", "tie", "unclear", or JSON null.
+Use "a" or "b" for the corresponding answer position, "tie" for equal quality,
+"unclear" when the evidence cannot distinguish them, or null for no suggestion.
+An opinion about which answer is better must never rewrite answers just to favor it.
 For evaluation, draft an evidence-grounded reference and concrete criteria that allow a
 reviewer to judge an answer: required facts, applicable conditions and prohibited overclaims.
 Apply the requested language and the review note without treating them as evidence.
@@ -48,11 +59,16 @@ class OpenAIFeedbackSampleGenerator:
         correction = snapshot.get("correction_signal") or {}
         payload = {
             "task_type": task_type, "question": question, "context": context,
+            "messages": snapshot.get("messages", [{"role": "user", "content": question}]),
             "original_answer": snapshot.get("answer", ""),
             "corrected_answer": snapshot.get("corrected_answer", ""),
+            "response_a": snapshot.get("response_a", snapshot.get("answer", "")),
+            "response_b": snapshot.get("response_b", snapshot.get("corrected_answer", "")),
             "feedback": correction.get("content", "") if isinstance(correction, Mapping) else "",
             "existing_reference": snapshot.get("evaluation_reference", ""),
             "existing_criteria": snapshot.get("evaluation_criteria", []),
+            "existing_preference": snapshot.get("suggested_preference"),
+            "existing_rationale": snapshot.get("rationale", ""),
             "language": construction_spec.get("language", "language of the question"),
             "evaluation_mode": snapshot.get("evaluation_mode", "reference"),
             "review_note": review_note,
@@ -89,7 +105,7 @@ class OpenAIFeedbackSampleGenerator:
             raise ValueError("sample_generation_response_invalid") from exc
         if not isinstance(value, dict):
             raise ValueError("sample_generation_response_invalid")
-        for key in ("target", "reference", "rationale"):
+        for key in ("target", "reference", "response_a", "response_b", "rationale"):
             if isinstance(value.get(key), str):
                 value[key] = strip_internal_references(value[key])
         if isinstance(value.get("criteria"), list):

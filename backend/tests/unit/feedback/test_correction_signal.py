@@ -10,6 +10,7 @@ from application.chat.agent_runner import AgentCompletionReason, AgentRunResult,
 from application.chat.session_service import ChatSessionService
 from application.feedback.correction_signal_handler import (
     CorrectionSignalAnalysisHandler,
+    CorrectionSignalAnalysisDraft,
 )
 from application.feedback.correction_signal_worker import CorrectionSignalAnalysisWorker
 from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
@@ -235,6 +236,51 @@ async def test_challenge_does_not_link_an_answer_from_a_later_question():
     )
     _, snapshot, _ = await CorrectionSignalAnalysisHandler(chat_repository=_Chat(messages)).handle(_job(original))
     assert not snapshot.get("corrected_answer")
+
+
+@pytest.mark.parametrize("trigger_text", [
+    "不对，改为只总结 B。",
+    "That's wrong. Only summarize B instead.",
+])
+async def test_challenge_changing_task_scope_does_not_form_a_preference_pair(trigger_text):
+    original = _messages(trigger_text=trigger_text)
+    messages = original + (
+        ChatMessage.assistant(
+            message_id="changed-task-answer", session_id="session-1",
+            content="B 的独立总结。", created_at="2026-09-25T00:00:04+00:00",
+        ),
+    )
+    _, snapshot, _ = await CorrectionSignalAnalysisHandler(
+        chat_repository=_Chat(messages)
+    ).handle(_job(original))
+    assert snapshot["analysis"]["resolution"] == "task_scope_changed"
+    assert not snapshot.get("corrected_answer")
+
+
+@pytest.mark.parametrize("relation", ["different_task", "uncertain"])
+async def test_task_assessment_blocks_scope_changes_without_keyword_matches(relation):
+    original = _messages(trigger_text="不对，先看 B 的腐蚀表现。")
+    messages = original + (
+        ChatMessage.assistant(
+            message_id="answer-2", session_id="session-1", content="B 的腐蚀表现。",
+            created_at="2026-09-25T00:00:04+00:00",
+        ),
+    )
+
+    class Engine:
+        async def analyze(self, **inputs):
+            assert inputs["messages"] == original
+            return CorrectionSignalAnalysisDraft(
+                problem_type="undetermined_dissatisfaction", confidence=0.2,
+                suggested_evidence=(), suggested_target=None,
+                task_relation=relation, task_relation_reason="Follow-up changes the outcome.",
+            )
+
+    _, snapshot, _ = await CorrectionSignalAnalysisHandler(
+        chat_repository=_Chat(messages), engine=Engine(),
+    ).handle(_job(original))
+    assert snapshot["pairing_assessment"]["task_relation"] == relation
+    assert not snapshot.get("corrected_message_id")
 
 
 async def test_handler_keeps_selected_context_requested_until_a_read_is_verified():

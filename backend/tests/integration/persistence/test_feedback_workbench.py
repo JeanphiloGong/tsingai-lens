@@ -39,6 +39,9 @@ from domain.feedback.tool_failure import (
     tool_failure_signal_id,
     tool_result_digest,
 )
+from domain.feedback.analysis_result import AnalysisResult
+from domain.feedback.correction_signal import CorrectionSignalAnalysisResult, correction_signal_idempotency_key
+from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
 from infra.persistence.postgres.analysis_job_repository import (
@@ -537,3 +540,87 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
 
     assert await worker.run_once() is None
     assert await chain.chat.read_messages(SESSION_ID) == trajectory
+
+
+@pytest.mark.parametrize("order", [("correction", "feedback"), ("feedback", "correction")])
+async def test_multiple_analysis_sources_preserve_correction_pair_and_evidence(
+    feedback_chain, order
+):
+    chain = feedback_chain
+    stored_feedback = await chain.chat_service.set_message_feedback_for_user(
+        SESSION_ID, chain.answer.message_id, USER_ID, rating="not_helpful", reason="incorrect",
+    )
+    feedback_job = (await chain.jobs.list_jobs(job_type="feedback_analysis"))[0]
+    correction_job = await chain.jobs.enqueue_correction_signal_analysis(
+        session_id=SESSION_ID, anchor_message_id=chain.answer.message_id,
+        trigger_message_id="challenge", trigger_digest="c" * 64,
+        idempotency_key=correction_signal_idempotency_key(
+            session_id=SESSION_ID, anchor_message_id=chain.answer.message_id,
+            trigger_message_id="challenge", trigger_digest="c" * 64,
+        ), now=_current_iso(),
+    )
+    common = {
+        "session_id": SESSION_ID,
+        "collection_id": COLLECTION_ID,
+        "anchor_message_id": chain.answer.message_id,
+        "problem_type": "source_missing",
+        "confidence": 0.8,
+        "related_message_ids": (chain.question.message_id, chain.answer.message_id),
+        "suggested_evidence": (),
+        "suggested_target": None,
+        "evidence_coverage": EvidenceCoverage(coverage_status="partial"),
+        "model": "test",
+        "input_digest": "a" * 64,
+        "created_at": NOW,
+    }
+    correction = CorrectionSignalAnalysisResult(
+        **common, result_id="correction-result", job_id=correction_job.job_id,
+        signal_id="correction_signal:challenge", signal_type="natural_language_correction",
+        trigger_message_id="challenge",
+    )
+    feedback = AnalysisResult(
+        **common, result_id="feedback-result", job_id=feedback_job.job_id,
+        feedback_id=stored_feedback.feedback_id,
+    )
+    snapshots = {
+        "correction": {
+            "question": chain.question.content, "answer": chain.answer.content,
+            "corrected_answer": "Paper B was preheated at 200 C.",
+            "corrected_message_id": "corrected-answer",
+            "pairing_basis": "same_case_review_input",
+            "correction_signal": {"content": "Actually, the caption records preheating."},
+            "inspected_sources": [{"document_title": "Paper B", "quote": "Preheated at 200 C."}],
+            "analysis": {"resolution": "correction_response_available"},
+        },
+        "feedback": {
+            "question": chain.question.content, "answer": chain.answer.content,
+            "corrected_answer": None,
+            "inspected_sources": [],
+            "analysis": {"problem_type": "source_missing", "suggested_target": None},
+        },
+    }
+    for source in order:
+        if source == "correction":
+            await chain.cases.upsert_case_from_correction_signal(
+                correction, context_snapshot=snapshots[source], now=_current_iso()
+            )
+        else:
+            await chain.cases.upsert_case_from_analysis(
+                feedback, context_snapshot=snapshots[source], now=_current_iso()
+            )
+    cases = await chain.cases.list_cases(collection_id=COLLECTION_ID)
+    assert len(cases) == 1
+    snapshot = cases[0].context_snapshot
+    assert snapshot["corrected_answer"] == "Paper B was preheated at 200 C."
+    assert snapshot["corrected_message_id"] == "corrected-answer"
+    assert snapshot["inspected_sources"][0]["quote"] == "Preheated at 200 C."
+    assert snapshot["pairing_basis"] == "same_case_review_input"
+    # Only the correction source can clear its own pair on a later projection.
+    await chain.cases.upsert_case_from_correction_signal(
+        correction, context_snapshot={"question": chain.question.content, "answer": chain.answer.content,
+            "correction_signal": {"content": "Actually, only summarize B now."},
+            "pairing_assessment": {"task_relation": "different_task"}}, now=_current_iso(),
+    )
+    current = await chain.cases.read_case(cases[0].case_id)
+    assert "corrected_answer" not in current.context_snapshot
+    assert "corrected_message_id" not in current.context_snapshot

@@ -58,6 +58,35 @@ async def test_generated_content_drops_internal_references_even_when_provider_co
     assert "tbl_doc_" not in value["target"]
 
 
+async def test_preference_rebuild_transmits_pair_note_and_explicit_choice_contract():
+    class Completions:
+        async def create(self, **request):
+            payload = json.loads(request["messages"][1]["content"])
+            assert payload["response_a"] == "B had no preheating."
+            assert payload["response_b"] == "B was preheated at 300 C."
+            assert payload["review_note"] == "Keep A; correct B's temperature."
+            assert 'exactly "a", "b", "tie", "unclear", or JSON null' in request["messages"][0]["content"]
+            return SimpleNamespace(choices=[SimpleNamespace(
+                finish_reason="stop", message=SimpleNamespace(content=json.dumps({
+                    "response_a": payload["response_a"],
+                    "response_b": "B was preheated at 200 C.",
+                    "suggested_preference": "b",
+                    "rationale": "B matches the readable evidence.", "missing_reasons": [],
+                })),
+            )])
+
+    value = await OpenAIFeedbackSampleGenerator(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())), model="test-model",
+    ).generate(
+        task_type="preference", question="Compare A and B's preheating.",
+        context=({"document_title": "B", "text": "Preheated at 200 C."},),
+        snapshot={"response_a": "B had no preheating.", "response_b": "B was preheated at 300 C."},
+        construction_spec={}, review_note="Keep A; correct B's temperature.",
+    )
+    assert value["response_b"] == "B was preheated at 200 C."
+    assert value["suggested_preference"] == "b"
+
+
 @pytest.mark.parametrize("content,finish_reason", [("not JSON", "stop"), ('{"target":"unfinished"}', "length")])
 async def test_invalid_or_truncated_generation_is_a_technical_failure(content, finish_reason):
     class Completions:

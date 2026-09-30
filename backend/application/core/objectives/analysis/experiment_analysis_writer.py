@@ -882,6 +882,7 @@ class ExperimentAnalysisWriter:
         revisions: Sequence[StoredPaperExperimentRevision],
         selections: Sequence[ObjectiveExperimentSelection],
         created_by: str | None = None,
+        parent_finding_id: str | None = None,
         transaction: RepositoryTransaction | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Copy fixed selections into a new snapshot and synthesize its Finding."""
@@ -905,6 +906,11 @@ class ExperimentAnalysisWriter:
             revisions=source_revisions,
             selections=copied,
         )
+        findings = tuple(
+            replace(item, parent_finding_id=parent_finding_id)
+            if parent_finding_id is not None else item
+            for item in synthesis.findings
+        )
         stored = await _repository_call(
             self.experiment_analysis_repository.write_graph,
             ExperimentAnalysisWrite(
@@ -914,7 +920,7 @@ class ExperimentAnalysisWriter:
                 revisions=source_revisions,
                 selections=copied,
                 groups=synthesis.groups,
-                findings=synthesis.findings,
+                findings=findings,
                 created_by=created_by,
             ),
             transaction=transaction,

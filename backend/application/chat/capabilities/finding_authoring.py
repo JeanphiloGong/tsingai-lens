@@ -42,17 +42,31 @@ class CreateFindingDraftCapability:
         name="create_finding_draft",
         description=(
             "Record one transient Finding draft that selects experiment results and "
-            "optional ComparisonGroups for researcher review."
+            "optional ComparisonGroups for researcher review. selection_ids must be "
+            "canonical ObjectiveExperimentSelection IDs returned by the experiment "
+            "graph; never use Evidence projection IDs, evidence-* IDs, or document IDs."
         ),
         risk=ToolRisk.DRAFT,
         input_model=CreateFindingDraftToolRequest,
     )
+
+    def __init__(self, *, finding_authoring_service: FindingAuthoringService | None = None) -> None:
+        self.finding_authoring_service = finding_authoring_service
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateFindingDraftToolRequest,
     ) -> ChatToolResult:
+        if self.finding_authoring_service is not None:
+            await self.finding_authoring_service.validate_selection_references(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                source_analysis_version=arguments.source_analysis_version,
+                selection_ids=tuple(arguments.selection_ids),
+                comparison_group_ids=tuple(arguments.comparison_group_ids),
+                user_id=context.user_id,
+            )
         draft = arguments.model_dump()
         refs = [
             ChatResourceRef(
@@ -135,6 +149,7 @@ class CreateFindingVersionCapability:
             created_by_user_id=context.user_id,
             selection_ids=tuple(arguments.selection_ids),
             comparison_group_ids=tuple(arguments.comparison_group_ids),
+            parent_finding_id=arguments.parent_finding_id,
         )
         finding = result.finding
         refs = [

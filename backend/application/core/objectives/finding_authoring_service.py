@@ -50,6 +50,7 @@ class FindingAuthoringService:
         selection_ids: tuple[str, ...],
         comparison_group_ids: tuple[str, ...] = (),
         created_by_user_id: str,
+        parent_finding_id: str | None = None,
     ) -> FindingAuthoringResult:
         if self.experiment_analysis_transaction_factory is None:
             raise RuntimeError(
@@ -110,6 +111,7 @@ class FindingAuthoringService:
                     revisions=source.revisions,
                     selections=chosen,
                     created_by=created_by_user_id,
+                    parent_finding_id=parent_finding_id,
                     transaction=transaction,
                 )
                 await self.objective_repository.publish_experiment_analysis(
@@ -135,6 +137,36 @@ class FindingAuthoringService:
         if analysis is None:
             raise FileNotFoundError("published Finding analysis snapshot not found")
         return FindingAuthoringResult(analysis=analysis, finding=finding)
+
+    async def validate_selection_references(
+        self,
+        *,
+        collection_id: str,
+        objective_id: str,
+        source_analysis_version: int,
+        selection_ids: tuple[str, ...],
+        comparison_group_ids: tuple[str, ...] = (),
+        user_id: str,
+    ) -> None:
+        """Validate transient draft references against the published graph."""
+        await self.collection_service.get_collection_for_user(collection_id, user_id)
+        objective = await self.objective_repository.read_objective(collection_id, objective_id)
+        if objective is None:
+            raise FileNotFoundError(f"research objective not found: {collection_id}/{objective_id}")
+        if objective.active_analysis_version != source_analysis_version:
+            raise ValueError("source analysis version is not the active published snapshot")
+        source = await self.experiment_query_service.read_analysis_bundle(
+            collection_id, objective_id, source_analysis_version
+        )
+        selected_ids = set(selection_ids)
+        for group_id in comparison_group_ids:
+            group = next((item for item in source.groups if item.group_id == group_id), None)
+            if group is None:
+                raise ValueError(f"Finding references an unknown comparison group: {group_id}")
+            selected_ids.update(item.selection_id for item in group.members if item.role == "included")
+        known_ids = {item.selection_id for item in source.selections}
+        if not selected_ids or not selected_ids <= known_ids:
+            raise ValueError("Finding references an unknown experiment selection")
 
 
 __all__ = ["FindingAuthoringResult", "FindingAuthoringService"]

@@ -802,7 +802,9 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 finding_feedback_service=finding_feedback_service,
                             ),
-                            CreateFindingDraftCapability(),
+                            CreateFindingDraftCapability(
+                                finding_authoring_service=finding_authoring_service,
+                            ),
                             CreateFindingVersionCapability(
                                 finding_authoring_service=finding_authoring_service,
                             ),

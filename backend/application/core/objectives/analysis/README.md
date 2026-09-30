@@ -101,6 +101,21 @@ Finding; the blocked measurements remain out of that slice. A provider or
 parser failure is recorded as a technical failure and is retryable; it is never
 converted into scientific absence.
 
+Automatic extraction declares experiment `label`/`scope_description` and
+test-condition fields in the provider schema. Each declared test candidate
+requires a non-empty response-local `test_key`; this key does not certify
+concrete scientific identity. A measurement's `test_key` may still be null
+when the Source does not establish its test binding. Reported operating values
+belong in test `parameters`, while absent conditions remain explicit gaps.
+
+Schema and content-contract rejection reasons enter the next bounded repair
+request. If every attempt is rejected and no valid Draft or scientific empty
+response was obtained, extraction returns `technical_failure`. The document
+coverage records `extraction_failed`; when all relevant papers fail this way,
+the existing analysis failure path prevents successful publication. A valid
+empty response remains scientific abstention, and valid incomplete content
+remains a partial archive. Zero Findings alone is therefore not a failure.
+
 ## Handling Known Extraction Failures
 
 Live extraction has exposed three distinct problems, and they require different

@@ -23,38 +23,96 @@ from application.core.objectives.llm.structured_response import (
 from domain.core.research_objective import ResearchObjective
 
 
-class PaperExperimentDraftEnvelope(BaseModel):
-    """The only provider envelope; nested objects use response-local keys.
+class ExtractedTestConditionModelOutput(BaseModel):
+    """A reported protocol candidate; its local key does not prove binding."""
 
-    The nested graph intentionally remains open because papers report domain
-    specific attributes.  The application contract performs the strict
-    cross-reference and provenance checks after parsing.  The field
-    descriptions below are part of the provider JSON schema and keep that
-    distinction visible to the model without forcing a materials-science
-    vocabulary into the transport type.
-    """
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
+
+    test_key: str = Field(
+        min_length=1,
+        description="Required response-local key for this test candidate, even when its scientific identity is broad.",
+    )
+    test_type: str = Field(
+        min_length=1,
+        description="Source-reported test or characterization category; do not invent a method.",
+    )
+    source_labels: list[str] = Field(
+        min_length=1, description="Supplied Sxxx labels supporting this test.",
+    )
+    method: str | None = Field(
+        default=None, description="Reported method or instrument; null when absent.",
+    )
+    standard: str | None = Field(
+        default=None, description="Reported standard; null when absent.",
+    )
+    parameters: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Reported operating values as name/value/unit objects, including temperature, speed and replication.",
+    )
+    outcome_scope: list[str] = Field(
+        default_factory=list, description="Outcomes explicitly covered by this protocol.",
+    )
+    binding_source_labels: list[str] = Field(
+        default_factory=list,
+        description="Supplied sources explicitly linking the protocol to this experiment; empty when unknown.",
+    )
+    protocol_specificity: Literal["exact", "partial", "category", "broad", "unknown"] = Field(
+        default="unknown",
+        description="Concrete method identity supported by the sources; a local key alone is not exact identity.",
+    )
+    protocol_completeness: Literal["complete", "partial", "unknown"] = Field(
+        default="unknown",
+        description="Coverage of reported operating conditions, separate from protocol identity.",
+    )
+    missing_parameters: list[str] = Field(
+        default_factory=list,
+        description="Unreported operating details; preserve them without inventing values.",
+    )
+
+
+class ExtractedPaperExperimentModelOutput(BaseModel):
+    """Experiment content with explicit protocol structure and extensible facts."""
+
+    model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
+
+    label: str = Field(
+        min_length=1, description="Human-readable source-supported experiment label.",
+    )
+    scope_description: str = Field(
+        min_length=1, description="Reported population, treatment assignment and experiment boundary.",
+    )
+    test_conditions: list[ExtractedTestConditionModelOutput] = Field(
+        default_factory=list,
+        description="Reported protocol candidates. Omit unsupported tests; measurement test_key may remain null when binding is unknown.",
+    )
+
+
+class ExtractedDocumentIssueModelOutput(BaseModel):
+    """A document-wide gap, not a reference to a local experiment member."""
+
+    model_config = ConfigDict(extra="allow")
+
+    target_ref: Literal["document", "experiment"] = Field(
+        default="document", description="Global issue scope; local member references belong inside that experiment's unresolved_issues.",
+    )
+    description: str = Field(min_length=1, description="Source-supported gap or limitation; never invent missing facts.")
+    source_labels: list[str] = Field(default_factory=list, description="Supplied Sxxx labels supporting this issue, when available.")
+
+
+class PaperExperimentDraftEnvelope(BaseModel):
+    """Provider content schema; application gates still own scientific binding."""
 
     model_config = ConfigDict(extra="forbid")
 
-    experiments: list[dict[str, Any]] = Field(
+    experiments: list[ExtractedPaperExperimentModelOutput] = Field(
         default_factory=list,
         description=(
             "Zero or more bounded experiment Draft objects. Each object uses "
             "response-local keys where useful and may contain source-local "
             "reported observations. Local "
-            "variant_key/test_key values are optional when the paper only gives "
-            "a broad or unresolved scope; use supplied Sxxx source labels."
+            "keys identify declared variants and tests. Measurement references may "
+            "be null when their binding is unresolved; use supplied Sxxx source labels."
         ),
-        # Pydantic emits only ``{"type": "object"}`` for ``dict[str, Any]``
-        # on some supported versions.  Make the provider contract explicit:
-        # scientific Draft fields are intentionally open here and are checked
-        # by the application authoring contract after parsing.
-        json_schema_extra={
-            "items": {
-                "type": "object",
-                "additionalProperties": True,
-            }
-        },
     )
     source_labels: list[str] = Field(
         default_factory=list,
@@ -63,22 +121,25 @@ class PaperExperimentDraftEnvelope(BaseModel):
             "invent source IDs or SourceReference objects."
         ),
     )
-    unresolved_issues: list[dict[str, Any]] = Field(
+    unresolved_issues: list[ExtractedDocumentIssueModelOutput] = Field(
         default_factory=list,
         description=(
             "Document-level boundary, conflict, or missing-context records. "
-            "Use target_ref and description; keep unknowns instead of guessing."
+            "Use target_ref=document or experiment and description. Member-specific "
+            "issues belong inside their experiment, not here; keep unknowns."
         ),
     )
 
 
-PAPER_EXPERIMENT_DRAFT_PROMPT_VERSION = "paper_experiment_draft.v2"
+PAPER_EXPERIMENT_DRAFT_PROMPT_VERSION = "paper_experiment_draft.v3"
 
 
 _DRAFT_SCHEMA_HINT: dict[str, Any] = {
     "experiments": [
         {
             "series_key": "local-series-key",
+            "label": "source-supported experiment label",
+            "scope_description": "reported population and treatment assignment",
             "scope_kind": "parent",
             "member_hints": {
                 "variant_keys": [],
@@ -87,7 +148,7 @@ _DRAFT_SCHEMA_HINT: dict[str, Any] = {
             },
             "experimental_variants": [
                 {
-                    "variant_key": None,
+                    "variant_key": "local-variant-key",
                     "variant_label": "paper label",
                     "subject_attributes": [],
                     "intervention_attributes": [],
@@ -104,7 +165,7 @@ _DRAFT_SCHEMA_HINT: dict[str, Any] = {
             ],
             "test_conditions": [
                 {
-                    "test_key": None,
+                    "test_key": "local-test-key",
                     "test_type": "paper-reported method",
                     "method": "reported method or instrument",
                     "standard": "reported standard, if any",
@@ -419,7 +480,7 @@ DECISION PROCESS
    keep independent populations, assignments, or designs separate. Boundary
    proposals are diagnostic hints, not an authoritative member list.
 4. Attach each value and each binding edge to the supplied Source labels. A
-   `variant_key` or `test_key` may be null when the row/sample or protocol is
+   measurement's `variant_key` or `test_key` may be null when the row/sample or protocol is
    broad, category-level, or unresolved. Keep the verbatim
    `reported_sample_label`/`reported_test_label`, candidate local keys, missing
    dimensions, and an unresolved issue instead of guessing an exact edge.
@@ -443,8 +504,8 @@ HARD RULES
 BOUNDARY EXAMPLES
 - A table reports `NP=72` and `P150=82`, and Methods identifies one tensile
   protocol: emit the two reported measurements, retaining their source block
-  and stated sample/test labels. Add local variants and exact keys only when
-  the paper explicitly supports them; otherwise retain the broad scope.
+  and stated sample/test labels. Give source-supported candidates local keys;
+  bind measurement references only when the paper supports the exact edges.
 - A table says only `condition A` and the Methods do not identify its treatment:
   retain the row/value, set its candidate variant/test edge to null or a
   candidate list, add an unresolved issue, and do not claim an exact binding.
@@ -462,10 +523,20 @@ OUTPUT SCHEMA
 Return exactly one JSON object with `experiments`, `source_labels`, and
 `unresolved_issues`. The nested Draft shape is shown in the user payload;
 unknown scientific attributes are allowed. Source labels are required for a
-reported fact; local variant/test references are optional when the source does
+reported fact; measurement variant/test references are optional when the source does
 not prove an exact binding. Preserve large or multi-column table results in
 their complete Source block; do not introduce a separate table-row domain
 object.
+Every declared variant and test candidate needs a non-empty local key. This
+key identifies the candidate within the response, not a proven scientific
+binding. Only measurement references may be null when their edges are unknown.
+Every experiment needs label and scope_description. Put reported temperature,
+speed and repetition values in test parameters as name/value/unit objects.
+Top-level unresolved_issues target_ref must be document or experiment. Inside
+an experiment, use experiment or a path to a declared member:
+variants/<variant_key>, test_conditions/<test_key>, measurements/<measurement_key>,
+or comparisons/<comparison_key>. Do not use a bare local key or free text as
+target_ref. Put the explanation in description.
 """.strip()
     user_prompt = json.dumps(
         {
@@ -612,22 +683,26 @@ class PaperExperimentExtractor:
                         prompt_version=PAPER_EXPERIMENT_DRAFT_PROMPT_VERSION,
                         before_request=remaining_timeout,
                     )
-                except ValidationError:
+                except ValidationError as exc:
+                    reason = "; ".join(
+                        f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"
+                        for error in exc.errors(include_input=False, include_url=False)
+                    )
                     attempts.append(
                         ExtractionAttempt(
                             strategy=strategy,
                             status="rejected",
-                            reason="provider response did not match the Draft envelope",
+                            reason=reason,
                             call_index=call_index,
                         )
                     )
                     previous = None
-                    missing = ()
+                    missing = (reason,)
                     continue
                 except Exception as exc:
                     raise ProviderTechnicalError(type(exc).__name__) from exc
 
-                raw = response.model_dump(mode="python")
+                raw = response.model_dump(mode="python", exclude_unset=True)
                 output = PaperExperimentModelOutput.from_model_mapping(
                     raw,
                     document_id=bundle.document_id,
@@ -718,13 +793,17 @@ class PaperExperimentExtractor:
                     )
                 )
                 previous = None
-                missing = ()
+                missing = (str(exc),)
 
         return PaperExperimentExtractionResult(
             output=last_output,
             readiness=last_readiness,
             attempts=tuple(attempts),
-            status="partial_archive" if last_output is not None else "abstained",
+            status=(
+                "partial_archive" if last_output is not None
+                else "abstained" if any(attempt.status == "insufficient" for attempt in attempts)
+                else "technical_failure"
+            ),
             omitted_source_refs=bundle.omitted_source_refs,
             diagnostics=tuple(
                 attempt.reason for attempt in attempts if attempt.reason

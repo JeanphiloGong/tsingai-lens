@@ -172,8 +172,8 @@ def test_draft_prompt_treats_binding_as_optional_when_scope_is_broad() -> None:
     assert "reported_test_label" in measurement_schema
     assert "candidate_variant_keys" in measurement_schema
     assert "candidate_test_keys" in measurement_schema
-    assert variant_schema["variant_key"] is None
-    assert test_schema["test_key"] is None
+    assert variant_schema["variant_key"]
+    assert test_schema["test_key"]
     assert "may be null" in system_prompt
     assert "one experiment per table or outcome" in system_prompt
     assert "retain both observations" in system_prompt
@@ -187,7 +187,11 @@ def test_draft_envelope_schema_describes_open_scientific_payload_without_new_ids
     assert "supplied Sxxx" in schema["properties"]["source_labels"]["description"]
     # Scientific fields stay open-ended; formal identity is rejected later by
     # PaperExperimentModelOutput rather than silently manufactured here.
-    assert schema["properties"]["experiments"]["items"]["additionalProperties"] is True
+    experiment = schema["$defs"]["ExtractedPaperExperimentModelOutput"]
+    assert experiment["additionalProperties"] is True
+    test = schema["$defs"]["ExtractedTestConditionModelOutput"]
+    assert "test_key" in test["required"]
+    assert test["properties"]["test_key"]["minLength"] == 1
 
 
 def test_source_bundle_preserves_plural_scientific_identifiers() -> None:
@@ -520,6 +524,60 @@ def test_zero_experiments_is_scientific_abstention() -> None:
     assert result.attempts[0].status == "insufficient"
 
 
+def test_missing_test_identity_is_extraction_failure_not_scientific_absence() -> None:
+    payload = _ready_payload()
+    payload["experiments"][0]["test_conditions"][0]["test_key"] = None
+
+    result = _extract_once(payload)
+
+    assert result.status == "technical_failure"
+    assert result.output is None
+    assert result.attempts[0].status == "rejected"
+    assert "test_key" in result.attempts[0].reason
+
+
+def test_rejected_draft_supplies_validation_reason_to_repair() -> None:
+    payload = _ready_payload()
+    payload["experiments"][0]["test_conditions"][0]["test_key"] = None
+    client = FakeStructuredResponseClient([payload, _ready_payload()])
+
+    result = PaperExperimentExtractor(client).extract(objective=_objective(), bundle=_bundle())
+
+    assert result.status == "ready"
+    repair = json.loads(client.calls[1]["user_prompt"])
+    assert any("test_key" in error for error in repair["missing_context"])
+
+
+def test_valid_empty_response_after_rejection_remains_scientific_abstention() -> None:
+    payload = _ready_payload()
+    payload["experiments"][0]["measurements"][0]["source_labels"] = ["S999"]
+    client = FakeStructuredResponseClient([payload, {"experiments": [], "source_labels": []}])
+
+    result = PaperExperimentExtractor(client, budget=ExtractionBudget(max_calls=2)).extract(
+        objective=_objective(), bundle=_bundle(),
+    )
+
+    assert result.status == "abstained"
+    assert [attempt.status for attempt in result.attempts] == ["rejected", "insufficient"]
+
+
+def test_document_issue_scope_is_explicit_and_repaired_without_dropping_facts() -> None:
+    payload = _ready_payload()
+    payload["unresolved_issues"] = [{
+        "target_ref": "series-1", "description": "The paper does not report raw sample values.",
+    }]
+    repaired = deepcopy(payload)
+    repaired["unresolved_issues"][0]["target_ref"] = "document"
+    client = FakeStructuredResponseClient([payload, repaired])
+
+    result = PaperExperimentExtractor(client).extract(objective=_objective(), bundle=_bundle())
+
+    assert result.status == "ready"
+    assert result.attempts[0].status == "rejected"
+    assert "target_ref" in result.attempts[0].reason
+    assert len(result.output.output.experiments[0].payload["measurements"]) == 2
+
+
 def test_empty_source_bundle_abstains_without_calling_provider() -> None:
     client = FakeStructuredResponseClient([])
     bundle = build_source_bundle(
@@ -621,7 +679,7 @@ def test_boundary_violations_are_rejected(mutation: str) -> None:
 
     result = _extract_once(payload)
 
-    assert result.status == "abstained"
+    assert result.status == "technical_failure"
     assert result.output is None
     assert result.attempts[0].status == "rejected"
 

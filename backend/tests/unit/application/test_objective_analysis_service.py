@@ -1677,6 +1677,67 @@ async def test_all_relevant_paper_extractions_failed_without_publication() -> No
     assert repository.published_calls == 0
 
 
+async def test_rejected_automatic_drafts_fail_analysis_instead_of_publishing_absence() -> None:
+    from application.core.objectives.analysis.paper_experiment_extraction import (
+        PaperExperimentExtractor,
+        build_source_bundle,
+    )
+    from application.core.objectives.objective_analysis_service import (
+        _build_contribution_for_extraction,
+    )
+    from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+
+    class InvalidDraftClient:
+        def complete(self, *, response_model, **kwargs):
+            return response_model.model_validate({
+                "experiments": [{
+                    "label": "Reported tensile experiment",
+                    "scope_description": "Same batch under two treatments",
+                    "test_conditions": [{
+                        "test_key": None,
+                        "test_type": "tensile",
+                        "source_labels": ["S001"],
+                    }],
+                }],
+                "source_labels": ["S001"],
+            })
+
+    service, repository, analyzer = _service()
+    await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
+    analysis = await repository.read_analysis("collection-1", "objective-1", 1)
+    objective = repository.objective
+    bundle = build_source_bundle(
+        document_id="paper-1", source_fingerprint="prepared-1",
+        source_payloads=({"source_kind": "block", "source_ref": "methods-1",
+                          "text": "Both treatment groups underwent tensile testing."},),
+    )
+    extraction = PaperExperimentExtractor(InvalidDraftClient()).extract(
+        objective=objective, bundle=bundle,
+    )
+    assert extraction.status == "technical_failure"
+    assert len(extraction.attempts) == 3
+    refs = tuple(bundle.source_catalog.values())
+    contribution = _build_contribution_for_extraction(
+        collection_id="collection-1", analysis=analysis, objective=objective,
+        frame=PaperAnalysisFrame.from_mapping({"document_id": "paper-1", "relevance": "high"}),
+        extraction=extraction, routed_source_refs=refs,
+        inspected_source_refs=(), failed_source_refs=refs, omitted_source_refs=(),
+    )
+    assert contribution.analysis_status == "failed"
+    assert contribution.evidence_disposition == "extraction_failed"
+    assert contribution.failed_source_count == 1
+    analyzer.artifacts = ObjectiveExperimentAnalysisArtifacts(
+        contributions=(contribution,), experiment_outputs=(),
+    )
+
+    result = await service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "failed"
+    assert result["analysis"].abstention_reason is None
+    assert result["objective"].objective.published_analysis_version is None
+    assert repository.experiment_published_calls == 0
+
+
 async def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version() -> None:
     analyzer = FakeObjectiveExperimentAnalysisService(error=RuntimeError("model unavailable"))
     service, repository, _analyzer = _service(analyzer=analyzer)

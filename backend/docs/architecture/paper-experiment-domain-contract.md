@@ -72,6 +72,9 @@ the review artifact, followed by exact approval of
 summary after a failed proposal is not a stored, reviewable experiment draft.
 Saving a reviewed draft must preserve its scientific content; changed or
 reduced content requires renewed review.
+The review digest also binds the source Objective analysis version. Publishing
+a successor analysis invalidates the earlier draft approval even when the
+paper Sources and scientific payload have not changed.
 
 Agent Finding inspection preserves the complete Finding and returns only as
 many complete Evidence records as fit the escaped tool-message token budget.

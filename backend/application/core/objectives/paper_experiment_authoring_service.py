@@ -183,6 +183,7 @@ class PaperExperimentAuthoringService:
             {
                 "collection_id": collection_id,
                 "objective_id": objective_id,
+                "source_analysis_version": analysis.analysis_version,
                 "document_id": document_id,
                 "source_fingerprint": source_fingerprint,
                 "draft": raw_draft,

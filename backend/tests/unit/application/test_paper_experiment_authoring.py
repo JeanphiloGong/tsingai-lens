@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from dataclasses import replace
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from hashlib import sha256
@@ -341,6 +343,46 @@ class _CollectionService:
 
     async def get_document(self, collection_id, document_id):
         return SimpleNamespace(preparation_fingerprint="prep-1")
+
+
+async def test_review_digest_changes_when_source_analysis_advances():
+    repository = _ObjectiveRepository()
+    service = PaperExperimentAuthoringService(
+        collection_service=_CollectionService(), source_artifact_repository=_SourceRepository(),
+        objective_repository=repository, experiment_analysis_writer=object(),
+    )
+    kwargs = dict(collection_id="collection-1", user_id="user-1",
+                  objective_id="objective-1", document_id="paper-1", raw_draft=_draft())
+    first = await service.prepare(**kwargs)
+    assert (await service.prepare(**kwargs)).draft_digest == first.draft_digest
+    async def advanced_objective(*args):
+        return replace(_objective(), active_analysis_version=2)
+    async def advanced_analysis(*args):
+        return replace(_analysis(), analysis_version=2)
+    repository.read_objective = advanced_objective
+    repository.read_analysis = advanced_analysis
+    second = await service.prepare(**kwargs)
+    assert second.draft_digest != first.draft_digest
+    stored = ChatMessage.from_tool_result(
+        message_id="review-1", session_id="session-1", created_at="2026-09-30T00:00:00Z",
+        result=ChatToolResult(tool_call_id="proposal-1", status="succeeded", data={
+                "draft_id": "reviewed-draft", "draft_digest": first.draft_digest,
+                "status": "pending_approval", "draft_created_at": datetime.now(timezone.utc).isoformat(),
+            "objective_id": "objective-1", "document_id": "paper-1", "draft": _draft(),
+        }),
+    )
+    from unittest.mock import AsyncMock
+    service.write = AsyncMock()
+    capability = CreatePaperExperimentRevisionCapability(
+        authoring_service=service, chat_repository=_ChatRepository((stored,)),
+    )
+    with pytest.raises(ValueError, match="digest changed"):
+        await capability.execute(
+            CapabilityExecutionContext(session_id="session-1", user_id="user-1",
+                                       collection_id="collection-1", tool_call_id="save-1"),
+            PaperExperimentRevisionToolRequest(draft_id="reviewed-draft", draft_digest=first.draft_digest),
+        )
+    service.write.assert_not_awaited()
 
 
 class _SourceRepository:

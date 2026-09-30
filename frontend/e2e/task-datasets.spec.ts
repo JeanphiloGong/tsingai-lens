@@ -146,6 +146,7 @@ test('a sample can be rebuilt, discarded, restored, and retried', async ({ page 
 	const mock = await mockTaskDataset(page);
 	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
 	await expect(page.getByRole('heading', { name: '正确回答' })).toBeVisible();
+	await page.locator('.sample-options > summary').click();
 	await page.getByRole('textbox', { name: '退回意见' }).fill('重新核对文献 B 的图注。');
 	await page.getByRole('button', { name: '退回重建' }).click();
 	await expect(page.getByText('构建任务已提交。')).toBeVisible();
@@ -157,6 +158,7 @@ test('a sample can be rebuilt, discarded, restored, and retried', async ({ page 
 
 	mock.setStatus('build_failed');
 	await page.getByRole('button', { name: '刷新样本队列' }).click();
+	await page.locator('.sample-options > summary').click();
 	await expect(page.getByRole('button', { name: '重试构建' })).toBeVisible();
 	await page.getByRole('button', { name: '重试构建' }).click();
 	await expect(page.getByText('构建任务已提交。')).toBeVisible();

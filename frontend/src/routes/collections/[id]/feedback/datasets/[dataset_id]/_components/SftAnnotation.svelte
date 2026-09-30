@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Check, ChevronDown, FileText, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
 	import { createEventDispatcher } from 'svelte';
+	import { t } from '../../../../../../_shared/i18n';
 	import type { DatasetSampleAction, DatasetSampleDetail, SftRevisionContent } from '../../../../../../_shared/feedbackDatasets';
 
 	export let sample: DatasetSampleDetail | null = null;
@@ -114,10 +115,10 @@
 			{/if}
 
 			{#if canEdit}<div class="actions" aria-label="样本操作">
-				<button class="primary" type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !target.trim()}>
+				<button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !target.trim()}>
 					<Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}
 				</button>
-				<button type="button" on:click={() => confirm(false)} disabled={!canConfirm}>
+				<button class:primary={!draftChanged} type="button" on:click={() => confirm(false)} disabled={!canConfirm}>
 					<Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}
 				</button>
 				<button type="button" on:click={() => confirm(true)} disabled={!canConfirm}>
@@ -125,6 +126,7 @@
 				</button>
 			</div>{/if}
 			{#if draftChanged}<p class="draft-note" role="status">有未保存的修改，保存后才能确认。</p>{/if}
+			<details class="sample-options"><summary>{$t('taskDatasets.moreActions')}</summary>
 			{#if sample.sample.status === 'needs_confirmation' || sample.sample.status === 'confirmed' || sample.sample.status === 'needs_input'}
 				<div class="rebuild-area">
 					<label for="rebuild-reason">退回意见</label>
@@ -136,6 +138,7 @@
 				{#if sample.sample.status === 'build_failed'}<button type="button" on:click={() => act('retry')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />重试构建</button>{/if}
 				{#if sample.sample.status === 'discarded'}<button type="button" on:click={() => act('restore')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />恢复样本</button>{:else}<button type="button" on:click={() => act('discard')} disabled={acting || saving || confirming}><Trash2 size={16} aria-hidden="true" />丢弃样本</button>{/if}
 			</div>
+			</details>
 			{#if notice}<p class="notice" role="status">{notice}</p>{/if}
 			{#if error}<p class="error" role="alert"><TriangleAlert size={15} aria-hidden="true" />{error}</p>{/if}
 		</section>
@@ -175,52 +178,66 @@
 {/if}
 
 <style>
+	.sample-options { margin-top: 24px; border-top: 1px solid var(--border-default); padding-top: 12px; }
+	.sample-options > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+	.sample-options .rebuild-area { border-top: 0; margin-top: 12px; }
 	:global(button), :global(input), :global(textarea) { font: inherit; }
-	.annotation-grid { display: grid; grid-template-columns: minmax(190px, .72fr) minmax(330px, 1.35fr) minmax(250px, .95fr); gap: 1px; background: #dbe3ec; border: 1px solid #dbe3ec; border-radius: 10px; overflow: hidden; }
-	.question-column, .editor-column, .evidence-column { background: #fff; padding: 24px; min-width: 0; }
-	.editor-column { background: #fbfcfe; }
-	.section-kicker { color: #0f766e; font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-	h2 { margin: 5px 0 14px; color: #172033; font-size: 19px; line-height: 1.25; }
-	.question { color: #172033; font-size: 16px; line-height: 1.65; white-space: pre-wrap; }
-	.original-answer { margin-top: 28px; border-top: 1px solid #e7edf3; padding-top: 14px; }
-	.original-answer summary, .omitted summary { display: flex; align-items: center; gap: 6px; color: #506176; cursor: pointer; font-size: 13px; font-weight: 700; }
+	.annotation-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 1px; background: var(--border-default); border: 1px solid var(--border-default); border-radius: 8px; overflow: hidden; }
+	.question-column, .editor-column, .evidence-column { background: var(--surface-card); padding: 24px; min-width: 0; }
+	.editor-column { background: var(--bg-subtle); }
+	.section-kicker { color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }
+	h2 { margin: 5px 0 14px; color: var(--text-primary); font-size: 19px; line-height: 1.25; }
+	.question { color: var(--text-primary); font-size: 16px; line-height: 1.65; white-space: pre-wrap; }
+	.original-answer { margin-top: 28px; border-top: 1px solid var(--border-default); padding-top: 14px; }
+	.original-answer summary, .omitted summary { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); cursor: pointer; font-size: 13px; font-weight: 700; }
 	.original-answer summary :global(svg) { transition: transform .15s ease; }
 	.original-answer[open] summary :global(svg), .omitted[open] summary :global(svg) { transform: rotate(180deg); }
-	.original-answer p { color: #5b687a; font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
-	.source-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; padding-top: 14px; border-top: 1px solid #e7edf3; color: #7b8796; font-size: 12px; }
-	.source-meta small { color: #64748b; }
+	.original-answer p { color: var(--text-secondary); font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
+	.source-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 32px; padding-top: 14px; border-top: 1px solid var(--border-default); color: var(--text-secondary); font-size: 12px; }
+	.source-meta small { color: var(--text-secondary); }
 	.section-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-	label { display: block; margin: 12px 0 6px; color: #536174; font-size: 12px; font-weight: 700; }
-	textarea, input { box-sizing: border-box; width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #172033; padding: 10px 11px; line-height: 1.55; resize: vertical; }
-	textarea:focus, input:focus { outline: 3px solid #99f6e4; border-color: #0f766e; }
-	textarea:disabled, input:disabled { background: #f1f5f9; color: #526174; }
-	.status { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #e2e8f0; border-radius: 999px; padding: 5px 9px; color: #64748b; font-size: 12px; white-space: nowrap; }
-	.status--confirmed { border-color: #99f6e4; color: #0f766e; background: #f0fdfa; }
+	label { display: block; margin: 12px 0 6px; color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+	textarea, input { box-sizing: border-box; width: 100%; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); padding: 10px 11px; line-height: 1.55; resize: vertical; }
+	textarea:focus, input:focus { outline: 3px solid var(--brand-border); border-color: var(--brand-primary); }
+	textarea:disabled, input:disabled { background: var(--bg-subtle); color: var(--text-secondary); }
+	.status { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border-strong); border-radius: 999px; padding: 5px 9px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+	.status--confirmed { border-color: var(--brand-border); color: var(--brand-primary); background: var(--brand-soft); }
 	.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
-	.actions button { display: inline-flex; gap: 7px; align-items: center; min-height: 36px; border: 1px solid #b8c4d3; border-radius: 6px; background: #fff; color: #304057; padding: 7px 11px; cursor: pointer; }
-	.actions button:hover:not(:disabled) { border-color: #0f766e; color: #0f766e; }
-	.actions button.primary { border-color: #0f766e; background: #0f766e; color: #fff; }
+	.actions button { display: inline-flex; gap: 7px; align-items: center; min-height: 36px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); padding: 7px 11px; cursor: pointer; }
+	.actions button:hover:not(:disabled) { border-color: var(--brand-primary); color: var(--brand-primary); }
+	.actions button.primary { border-color: var(--brand-primary); background: var(--brand-primary); color: white; }
 	.actions button:disabled { cursor: not-allowed; opacity: .48; }
-	.draft-note { color: #9a6700; font-size: 13px; }
-	.rebuild-area { margin-top: 22px; border-top: 1px solid #e7edf3; padding-top: 10px; }
-	.rebuild-area button, .recovery-actions button { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; margin-top: 10px; border: 1px solid #b8c4d3; border-radius: 6px; background: #fff; color: #304057; padding: 7px 11px; cursor: pointer; }
+	.draft-note { color: var(--warning-text); font-size: 13px; }
+	.rebuild-area { margin-top: 22px; border-top: 1px solid var(--border-default); padding-top: 10px; }
+	.rebuild-area button, .recovery-actions button { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; margin-top: 10px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); padding: 7px 11px; cursor: pointer; }
 	.rebuild-area button:disabled, .recovery-actions button:disabled { cursor: not-allowed; opacity: .48; }
 	.recovery-actions { display: flex; gap: 8px; margin-top: 12px; }
-	.notice { margin: 14px 0 0; color: #0f766e; font-size: 13px; }
-	.error { display: flex; gap: 7px; align-items: flex-start; margin: 14px 0 0; color: #b42318; font-size: 13px; }
-	.aside-note { margin: -4px 0 18px; color: #68778a; font-size: 12px; line-height: 1.55; }
+	.notice { margin: 14px 0 0; color: var(--brand-primary); font-size: 13px; }
+	.error { display: flex; gap: 7px; align-items: flex-start; margin: 14px 0 0; color: var(--danger-text); font-size: 13px; }
+	.aside-note { margin: -4px 0 18px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
 	.evidence-list { display: grid; gap: 14px; }
-	.evidence-card { border-left: 3px solid #0f766e; padding-left: 12px; }
+	.evidence-card { border-left: 3px solid var(--brand-primary); padding-left: 12px; }
 	.evidence-card label { margin-top: 0; }
 	.evidence-card textarea { min-height: 120px; }
-	.missing, .missing-box { color: #a15c00; font-size: 13px; line-height: 1.55; }
-	.missing-box { margin-top: 16px; border: 1px solid #fed7aa; border-radius: 6px; background: #fff7ed; padding: 11px 12px; }
+	.missing, .missing-box { color: var(--warning-text); font-size: 13px; line-height: 1.55; }
+	.missing-box { margin-top: 16px; border: 1px solid var(--warning-border); border-radius: 6px; background: var(--warning-bg); padding: 11px 12px; }
 	.missing-box ul { margin: 7px 0 0; padding-left: 18px; }
-	.omitted { margin-top: 18px; border-top: 1px solid #e7edf3; padding-top: 13px; }
-	.omitted p { color: #68778a; font-size: 12px; line-height: 1.5; }
-	.empty { display: grid; justify-items: center; padding: 72px 24px; border: 1px dashed #cbd5e1; border-radius: 10px; background: #fff; color: #64748b; text-align: center; }
+	.omitted { margin-top: 18px; border-top: 1px solid var(--border-default); padding-top: 13px; }
+	.omitted p { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+	.empty { display: grid; justify-items: center; padding: 72px 24px; border: 1px dashed var(--border-strong); border-radius: 8px; background: var(--surface-card); color: var(--text-secondary); text-align: center; }
 	.empty h2 { margin-bottom: 5px; }
 	.empty p { margin: 0; max-width: 380px; line-height: 1.6; }
-	@media (max-width: 1080px) { .annotation-grid { grid-template-columns: minmax(180px, .7fr) minmax(320px, 1.3fr); } .evidence-column { grid-column: 1 / -1; border-top: 1px solid #dbe3ec; } .evidence-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-	@media (max-width: 680px) { .annotation-grid { display: block; } .question-column, .editor-column, .evidence-column { padding: 19px; } .evidence-column { border-top: 1px solid #dbe3ec; } .evidence-list { grid-template-columns: 1fr; } .actions button { flex: 1 1 auto; justify-content: center; } }
+
+	@media (max-width: 680px) { .annotation-grid { display: block; } .question-column, .editor-column, .evidence-column { padding: 19px; } .evidence-column { border-top: 1px solid var(--border-default); } .evidence-list { grid-template-columns: 1fr; } .actions button { flex: 1 1 auto; justify-content: center; } }
+	.question-column { grid-column: 1 / -1; padding: 20px; border-bottom: 1px solid var(--border-default); }
+	.editor-column, .evidence-column { padding: 20px; }
+	.question { font-size: 14px; margin: 0; }
+	.original-answer { margin-top: 16px; padding-top: 12px; }
+	.source-meta { margin-top: 12px; padding-top: 12px; }
+	.section-kicker { color: var(--text-secondary); font-weight: 600; }
+	h2 { font-size: 16px; }
+	.status--confirmed { color: var(--success-text); background: var(--success-bg); border-color: var(--success-border); }
+	button:focus-visible, summary:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 3px; }
+	.actions button.primary:hover:not(:disabled) { color: white; background: var(--brand-primary-hover); }
+	@media (max-width: 760px) { .annotation-grid { display: block; } .evidence-column { border-top: 1px solid var(--border-default); } }
 </style>

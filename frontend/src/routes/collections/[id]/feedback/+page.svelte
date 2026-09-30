@@ -88,9 +88,7 @@
 			<a class="back-link" href={resolve('/collections/[id]', { id: collectionId })}>
 				<ArrowLeft size={15} aria-hidden="true" />{$t('taskDatasets.back')}
 			</a>
-			<p class="eyebrow">{$t('taskDatasets.eyebrow')}</p>
 			<h1 id="datasets-title">{$t('taskDatasets.title')}</h1>
-			<p class="lede">{$t('taskDatasets.lede')}</p>
 		</div>
 		<button
 			class="icon-button"
@@ -117,10 +115,8 @@
 	</nav>
 	<div class="workspace-grid">
 		<section class="create-panel" aria-labelledby="create-title">
-			<div class="panel-icon" aria-hidden="true"><Plus size={18} /></div>
 			<div class="panel-copy">
 				<h2 id="create-title">{$t('taskDatasets.createTitle')}</h2>
-				<p>{$t('taskDatasets.createDetail')}</p>
 			</div>
 			<form class="create-form" on:submit|preventDefault={createDataset}>
 				<label for="dataset-name">{$t('taskDatasets.nameLabel')}</label>
@@ -131,7 +127,6 @@
 					placeholder={$t('taskDatasets.namePlaceholder')}
 					required
 				/>
-				<span class="fixed-task">{taskLabel(taskType)}</span>
 				<button class="primary-button" type="submit" disabled={creating || !name.trim()}>
 					<Plus size={16} aria-hidden="true" />{creating ? $t('taskDatasets.creating') : $t('taskDatasets.create')}
 				</button>
@@ -141,7 +136,7 @@
 		<section class="list-panel" aria-labelledby="list-title">
 			<div class="section-heading">
 				<div>
-					<h2 id="list-title">{$t('taskDatasets.title')}</h2>
+					<h2 id="list-title">{taskLabel(taskType)}</h2>
 				</div>
 				<span class="count">{visibleDatasets.length}</span>
 			</div>
@@ -182,63 +177,48 @@
 </section>
 
 <style>
-	.task-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid #dce4ed; margin-bottom: 24px; }
-	.task-tabs button { display: flex; align-items: center; gap: 12px; border: 0; border-bottom: 3px solid transparent; background: transparent; padding: 14px 18px; color: #607086; cursor: pointer; font: inherit; font-size: 14px; }
-	.task-tabs button.active { color: #147d74; border-bottom-color: #147d74; font-weight: 700; }
-	.task-tabs span { font-size: 12px; }
-	.fixed-task { color: #147d74; font-size: 13px; padding: 8px 0; }
-	:global(body) { background: #f6f8fb; }
-	.datasets { max-width: 1180px; margin: 0 auto; padding: 34px 28px 72px; color: #253347; }
-	.page-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 28px; }
+	.datasets { width: 100%; box-sizing: border-box; padding: 24px; color: var(--text-primary); background: var(--surface-card); border-block: 1px solid var(--border-default); }
+	.page-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
 	.page-heading { min-width: 0; }
-	.back-link { display: inline-flex; gap: 7px; align-items: center; color: #557086; font-size: 13px; font-weight: 700; text-decoration: none; }
-	.back-link:hover { color: #147d74; }
-	.eyebrow { margin: 18px 0 7px; color: #168278; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-	h1, h2, p { margin: 0; }
-	h1 { color: #18273a; font-size: clamp(28px, 4vw, 42px); line-height: 1.08; letter-spacing: 0; }
-	.lede { max-width: 690px; margin-top: 12px; color: #607086; font-size: 15px; line-height: 1.65; }
-	.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex: 0 0 auto; border: 1px solid #d6e0ea; border-radius: 7px; background: #fff; color: #476277; cursor: pointer; }
-	.icon-button:hover:not(:disabled) { border-color: #7dc8bf; color: #147d74; }
-	.icon-button:disabled { cursor: wait; opacity: .58; }
+	.back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; text-decoration: none; }
+	.back-link:hover { color: var(--brand-primary); }
+	h1 { margin: 8px 0 0; font-size: 28px; line-height: 36px; }
+	h2 { margin: 0; font-size: 16px; line-height: 24px; }
+	.icon-button { display: inline-grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); cursor: pointer; }
+	.icon-button:hover:not(:disabled) { color: var(--brand-primary); border-color: var(--brand-primary); }
+	button:disabled { opacity: .5; cursor: not-allowed; }
 	.spin { display: inline-flex; }
 	.spin :global(svg) { animation: spin 1s linear infinite; }
-	.notice { display: flex; gap: 9px; align-items: center; margin-bottom: 20px; border: 1px solid #fecaca; border-radius: 7px; background: #fff5f5; color: #b42318; padding: 11px 13px; font-size: 13px; }
-	.workspace-grid { display: grid; grid-template-columns: minmax(260px, .72fr) minmax(0, 1.28fr); gap: 18px; align-items: start; }
-	.create-panel, .list-panel { border: 1px solid #dce4ed; border-radius: 8px; background: #fff; box-shadow: 0 7px 24px rgba(35, 53, 71, .06); }
-	.create-panel { display: grid; gap: 14px; padding: 22px; }
-	.panel-icon, .dataset-card__icon { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 7px; background: #e8f6f4; color: #147d74; }
-	.panel-copy h2, .section-heading h2 { color: #223249; font-size: 18px; line-height: 1.25; }
-	.panel-copy p:last-child { margin-top: 8px; color: #718096; font-size: 13px; line-height: 1.55; }
-	.create-form { display: grid; gap: 8px; margin-top: 3px; }
-	.create-form label { color: #52647a; font-size: 12px; font-weight: 750; }
-	.create-form input { width: 100%; box-sizing: border-box; border: 1px solid #cbd7e3; border-radius: 6px; background: #fff; color: #253347; padding: 10px 11px; font: inherit; font-size: 13px; }
-	.create-form input:focus { outline: 3px solid rgba(34, 153, 141, .16); border-color: #299e91; }
-	.primary-button { display: inline-flex; gap: 7px; align-items: center; justify-content: center; margin-top: 6px; border: 1px solid #147d74; border-radius: 6px; background: #147d74; color: #fff; padding: 10px 13px; font-size: 13px; font-weight: 800; cursor: pointer; }
-	.primary-button:hover:not(:disabled) { background: #10685f; }
-	.primary-button:disabled { cursor: not-allowed; opacity: .48; }
-	.list-panel { min-height: 300px; padding: 22px; }
-	.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #e5ebf1; padding-bottom: 15px; }
-	.count { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border-radius: 999px; background: #e8f6f4; color: #147d74; font-size: 12px; font-weight: 800; }
-	.dataset-list { display: grid; gap: 10px; padding-top: 15px; }
-	.dataset-card { display: flex; align-items: center; gap: 12px; min-width: 0; border: 1px solid #e0e7ef; border-radius: 7px; background: #fff; color: inherit; padding: 14px; text-decoration: none; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
-	.dataset-card:hover { border-color: #7dc8bf; box-shadow: 0 6px 15px rgba(20, 125, 116, .09); transform: translateY(-1px); }
-	.dataset-card__body { min-width: 0; flex: 1; }
-	.dataset-card__topline { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
-	.dataset-card__topline strong { min-width: 0; overflow: hidden; color: #253347; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-	.dataset-card__topline span { flex: 0 0 auto; color: #147d74; font-size: 11px; font-weight: 800; }
-	.dataset-card__meta { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 7px; color: #7b8b9f; font-size: 11px; }
-	.dataset-card > :global(svg) { color: #91a1b3; }
-	.empty-state { display: grid; justify-items: center; gap: 8px; min-height: 220px; align-content: center; color: #7b8b9f; text-align: center; font-size: 13px; }
-	.empty-state strong { color: #3b4b60; font-size: 14px; }
-	.empty-state :global(svg) { color: #6e9e9a; }
-	.loader { width: 19px; height: 19px; border: 2px solid #d8ebe8; border-top-color: #168278; border-radius: 50%; animation: spin 1s linear infinite; }
+	.notice { display: flex; align-items: center; gap: 8px; padding: 12px; margin-bottom: 16px; border: 1px solid var(--danger-border); border-radius: 6px; color: var(--danger-text); background: var(--danger-bg); font-size: 13px; }
+	.task-tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border-default); margin-bottom: 24px; }
+	.task-tabs button { display: inline-flex; align-items: center; gap: 8px; padding: 12px 16px; border: 0; border-bottom: 2px solid transparent; color: var(--text-secondary); background: transparent; font: inherit; font-size: 14px; cursor: pointer; }
+	.task-tabs button.active { border-bottom-color: var(--brand-primary); color: var(--brand-primary); font-weight: 600; }
+	.task-tabs button:hover { background: var(--bg-subtle); }
+	.task-tabs span { display: grid; place-items: center; min-width: 20px; height: 20px; padding-inline: 4px; box-sizing: border-box; border-radius: 4px; background: var(--bg-subtle); font-size: 12px; }
+	.workspace-grid { display: grid; gap: 24px; }
+	.create-panel { display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: center; gap: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--border-default); }
+	.create-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 12px; max-width: 720px; }
+	.create-form label { grid-column: 1 / -1; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+	.create-form input { width: 100%; min-width: 0; box-sizing: border-box; height: 40px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px 12px; background: var(--surface-card); color: var(--text-primary); font: inherit; font-size: 14px; }
+	.primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 8px 16px; border: 1px solid var(--brand-primary); border-radius: 6px; background: var(--brand-primary); color: white; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+	.primary-button:hover:not(:disabled) { background: var(--brand-primary-hover); }
+	.section-heading { display: flex; align-items: center; gap: 12px; padding-bottom: 16px; }
+	.count { color: var(--text-secondary); font-size: 13px; }
+	.dataset-list { display: grid; }
+	.dataset-card { display: flex; align-items: center; gap: 16px; padding: 20px 12px; border-top: 1px solid var(--border-default); color: var(--text-primary); text-decoration: none; min-width: 0; }
+	.dataset-card:hover { background: var(--bg-subtle); }
+	.dataset-card__icon { display: grid; place-items: center; width: 36px; height: 36px; flex: 0 0 auto; color: var(--brand-primary); background: var(--brand-soft); border-radius: 6px; }
+	.dataset-card__body { flex: 1; min-width: 0; }
+	.dataset-card__topline { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+	.dataset-card__topline strong { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+	.dataset-card__topline span { font-size: 12px; color: var(--text-secondary); flex: 0 0 auto; }
+	.dataset-card__meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 6px; color: var(--text-secondary); font-size: 12px; }
+	.dataset-card > :global(svg) { flex: 0 0 auto; color: var(--text-secondary); }
+	.empty-state { display: grid; justify-items: center; align-content: center; gap: 12px; min-height: 180px; color: var(--text-secondary); font-size: 13px; text-align: center; }
+	.empty-state strong { font-size: 14px; color: var(--text-primary); }
+	.loader { width: 20px; height: 20px; border: 2px solid var(--border-default); border-top-color: var(--brand-primary); border-radius: 50%; animation: spin 1s linear infinite; }
+	button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 3px; }
 	@keyframes spin { to { transform: rotate(360deg); } }
-	@media (max-width: 760px) {
-		.datasets { padding: 24px 16px 52px; }
-		.page-header { gap: 12px; }
-		.workspace-grid { grid-template-columns: 1fr; }
-		.create-panel, .list-panel { padding: 18px; }
-		.dataset-card__topline { display: grid; gap: 5px; }
-		.dataset-card__topline strong { white-space: normal; overflow: visible; }
-	}
+	@media (max-width: 760px) { .create-panel { grid-template-columns: 1fr; gap: 12px; } .dataset-card__topline { display: grid; gap: 4px; } }
+	@media (max-width: 480px) { .datasets { padding: 16px; } .task-tabs { gap: 0; } .task-tabs button { padding: 12px 8px; font-size: 12px; gap: 4px; } .create-form { grid-template-columns: 1fr; } .create-form label { grid-column: auto; } .dataset-card { padding: 16px 0; gap: 12px; } h1 { font-size: 24px; } }
 </style>

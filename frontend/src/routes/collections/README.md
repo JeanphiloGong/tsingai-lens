@@ -147,6 +147,11 @@ This node owns the Collection route family.
   under `feedback/datasets/[dataset_id]`. The collection picker shows real case
   questions and document titles, submits selected cases for construction, and
   automatically refreshes pending builds without replacing an editable draft.
+  The entry and all three annotation editors use the application's shared
+  brand, surface, text, and state tokens in both light and dark themes. The
+  entry uses a compact creation row and dataset list; sample questions sit
+  above the answer and evidence columns. Rebuild, discard, restore, and retry
+  controls stay available in the expandable additional-actions section.
   Candidate analysis stays inside the workbench as an internal review signal;
   only a confirmed sample revision can be published as model-facing JSONL.
   The validation scenario uses two open-access Nature Communications papers:

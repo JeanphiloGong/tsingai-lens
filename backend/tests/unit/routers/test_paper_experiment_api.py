@@ -27,6 +27,14 @@ def test_experiment_projection_routes_are_additive() -> None:
     ) in routes
 
 
+def test_feedback_product_routes_use_task_datasets_without_legacy_snapshot_readback() -> None:
+    app = create_app()
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
+
+    assert "/api/v1/feedback-datasets" in paths
+    assert not any("/api/v1/dataset-snapshots" in path for path in paths)
+
+
 def test_existing_analysis_request_contract_has_no_experiment_fields() -> None:
     app = create_app()
     operation = app.openapi()["paths"][

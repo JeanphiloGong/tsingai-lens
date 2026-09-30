@@ -224,7 +224,7 @@ class DatasetSampleBuildWorker:
         reader = getattr(self.job_repository, "read_job", None)
         if callable(reader):
             finished = await reader(job.job_id)
-            if finished is not None and finished.status not in {"pending", "running"}:
+            if finished is not None:
                 return finished
         return replace(
             job,

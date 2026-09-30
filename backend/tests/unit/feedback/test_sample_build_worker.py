@@ -36,10 +36,6 @@ class _Jobs:
         self.job = replace(self.job, status="running", started_at=now, updated_at=now)
         return self.job
 
-    async def read_job(self, job_id: str):
-        return self.job
-
-
 class _Datasets:
     def __init__(self, dataset=None) -> None:
         self.dataset = dataset or _dataset()
@@ -327,3 +323,25 @@ async def _missing_case(case_id: str):
         _case(),
         context_snapshot={"question": "缺少证据", "answer": "原回答", "inspected_sources": []},
     )
+
+
+async def test_worker_reports_persisted_state_when_completion_loses_its_lease():
+    replacement = replace(_job(), status="running", worker_id="new-worker", lease_version=2)
+
+    class ReclaimedJobs(_Jobs):
+        async def read_job(self, job_id: str):
+            return replacement
+
+    class LostLeaseSamples(_Samples):
+        async def complete_build(self, **inputs):
+            assert inputs["outcome"] == "candidate"
+            return None
+
+    samples = LostLeaseSamples(replace(_sample(), status="building"))
+    result = await DatasetSampleBuildWorker(
+        job_repository=ReclaimedJobs(_job()), dataset_repository=_Datasets(),
+        sample_repository=samples, case_repository=_Cases(), builder=SftSampleBuilder(),
+    ).run_once()
+    assert result == replacement
+    assert samples.sample.status == "building"
+    assert samples.sample.current_revision_id is None

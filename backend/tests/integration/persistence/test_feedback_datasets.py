@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -21,7 +22,8 @@ from application.feedback.dataset_export_service import FeedbackDatasetExportSer
 from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from application.repositories.feedback_dataset_sample_repository import DatasetSampleActionConflict
-from domain.feedback.sample_revision import SampleRevision
+from domain.feedback.sample_revision import SampleRevision, SftRevisionContent
+from infra.persistence.postgres.analysis_job_repository import PostgresAnalysisJobRepository
 from infra.persistence.postgres.models.feedback import (
     FeedbackAnnotationRow,
     FeedbackCaseRow,
@@ -223,7 +225,8 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         outcome="candidate",
         finished_at=(recovery_time + timedelta(seconds=2)).isoformat(),
     ) is None
-    assert (await chain.jobs.read_job(rebuild_job.job_id)).status == "cancelled"
+    # The old lease must not cancel or otherwise mutate the replacement lease.
+    assert (await chain.jobs.read_job(rebuild_job.job_id)).status == "running"
     unchanged = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id)
     assert unchanged is not None and unchanged.current_revision_id == original_revision_id
     assert unchanged.status == "discarded"
@@ -339,6 +342,91 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     ), return_exceptions=True)
     assert sum(isinstance(result, DatasetSampleActionConflict) for result in restored_in_race) == 1
     assert sum(getattr(result, "status", None) == "needs_confirmation" for result in restored_in_race) == 1
+
+
+@pytest.mark.parametrize("stale_outcome", ["candidate", "failed", "needs_input"])
+async def test_reclaimed_build_rejects_old_lease_completion(
+    feedback_chain, postgres_session_factory, stale_outcome
+) -> None:
+    chain = feedback_chain
+    await chain.chat_service.set_message_feedback_for_user(
+        SESSION_ID, chain.answer.message_id, USER_ID, rating="not_helpful", reason="incorrect",
+    )
+    await FeedbackAnalysisWorker(
+        job_repository=chain.jobs, case_repository=chain.cases,
+        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+    ).run_once()
+    case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
+    datasets = PostgresFeedbackDatasetRepository(postgres_session_factory)
+    samples = PostgresFeedbackDatasetSampleRepository(postgres_session_factory)
+    service = FeedbackDatasetService(
+        repository=datasets, collection_service=chain.collection_service,
+        sample_repository=samples, case_repository=chain.cases,
+    )
+    dataset = await service.create_for_user(
+        user_id=USER_ID, collection_id=COLLECTION_ID, name="Lease test", task_type="sft",
+        construction_spec={},
+    )
+    collected = await service.collect_cases_for_user(
+        user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,),
+    )
+    sample = collected.items[0].sample
+    old = await chain.jobs.claim_next_dataset_sample_build_job(_now())
+    assert old is not None
+    later = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert await chain.jobs.recover_expired_jobs(later.isoformat()) == 1
+    assert await samples.complete_build(
+        job=old, sample_id=sample.sample_id, generation=sample.generation,
+        revision=None, outcome="failed", error_code="old_worker_failed", finished_at=later.isoformat(),
+    ) is None
+    assert (await chain.jobs.read_job(old.job_id)).status == "pending"
+    next_worker = PostgresAnalysisJobRepository(postgres_session_factory, worker_id="replacement-worker")
+    new = await next_worker.claim_next_dataset_sample_build_job(later.isoformat())
+    assert new is not None and new.lease_version == old.lease_version + 1
+    revision = SampleRevision.build_worker(
+        revision_id=f"revision_{uuid4().hex[:32]}", sample_id=sample.sample_id, revision_no=1,
+        content=SftRevisionContent.from_mapping({
+            "schema_version": "literature-sft.v1",
+            "messages": [{"role": "user", "content": "Compare A and B."}],
+            "context": [{"document_title": "B", "text": "Preheated at 200 C."}],
+            "target": "B used 200 C.",
+            "evidence": [{"document_title": "B", "text": "Preheated at 200 C."}],
+        }),
+        input_digest=sample.source_digest, construction_spec_version=dataset.spec_version,
+        provenance={}, created_at=later.isoformat(), job_id=old.job_id,
+    )
+    assert await samples.complete_build(
+        job=old, sample_id=sample.sample_id, generation=sample.generation,
+        revision=revision if stale_outcome == "candidate" else None, outcome=stale_outcome,
+        error_code="old_worker_failed" if stale_outcome == "failed" else None,
+        finished_at=later.isoformat(),
+    ) is None
+    stored = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample.sample_id)
+    assert stored.status == "building" and stored.current_revision_id is None
+    assert await samples.read_revision(revision.revision_id) is None
+    assert await chain.jobs.read_job(new.job_id) == new
+    assert await samples.complete_build(
+        job=replace(new, worker_id="wrong-worker"), sample_id=sample.sample_id,
+        generation=sample.generation, revision=None, outcome="failed", error_code="wrong_worker",
+        finished_at=later.isoformat(),
+    ) is None
+    assert await samples.complete_build(
+        job=new, sample_id=sample.sample_id, generation=sample.generation,
+        revision=None, outcome="failed", error_code="expired_worker",
+        finished_at=new.lease_expires_at,
+    ) is None
+    assert await chain.jobs.read_job(new.job_id) == new
+    finished = await samples.complete_build(
+        job=new, sample_id=sample.sample_id, generation=sample.generation,
+        revision=revision, outcome="candidate", finished_at=(later + timedelta(seconds=1)).isoformat(),
+    )
+    assert finished.status == "needs_confirmation"
+    assert await samples.complete_build(
+        job=old, sample_id=sample.sample_id, generation=sample.generation,
+        revision=None, outcome="failed", error_code="old_worker_failed",
+        finished_at=(later + timedelta(seconds=2)).isoformat(),
+    ) is None
+    assert (await chain.jobs.read_job(new.job_id)).status == "succeeded"
 
 
 async def test_d7_migration_cli_is_one_way_idempotent_and_audited(

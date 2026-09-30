@@ -376,20 +376,27 @@ class PostgresFeedbackDatasetSampleRepository:
             raise ValueError("non-candidate build cannot persist a revision")
         timestamp = _datetime(finished_at)
         async with self.session_factory.begin() as session:
+            job_row = await session.get(AnalysisJobRow, job.job_id, with_for_update=True)
+            if job_row is None:
+                raise FileNotFoundError("sample build identity not found")
+            if job_row.status in {"succeeded", "failed", "cancelled"}:
+                if job_row.lease_version != job.lease_version:
+                    return None
+            elif not _lease_matches(job_row, job, timestamp):
+                return None
             row = await session.scalar(
                 select(FeedbackDatasetSampleRow)
                 .where(FeedbackDatasetSampleRow.sample_id == sample_id)
                 .with_for_update()
             )
-            job_row = await session.get(AnalysisJobRow, job.job_id, with_for_update=True)
-            if row is None or job_row is None:
+            if row is None:
                 raise FileNotFoundError("sample build identity not found")
             if (
                 row.generation != generation
                 or row.active_job_id != job.job_id
                 or row.source_digest != job.payload.get("source_digest")
             ):
-                if job_row.status in {"pending", "running"}:
+                if job_row.status == "running":
                     _finish_job(
                         job_row,
                         status="cancelled",
@@ -500,6 +507,16 @@ def _clear_lease(row: AnalysisJobRow) -> None:
     row.worker_id = None
     row.lease_expires_at = None
     row.heartbeat_at = None
+
+
+def _lease_matches(row: AnalysisJobRow, job: AnalysisJob, timestamp: datetime) -> bool:
+    return bool(job.worker_id) and (
+        row.status == "running"
+        and row.worker_id == job.worker_id
+        and row.lease_version == job.lease_version
+        and row.lease_expires_at is not None
+        and row.lease_expires_at > timestamp
+    )
 
 
 def _sample(row: FeedbackDatasetSampleRow) -> DatasetSample:

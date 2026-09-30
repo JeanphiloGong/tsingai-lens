@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import pytest
 
-from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
+from application.chat import (
+    CapabilityExecutionContext,
+    CapabilityRegistry,
+    ModelToolCall,
+    ModelTurn,
+    ResearchAgentRunner,
+)
 from application.chat.capability_policy import select_tool_specs, validate_batch
-from application.chat.capabilities.document_sources import SearchSourcesCapability
+from application.chat.capabilities.document_sources import (
+    InspectDocumentSourcesCapability,
+    InspectDocumentSourcesToolRequest,
+    ReadSourceCapability,
+    ReadSourceToolRequest,
+    SearchSourcesCapability,
+)
 from domain.chat import ChatMessage, ChatToolCall, ToolPermissionMode, ToolRisk
 from tests.unit.application.test_research_agent_runner import _Capability, _Model, _context
 
@@ -26,6 +39,59 @@ def test_initial_catalog_defers_read_parameters_even_without_intent_keywords():
 
 def test_search_sources_is_declared_as_a_parallel_safe_read():
     assert SearchSourcesCapability.spec.parallel_safe is True
+
+
+@pytest.mark.anyio
+async def test_source_reads_expose_the_authoring_label_catalog():
+    document = SimpleNamespace(
+        document_id="paper-1",
+        title="Controlled paper",
+        blocks=(
+            SimpleNamespace(
+                block_id="methods-1", block_order=0, block_type="paragraph",
+                text="Methods", page=1, heading_path="Methods",
+            ),
+            SimpleNamespace(
+                block_id="results-1", block_order=1, block_type="paragraph",
+                text="Results", page=2, heading_path="Results",
+            ),
+        ),
+        tables=(),
+        figures=(),
+    )
+
+    class _Collection:
+        async def get_collection_for_user(self, collection_id, user_id):
+            return None
+
+    class _Sources:
+        async def read_document(self, collection_id, document_id):
+            return document
+
+    context = CapabilityExecutionContext(
+        session_id="session-1", user_id="user-1", collection_id="collection-1",
+        tool_call_id="call-1",
+    )
+    inspected = await InspectDocumentSourcesCapability(
+        collection_service=_Collection(), source_artifact_repository=_Sources(),
+    ).execute(context, InspectDocumentSourcesToolRequest(document_id="paper-1"))
+
+    assert [item["source_label"] for item in inspected.data["sources"]] == ["S001", "S002"]
+    assert [item["source_ref"] for item in inspected.data["sources"]] == ["methods-1", "results-1"]
+    assert inspected.data["source_label_to_ref"] == {
+        "S001": "methods-1",
+        "S002": "results-1",
+    }
+
+    read = await ReadSourceCapability(
+        collection_service=_Collection(), source_artifact_repository=_Sources(),
+    ).execute(
+        context,
+        ReadSourceToolRequest(
+            document_id="paper-1", source_kind="text_window", source_ref="results-1",
+        ),
+    )
+    assert read.data["source_label"] == "S002"
 
 
 def test_no_tool_wording_does_not_hide_default_discovery():

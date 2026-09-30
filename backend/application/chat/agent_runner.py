@@ -52,6 +52,32 @@ from utils.logger import get_request_id
 
 logger = logging.getLogger(__name__)
 
+_ACTIONABLE_CAPABILITY_EXCEPTIONS = (
+    ValueError,
+    FileNotFoundError,
+    LookupError,
+    PermissionError,
+)
+_SENSITIVE_ERROR_MARKERS = (
+    "password",
+    "secret",
+    "api_key",
+    "apikey",
+    "access_token",
+    "authorization",
+    "bearer",
+)
+
+
+def _safe_capability_error_message(exc: BaseException) -> str:
+    """Keep domain validation details while hiding arbitrary internal errors."""
+    if not isinstance(exc, _ACTIONABLE_CAPABILITY_EXCEPTIONS):
+        return "The capability raised an internal error. Review the request and retry."
+    detail = " ".join(str(exc).split())[:500]
+    if not detail or any(marker in detail.casefold() for marker in _SENSITIVE_ERROR_MARKERS):
+        return "The capability rejected the request. Review the arguments and retry."
+    return detail
+
 _TrajectoryCheckpoint = Callable[
     [
         tuple[ChatMessage, ...],
@@ -1729,7 +1755,8 @@ class ResearchAgentRunner:
             call, result = ResearchAgentRunner._failure(
                 call,
                 "capability_execution_failed",
-                "The research capability could not be completed.",
+                "The research capability could not be completed: "
+                + _safe_capability_error_message(exc),
             )
         return call, result
 

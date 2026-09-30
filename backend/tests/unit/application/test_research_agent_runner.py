@@ -2259,6 +2259,37 @@ async def test_capability_exception_is_sanitized_before_returning_to_model(caplo
     assert "exception_type=RuntimeError" in caplog.text
 
 
+async def test_capability_validation_exception_is_actionable_for_model_repair() -> None:
+    capability = _Capability(
+        "get_collection_context",
+        ToolRisk.DRAFT,
+        fail_with=ValueError(
+            "raw model output referenced unknown source labels: S001=methods-1"
+        ),
+    )
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="get_collection_context", arguments={},
+            ),)),
+            ModelTurn(content="我会改用读取结果中的 S001 标签。"),
+        ),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+
+    result = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="整理实验草案",
+    )
+
+    failure = next(
+        item for item in result.tool_results
+        if item.error_code == "capability_execution_failed"
+    )
+    assert failure.error_code == "capability_execution_failed"
+    assert "unknown source labels" in failure.error_message
+    assert "S001=methods-1" in failure.error_message
+
+
 async def test_queued_capability_result_returns_to_model_as_a_successful_observation() -> None:
     capability = _Capability(
         "start_objective_analysis",

@@ -124,9 +124,11 @@ class ReadSourceCapability:
         description=(
             "Read one exact canonical paper Source by document, Source kind, and "
             "Source reference. The returned content is the complete Source when it "
-            "fits the bounded result, with a stable digest and continuation offset "
-            "for oversized text. This is the source-reading step for Evidence; it "
-            "does not itself create Evidence or a Finding. Use inspect_table for "
+            "fits the bounded result, with its stable authoring source_label (S001, "
+            "S002, ...) and source_ref, a stable digest, and continuation offset "
+            "for oversized text. Use the source_label, not source_ref, when citing "
+            "PaperExperiment evidence. This is the source-reading step for Evidence; "
+            "it does not itself create Evidence or a Finding. Use inspect_table for "
             "row-aware inspection of an oversized table."
         ),
         risk=ToolRisk.READ,
@@ -170,6 +172,9 @@ class ReadSourceCapability:
                 error_code="source_not_found",
                 error_message="The requested canonical Source was not found in this paper.",
             )
+        source["source_label"] = InspectDocumentSourcesCapability._source_label_for_document(
+            document, source["source_ref"]
+        )
 
         canonical_content = source.pop("_canonical_content")
         digest = hashlib.sha256(canonical_content.encode("utf-8")).hexdigest()
@@ -654,7 +659,12 @@ class InspectDocumentSourcesCapability:
         name="inspect_document_sources",
         description=(
             "Read a context-sized batch of complete paper passages, tables and captions, with a section outline and length estimates. "
-            "Select a heading or page and omit limit for automatic batching; continue with next_offset, and use read_source for any oversized truncated Source."
+            "Each returned Source includes its stable authoring label (S001, S002, ...); "
+            "copy that source_label exactly into PaperExperiment source_labels and binding "
+            "fields, never combine it with source_ref. The response also includes a "
+            "source_label_to_ref map for the returned batch. Select a heading or page and omit "
+            "limit for automatic batching; continue with next_offset, and use read_source "
+            "for any oversized truncated Source."
         ),
         risk=ToolRisk.READ,
         input_model=InspectDocumentSourcesToolRequest,
@@ -709,6 +719,8 @@ class InspectDocumentSourcesCapability:
             content = source.pop("_canonical_content")
             source.update(content=content, content_truncated=False, canonical_length=len(content),
                           estimated_tokens=ChatContextBuilder.estimate_tokens(content))
+        for index, source in enumerate(sources, start=1):
+            source["source_label"] = f"S{index:03d}"
         sections: dict[str, dict[str, Any]] = {}
         for source in sources:
             heading = " ".join(str(source.get("heading_path") or "").split())
@@ -818,6 +830,10 @@ class InspectDocumentSourcesCapability:
                 "limit": arguments.limit,
                 "next_offset": next_offset,
                 "sources": visible,
+                "source_label_to_ref": {
+                    source["source_label"]: source["source_ref"]
+                    for source in visible
+                },
                 "batch_token_budget": context.max_result_tokens,
                 "returned_source_count": len(visible),
                 "support_is_evidence": False,
@@ -840,6 +856,10 @@ class InspectDocumentSourcesCapability:
                                       error_message="Request this paper individually with an exact Source or narrower section.")
             next_offset = arguments.offset + len(visible)
             result = replace(result, data={**result.data, "sources": list(visible), "document_outline": list(outline),
+                "source_label_to_ref": {
+                    source["source_label"]: source["source_ref"]
+                    for source in visible
+                },
                 "outline_truncated": len(sections) > len(outline), "returned_source_count": len(visible),
                 "next_offset": next_offset if next_offset < len(matches) else None,
             }, resource_refs=(self._document_ref(context.collection_id, document.document_id), *(
@@ -858,6 +878,24 @@ class InspectDocumentSourcesCapability:
             "role": "tool", "tool_call_id": result.tool_call_id,
             "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
         })
+
+    @staticmethod
+    def _source_label_for_document(document: Any, source_ref: str) -> str:
+        refs = [
+            block.block_id
+            for block in sorted(document.blocks, key=lambda item: item.block_order)
+            if str(block.text or "").strip()
+        ]
+        refs.extend(table.table_id for table in sorted(document.tables, key=lambda item: item.table_order))
+        refs.extend(
+            figure.figure_id
+            for figure in sorted(document.figures, key=lambda item: item.figure_order)
+            if str(figure.caption_text or "").strip()
+        )
+        try:
+            return f"S{refs.index(source_ref) + 1:03d}"
+        except ValueError:
+            return ""
 
     @staticmethod
     def _text_source(block: Any) -> dict[str, Any]:

@@ -361,7 +361,7 @@ selected feedback cases:
 - `POST /api/v1/feedback-datasets/{dataset_id}/export-previews`
 - `POST /api/v1/feedback-datasets/{dataset_id}/exports`
 - `GET /api/v1/feedback-datasets/{dataset_id}/exports?limit={limit}&offset={offset}`
-- `GET /api/v1/feedback-datasets/{dataset_id}/exports/{export_id}/download?format=jsonl|json|provenance`
+- `GET /api/v1/feedback-datasets/{dataset_id}/exports/{export_id}/download?format=jsonl|json|provenance|manifest`
 
 D1 accepts only `task_type: "sft"`; the dataset's Collection and task type are
 fixed at creation. The collection request contains `source_case_ids`; it is
@@ -415,13 +415,19 @@ preview. Unselected sample changes do not invalidate the preview or add rows to
 the export. An empty export is rejected.
 
 Each published export is immutable and has its own `export_id` and sequential
-version. `format=jsonl` and `format=json` contain only model-facing SFT rows:
-messages with the confirmed target as the final assistant message and readable
-document title/text context. They do not contain sample, case, session, message,
-source, or locator IDs. `format=provenance` downloads the separate trace sidecar
+version. `format=jsonl` and `format=json` contain task-specific model-facing
+rows. SFT rows contain messages with the confirmed target as the final
+assistant message; Preference rows contain the fixed messages/context and the
+human-selected `chosen` and `rejected` answers; Evaluation rows contain the
+messages/context, reference or rubric criteria, and evaluation mode. All rows
+include readable document title/text context and evidence. They do not contain
+sample, case, session, message, source, or locator IDs. `format=provenance`
+downloads the separate trace sidecar
 with row keys, source/message identities, evidence records, and digests. The
 sidecar is for audit and later source lookup; it is not appended to the model
-prompt. Replaying the same idempotency key and publication digest returns the
+prompt. `format=manifest` downloads the export manifest with the task schema,
+row count, member/content/provenance digests, and the names of the related
+files. Replaying the same idempotency key and publication digest returns the
 existing immutable export rather than creating another version.
 
 P6 dataset preparation and offline evaluation are read-only scripts over a

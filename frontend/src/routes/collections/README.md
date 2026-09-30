@@ -185,8 +185,9 @@ and lets the user open an affected sample or explicitly publish only the valid
 rows. Publishing freezes the confirmed revision set; later edits create a new
 export rather than changing an earlier file. JSONL and JSON downloads contain
 model-readable messages and document text only. The provenance download keeps
-the row-to-message/source mapping and evidence locators for audit, while those
-internal identifiers stay out of the training file.
+the row-to-message/source mapping and evidence locators for audit, while the
+manifest download binds the task schema, file names, row count, and digests.
+These internal identifiers stay out of the training file.
 
 The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
 Opening "AI summary" requests one short paragraph; it has no categorized

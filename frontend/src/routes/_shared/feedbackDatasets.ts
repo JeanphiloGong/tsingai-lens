@@ -1,6 +1,7 @@
 import { downloadBlob, requestJson } from './api';
 
 export type FeedbackDatasetTaskType = 'sft' | 'preference' | 'evaluation';
+export type DatasetExportFormat = 'jsonl' | 'json' | 'provenance' | 'manifest';
 
 export type FeedbackDataset = {
 	dataset_id: string;
@@ -143,7 +144,7 @@ export type DatasetExportSummary = {
 	provenance_digest: string;
 	manifest_digest: string;
 	created_at: string;
-	download_formats: Array<'jsonl' | 'json' | 'provenance'>;
+	download_formats: DatasetExportFormat[];
 };
 
 function datasetPath(datasetId = '') {
@@ -305,10 +306,10 @@ export async function fetchFeedbackDatasetExports(
 export async function downloadFeedbackDatasetExport(
 	datasetId: string,
 	exportItem: DatasetExportSummary,
-	format: 'jsonl' | 'json' | 'provenance'
+	format: DatasetExportFormat
 ) {
-	const extension = format === 'provenance' ? 'jsonl' : format;
-	const suffix = format === 'provenance' ? 'provenance' : 'data';
+	const extension = format === 'provenance' ? 'jsonl' : format === 'jsonl' ? 'jsonl' : 'json';
+	const suffix = format === 'provenance' ? 'provenance' : format === 'manifest' ? 'manifest' : 'data';
 	await downloadBlob(
 		`${datasetPath(datasetId)}/exports/${encodeURIComponent(exportItem.export_id)}/download?format=${format}`,
 		`${datasetId}-v${exportItem.export_no}-${suffix}.${extension}`

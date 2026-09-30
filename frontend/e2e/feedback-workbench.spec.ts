@@ -1,24 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const collectionId = 'col_feedback';
-const caseId = 'case_feedback';
-const digest = 'a'.repeat(64);
+const datasetId = 'fdset_feedback';
+const caseId = 'case_feedback_private';
 
 function json(body: unknown, status = 200) {
 	return { status, contentType: 'application/json', body: JSON.stringify(body) };
 }
 
-type MockFeedbackApisOptions = {
-	sourceSignals?: Array<Record<string, unknown>>;
-};
+async function mockTaskEntry(page: Page, withExport = false) {
+	let created = false;
 
-async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {}) {
-	let status = 'needs_annotation';
-	let annotation: Record<string, unknown> | null = null;
-	let reviewDecisions: Record<string, unknown>[] = [];
-	let reviewAttempts = 0;
-	const reviewKeys: string[] = [];
-
+	await page.addInitScript(() => localStorage.setItem('retrieval.lang', 'zh'));
 	await page.route('**/*', async (route) => {
 		const request = route.request();
 		const path = new URL(request.url()).pathname;
@@ -29,217 +22,122 @@ async function mockFeedbackApis(page: Page, options: MockFeedbackApisOptions = {
 			);
 		}
 		if (path === '/api/v1/collections' && request.method() === 'GET') {
-			return route.fulfill(
-				json({
-					items: [
-						{
-							collection_id: collectionId,
-							name: 'Feedback fixture',
-							status: 'ready',
-							documents: []
-						}
-					]
-				})
-			);
+			return route.fulfill(json({ items: [{ collection_id: collectionId, name: 'Feedback fixture', status: 'ready', documents: [] }] }));
 		}
 		if (path === `/api/v1/collections/${collectionId}` && request.method() === 'GET') {
-			return route.fulfill(
-				json({ collection_id: collectionId, name: 'Feedback fixture', status: 'ready', documents: [] })
-			);
+			return route.fulfill(json({ collection_id: collectionId, name: 'Feedback fixture', status: 'ready', documents: [] }));
+		}
+		if (path === '/api/v1/feedback-datasets' && request.method() === 'GET') {
+			const items = created ? [{
+				dataset_id: datasetId,
+				collection_id: collectionId,
+				name: '预热条件问答纠错',
+				task_type: 'sft',
+				construction_spec: { language: 'zh-CN' },
+				spec_version: 1,
+				created_by: 'user_feedback',
+				created_at: '2026-09-29T00:00:00Z',
+				updated_at: '2026-09-29T00:00:00Z'
+			}] : [];
+			return route.fulfill(json({ items, limit: 200, offset: 0 }));
+		}
+		if (path === '/api/v1/feedback-datasets' && request.method() === 'POST') {
+			created = true;
+			return route.fulfill(json({
+				dataset_id: datasetId,
+				collection_id: collectionId,
+				name: '预热条件问答纠错',
+				task_type: request.postDataJSON().task_type,
+				construction_spec: request.postDataJSON().construction_spec,
+				spec_version: 1,
+				created_by: 'user_feedback',
+				created_at: '2026-09-29T00:00:00Z',
+				updated_at: '2026-09-29T00:00:00Z'
+			}, 201));
 		}
 		if (path === '/api/v1/feedback-cases' && request.method() === 'GET') {
-			return route.fulfill(
-				json({
-					items: [
-						{
-							case_id: caseId,
-							collection_id: collectionId,
-							status,
-							anchor_message_id: 'answer_feedback',
-							problem_type: 'source_missing',
-							confidence: 0.87,
-							needs_human_review: true,
-							created_at: '2026-09-25T00:00:00Z',
-							question_preview: 'Compare Paper A and Paper B',
-							answer_preview: 'Paper B has no preheating information.',
-							document_titles: ['Paper A', 'Paper B'],
-							coverage_status: 'partial'
-						}
-					],
-					limit: 50,
-					offset: 0
-				})
-			);
-		}
-		if (path === `/api/v1/feedback-cases/${caseId}` && request.method() === 'GET') {
-			return route.fulfill(
-				json({
+			return route.fulfill(json({
+				items: [{
 					case_id: caseId,
 					collection_id: collectionId,
-					session_id: 'session_feedback',
-					status,
-					source_signals: options.sourceSignals ?? [],
-					question: 'Compare Paper A and Paper B.',
-					answer: 'Paper B has no preheating information.',
-					requested_scope: [{ document_id: 'doc_a', title: 'Paper A' }],
-					inspected_sources: [{ source_ref: 'source_b', document_title: 'Paper B', heading_path: 'Figure 3 caption', page: 4, quote: 'Preheating at 200 C.' }],
-					omitted_candidates: [],
-					claim_support: [],
-					gaps: ['Paper B figure caption was omitted.'],
-					coverage_status: 'partial',
-					analysis: { problem_type: 'source_missing', confidence: 0.87, suggested_target: null, model: 'test', result_id: 'result_feedback', coverage_status: 'partial' },
-					annotation,
-					current_annotation_digest: annotation ? digest : null,
-					review_decisions: reviewDecisions,
-					technical_error: null,
-					created_at: '2026-09-25T00:00:00Z',
-					updated_at: '2026-09-25T00:00:00Z'
-				})
-			);
+					status: 'needs_annotation',
+					question_preview: '比较文献 A、B 的预热条件。',
+					answer_preview: '文献 B 没有预热。',
+					document_titles: ['文献 A', '文献 B'],
+					created_at: '2026-09-29T00:00:00Z'
+				}],
+				limit: 50,
+				offset: 0
+			}));
 		}
-		if (path === `/api/v1/feedback-cases/${caseId}/annotation` && request.method() === 'PATCH') {
-			annotation = {
-				annotation_id: 'annotation_feedback',
-				case_id: caseId,
-				version: annotation ? 2 : 1,
-				problem_type: 'source_missing',
-				severity: 'high',
-				target: null,
-				support_source_refs: [],
-				dataset_uses: ['evaluation'],
-				reason: 'The figure caption was checked.',
-				annotation_digest: digest,
+		if (path === `/api/v1/feedback-datasets/${datasetId}` && request.method() === 'GET') {
+			return route.fulfill(json({
+				dataset_id: datasetId,
+				collection_id: collectionId,
+				name: '预热条件问答纠错',
+				task_type: 'sft',
+				construction_spec: { language: 'zh-CN' },
+				spec_version: 1,
 				created_by: 'user_feedback',
-				created_at: '2026-09-25T00:00:00Z',
-				updated_at: '2026-09-25T00:00:00Z'
-			};
-			status = 'ready_for_review';
-			return route.fulfill(json(annotation));
+				created_at: '2026-09-29T00:00:00Z',
+				updated_at: '2026-09-29T00:00:00Z'
+			}));
 		}
-		if (path === `/api/v1/feedback-cases/${caseId}/review` && request.method() === 'POST') {
-			reviewKeys.push(request.headers()['idempotency-key'] ?? '');
-			reviewAttempts += 1;
-			if (reviewAttempts === 1) return route.fulfill(json({ detail: 'temporary failure' }, 503));
-			status = 'rejected';
-			const decision = {
-				decision_id: 'review_feedback',
-				case_id: caseId,
-				annotation_digest: digest,
-				decision: 'reject',
-				reason: 'Needs a clearer source explanation.',
-				created_by: 'user_feedback',
-				seq: 1,
-				created_at: '2026-09-25T00:00:00Z'
-			};
-			reviewDecisions = [decision];
-			return route.fulfill(json(decision));
+		if (path === `/api/v1/feedback-datasets/${datasetId}/samples` && request.method() === 'GET') {
+			return route.fulfill(json({ items: [], total: 0, limit: 200, offset: 0 }));
 		}
-		if (path === `/api/v1/feedback-cases/${caseId}/review-decisions` && request.method() === 'GET') {
-			return route.fulfill(json({ items: reviewDecisions }));
+		if (path === `/api/v1/feedback-datasets/${datasetId}/exports` && request.method() === 'GET') {
+			return route.fulfill(json({
+				items: withExport ? [{
+					export_id: 'export_feedback',
+					dataset_id: datasetId,
+					export_no: 1,
+					schema_version: 'literature-sft.v1',
+					row_count: 1,
+					content_digest: 'a'.repeat(64),
+					provenance_digest: 'b'.repeat(64),
+					manifest_digest: 'c'.repeat(64),
+					created_at: '2026-09-29T00:00:00Z',
+					download_formats: ['jsonl', 'json', 'provenance', 'manifest']
+				}] : [],
+				limit: 50,
+				offset: 0
+			}));
+		}
+		if (path === `/api/v1/feedback-datasets/${datasetId}/exports/export_feedback/download` && request.method() === 'GET') {
+			return route.fulfill(json({ manifest_schema_version: 'feedback-dataset-export-manifest.v1' }));
+		}
+		if (path === `/api/v1/feedback-datasets/${datasetId}/collections` && request.method() === 'POST') {
+			return route.fulfill(json({ created_count: 1, existing_count: 0 }, 202));
 		}
 		return route.fulfill(json({ detail: `unhandled test route: ${request.method()} ${path}` }, 404));
 	});
-
-	return {
-		getReviewKeys: () => reviewKeys,
-		getReviewAttempts: () => reviewAttempts
-	};
 }
 
-test('feedback workbench carries a retry key and keeps the reviewer out of technical IDs', async ({ page }) => {
-	const api = await mockFeedbackApis(page);
+test('the collection entry uses task datasets and keeps internal IDs out of the reviewer view', async ({ page }) => {
+	await mockTaskEntry(page);
 	await page.setViewportSize({ width: 1440, height: 1000 });
 	await page.goto(`/collections/${collectionId}/feedback`);
 
-	await expect(page.getByRole('heading', { name: 'Feedback workbench' })).toBeVisible();
-	await expect(page.locator('.quality-flow__step--done')).toHaveCount(2);
-	await expect(page.locator('.quality-flow__step--active')).toHaveCount(1);
-	await expect(page.getByRole('button', { name: 'Export candidate analysis' })).toHaveCount(0);
-	await page.getByRole('button', { name: /Compare Paper A and Paper B/ }).click();
-	await expect(page.getByRole('heading', { name: 'Human annotation' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: '任务数据集' })).toBeVisible();
+	await expect(page.getByRole('button', { name: /回答偏好/ })).toBeVisible();
+	await expect(page.getByRole('button', { name: /评测/ })).toBeVisible();
+	await page.locator('#dataset-name').fill('预热条件问答纠错');
+	await page.getByRole('button', { name: '创建数据集', exact: true }).click();
+	await expect(page).toHaveURL(new RegExp(`/feedback/datasets/${datasetId}$`));
 
-	const annotationReason = page.locator('.annotation-panel textarea').last();
-	await annotationReason.fill('The figure caption was checked.');
-	await page.getByRole('button', { name: 'Save annotation' }).click();
-	await expect(page.getByRole('heading', { name: 'Review decision' })).toBeVisible();
-
-	const reviewReason = page.locator('.review-panel textarea');
-	await reviewReason.fill('Needs a clearer source explanation.');
-	await page.getByRole('button', { name: 'Reject' }).click();
-	await expect(page.getByRole('alert')).toContainText('request could not be completed');
-	await page.getByRole('button', { name: 'Reject' }).click();
-	await expect(page.getByText(/Rejected/i).last()).toBeVisible();
-
-	const keys = api.getReviewKeys();
-	expect(api.getReviewAttempts()).toBe(2);
-	expect(keys[0]).toBeTruthy();
-	expect(keys[1]).toBe(keys[0]);
-	expect(await page.locator('body').textContent()).not.toContain(caseId);
-	expect(await page.locator('body').textContent()).not.toContain('source_b');
-	expect(await page.locator('body').textContent()).toContain('Figure 3 caption');
-});
-
-test('feedback workbench presents each source signal with its own meaning', async ({ page }) => {
-	await mockFeedbackApis(page, {
-		sourceSignals: [
-			{
-				signal_type: 'chat_message_feedback',
-				feedback_id: 'feedback_private',
-				rating: 'not_helpful',
-				reason: 'source_missing',
-				comment: 'Paper B was not checked.',
-				created_at: '2026-09-25T00:00:00Z'
-			},
-			{
-				signal_type: 'natural_language_correction',
-				signal_id: 'signal_correction_private',
-				anchor_message_id: 'answer_feedback',
-				trigger_message_id: 'challenge_private',
-				content: 'You did not inspect Figure 3 in Paper B.',
-				problem_type: 'source_missing',
-				confidence: 0.91,
-				suggested_target: null,
-				resolution: 'unresolved_candidate',
-				created_at: '2026-09-25T00:01:00Z'
-			},
-			{
-				signal_type: 'tool_failure',
-				signal_id: 'signal_tool_private',
-				tool_call_id: 'tool_call_private',
-				assistant_message_id: 'assistant_private',
-				result_message_id: 'result_private',
-				tool_name: 'inspect_document_sources',
-				error_code: 'source_unavailable',
-				problem_type: 'tool_failure',
-				confidence: 1,
-				suggested_target: null,
-				resolution: 'unresolved_candidate',
-				created_at: '2026-09-25T00:02:00Z'
-			}
-		]
-	});
-
-	await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`/collections/${collectionId}/feedback`);
-	await page.getByRole('button', { name: /Compare Paper A and Paper B/ }).click();
-
-	const correction = page.locator('[data-signal-type="natural_language_correction"]');
-	await expect(correction).toContainText('User correction');
-	await expect(correction).toContainText('You did not inspect Figure 3 in Paper B.');
-
-	const failure = page.locator('[data-signal-type="tool_failure"]');
-	await expect(failure).toContainText('Tool failure');
-	await expect(failure).toContainText('inspect document sources');
-	await expect(failure).toContainText('source unavailable');
-
+	await page.getByRole('button', { name: '收集案例', exact: true }).click();
+	await expect(page.getByText('比较文献 A、B 的预热条件。')).toBeVisible();
+	await expect(page.getByText('文献 A · 文献 B')).toBeVisible();
 	const body = await page.locator('body').textContent();
-	expect(body).not.toContain('signal_correction_private');
-	expect(body).not.toContain('tool_call_private');
-	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+	expect(body).not.toContain(caseId);
+	expect(body).not.toContain('source_ref');
+	await page.getByRole('checkbox', { name: /比较文献 A、B/ }).check();
+	await page.getByRole('button', { name: /收集并构建/ }).click();
 });
 
 test('the global header keeps language controls visible at tablet width', async ({ page }) => {
-	await mockFeedbackApis(page);
+	await mockTaskEntry(page);
 	await page.setViewportSize({ width: 1024, height: 800 });
 	await page.goto(`/collections/${collectionId}/feedback`);
 
@@ -247,4 +145,16 @@ test('the global header keeps language controls visible at tablet width', async 
 	expect(bounds).not.toBeNull();
 	expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1024);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1024);
+});
+
+test('export history exposes the manifest download alongside training files', async ({ page }) => {
+	await mockTaskEntry(page, true);
+	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+	await page.locator('.export-panel > summary').click();
+	await expect(page.getByText('已发布版本')).toBeVisible();
+	await expect(page.getByRole('button', { name: '清单' })).toBeVisible();
+
+	const download = page.waitForEvent('download');
+	await page.getByRole('button', { name: '清单' }).click();
+	await expect((await download).suggestedFilename()).toContain('manifest.json');
 });

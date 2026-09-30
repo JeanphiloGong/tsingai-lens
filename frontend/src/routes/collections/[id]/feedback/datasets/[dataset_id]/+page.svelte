@@ -32,6 +32,7 @@
 		type DatasetSampleDetail,
 		type DatasetExportPreview,
 		type DatasetExportSummary,
+		type DatasetExportFormat,
 		type FeedbackDataset,
 		type RevisionContent
 	} from '../../../../../_shared/feedbackDatasets';
@@ -258,7 +259,7 @@
 		}
 	}
 
-	async function downloadExport(item: DatasetExportSummary, format: 'jsonl' | 'json' | 'provenance') {
+	async function downloadExport(item: DatasetExportSummary, format: DatasetExportFormat) {
 		const key = `${item.export_id}:${format}`;
 		if (downloadingExport) return;
 		downloadingExport = key;
@@ -571,6 +572,7 @@
 									<button class="download-button" type="button" on:click={() => downloadExport(item, 'jsonl')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />JSONL</button>
 									<button class="download-button" type="button" on:click={() => downloadExport(item, 'json')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />JSON</button>
 									<button class="download-button download-button--quiet" type="button" on:click={() => downloadExport(item, 'provenance')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />追溯包</button>
+									<button class="download-button download-button--quiet" type="button" on:click={() => downloadExport(item, 'manifest')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />清单</button>
 								</div>
 							</div>
 						{/each}

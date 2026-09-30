@@ -73,6 +73,13 @@ summary after a failed proposal is not a stored, reviewable experiment draft.
 Saving a reviewed draft must preserve its scientific content; changed or
 reduced content requires renewed review.
 
+Agent Finding inspection preserves the complete Finding and returns only as
+many complete Evidence records as fit the escaped tool-message token budget.
+Continue with `next_evidence_offset` to review the rest. If a complete Finding,
+its reviews, or a single Evidence record cannot fit, inspection returns
+`finding_read_exceeds_budget` without an oversized observation or a false
+claim of complete review; the exact record remains accessible in the workspace.
+
 Complete canonical Source reads remain usable across user turns in the same
 session. Before accepting a proposal, the capability compares every cited
 Source's current content digest with the session's complete reading records.

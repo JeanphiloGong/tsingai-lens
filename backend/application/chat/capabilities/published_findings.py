@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+import json
 from typing import Any, Annotated, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,6 +13,7 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from application.chat.context_builder import ChatContextBuilder
 
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=160)]
@@ -369,7 +372,7 @@ class InspectPublishedFindingCapability:
             version,
             arguments.finding_id,
         )
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
             data={
@@ -402,6 +405,43 @@ class InspectPublishedFindingCapability:
             ),
             warnings=warnings,
         )
+        # Measure the actual escaped tool message, rather than raw excerpt text.
+        budget = max(0, min(context.max_result_tokens, 12_000) - 256)
+        while ChatContextBuilder.estimate_tokens({
+            "role": "tool", "tool_call_id": result.tool_call_id,
+            "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
+        }) > budget:
+            if not evidence_items:
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id,
+                    status="failed",
+                    error_code="finding_read_exceeds_budget",
+                    error_message=(
+                        "The complete Finding or one Evidence record exceeds the read budget. "
+                        "Open the exact Finding and Sources in the workspace; this result "
+                        "does not establish a complete review."
+                    ),
+                    resource_refs=(finding_ref,),
+                )
+            evidence_items.pop()
+            pending = {replacements.get(item["evidence_id"]) for item in evidence_items}
+            replacement_evidence = [item for item in replacement_evidence if item["evidence_id"] in pending]
+            next_offset = arguments.evidence_offset + len(evidence_items)
+            if not evidence_items and next_offset < evidence_total:
+                # A zero-length page must never ask the Agent to repeat its offset.
+                continue
+            visible_ids = {item["evidence_id"] for item in (*evidence_items, *replacement_evidence)}
+            result = replace(
+                result,
+                data={**result.data, "evidence": list(evidence_items),
+                      "replacement_evidence": replacement_evidence,
+                      "next_evidence_offset": next_offset if next_offset < evidence_total else None},
+                resource_refs=(finding_ref, *(ref for ref in result.resource_refs[1:]
+                    if ref.resource_id.rsplit(":", 1)[-1] in visible_ids)),
+                warnings=("Additional Finding Evidence was omitted to fit the read budget; "
+                          "continue with next_evidence_offset before a complete review.",),
+            )
+        return result
 
 
 __all__ = [

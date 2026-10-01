@@ -192,6 +192,13 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     row = json.loads(data)
     assert "sample_id" not in row and "source_ref" not in json.dumps(row)
 
+    # A withdrawn source invalidates this member only; it must not make the
+    # confirmed-member query fail for the whole workbench.
+    async with postgres_session_factory.begin() as session:
+        source_row = await session.get(FeedbackCaseRow, case.case_id)
+        assert source_row is not None
+        source_row.status = "withdrawn"
+    assert await samples.read_confirmed_members(dataset_id=dataset.dataset_id) == ()
 
 async def test_rebuild_discard_restore_and_late_worker_result(
     feedback_chain, postgres_session_factory

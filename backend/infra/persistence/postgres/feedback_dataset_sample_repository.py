@@ -189,7 +189,10 @@ class PostgresFeedbackDatasetSampleRepository:
             members: list[ConfirmedDatasetMember] = []
             for sample, revision, case in rows:
                 if case.status == "withdrawn":
-                    raise DatasetSampleRevisionConflict("sample_source_stale")
+                    # A withdrawn source invalidates only this sample.  Do
+                    # not make one stale row break the whole workbench or
+                    # prevent other confirmed samples from being exported.
+                    continue
                 if source_digest_for_case(_case_record(case)) != sample.source_digest:
                     raise DatasetSampleRevisionConflict("sample_source_stale")
                 members.append(

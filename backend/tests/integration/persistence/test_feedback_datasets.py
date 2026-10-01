@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
-from datetime import datetime, timedelta, timezone
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -17,13 +17,26 @@ from sqlalchemy import select
 
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
-from application.feedback.dataset_service import FeedbackDatasetService
 from application.feedback.dataset_export_service import FeedbackDatasetExportService
+from application.feedback.dataset_service import FeedbackDatasetService
 from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
-from application.repositories.feedback_dataset_sample_repository import DatasetSampleActionConflict
+from application.repositories.feedback_dataset_sample_repository import (
+    DatasetSampleActionConflict,
+)
 from domain.feedback.sample_revision import SampleRevision, SftRevisionContent
-from infra.persistence.postgres.analysis_job_repository import PostgresAnalysisJobRepository
+from infra.persistence.postgres.analysis_job_repository import (
+    PostgresAnalysisJobRepository,
+)
+from infra.persistence.postgres.feedback_dataset_export_repository import (
+    PostgresFeedbackDatasetExportRepository,
+)
+from infra.persistence.postgres.feedback_dataset_repository import (
+    PostgresFeedbackDatasetRepository,
+)
+from infra.persistence.postgres.feedback_dataset_sample_repository import (
+    PostgresFeedbackDatasetSampleRepository,
+)
 from infra.persistence.postgres.models.feedback import (
     FeedbackAnnotationRow,
     FeedbackCaseRow,
@@ -36,19 +49,13 @@ from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetSampleRow,
     FeedbackSampleRevisionRow,
 )
-from infra.persistence.postgres.feedback_dataset_repository import PostgresFeedbackDatasetRepository
-from infra.persistence.postgres.feedback_dataset_sample_repository import PostgresFeedbackDatasetSampleRepository
-from infra.persistence.postgres.feedback_dataset_export_repository import (
-    PostgresFeedbackDatasetExportRepository,
-)
+from scripts.migrate_feedback_task_datasets import _legacy_digest, stable_id
 from tests.integration.persistence.test_feedback_workbench import (
     COLLECTION_ID,
     SESSION_ID,
     USER_ID,
     feedback_chain,
 )
-from scripts.migrate_feedback_task_datasets import _legacy_digest, stable_id
-
 
 pytestmark = pytest.mark.anyio
 
@@ -73,6 +80,16 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         sample_repository=samples, case_repository=chain.cases)
     dataset = await service.create_for_user(user_id=USER_ID, collection_id=COLLECTION_ID,
         name=f"Preheating {task_type}", task_type=task_type, construction_spec={})
+    stored = await service.read_record_for_user(
+        user_id=USER_ID, dataset_id=dataset.dataset_id
+    )
+    assert stored.dataset == dataset
+    assert stored.created_at.tzinfo is not None
+    assert stored.updated_at == stored.created_at
+    listed = await service.list_records_for_user(
+        user_id=USER_ID, collection_id=COLLECTION_ID
+    )
+    assert listed == (stored,)
     collected = await service.collect_cases_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,))
     sample_id = collected.items[0].sample.sample_id
     await DatasetSampleBuildWorker(job_repository=chain.jobs, dataset_repository=datasets,

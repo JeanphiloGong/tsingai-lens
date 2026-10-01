@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from datetime import datetime, timezone
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -27,7 +26,6 @@ from domain.feedback.sample_revision import (
     content_digest_for,
 )
 
-
 pytestmark = pytest.mark.anyio
 
 
@@ -37,7 +35,6 @@ def anyio_backend() -> str:
 
 
 def _dataset() -> Dataset:
-    now = datetime(2026, 9, 29, tzinfo=timezone.utc)
     return Dataset(
         dataset_id="fdset_export_test",
         collection_id="collection-1",
@@ -46,8 +43,6 @@ def _dataset() -> Dataset:
         construction_spec={"language": "zh-CN"},
         spec_version=1,
         created_by="user-1",
-        created_at=now,
-        updated_at=now,
     )
 
 

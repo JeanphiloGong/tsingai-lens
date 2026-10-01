@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 import pytest
 
@@ -10,8 +9,13 @@ from application.feedback.preference_sample_builder import (
     PreferenceSampleBuilder,
     validate_preference,
 )
-from domain.feedback import Dataset, DatasetSample, FeedbackCase, SampleRevision, PreferenceRevisionContent
-
+from domain.feedback import (
+    Dataset,
+    DatasetSample,
+    FeedbackCase,
+    PreferenceRevisionContent,
+    SampleRevision,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -22,8 +26,9 @@ def anyio_backend() -> str:
 
 
 def _dataset() -> Dataset:
-    now = datetime.now(timezone.utc)
-    return Dataset("fdset-preference", "collection-1", "偏好", "preference", {}, 1, "user-1", now, now)
+    return Dataset(
+        "fdset-preference", "collection-1", "偏好", "preference", {}, 1, "user-1"
+    )
 
 
 def _sample() -> DatasetSample:

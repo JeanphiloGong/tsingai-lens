@@ -39,15 +39,6 @@ class _Repository:
     async def read(self, dataset_id: str) -> Dataset | None:
         return self.items.get(dataset_id)
 
-    async def list_for_collection(self, *, collection_id: str, limit: int, offset: int):
-        values = [
-            item
-            for item in self.items.values()
-            if item.collection_id == collection_id
-        ]
-        return tuple(values[offset : offset + limit])
-
-
 class _Cases:
     def __init__(self, case: FeedbackCase) -> None:
         self.case = case
@@ -87,8 +78,9 @@ def _source_case() -> FeedbackCase:
 @pytest.mark.parametrize("excerpt", ["Preheated at 200 C.", "Preheated at 250 C."])
 async def test_needs_input_can_save_its_first_complete_human_revision(excerpt: str) -> None:
     from dataclasses import replace
-    from domain.feedback import DatasetSample
+
     from application.feedback.dataset_service import FeedbackDatasetConflict
+    from domain.feedback import DatasetSample
 
     class Samples:
         sample = None
@@ -161,6 +153,26 @@ async def test_create_dataset_has_own_identity_and_fixed_sft_type() -> None:
     assert await service.read_for_user(user_id="user-1", dataset_id=dataset.dataset_id) == dataset
 
 
+async def test_reused_request_rules_cannot_change_saved_spec() -> None:
+    repository = _Repository()
+    service = FeedbackDatasetService(
+        repository=repository,
+        collection_service=_Collections(),
+    )
+    spec = {"source_filter": {"kinds": ["feedback_case"]}}
+    dataset = await service.create_for_user(
+        user_id="user-1",
+        collection_id="collection-1",
+        name="SFT",
+        task_type="sft",
+        construction_spec=spec,
+    )
+    spec["source_filter"]["kinds"].append("tool_failure")
+
+    saved = await repository.read(dataset.dataset_id)
+    assert saved.construction_spec == {"source_filter": {"kinds": ["feedback_case"]}}
+
+
 @pytest.mark.anyio
 async def test_create_allows_task_types_and_rejects_credentials() -> None:
     service = FeedbackDatasetService(
@@ -199,24 +211,31 @@ async def test_collection_scope_and_pagination_are_enforced() -> None:
     )
 
     with pytest.raises(FileNotFoundError):
-        await service.list_for_user(user_id="user-2", collection_id="collection-1")
+        await service.list_records_for_user(user_id="user-2", collection_id="collection-1")
     with pytest.raises(FeedbackDatasetError, match="pagination_invalid"):
-        await service.list_for_user(user_id="user-1", collection_id="collection-1", limit=0)
+        await service.list_records_for_user(user_id="user-1", collection_id="collection-1", limit=0)
 
 
-def test_dataset_domain_normalizes_name_and_rejects_unknown_type() -> None:
-    now = datetime.now(timezone.utc)
-    with pytest.raises(ValueError, match="invalid dataset task type"):
-        Dataset(
-            dataset_id="fdset_1",
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "name,task_type,code",
+    [
+        ("SFT", "unknown", "dataset_task_type_not_available"),
+        (" " * 3, "sft", "dataset_name_required"),
+        ("x" * 121, "sft", "dataset_name_too_long"),
+    ],
+)
+async def test_dataset_service_rejects_invalid_input(name, task_type, code) -> None:
+    service = FeedbackDatasetService(
+        repository=_Repository(), collection_service=_Collections()
+    )
+    with pytest.raises(FeedbackDatasetError, match=code):
+        await service.create_for_user(
+            user_id="user-1",
             collection_id="collection-1",
-            name="SFT",
-            task_type="unknown",  # type: ignore[arg-type]
+            name=name,
+            task_type=task_type,
             construction_spec={},
-            spec_version=1,
-            created_by="user-1",
-            created_at=now,
-            updated_at=now,
         )
 
 

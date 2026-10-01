@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import asdict
 from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
@@ -11,38 +12,40 @@ from application.feedback.dataset_export_service import (
     DatasetExportError,
     FeedbackDatasetExportService,
 )
-from application.repositories.feedback_dataset_export_repository import DatasetExportSummary
 from application.feedback.dataset_service import (
     DatasetSampleDetail,
     FeedbackDatasetConflict,
     FeedbackDatasetError,
     FeedbackDatasetService,
 )
+from application.repositories.feedback_dataset_export_repository import (
+    DatasetExportSummary,
+)
+from application.repositories.feedback_dataset_repository import StoredDataset
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.task_datasets import (
     DatasetCollectionItemResponse,
     DatasetCollectionRequest,
     DatasetCollectionResponse,
+    DatasetExportIssueResponse,
+    DatasetExportListResponse,
+    DatasetExportPreviewRequest,
+    DatasetExportPreviewResponse,
+    DatasetExportPreviewRowResponse,
+    DatasetExportPublishRequest,
+    DatasetExportSummaryResponse,
     DatasetSampleDetailResponse,
     DatasetSampleListResponse,
     DatasetSampleRevisionResponse,
     DatasetSampleSourceCaseResponse,
     DatasetSampleSummaryResponse,
-    DatasetExportIssueResponse,
-    DatasetExportListResponse,
-    DatasetExportPreviewResponse,
-    DatasetExportPreviewRequest,
-    DatasetExportPreviewRowResponse,
-    DatasetExportPublishRequest,
-    DatasetExportSummaryResponse,
-    SampleConfirmRequest,
     SampleActionRequest,
+    SampleConfirmRequest,
     SampleRevisionUpdateRequest,
     TaskDatasetCreateRequest,
     TaskDatasetListResponse,
     TaskDatasetResponse,
 )
-
 
 router = APIRouter(prefix="/feedback-datasets", tags=["feedback-workbench"])
 
@@ -74,13 +77,13 @@ def _export_service(request: Request) -> FeedbackDatasetExportService:
 
 
 def _sample_response(sample: object) -> DatasetSampleSummaryResponse:
-    return DatasetSampleSummaryResponse.model_validate(sample.to_record())  # type: ignore[attr-defined]
+    return DatasetSampleSummaryResponse.model_validate(sample, from_attributes=True)  # type: ignore[attr-defined]
 
 
 def _revision_response(revision: object | None) -> DatasetSampleRevisionResponse | None:
     if revision is None:
         return None
-    return DatasetSampleRevisionResponse.model_validate(revision.to_record())  # type: ignore[attr-defined]
+    return DatasetSampleRevisionResponse.model_validate(asdict(revision))
 
 
 def _detail_response(detail: DatasetSampleDetail) -> DatasetSampleDetailResponse:
@@ -140,7 +143,10 @@ def _preview_response(preview) -> DatasetExportPreviewResponse:
         dataset_id=preview.dataset_id,
         requested_count=preview.requested_count,
         exportable_count=preview.exportable_count,
-        issues=[DatasetExportIssueResponse(**issue.to_record()) for issue in preview.issues],
+        issues=[
+            DatasetExportIssueResponse.model_validate(issue, from_attributes=True)
+            for issue in preview.issues
+        ],
         sample_rows=rows,
         preview_digest=preview.preview_digest,
         created_at=preview.created_at,
@@ -167,18 +173,31 @@ def _safe_filename(value: str) -> str:
     return (cleaned or "dataset-export")[:100]
 
 
+def _dataset_response(record: StoredDataset) -> TaskDatasetResponse:
+    return TaskDatasetResponse(
+        **asdict(record.dataset),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
 @router.post("", response_model=TaskDatasetResponse, status_code=status.HTTP_201_CREATED)
 async def create_feedback_dataset(
     payload: TaskDatasetCreateRequest,
     request: Request,
 ) -> TaskDatasetResponse:
+    user_id = await current_user_id(request)
     try:
         dataset = await _service(request).create_for_user(
-            user_id=await current_user_id(request),
+            user_id=user_id,
             collection_id=payload.collection_id,
             name=payload.name,
             task_type=payload.task_type,
             construction_spec=payload.construction_spec,
+        )
+        record = await _service(request).read_record_for_user(
+            user_id=user_id,
+            dataset_id=dataset.dataset_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="collection not found") from exc
@@ -187,7 +206,7 @@ async def create_feedback_dataset(
             status_code=422,
             detail={"code": str(exc), "message": str(exc)},
         ) from exc
-    return TaskDatasetResponse.model_validate(dataset.to_record())
+    return _dataset_response(record)
 
 
 @router.get("", response_model=TaskDatasetListResponse)
@@ -198,7 +217,7 @@ async def list_feedback_datasets(
     offset: int = Query(default=0, ge=0),
 ) -> TaskDatasetListResponse:
     try:
-        datasets = await _service(request).list_for_user(
+        datasets = await _service(request).list_records_for_user(
             user_id=await current_user_id(request),
             collection_id=collection_id,
             limit=limit,
@@ -212,7 +231,7 @@ async def list_feedback_datasets(
             detail={"code": str(exc), "message": str(exc)},
         ) from exc
     return TaskDatasetListResponse(
-        items=[TaskDatasetResponse.model_validate(item.to_record()) for item in datasets],
+        items=[_dataset_response(item) for item in datasets],
         limit=limit,
         offset=offset,
     )
@@ -224,13 +243,13 @@ async def get_feedback_dataset(
     request: Request,
 ) -> TaskDatasetResponse:
     try:
-        dataset = await _service(request).read_for_user(
+        record = await _service(request).read_record_for_user(
             user_id=await current_user_id(request),
             dataset_id=dataset_id,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc
-    return TaskDatasetResponse.model_validate(dataset.to_record())
+    return _dataset_response(record)
 
 
 @router.post(

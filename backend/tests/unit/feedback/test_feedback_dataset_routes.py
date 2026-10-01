@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from application.repositories.feedback_dataset_repository import StoredDataset
 from controllers.feedback import task_datasets
 from controllers.schemas.task_datasets import (
     SampleConfirmRequest,
@@ -32,9 +33,6 @@ def _request(service, user_id: str = "user-1"):
 
 
 def _dataset() -> Dataset:
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
     return Dataset(
         dataset_id="fdset_1",
         collection_id="collection-1",
@@ -43,8 +41,6 @@ def _dataset() -> Dataset:
         construction_spec={},
         spec_version=1,
         created_by="user-1",
-        created_at=now,
-        updated_at=now,
     )
 
 
@@ -115,8 +111,14 @@ class _Service:
         assert kwargs["user_id"] == "user-1"
         return _dataset()
 
-    async def list_for_user(self, **kwargs):
-        return (_dataset(),)
+    async def list_records_for_user(self, **kwargs):
+        return (await self.read_record_for_user(dataset_id="fdset_1"),)
+
+    async def read_record_for_user(self, **kwargs):
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        return StoredDataset(await self.read_for_user(**kwargs), now, now)
 
     async def read_for_user(self, **kwargs):
         if kwargs["dataset_id"] != "fdset_1":

@@ -88,10 +88,7 @@ class _Samples:
 
 
 def _dataset() -> Dataset:
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
-    return Dataset("fdset-1", "collection-1", "SFT", "sft", {}, 1, "user-1", now, now)
+    return Dataset("fdset-1", "collection-1", "SFT", "sft", {}, 1, "user-1")
 
 
 def _sample() -> DatasetSample:

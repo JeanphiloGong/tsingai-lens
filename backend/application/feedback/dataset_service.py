@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 from uuid import uuid4
 
-from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.repositories.analysis_job_repository import AnalysisJob
+from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.repositories.feedback_dataset_repository import (
     FeedbackDatasetRepository,
+    StoredDataset,
 )
 from application.repositories.feedback_dataset_sample_repository import (
-    CollectedDatasetSample,
-    DatasetSampleActionConflict,
     DATASET_SAMPLE_BUILD_JOB_TYPE,
     DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
+    CollectedDatasetSample,
+    DatasetSampleActionConflict,
     DatasetSampleRevisionConflict,
     FeedbackDatasetSampleRepository,
     build_job_payload,
@@ -109,37 +111,21 @@ class FeedbackDatasetService:
         cleaned_name = name.strip()
         if not cleaned_name:
             raise FeedbackDatasetError("dataset_name_required")
+        if len(cleaned_name) > 120:
+            raise FeedbackDatasetError("dataset_name_too_long")
+        if not user_id or not collection_id:
+            raise FeedbackDatasetError("dataset_identity_required")
         _validate_public_spec(construction_spec)
-        now = datetime.now(timezone.utc)
         dataset = Dataset(
             dataset_id=f"fdset_{uuid4().hex[:32]}",
             collection_id=collection_id,
             name=cleaned_name,
             task_type=cast(DatasetTaskType, task_type),
-            construction_spec=construction_spec,
+            construction_spec=deepcopy(construction_spec),
             spec_version=1,
             created_by=user_id,
-            created_at=now,
-            updated_at=now,
         )
         return await self.repository.create(dataset)
-
-    async def list_for_user(
-        self,
-        *,
-        user_id: str,
-        collection_id: str,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> tuple[Dataset, ...]:
-        await self.collection_service.get_collection_for_user(collection_id, user_id)
-        if limit < 1 or limit > 200 or offset < 0:
-            raise FeedbackDatasetError("pagination_invalid")
-        return await self.repository.list_for_collection(
-            collection_id=collection_id,
-            limit=limit,
-            offset=offset,
-        )
 
     async def read_for_user(self, *, user_id: str, dataset_id: str) -> Dataset:
         dataset = await self.repository.read(dataset_id)
@@ -150,6 +136,34 @@ class FeedbackDatasetService:
             user_id,
         )
         return dataset
+
+    async def read_record_for_user(
+        self, *, user_id: str, dataset_id: str
+    ) -> StoredDataset:
+        record = await self.repository.read_record(dataset_id)
+        if record is None:
+            raise FileNotFoundError(f"dataset not found: {dataset_id}")
+        await self.collection_service.get_collection_for_user(
+            record.dataset.collection_id, user_id
+        )
+        return record
+
+    async def list_records_for_user(
+        self,
+        *,
+        user_id: str,
+        collection_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[StoredDataset, ...]:
+        await self.collection_service.get_collection_for_user(collection_id, user_id)
+        if limit < 1 or limit > 200 or offset < 0:
+            raise FeedbackDatasetError("pagination_invalid")
+        return await self.repository.list_records_for_collection(
+            collection_id=collection_id,
+            limit=limit,
+            offset=offset,
+        )
 
     async def collect_cases_for_user(
         self,

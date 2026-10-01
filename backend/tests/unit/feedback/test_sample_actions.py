@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
 
 import pytest
 
@@ -33,8 +32,7 @@ class _Collections:
 
 class _Datasets:
     async def read(self, dataset_id: str):
-        now = datetime.now(timezone.utc)
-        return Dataset(dataset_id, "collection-1", "SFT", "sft", {}, 1, "user-1", now, now)
+        return Dataset(dataset_id, "collection-1", "SFT", "sft", {}, 1, "user-1")
 
 
 class _Cases:

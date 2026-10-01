@@ -197,10 +197,14 @@ async def test_handler_produces_unresolved_candidate_without_inventing_target():
 
 
 async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
-    from tests.unit.feedback.test_source_coverage import _trajectory
-    from application.feedback.preference_sample_builder import PreferenceSampleBuilder, PreferenceBuildCandidate
-    from domain.feedback import Dataset, DatasetSample, FeedbackCase
     from datetime import datetime, timezone
+
+    from application.feedback.preference_sample_builder import (
+        PreferenceBuildCandidate,
+        PreferenceSampleBuilder,
+    )
+    from domain.feedback import Dataset, DatasetSample, FeedbackCase
+    from tests.unit.feedback.test_source_coverage import _trajectory
 
     source_turn, _, _ = _trajectory(answer_message_id="answer-2", tool_request_message_id="read-after-challenge")
     original = _messages()
@@ -218,7 +222,9 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
     assert "answer-2" in result.related_message_ids
     assert snapshot["inspected_sources"][0]["quote"] == "The exact passage."
     now = datetime.now(timezone.utc)
-    dataset = Dataset("fdset-1", "collection-1", "Preference", "preference", {}, 1, "user-1", now, now)
+    dataset = Dataset(
+        "fdset-1", "collection-1", "Preference", "preference", {}, 1, "user-1"
+    )
     sample = DatasetSample.pending(sample_id="sample-1", dataset_id="fdset-1", source_case_id="case-1",
                                    source_digest="a" * 64, active_job_id="job-1", now=now.isoformat())
     case = FeedbackCase("case-1", "collection-1", "session-1", "answer-1", (), (), snapshot,

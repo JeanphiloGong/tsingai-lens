@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 import pytest
 
@@ -11,7 +10,6 @@ from application.feedback.sft_sample_builder import (
 )
 from domain.feedback import Dataset, DatasetSample, FeedbackCase
 
-
 pytestmark = pytest.mark.anyio
 
 
@@ -21,7 +19,6 @@ def anyio_backend() -> str:
 
 
 def _dataset() -> Dataset:
-    now = datetime.now(timezone.utc)
     return Dataset(
         dataset_id="fdset-1",
         collection_id="collection-1",
@@ -30,8 +27,6 @@ def _dataset() -> Dataset:
         construction_spec={"language": "zh-CN"},
         spec_version=1,
         created_by="user-1",
-        created_at=now,
-        updated_at=now,
     )
 
 

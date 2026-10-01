@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
 import pytest
 
@@ -12,7 +11,6 @@ from application.feedback.evaluation_sample_builder import (
 )
 from domain.feedback import Dataset, DatasetSample, FeedbackCase
 
-
 pytestmark = pytest.mark.anyio
 
 
@@ -22,8 +20,9 @@ def anyio_backend() -> str:
 
 
 def _dataset() -> Dataset:
-    now = datetime.now(timezone.utc)
-    return Dataset("fdset-evaluation", "collection-1", "评测", "evaluation", {}, 1, "user-1", now, now)
+    return Dataset(
+        "fdset-evaluation", "collection-1", "评测", "evaluation", {}, 1, "user-1"
+    )
 
 
 def _sample() -> DatasetSample:

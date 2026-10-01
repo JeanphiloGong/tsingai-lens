@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from application.repositories.feedback_dataset_repository import StoredDataset
 from domain.feedback.dataset import Dataset
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
 
@@ -31,29 +32,33 @@ class PostgresFeedbackDatasetRepository:
             row = await session.get(FeedbackDatasetRow, dataset_id)
             return _to_domain(row) if row is not None else None
 
-    async def list_for_collection(
+    async def read_record(self, dataset_id: str) -> StoredDataset | None:
+        async with self.session_factory() as session:
+            row = await session.get(FeedbackDatasetRow, dataset_id)
+            return _to_record(row) if row is not None else None
+
+    async def list_records_for_collection(
         self,
         *,
         collection_id: str,
         limit: int,
         offset: int,
-    ) -> tuple[Dataset, ...]:
+    ) -> tuple[StoredDataset, ...]:
         statement = (
             select(FeedbackDatasetRow)
             .where(FeedbackDatasetRow.collection_id == collection_id)
             .order_by(
-                FeedbackDatasetRow.created_at.desc(),
-                FeedbackDatasetRow.dataset_id,
+                FeedbackDatasetRow.created_at.desc(), FeedbackDatasetRow.dataset_id
             )
             .offset(offset)
             .limit(limit)
         )
         async with self.session_factory() as session:
-            rows = await session.scalars(statement)
-            return tuple(_to_domain(row) for row in rows)
+            return tuple(_to_record(row) for row in await session.scalars(statement))
 
 
 def _row_values(dataset: Dataset) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
     return {
         "dataset_id": dataset.dataset_id,
         "collection_id": dataset.collection_id,
@@ -62,8 +67,8 @@ def _row_values(dataset: Dataset) -> dict[str, Any]:
         "construction_spec": deepcopy(dataset.construction_spec),
         "spec_version": dataset.spec_version,
         "created_by": dataset.created_by,
-        "created_at": _datetime(dataset.created_at),
-        "updated_at": _datetime(dataset.updated_at),
+        "created_at": now,
+        "updated_at": now,
     }
 
 
@@ -76,6 +81,12 @@ def _to_domain(row: FeedbackDatasetRow) -> Dataset:
         construction_spec=deepcopy(row.construction_spec or {}),
         spec_version=row.spec_version,
         created_by=row.created_by,
+    )
+
+
+def _to_record(row: FeedbackDatasetRow) -> StoredDataset:
+    return StoredDataset(
+        dataset=_to_domain(row),
         created_at=_datetime(row.created_at),
         updated_at=_datetime(row.updated_at),
     )

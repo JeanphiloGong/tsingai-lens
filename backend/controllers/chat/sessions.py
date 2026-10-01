@@ -19,8 +19,7 @@ from application.chat.session_service import (
     ChatSourceContextError,
 )
 from application.repositories.chat_repository import ChatSessionBusyError
-from controllers.dependencies.auth import current_user_id
-from controllers.schemas.chat.session import (
+from controllers.chat.schemas import (
     ChatBranchRequest,
     ChatMessageFeedbackRequest,
     ChatMessageFeedbackResponse,
@@ -41,6 +40,7 @@ from controllers.schemas.chat.session import (
     ChatTurnRequest,
     ChatTurnResponse,
 )
+from controllers.dependencies.auth import current_user_id
 from domain.chat import ChatSourceContext, ToolPermissionMode
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])

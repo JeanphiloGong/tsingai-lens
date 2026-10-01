@@ -23,7 +23,7 @@ from application.repositories.feedback_dataset_export_repository import (
 )
 from application.repositories.feedback_dataset_repository import StoredDataset
 from controllers.dependencies.auth import current_user_id
-from controllers.schemas.task_datasets import (
+from controllers.feedback.task_dataset_schemas import (
     DatasetCollectionItemResponse,
     DatasetCollectionRequest,
     DatasetCollectionResponse,

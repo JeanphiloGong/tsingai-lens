@@ -7,10 +7,10 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from application.repositories.feedback_dataset_repository import StoredDataset
 from application.feedback.dataset_export_service import DatasetExportError
+from application.repositories.feedback_dataset_repository import StoredDataset
 from controllers.feedback import task_datasets
-from controllers.schemas.task_datasets import (
+from controllers.feedback.task_dataset_schemas import (
     SampleConfirmRequest,
     SampleRevisionUpdateRequest,
     TaskDatasetCreateRequest,
@@ -259,7 +259,7 @@ def test_task_dataset_collection_returns_accepted_operation() -> None:
                 },
             )()
 
-    from controllers.schemas.task_datasets import DatasetCollectionRequest
+    from controllers.feedback.task_dataset_schemas import DatasetCollectionRequest
 
     response = asyncio.run(
         task_datasets.collect_feedback_cases(

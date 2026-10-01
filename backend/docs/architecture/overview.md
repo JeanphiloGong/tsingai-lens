@@ -183,6 +183,13 @@ Collection access and public construction rules in the application service and
 request schema. The PostgreSQL implementation generates and reads record
 timestamps. No duplicate Dataset fields or generic conversion layer is needed.
 
+Small HTTP models used by one route file are declared in that file. Larger
+route-local families stay in the owning module (`controllers/chat/schemas.py`
+and `controllers/feedback/task_dataset_schemas.py` beside their routes). Only
+models consumed by multiple route files belong in `controllers/schemas/`.
+Service-local results stay beside their service, and repository projections
+beside their contract.
+
 Other timestamps are judged by their use. Chat message chronology, tool approval
 time, authored evidence/review time, confirmation time and preview expiry affect
 ordering, provenance or validity and remain explicit. Persisting such a value

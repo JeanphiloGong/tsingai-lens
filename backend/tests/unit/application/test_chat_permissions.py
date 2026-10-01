@@ -2,12 +2,24 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner, ToolSpec, intent_policy
+from application.chat import (
+    CapabilityRegistry,
+    ModelToolCall,
+    ModelTurn,
+    ResearchAgentRunner,
+    ToolSpec,
+    intent_policy,
+)
 from application.chat.session_service import ChatSessionService
 from domain.chat import ToolPermissionMode, ToolRisk
 from domain.chat.permissions import AUTO_ACTIONS, change_permission, permits_automatic
 from tests.support.chat_repository import MemoryChatRepository
-from tests.unit.application.test_chat_session_service import _CollectionService, _WriteCapability, _Question, _SourceArtifactRepository
+from tests.unit.application.test_chat_session_service import (
+    _CollectionService,
+    _Question,
+    _SourceArtifactRepository,
+    _WriteCapability,
+)
 from tests.unit.application.test_research_agent_runner import _Model
 
 pytestmark = pytest.mark.anyio
@@ -127,8 +139,9 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
 
 async def test_permission_controller_enforces_owner_and_revision():
     from fastapi import HTTPException
+
+    from controllers.chat.schemas import ChatPermissionRequest
     from controllers.chat.sessions import get_chat_permission, set_chat_permission
-    from controllers.schemas.chat.session import ChatPermissionRequest
     from tests.unit.routers.test_chat_sessions_api import _request
     repository = MemoryChatRepository()
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),

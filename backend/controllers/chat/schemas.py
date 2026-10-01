@@ -132,7 +132,11 @@ class ChatModelCallSummaryResponse(BaseModel):
     model: str
     request_digest: str
     status: Literal[
-        "recorded", "provider_succeeded", "provider_failed", "response_invalid", "cancelled"
+        "recorded",
+        "provider_succeeded",
+        "provider_failed",
+        "response_invalid",
+        "cancelled",
     ]
     started_at: str
     finished_at: str | None = None
@@ -204,7 +208,10 @@ class ChatTurnResponse(BaseModel):
     messages: list[ChatMessageResponse] = Field(default_factory=list)
     pending_approval: ChatToolCallResponse | None = None
     error_code: str | None = None
-    completion_reason: Literal["model_answer", "resource_budget", "no_progress", "emergency_ceiling"] | None = None
+    completion_reason: (
+        Literal["model_answer", "resource_budget", "no_progress", "emergency_ceiling"]
+        | None
+    ) = None
     warnings: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -226,7 +233,9 @@ class ChatMessageFeedbackRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_details(self) -> ChatMessageFeedbackRequest:
-        if self.rating is None and (self.reason is not None or self.comment is not None):
+        if self.rating is None and (
+            self.reason is not None or self.comment is not None
+        ):
             raise ValueError("withdrawn feedback cannot have a reason or comment")
         if self.reason is not None and self.rating != "not_helpful":
             raise ValueError("only negative feedback may have a reason")
@@ -253,7 +262,9 @@ class ChatResponseSnapshotResponse(BaseModel):
     sequence: int
     started_at: str
     updated_at: str
-    status: Literal["running", "completed", "approval_required", "failed", "interrupted"]
+    status: Literal[
+        "running", "completed", "approval_required", "failed", "interrupted"
+    ]
     message_id: str | None = None
     message_created_at: str | None = None
     content: str = ""
@@ -278,7 +289,15 @@ class ChatTreeNodeResponse(BaseModel):
     message: ChatMessageResponse
     parent_message_id: str | None
     answer: str
-    status: Literal["completed", "running", "approval_required", "failed", "interrupted", "incomplete", "draft"]
+    status: Literal[
+        "completed",
+        "running",
+        "approval_required",
+        "failed",
+        "interrupted",
+        "incomplete",
+        "draft",
+    ]
     can_branch: bool
 
 

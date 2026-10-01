@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from controllers import feedback_cases
-from controllers.schemas.feedback_cases import FeedbackAnnotationRequest
+from controllers.feedback_cases import FeedbackAnnotationRequest
 from domain.feedback import FeedbackAnnotation
 
 

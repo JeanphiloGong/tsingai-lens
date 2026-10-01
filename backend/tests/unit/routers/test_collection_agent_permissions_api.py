@@ -1,12 +1,12 @@
-from types import SimpleNamespace
 import asyncio
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
-from controllers.schemas.source.collection import CollectionAgentPermissionRequest
 from controllers.source.collections import (
+    CollectionAgentPermissionRequest,
     get_collection_agent_permission,
     set_collection_agent_permission,
 )

@@ -3,17 +3,43 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from application.auth.session_service import (
     SESSION_COOKIE_NAME,
     InvalidCredentialsError,
 )
 from controllers.dependencies.auth import require_current_user
-from controllers.schemas.auth import (
-    AuthLoginRequest,
-    AuthLogoutResponse,
-    AuthSessionResponse,
-)
+
+
+class AuthLoginRequest(BaseModel):
+    """Browser login payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    email: str = Field(..., description="User email")
+    password: str = Field(..., description="User password")
+
+
+class AuthUserResponse(BaseModel):
+    """Authenticated user visible to the browser."""
+
+    user_id: str = Field(..., description="User ID")
+    email: str = Field(..., description="Email")
+    display_name: str | None = Field(default=None, description="Display name")
+
+
+class AuthSessionResponse(BaseModel):
+    """Current browser session state."""
+
+    user: AuthUserResponse
+
+
+class AuthLogoutResponse(BaseModel):
+    """Logout result."""
+
+    ok: bool = True
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

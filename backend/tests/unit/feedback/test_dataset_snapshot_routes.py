@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from controllers.feedback import datasets
-from controllers.schemas.datasets import DatasetSnapshotCreateRequest
+from controllers.feedback.datasets import DatasetSnapshotCreateRequest
 from domain.feedback import DatasetSnapshot
 
 

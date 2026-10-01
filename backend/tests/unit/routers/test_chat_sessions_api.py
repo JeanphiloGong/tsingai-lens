@@ -18,7 +18,7 @@ from application.chat.session_service import (
 )
 from application.pipeline import PipelineRunService
 from controllers.chat import sessions as sessions_controller
-from controllers.schemas.chat.session import (
+from controllers.chat.schemas import (
     ChatSessionCreateRequest,
     ChatSessionListResponse,
     ChatToolDecisionRequest,

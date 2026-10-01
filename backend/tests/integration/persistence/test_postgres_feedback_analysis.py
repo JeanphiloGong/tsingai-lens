@@ -135,6 +135,64 @@ async def test_expired_running_job_is_recovered_and_claimed_again(
     assert claimed.error_code is None
 
 
+async def test_running_job_lease_can_be_renewed_by_current_worker(
+    postgres_session_factory,
+) -> None:
+    repository = PostgresAnalysisJobRepository(
+        postgres_session_factory,
+        worker_id="worker-heartbeat",
+    )
+    await _insert_job(postgres_session_factory, job_id="job-heartbeat")
+    claimed = await repository.claim_next_feedback_analysis_job(
+        (BASE_TIME + timedelta(seconds=1)).isoformat()
+    )
+    assert claimed is not None
+
+    renewed = await repository.renew_lease(
+        job_id=claimed.job_id,
+        worker_id="worker-heartbeat",
+        lease_version=claimed.lease_version,
+        now=(BASE_TIME + timedelta(minutes=5)).isoformat(),
+    )
+    assert renewed is not None
+    assert renewed.heartbeat_at == "2026-09-24T00:05:00+00:00"
+    assert renewed.lease_expires_at == "2026-09-24T00:20:00+00:00"
+    assert renewed.lease_version == claimed.lease_version
+
+
+async def test_lease_renewal_rejects_wrong_owner_version_and_expired_lease(
+    postgres_session_factory,
+) -> None:
+    repository = PostgresAnalysisJobRepository(
+        postgres_session_factory,
+        worker_id="worker-heartbeat",
+    )
+    await _insert_job(postgres_session_factory, job_id="job-heartbeat-fence")
+    claimed = await repository.claim_next_feedback_analysis_job(
+        (BASE_TIME + timedelta(seconds=1)).isoformat()
+    )
+    assert claimed is not None
+
+    assert await repository.renew_lease(
+        job_id=claimed.job_id,
+        worker_id="other-worker",
+        lease_version=claimed.lease_version,
+        now=(BASE_TIME + timedelta(minutes=5)).isoformat(),
+    ) is None
+    assert await repository.renew_lease(
+        job_id=claimed.job_id,
+        worker_id="worker-heartbeat",
+        lease_version=claimed.lease_version + 1,
+        now=(BASE_TIME + timedelta(minutes=5)).isoformat(),
+    ) is None
+    assert await repository.renew_lease(
+        job_id=claimed.job_id,
+        worker_id="worker-heartbeat",
+        lease_version=claimed.lease_version,
+        now=(BASE_TIME + timedelta(minutes=16)).isoformat(),
+    ) is None
+
+
 async def test_old_worker_cannot_finish_reclaimed_job(
     postgres_session_factory,
 ) -> None:

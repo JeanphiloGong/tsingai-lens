@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from application.feedback.analysis_handler import AnalysisInputError, FeedbackAnalysisHandler
+from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
 
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,14 @@ class FeedbackAnalysisWorker:
         if job is None:
             return None
         try:
-            result, context_snapshot, source_signal_ids = await self.handler.handle(job)
+            result, context_snapshot, source_signal_ids = await run_with_lease_heartbeat(
+                self.job_repository,
+                job,
+                lambda: self.handler.handle(job),
+            )
+        except LeaseLostError:
+            read_job = getattr(self.job_repository, "read_job", None)
+            return await read_job(job.job_id) if callable(read_job) else job
         except AnalysisInputError as exc:
             if str(exc) in {"feedback_withdrawn", "feedback_version_superseded"}:
                 return await self.job_repository.mark_cancelled(

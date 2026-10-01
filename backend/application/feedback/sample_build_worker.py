@@ -15,6 +15,7 @@ from application.feedback.preference_sample_builder import PreferenceSampleBuild
 from application.feedback.sft_sample_builder import (
     SftSampleBuilderProtocol,
 )
+from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.repositories.feedback_dataset_repository import (
     FeedbackDatasetRepository,
@@ -75,7 +76,13 @@ class DatasetSampleBuildWorker:
             return await self._read_finished(job, status="running")
         try:
             async with asyncio.timeout(timeout):
-                return await self._build(job)
+                return await run_with_lease_heartbeat(
+                    self.job_repository,
+                    job,
+                    lambda: self._build(job),
+                )
+        except LeaseLostError:
+            return await self._read_finished(job, status="running")
         except TimeoutError:
             payload = job.payload
             await self.sample_repository.complete_build(

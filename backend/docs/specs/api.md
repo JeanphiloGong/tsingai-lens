@@ -403,7 +403,10 @@ replacement claim; its return value reflects the persisted job state.
 Sample builds have a 600-second wall-clock limit, shortened when the remaining
 lease leaves less time. Timeout cancels the awaited build and records
 `build_failed` with `dataset_sample_build_timeout` before the 900-second lease
-expires. This Worker uses bounded execution rather than heartbeat renewal.
+expires. All Workers renew an unexpired lease periodically with the claimed
+`worker_id` and `lease_version`; a renewal rejected by the database cancels the
+in-flight operation and prevents it from publishing a result. Sample builds
+also keep the 600-second wall-clock limit as a provider/runtime safeguard.
 
 Natural-language correction analysis first assesses whether the follow-up
 preserves the original research task (papers, comparison scope, outcome and

@@ -229,5 +229,14 @@ class AnalysisJobRepository(Protocol):
 
     async def recover_expired_jobs(self, now: str) -> int: ...
 
+    async def renew_lease(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        lease_version: int,
+        now: str,
+    ) -> AnalysisJob | None: ...
+
 
 __all__ = ["AnalysisJob", "AnalysisJobStatus", "AnalysisJobRepository"]

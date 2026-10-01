@@ -540,6 +540,37 @@ class PostgresAnalysisJobRepository:
             await session.flush()
         return recovered
 
+    async def renew_lease(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        lease_version: int,
+        now: str,
+    ) -> AnalysisJob | None:
+        """Extend an unexpired lease only for its current owner/version."""
+        if not job_id.strip() or not worker_id.strip() or lease_version < 1:
+            raise ValueError("job lease identity is invalid")
+        timestamp = _datetime(now)
+        async with self.session_factory.begin() as session:
+            row = await session.scalar(
+                select(AnalysisJobRow)
+                .where(AnalysisJobRow.job_id == job_id)
+                .with_for_update()
+            )
+            if row is None or not _completion_lease_matches(
+                row,
+                worker_id=worker_id,
+                lease_version=lease_version,
+                timestamp=timestamp,
+            ):
+                return None
+            row.lease_expires_at = timestamp + timedelta(seconds=self.lease_seconds)
+            row.heartbeat_at = timestamp
+            row.updated_at = timestamp
+            await session.flush()
+            return _job(row)
+
     async def cancel_feedback_analysis_jobs(
         self,
         feedback_id: str,

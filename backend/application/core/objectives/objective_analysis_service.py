@@ -6,9 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Mapping, Sequence
 
 from application.core.objectives.analysis.diagnostics import record_analysis_failure
-from application.core.objectives.analysis.evidence_routing import (
-    route_sources,
-)
+from application.core.objectives.analysis.evidence_routing import route_sources
 from application.core.objectives.analysis.paper_experiment_contract import (
     ReconciledPaperExperimentOutput,
 )
@@ -18,8 +16,8 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
     build_bundle_from_routes,
 )
 from application.core.objectives.analysis.source_screening import (
-    PaperAnalysisFrame,
     ObjectiveSourceScreener,
+    PaperAnalysisFrame,
     screen_sources,
 )
 from application.core.objectives.objective_input_service import (
@@ -31,11 +29,13 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopePreview,
     screen_objective_scope,
 )
-from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveRepository,
+)
 from application.repositories.paper_map_repository import PaperMapRepository
 from application.source.collection_service import CollectionService
 from domain.core import (
-    ObjectiveAnalysis,
     InspectedObjectiveSourceRef,
     PaperContribution,
     PaperResearchMap,

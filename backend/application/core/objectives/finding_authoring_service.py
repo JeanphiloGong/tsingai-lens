@@ -10,11 +10,13 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 from application.core.objectives.analysis.experiment_query_service import (
     ExperimentQueryService,
 )
-from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveRepository,
+)
 from application.repositories.transaction import RepositoryTransactionFactory
 from application.source.collection_service import CollectionService
 from domain.core.finding import Finding
-from domain.core.research_objective import ObjectiveAnalysis
 
 
 @dataclass(frozen=True)

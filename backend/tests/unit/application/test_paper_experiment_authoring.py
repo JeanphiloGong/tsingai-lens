@@ -1,28 +1,28 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-from dataclasses import replace
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import replace
+from datetime import datetime, timezone
 from hashlib import sha256
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.paper_experiment_authoring import (
-    PaperExperimentRevisionToolRequest,
     CreatePaperExperimentRevisionCapability,
     PaperExperimentDraftToolRequest,
+    PaperExperimentRevisionToolRequest,
     ProposePaperExperimentDraftCapability,
 )
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
+from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.chat import ChatMessage, ChatToolRequest, ChatToolResult
-from domain.core.research_objective import ObjectiveAnalysis, PaperContribution, ResearchObjective
-
+from domain.core.research_objective import PaperContribution, ResearchObjective
 
 pytestmark = pytest.mark.anyio
 

@@ -8,10 +8,10 @@ repository write. Authored snapshots use their separate publication path.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import re
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
 from application.core.objectives.analysis.experiment_finding_synthesis import (
@@ -26,6 +26,7 @@ from application.repositories.experiment_analysis_repository import (
     ExperimentAnalysisRepository,
     ExperimentAnalysisWrite,
 )
+from application.repositories.objective_repository import ObjectiveAnalysis
 from application.repositories.paper_experiment_repository import (
     PaperExperimentRepository,
     StoredPaperExperimentRevision,
@@ -34,11 +35,8 @@ from application.repositories.transaction import RepositoryTransaction
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import (
-    ExperimentComparison,
-    PaperExperimentRevision,
-)
-from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
+from domain.core.paper_experiment import ExperimentComparison, PaperExperimentRevision
+from domain.core.research_objective import ResearchObjective
 
 
 async def _repository_call(

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from hashlib import sha256
-import json
 from typing import Any, Mapping
 
 from application.core.objectives.analysis.experiment_analysis_writer import (
-    ExperimentAnalysisWriteResult,
     ExperimentAnalysisWriter,
+    ExperimentAnalysisWriteResult,
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentModelOutput,
@@ -19,11 +19,14 @@ from application.core.objectives.analysis.paper_experiment_contract import (
 from application.core.objectives.analysis.paper_experiment_extraction import (
     build_source_bundle,
 )
-from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveRepository,
+)
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.transaction import RepositoryTransactionFactory
 from application.source.collection_service import CollectionService
-from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
+from domain.core.research_objective import ResearchObjective
 
 
 @dataclass(frozen=True)

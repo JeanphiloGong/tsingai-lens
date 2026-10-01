@@ -5,9 +5,10 @@ from __future__ import annotations
 from asyncio import Lock
 from copy import deepcopy
 
-from application.repositories.pipeline_run_repository import PipelineRunSummary
-
-from domain.pipeline import PipelineRun
+from application.repositories.pipeline_run_repository import (
+    PipelineRun,
+    PipelineRunSummary,
+)
 
 
 class MemoryPipelineRunRepository:

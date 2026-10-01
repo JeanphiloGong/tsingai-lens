@@ -9,20 +9,20 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
     stable_draft_experiment_id,
 )
-from application.repositories.experiment_analysis_repository import (
-    ExperimentAnalysisWrite,
-    StoredExperimentAnalysis,
-)
-from application.repositories.paper_experiment_repository import (
-    StoredPaperExperimentRevision,
-)
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentModelOutput,
     ReconciledPaperExperimentOutput,
     reconcile_model_output,
 )
-from domain.core.research_objective import ObjectiveAnalysis, ResearchObjective
-
+from application.repositories.experiment_analysis_repository import (
+    ExperimentAnalysisWrite,
+    StoredExperimentAnalysis,
+)
+from application.repositories.objective_repository import ObjectiveAnalysis
+from application.repositories.paper_experiment_repository import (
+    StoredPaperExperimentRevision,
+)
+from domain.core.research_objective import ResearchObjective
 
 pytestmark = pytest.mark.anyio
 

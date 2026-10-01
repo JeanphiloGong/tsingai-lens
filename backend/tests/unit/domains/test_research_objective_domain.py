@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import replace
-
 from datetime import datetime, timezone
 
 import pytest
 
-from domain.core import (
+from application.repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
+)
+from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -389,7 +390,12 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
     confirmed = candidate.confirm()
     queued = confirmed.queue_analysis(1)
     succeeded = _analysis().start().succeed()
-    published = queued.publish_analysis(succeeded)
+    published = queued.publish_analysis(
+        collection_id=succeeded.collection_id,
+        objective_id=succeeded.objective_id,
+        analysis_version=succeeded.analysis_version,
+        status=succeeded.status,
+    )
 
     assert candidate.confirmation_status == "candidate"
     assert confirmed.confirmation_status == "confirmed"
@@ -446,7 +452,12 @@ def test_research_objective_rejects_cross_objective_publication() -> None:
     analysis = _analysis(objective_id="another-objective").start().succeed()
 
     with pytest.raises(ValueError, match="another objective"):
-        objective.publish_analysis(analysis)
+        objective.publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
 
 
 def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:

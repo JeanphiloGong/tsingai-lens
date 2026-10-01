@@ -4,21 +4,20 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any
 
-from application.repositories.objective_repository import StoredObjective
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
 from application.repositories.transaction import RepositoryTransaction
-
 from domain.core import (
     Finding,
-    ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
 )
-
 
 _MIN_TIMESTAMP = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -456,7 +455,12 @@ class MemoryObjectiveRepository:
             abstention_note=abstention_note,
         )
         objective_key = key[:2]
-        objective = self._require_objective(*objective_key).publish_analysis(analysis)
+        objective = self._require_objective(*objective_key).publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
         self._touch_objective(objective_key, datetime.now(timezone.utc))
@@ -494,7 +498,12 @@ class MemoryObjectiveRepository:
             abstention_note=abstention_note,
         )
         objective_key = key[:2]
-        objective = self._require_objective(*objective_key).publish_analysis(analysis)
+        objective = self._require_objective(*objective_key).publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
         self._touch_objective(objective_key, datetime.now(timezone.utc))
@@ -549,7 +558,12 @@ class MemoryObjectiveRepository:
             finding.validate_sources(evidence_records, contributions)
 
         objective = objective.queue_analysis(analysis.analysis_version)
-        objective = objective.publish_analysis(analysis)
+        objective = objective.publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
         self._touch_objective(objective_key, datetime.now(timezone.utc))

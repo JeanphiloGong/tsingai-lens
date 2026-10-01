@@ -5,8 +5,9 @@ import json
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from application.repositories.objective_repository import ObjectiveAnalysis
 from controllers.core.finding_review import router
-from domain.core import Finding, ObjectiveAnalysis, ObjectiveEvidence
+from domain.core import Finding, ObjectiveEvidence
 from domain.evaluation import FindingCuration, FindingFeedback
 
 

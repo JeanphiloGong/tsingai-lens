@@ -6,17 +6,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.core.objectives.finding_authoring_service import FindingAuthoringService
-from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.research_objective import (
-    ObjectiveAnalysis, ObjectiveFactSet, PaperContribution, PreparedDocumentInput,
-    ResearchObjective,
+from application.core.objectives.finding_authoring_service import (
+    FindingAuthoringService,
 )
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
-
+from application.repositories.objective_repository import ObjectiveAnalysis
+from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
+from domain.core.research_objective import (
+    ObjectiveFactSet,
+    PaperContribution,
+    PreparedDocumentInput,
+    ResearchObjective,
+)
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 

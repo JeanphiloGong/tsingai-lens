@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from domain.pipeline import ModelUsage, TokenUsage
+from application.repositories.pipeline_run_repository import ModelUsage, TokenUsage
 from infra.llm.usage import (
     capture_llm_usage,
     record_llm_completion,

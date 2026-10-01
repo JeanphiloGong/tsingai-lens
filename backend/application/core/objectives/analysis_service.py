@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from asyncio import (
     CancelledError,
     Lock,
@@ -13,11 +14,13 @@ from asyncio import (
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import replace
-import logging
 from time import perf_counter
 from typing import Any, Callable, Mapping
 
 from application.core.document_profiles.service import DocumentProfileService
+from application.core.objectives.analysis.analysis_record_source import (
+    should_read_experiment_projection,
+)
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
     record_analysis_failure,
@@ -27,9 +30,6 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 )
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
-)
-from application.core.objectives.analysis.analysis_record_source import (
-    should_read_experiment_projection,
 )
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
@@ -43,14 +43,16 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
-from domain.core import ObjectiveAnalysis, ResearchObjective
-from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveRepository,
+)
 from application.repositories.transaction import (
     RepositoryTransaction,
     RepositoryTransactionFactory,
 )
+from domain.core import ResearchObjective
 from infra.llm.usage import capture_llm_usage
-
 
 logger = logging.getLogger(__name__)
 

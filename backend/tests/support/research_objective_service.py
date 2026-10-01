@@ -5,19 +5,15 @@ from hashlib import sha256
 from typing import Any
 
 from application.core.document_profiles.service import DocumentProfileService
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveExperimentAnalysisService,
+)
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
-from application.core.objectives.objective_analysis_service import (
-    ObjectiveExperimentAnalysisService,
-)
-from domain.core import (
-    DocumentProfile,
-    ObjectiveAnalysis,
-    PreparedDocumentInput,
-    ResearchObjective,
-)
+from application.repositories.objective_repository import ObjectiveAnalysis
+from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
 from domain.source import Document
 from infra.persistence.memory import (
     MemoryDocumentProfileRepository,

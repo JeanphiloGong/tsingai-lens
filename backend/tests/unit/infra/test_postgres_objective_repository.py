@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from domain.core import ObjectiveAnalysis, PreparedDocumentInput, ResearchObjective
+from application.repositories.objective_repository import ObjectiveAnalysis
+from domain.core import PreparedDocumentInput, ResearchObjective
 from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
 from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
 

@@ -6,15 +6,17 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from application.repositories.objective_repository import StoredObjective
-from application.repositories.transaction import RepositoryTransaction
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from application.repositories.pipeline_run_repository import ExecutionStats
+from application.repositories.transaction import RepositoryTransaction
 from domain.core import (
     Finding,
-    ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -22,13 +24,14 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.pipeline import ExecutionStats
+from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.models.document_preparation import (
+    DocumentPreparationRow,
+)
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
     ObjectiveResearchRecord,
 )
-from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
-from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.transaction import database_session_scope
 
 
@@ -530,7 +533,10 @@ class PostgresObjectiveRepository:
                 abstention_note=abstention_note,
             )
             objective = self._objective_from_row(objective_row).publish_analysis(
-                analysis
+                collection_id=analysis.collection_id,
+                objective_id=analysis.objective_id,
+                analysis_version=analysis.analysis_version,
+                status=analysis.status,
             )
             self._write_analysis(analysis_row, analysis)
             self._write_objective(
@@ -593,7 +599,10 @@ class PostgresObjectiveRepository:
                 abstention_note=abstention_note,
             )
             objective = self._objective_from_row(objective_row).publish_analysis(
-                analysis
+                collection_id=analysis.collection_id,
+                objective_id=analysis.objective_id,
+                analysis_version=analysis.analysis_version,
+                status=analysis.status,
             )
             self._write_analysis(analysis_row, analysis)
             self._write_objective(
@@ -672,7 +681,12 @@ class PostgresObjectiveRepository:
             self._write_result_records(analysis_row, evidence_records, findings)
             session.add(analysis_row)
             objective = objective.queue_analysis(analysis.analysis_version)
-            objective = objective.publish_analysis(analysis)
+            objective = objective.publish_analysis(
+                collection_id=analysis.collection_id,
+                objective_id=analysis.objective_id,
+                analysis_version=analysis.analysis_version,
+                status=analysis.status,
+            )
             self._write_objective(objective_row, objective, now=now)
             return objective, analysis
 

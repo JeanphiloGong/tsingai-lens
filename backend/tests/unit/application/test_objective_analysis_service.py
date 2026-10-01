@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from application.repositories.objective_repository import StoredObjective
-
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -9,43 +7,44 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.core.objectives.analysis_service import (
-    ObjectiveAnalysisDispatchError,
-    ObjectiveAnalysisService,
-    _experiment_abstention,
-)
-from application.core.objectives.analysis.diagnostics import (
-    record_analysis_diagnostic,
-)
-from application.core.objectives.objective_analysis_service import (
-    ObjectiveExperimentAnalysisService,
-    ObjectiveExperimentAnalysisArtifacts,
-    _used_draft_source_labels,
+from application.core.objectives.analysis.diagnostics import record_analysis_diagnostic
+from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentDraft,
+    PaperExperimentModelOutput,
+    ReconciledPaperExperimentOutput,
 )
 from application.core.objectives.analysis.paper_experiment_extraction import (
     PaperExperimentExtractionResult,
     build_source_bundle,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.analysis.paper_experiment_contract import (
-    PaperExperimentDraft,
-    PaperExperimentModelOutput,
-    ReconciledPaperExperimentOutput,
+from application.core.objectives.analysis_service import (
+    ObjectiveAnalysisDispatchError,
+    ObjectiveAnalysisService,
+    _experiment_abstention,
+)
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveExperimentAnalysisArtifacts,
+    ObjectiveExperimentAnalysisService,
+    _used_draft_source_labels,
+)
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from application.repositories.pipeline_run_repository import (
+    ModelUsage,
+    TokenUsage,
 )
 from domain.core import (
     DocumentProfile,
     Finding,
-    ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
-from infra.llm.usage import (
-    record_llm_completion,
-    record_llm_prompt_version,
-)
+from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 pytestmark = pytest.mark.anyio
 
@@ -586,7 +585,12 @@ class FakeObjectiveRepository:
             abstention_note=artifacts.get("abstention_note"),
         )
         self.analyses[analysis_version] = analysis
-        self.objective = self.objective.publish_analysis(analysis)
+        self.objective = self.objective.publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
         self.findings[analysis_version] = artifacts["findings"]
         self.contributions[analysis_version] = artifacts["contributions"]
         self.evidence[analysis_version] = artifacts["evidence_records"]
@@ -610,7 +614,12 @@ class FakeObjectiveRepository:
             abstention_note=abstention_note,
         )
         self.analyses[analysis_version] = analysis
-        self.objective = self.objective.publish_analysis(analysis)
+        self.objective = self.objective.publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
         self.findings[analysis_version] = (
             self.native_findings
             if self.native_findings is not None
@@ -1682,10 +1691,10 @@ async def test_rejected_automatic_drafts_fail_analysis_instead_of_publishing_abs
         PaperExperimentExtractor,
         build_source_bundle,
     )
+    from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
     from application.core.objectives.objective_analysis_service import (
         _build_contribution_for_extraction,
     )
-    from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 
     class InvalidDraftClient:
         def complete(self, *, response_model, **kwargs):

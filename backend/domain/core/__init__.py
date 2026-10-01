@@ -1,5 +1,6 @@
 """Core domain models and judgment rules."""
 
+from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.document_profile import (
     PROFILE_EXTRACTION_FAILED_WARNING,
     PROFILE_STATUS_COMPLETED,
@@ -8,16 +9,6 @@ from domain.core.document_profile import (
     DocumentProfileSummary,
     ProfileStatus,
     summarize_document_profile_collection,
-)
-from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    SCIENTIFIC_RESULT_DIRECTIONS,
-    SCIENTIFIC_RESULT_KINDS,
-    ScientificAttribute,
-    ScientificComparison,
-    ScientificContext,
-    ScientificResult,
-    ScientificVariable,
 )
 from domain.core.finding import (
     FINDING_ASSERTION_STRENGTHS,
@@ -28,37 +19,32 @@ from domain.core.finding import (
     FindingPaperContribution,
     directions_contradict,
 )
+from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
     COMPARISON_BASIS,
     COMPARISON_DIRECTIONS,
     COMPARISON_STATUSES,
-    ExperimentComparison,
-    ExperimentMeasurementResult,
-    ExperimentTestCondition,
-    ExperimentalVariant,
     INTERPRETATION_KINDS,
     MEASUREMENT_RESULT_KINDS,
     PAPER_EXPERIMENT_BINDING_STATUSES,
     PAPER_EXPERIMENT_DESIGN_TYPES,
     PAPER_EXPERIMENT_IDENTITY_STATUSES,
-    PaperExperimentRevision,
     RELATION_STATUSES,
+    ExperimentalVariant,
+    ExperimentComparison,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
+    PaperExperimentRevision,
     ReportedInterpretation,
     SourceReference,
     outcome_labels_compatible,
 )
-from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     EVIDENCE_ORIGINS,
     EVIDENCE_RESOLUTION_STATUS_VALUES,
     EVIDENCE_ROLE_VALUES,
     EVIDENCE_STATUS_VALUES,
-    OBJECTIVE_ANALYSIS_ABSTENTION_REASONS,
-    OBJECTIVE_ANALYSIS_ORIGINS,
-    OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS,
-    OBJECTIVE_ANALYSIS_STATUSES,
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_DERIVATION_BASIS_KINDS,
     OBJECTIVE_EVIDENCE_STATE_TRANSITIONS,
@@ -68,7 +54,6 @@ from domain.core.research_objective import (
     PAPER_ROLE_VALUES,
     SOURCE_KIND_VALUES,
     InspectedObjectiveSourceRef,
-    ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -90,9 +75,16 @@ from domain.core.research_objective import (
     normalize_objective_confidence,
     normalize_objective_terms,
 )
-from domain.core.research_process import (
-    SOURCE_OBSERVATION_STATUSES,
-    SourceObservation,
+from domain.core.research_process import SOURCE_OBSERVATION_STATUSES, SourceObservation
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    SCIENTIFIC_RESULT_KINDS,
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
 )
 
 __all__ = [
@@ -137,14 +129,9 @@ __all__ = [
     "outcome_labels_compatible",
     "SOURCE_OBSERVATION_STATUSES",
     "SourceObservation",
-    "OBJECTIVE_ANALYSIS_STATUSES",
-    "OBJECTIVE_ANALYSIS_ABSTENTION_REASONS",
-    "OBJECTIVE_ANALYSIS_ORIGINS",
-    "OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS",
     "OBJECTIVE_CONFIRMATION_STATUSES",
     "OBJECTIVE_EVIDENCE_STATES",
     "OBJECTIVE_EVIDENCE_STATE_TRANSITIONS",
-    "ObjectiveAnalysis",
     "ObjectiveEvidence",
     "ObjectiveFactSet",
     "InspectedObjectiveSourceRef",

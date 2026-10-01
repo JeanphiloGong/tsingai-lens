@@ -13,14 +13,14 @@ from pydantic import BaseModel, ValidationError
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
     DocumentProfileExtractor,
+    DocumentProfileModelOutput,
 )
-from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.source_extraction import (
     DirectEvidenceExtractionsModelOutput,
-    ObjectiveSourceExtractor,
     EvidenceContextModelOutput,
     EvidenceExtractionModelOutput,
     EvidenceExtractionsModelOutput,
+    ObjectiveSourceExtractor,
     RequestedContextFactsModelOutput,
     _normalize_objective_evidence_payload,
     _objective_evidence_repair_instruction,
@@ -32,8 +32,8 @@ from application.core.objectives.analysis.source_screening import (
     build_objective_paper_frame_prompt,
 )
 from application.core.objectives.discovery.axis_equivalence import (
-    ResearchAxisEquivalenceClassifier,
     AxisCanonicalizationPlanModelOutput,
+    ResearchAxisEquivalenceClassifier,
     build_research_axis_canonicalization_prompt,
 )
 from application.core.objectives.discovery.paper_understanding.paper_map_outputs import (
@@ -56,7 +56,7 @@ from application.core.paper_facts.extraction import (
     TableMatrixRepairModelOutput,
     build_table_matrix_repair_prompt,
 )
-from domain.pipeline import ModelUsage, TokenUsage
+from application.repositories.pipeline_run_repository import ModelUsage, TokenUsage
 from infra.llm.usage import capture_llm_usage
 
 

@@ -8,15 +8,12 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from domain.pipeline import (
-    ExecutionTimestamps,
-    PipelineNodeRun,
+from application.repositories.pipeline_run_repository import (
     PipelineNodeStatus,
     PipelineRun,
+    PipelineRunRepository,
     PipelineRunStatus,
 )
-from application.repositories.pipeline_run_repository import PipelineRunRepository
-
 
 _PIPELINE_NODES: dict[str, dict[str, tuple[str, ...]]] = {
     "document_preparation": {

@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from application.repositories.objective_repository import StoredObjective
-
 from dataclasses import replace
 from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from application.core.objectives.analysis_service import (
-    ObjectiveAnalysisDispatchError,
-)
+from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
     ResearchObjectiveNotFoundError,
@@ -19,13 +15,21 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopeDecision,
     ObjectiveScopePreview,
 )
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from application.repositories.pipeline_run_repository import (
+    ExecutionStats,
+    ModelUsage,
+    TokenUsage,
+)
 from controllers.core.research_objectives import router
 from controllers.schemas.core.research_objectives import (
     ObjectiveEvidenceAttributeResponse,
 )
 from domain.core import (
     Finding,
-    ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -33,7 +37,6 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
 
 
 def _objective() -> ResearchObjective:

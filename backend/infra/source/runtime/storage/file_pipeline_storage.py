@@ -3,10 +3,8 @@
 
 """File-backed storage used by the Source runtime."""
 
-import logging
 import os
 import re
-import shutil
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,24 +14,15 @@ import aiofiles
 from aiofiles.os import remove
 from aiofiles.ospath import exists
 
-from infra.source.runtime.storage.pipeline_storage import (
-    PipelineStorage,
-    get_timestamp_formatted_with_local_tz,
-)
-
-logger = logging.getLogger(__name__)
-
-
-class FilePipelineStorage(PipelineStorage):
+class FilePipelineStorage:
     """File-backed Source runtime storage."""
 
     _root_dir: str
     _encoding: str
 
-    def __init__(self, **kwargs: Any) -> None:
-        self._root_dir = kwargs.get("base_dir", "")
-        self._encoding = kwargs.get("encoding", "utf-8")
-        logger.debug("Creating file storage at %s", self._root_dir)
+    def __init__(self, base_dir: str, encoding: str = "utf-8") -> None:
+        self._root_dir = base_dir
+        self._encoding = encoding
         Path(self._root_dir).mkdir(parents=True, exist_ok=True)
 
     def find(
@@ -113,27 +102,11 @@ class FilePipelineStorage(PipelineStorage):
         if await self.has(key):
             await remove(join_path(self._root_dir, key))
 
-    async def clear(self) -> None:
-        for file in Path(self._root_dir).glob("*"):
-            if file.is_dir():
-                shutil.rmtree(file)
-            else:
-                file.unlink()
-
-    def child(self, name: str | None) -> "PipelineStorage":
-        if name is None:
-            return self
-        child_path = str(Path(self._root_dir) / Path(name))
-        return FilePipelineStorage(base_dir=child_path, encoding=self._encoding)
-
-    def keys(self) -> list[str]:
-        return [item.name for item in Path(self._root_dir).iterdir() if item.is_file()]
-
     async def get_creation_date(self, key: str) -> str:
         file_path = Path(join_path(self._root_dir, key))
         creation_timestamp = file_path.stat().st_ctime
         creation_time_utc = datetime.fromtimestamp(creation_timestamp, tz=timezone.utc)
-        return get_timestamp_formatted_with_local_tz(creation_time_utc)
+        return creation_time_utc.astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
 
 def join_path(file_path: str, file_name: str) -> Path:

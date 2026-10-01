@@ -11,24 +11,6 @@ from enum import Enum
 from pydantic import BaseModel, Field, model_validator
 
 
-class InputFileType(str, Enum):
-    """Supported input file types for the active Source runtime."""
-
-    csv = "csv"
-    document = "document"
-    text = "text"
-    json = "json"
-
-
-class StorageType(str, Enum):
-    """Supported storage types for the active Source runtime."""
-
-    file = "file"
-    memory = "memory"
-    blob = "blob"
-    cosmosdb = "cosmosdb"
-
-
 class ChunkStrategyType(str, Enum):
     """Supported chunking strategies for the active Source runtime."""
 
@@ -39,12 +21,7 @@ class ChunkStrategyType(str, Enum):
 class StorageConfig(BaseModel):
     """Storage configuration used by Source input/output."""
 
-    type: StorageType | str = Field(default=StorageType.file)
     base_dir: str = Field(default="output")
-    connection_string: str | None = None
-    container_name: str | None = None
-    storage_account_blob_url: str | None = None
-    cosmosdb_account_url: str | None = None
 
 
 class InputStorageConfig(StorageConfig):
@@ -57,13 +34,10 @@ class InputConfig(BaseModel):
     """Input configuration for Source runtime normalization."""
 
     storage: InputStorageConfig = Field(default_factory=InputStorageConfig)
-    file_type: InputFileType | str = Field(default=InputFileType.document)
+    file_type: str = Field(default="document")
     encoding: str = Field(default="utf-8")
     file_pattern: str = Field(default="")
     file_filter: dict[str, str] | None = None
-    text_column: str = Field(default="text")
-    title_column: str | None = None
-    metadata: list[str] | None = None
 
 
 class ChunkingConfig(BaseModel):
@@ -103,17 +77,12 @@ class SourceRuntimeConfig(BaseModel):
         if self.input.file_pattern:
             return
         file_type = str(getattr(self.input.file_type, "value", self.input.file_type))
-        if file_type == InputFileType.text.value:
-            self.input.file_pattern = r".*\.txt$"
-        elif file_type == InputFileType.document.value:
+        if file_type == "document":
             self.input.file_pattern = r".*\.(?:txt|pdf)$"
         else:
-            self.input.file_pattern = rf".*\.{file_type}$"
+            raise ValueError(f"unsupported Source input type: {file_type}")
 
     def _resolve_storage_dir(self, storage: StorageConfig) -> None:
-        storage_type = str(getattr(storage.type, "value", storage.type))
-        if storage_type != StorageType.file.value:
-            return
         if storage.base_dir.strip() == "":
             raise ValueError("file storage requires a base_dir")
         storage.base_dir = str((Path(self.root_dir) / storage.base_dir).resolve())

@@ -53,12 +53,19 @@ overwrites the current Source table.
 
 ## Key Areas
 
+- `ingestion/upload_validation.py`: UTF-8, PDF readability, and supported upload
+  type checks before original-file storage; it does not construct import models
+  or parsed Source artifacts.
 - `config/`: parser runtime configuration.
 - `contracts/`: artifact schema columns.
 - `runtime/build_source_artifacts.py`: direct parsing and scratch-output entrypoint.
 - `runtime/parsers/`: PDF and text parsers, including text chunking and normalization.
 - `runtime/mapping/`: conversion into Source records.
-- `runtime/storage/`: runtime file and memory storage.
+- `runtime/storage/`: file-backed scratch storage for parser input and output.
+
+Runtime logging is configured by the application logger. Source parsing uses
+module loggers and does not install its own handlers or logging namespace
+configuration.
 
 Related authorities:
 

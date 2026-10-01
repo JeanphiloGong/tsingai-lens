@@ -1,19 +1,5 @@
-"""Source runtime storage primitives."""
+"""File storage used for Source parser scratch input and output."""
 
-try:
-    from infra.source.runtime.storage.factory import create_storage_from_config
-    from infra.source.runtime.storage.file_pipeline_storage import FilePipelineStorage
-    from infra.source.runtime.storage.memory_pipeline_storage import MemoryPipelineStorage
-    from infra.source.runtime.storage.pipeline_storage import PipelineStorage
-except ModuleNotFoundError:
-    create_storage_from_config = None
-    FilePipelineStorage = None
-    MemoryPipelineStorage = None
-    PipelineStorage = None
+from infra.source.runtime.storage.file_pipeline_storage import FilePipelineStorage
 
-__all__ = [
-    "create_storage_from_config",
-    "FilePipelineStorage",
-    "MemoryPipelineStorage",
-    "PipelineStorage",
-]
+__all__ = ["FilePipelineStorage"]

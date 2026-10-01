@@ -7,7 +7,6 @@ one-Document preparation orchestration.
 
 - HTTP upload: `controllers/source/collections.py:upload_collection_document`
 - Import implementation: `SourceImportService.add_document()`
-- External import: `SourceImportService.import_from_adapter()`
 - Queue preparation: `DocumentPreparationService.queue_document_preparation()`
 - Execute preparation: `DocumentPreparationService.run_document_preparation()`
 - Read prepared Source: `ArtifactInputService`
@@ -23,7 +22,7 @@ flow; it does not form Objectives or create Evidence.
 | Concern | Owner | Persistent result |
 |---|---|---|
 | Collection and Document membership | `collection_service.py` | Collection/Document records |
-| Upload and external import | `source_import_service.py` | stored Document records |
+| Upload | `source_import_service.py` | stored Document records |
 | Source/Profile preparation | `document_preparation_service.py` | Source artifact, Profile, run |
 | Display Markdown | `document_markdown_service.py` | none |
 | References | `reference_extraction_service.py` | Source references |
@@ -67,8 +66,9 @@ classification. A completed but scientifically uncertain Profile is reusable.
 
 - `collection_service.py`: Collection and current Document lifecycle, Figure
   assets, and preparation-state updates.
-- `source_import_service.py`: Upload normalization, adapter imports, object
-  storage writes, and Document registration.
+- `source_import_service.py`: Upload validation, original-byte storage, and
+  Document registration. Duplicate retries reuse the existing Document; failed
+  registration removes only bytes that were not registered.
 - `source_archive_service.py`: Original-file lookup and bounded reproduction
   archives. It verifies stored bytes but does not change Collection state.
 - `document_preparation_service.py`: Source/Profile preparation sequence,
@@ -83,7 +83,7 @@ Scientific Objective analysis lives in [`../core/objectives/README.md`](../core/
 
 ## Changing This Module
 
-For upload or external import behavior, start with `SourceImportService`.
+For upload behavior, start with `SourceImportService`.
 For reproduction downloads, start with `SourceArchiveService`. For readiness,
 retry, or stage reuse, start with `DocumentPreparationService`; its fingerprints
 decide which existing artifacts can be reused. Do not put these responsibilities
@@ -111,7 +111,7 @@ From `backend/`, run:
 .venv/bin/python -m pytest -q tests/unit/services/test_collection_service.py tests/unit/services/test_document_preparation_service.py tests/integration/test_app_layer_api.py
 ```
 
-These cases cover upload and adapter import, original-byte archive retrieval,
+These cases cover upload, original-byte archive retrieval,
 partial preparation failure, stage reuse, and HTTP responses. Parser-specific
 tests live under `tests/unit/infra/source/`; fixture and database setup are
 described in [`../../tests/README.md`](../../tests/README.md).

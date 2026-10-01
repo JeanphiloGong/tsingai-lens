@@ -27,10 +27,9 @@ from infra.source.contracts.artifact_schemas import (
 )
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.input import create_input
-from infra.source.runtime.logging import init_runtime_loggers
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
 from infra.source.runtime.parsers.plain_text import build_text_bundle
-from infra.source.runtime.storage.factory import create_storage_from_config
+from infra.source.runtime.storage.file_pipeline_storage import FilePipelineStorage
 from infra.source.runtime.storage.table_io import write_table_to_storage
 
 logger = logging.getLogger(__name__)
@@ -38,14 +37,12 @@ logger = logging.getLogger(__name__)
 
 async def build_source_artifacts(
     config: SourceRuntimeConfig,
-    verbose: bool = False,
     input_documents: pd.DataFrame | None = None,
 ) -> SourceArtifactBundle:
     """Parse supplied documents, or load an inventory from configured storage."""
-    init_runtime_loggers(config=config, verbose=verbose)
     started_at = time.perf_counter()
-    input_storage = create_storage_from_config(config.input.storage)
-    output_storage = create_storage_from_config(config.output)
+    input_storage = FilePipelineStorage(base_dir=config.input.storage.base_dir)
+    output_storage = FilePipelineStorage(base_dir=config.output.base_dir)
     inventory = input_documents
     if inventory is None:
         inventory = await create_input(config.input, input_storage)

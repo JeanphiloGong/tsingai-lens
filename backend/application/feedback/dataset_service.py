@@ -158,84 +158,12 @@ class FeedbackDatasetService:
     ) -> tuple[StoredDataset, ...]:
         if limit < 1 or limit > 200 or offset < 0:
             raise FeedbackDatasetError("pagination_invalid")
-        await self.ensure_system_workbench_for_user(
-            user_id=user_id,
-            collection_id=collection_id,
-            backfill_existing_cases=True,
-        )
+        await self.collection_service.get_collection_for_user(collection_id, user_id)
         return await self.repository.list_records_for_collection(
             collection_id=collection_id,
             limit=limit,
             offset=offset,
         )
-
-    async def ensure_system_workbench_for_user(
-        self,
-        *,
-        user_id: str,
-        collection_id: str,
-        backfill_existing_cases: bool,
-    ) -> tuple[Dataset, ...]:
-        """Return the three fixed Collection workbenches and queue their cases.
-
-        Dataset records are an internal persistence detail of the workbench;
-        users choose a task type, never a Dataset definition.  The first page
-        visit also backfills cases created before the automatic pipeline was
-        enabled, so an empty task page cannot be caused by an old case.
-        """
-
-        collection = await self.collection_service.get_collection_for_user(
-            collection_id, user_id
-        )
-        ensure = getattr(self.repository, "ensure_system_datasets", None)
-        if not callable(ensure):
-            return ()
-        datasets = tuple(
-            await ensure(
-                collection_id=collection_id,
-                owner_user_id=str(collection["owner_user_id"]),
-            )
-        )
-        if not backfill_existing_cases or self.sample_repository is None or self.case_repository is None:
-            return datasets
-
-        case_ids: list[str] = []
-        offset = 0
-        while True:
-            batch = await self.case_repository.list_cases(
-                collection_id=collection_id, limit=200, offset=offset
-            )
-            case_ids.extend(case.case_id for case in batch)
-            if len(batch) < 200:
-                break
-            offset += len(batch)
-        for dataset in datasets:
-            for start in range(0, len(case_ids), 1000):
-                if case_ids[start : start + 1000]:
-                    await self.collect_cases_for_user(
-                        user_id=user_id,
-                        dataset_id=dataset.dataset_id,
-                        source_case_ids=tuple(case_ids[start : start + 1000]),
-                    )
-        return datasets
-
-    async def enqueue_case_samples(self, *, collection_id: str, case_id: str) -> None:
-        """Queue one sample build for each fixed task type after case creation."""
-
-        if self.sample_repository is None or self.case_repository is None:
-            return
-        collection = await self.collection_service.get_collection(collection_id)
-        datasets = await self.ensure_system_workbench_for_user(
-            user_id=str(collection["owner_user_id"]),
-            collection_id=collection_id,
-            backfill_existing_cases=False,
-        )
-        for dataset in datasets:
-            await self.collect_cases_for_user(
-                user_id=str(collection["owner_user_id"]),
-                dataset_id=dataset.dataset_id,
-                source_case_ids=(case_id,),
-            )
 
     async def collect_cases_for_user(
         self,
@@ -303,10 +231,10 @@ class FeedbackDatasetService:
                     updated_at=now,
                 )
             )
-        collected = await self.sample_repository.collect(
-            samples=tuple(samples),
-            jobs=tuple(jobs),
-        )
+        try:
+            collected = await self.sample_repository.collect(samples=tuple(samples), jobs=tuple(jobs))
+        except DatasetSampleRevisionConflict as exc:
+            raise FeedbackDatasetConflict(str(exc)) from exc
         return DatasetCollectionResult(
             operation_id=f"collect_{uuid4().hex[:24]}",
             items=collected,

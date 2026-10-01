@@ -90,7 +90,6 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
         job_repository=chain.jobs,
         case_repository=chain.cases,
         handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
-        dataset_service=service,
     )
 
     terminal = await worker.run_once()
@@ -257,8 +256,10 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         case_repository=chain.cases,
         builder=SftSampleBuilder(),
     )
-    built = await worker.run_once()
-    assert built is not None and built.status == "succeeded"
+    # Drain automatic and superseded jobs before checking the explicitly collected sample.
+    while await worker.run_once() is not None:
+        pass
+    assert (await chain.jobs.read_job(collected.items[0].job.job_id)).status == "succeeded"
     candidate = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id)
     assert candidate is not None and candidate.status == "needs_confirmation"
     original_revision_id = candidate.current_revision_id
@@ -458,6 +459,15 @@ async def test_reclaimed_build_rejects_old_lease_completion(
         user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,),
     )
     sample = collected.items[0].sample
+    # Keep the recovery scenario focused on this sample's lease.
+    async with postgres_session_factory.begin() as session:
+        from infra.persistence.postgres.models.feedback import AnalysisJobRow
+        other_jobs = await session.scalars(select(AnalysisJobRow).where(
+            AnalysisJobRow.job_type == "dataset_sample_build",
+            AnalysisJobRow.job_id != collected.items[0].job.job_id,
+        ))
+        for job in other_jobs:
+            job.available_at = datetime.now(timezone.utc) + timedelta(days=1)
     old = await chain.jobs.claim_next_dataset_sample_build_job(_now())
     assert old is not None
     later = datetime.now(timezone.utc) + timedelta(hours=1)

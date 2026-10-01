@@ -25,7 +25,7 @@ class _Collections:
     async def get_collection_for_user(self, collection_id: str, user_id: str):
         if (collection_id, user_id) != ("collection-1", "user-1"):
             raise FileNotFoundError("collection not found")
-        return {"collection_id": collection_id}
+        return {"collection_id": collection_id, "owner_user_id": user_id}
 
 
 class _Repository:
@@ -38,6 +38,9 @@ class _Repository:
 
     async def read(self, dataset_id: str) -> Dataset | None:
         return self.items.get(dataset_id)
+
+    async def list_records_for_collection(self, **kwargs):
+        return ()
 
 class _Cases:
     def __init__(self, case: FeedbackCase) -> None:
@@ -73,6 +76,44 @@ def _source_case() -> FeedbackCase:
         created_at="2026-09-29T00:00:00+00:00",
         updated_at="2026-09-29T00:00:00+00:00",
     )
+
+
+async def test_listing_does_not_create_datasets_or_collect_withdrawn_cases() -> None:
+    class ReadOnlyRepository(_Repository):
+        async def ensure_system_datasets(self, **kwargs):
+            raise AssertionError("a GET must not initialize or enqueue work")
+
+    class UnreadCases:
+        async def list_cases(self, **kwargs):
+            raise AssertionError("a GET must not scan source cases")
+
+    samples = _Samples()
+    service = FeedbackDatasetService(
+        repository=ReadOnlyRepository(), collection_service=_Collections(),
+        sample_repository=samples, case_repository=UnreadCases(),
+    )
+    assert await service.list_records_for_user(user_id="user-1", collection_id="collection-1") == ()
+    assert await service.list_records_for_user(user_id="user-1", collection_id="collection-1", offset=1) == ()
+    assert samples.calls == []
+
+
+async def test_collect_reports_source_changed_during_transaction_as_conflict():
+    from application.feedback.dataset_service import FeedbackDatasetConflict
+    from application.repositories.feedback_dataset_sample_repository import DatasetSampleRevisionConflict
+
+    class RacingSamples(_Samples):
+        async def collect(self, **kwargs):
+            raise DatasetSampleRevisionConflict("sample_source_stale")
+
+    service = FeedbackDatasetService(
+        repository=_Repository(), collection_service=_Collections(),
+        sample_repository=RacingSamples(), case_repository=_Cases(_source_case()),
+    )
+    dataset = await service.create_for_user(
+        user_id="user-1", collection_id="collection-1", name="SFT", task_type="sft", construction_spec={},
+    )
+    with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
+        await service.collect_cases_for_user(user_id="user-1", dataset_id=dataset.dataset_id, source_case_ids=("case-1",))
 
 
 @pytest.mark.parametrize("excerpt", ["Preheated at 200 C.", "Preheated at 250 C."])

@@ -563,6 +563,8 @@ async def collect_feedback_cases(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset or feedback case not found") from exc
+    except FeedbackDatasetConflict as exc:
+        raise HTTPException(status_code=409, detail={"code": str(exc), "message": str(exc)}) from exc
     except FeedbackDatasetError as exc:
         raise HTTPException(
             status_code=422,

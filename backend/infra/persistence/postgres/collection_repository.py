@@ -22,6 +22,7 @@ from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
 )
+from infra.persistence.postgres.feedback_dataset_repository import ensure_system_datasets
 
 
 class PostgresCollectionRepository:
@@ -43,6 +44,12 @@ class PostgresCollectionRepository:
                     created_at=_datetime(record.created_at),
                     updated_at=_datetime(record.updated_at),
                 )
+            )
+            await session.flush()
+            await ensure_system_datasets(
+                session, collection_id=record.collection.collection_id,
+                owner_user_id=record.collection.owner_user_id,
+                now=_datetime(record.created_at),
             )
 
     async def list_collections(

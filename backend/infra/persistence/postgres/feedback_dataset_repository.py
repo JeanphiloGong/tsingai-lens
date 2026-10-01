@@ -12,11 +12,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from application.repositories.feedback_dataset_repository import StoredDataset
-from domain.feedback.dataset import Dataset
+from domain.feedback.dataset import Dataset, DatasetTaskType
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
 
 
-_SYSTEM_TASKS: tuple[tuple[str, str], ...] = (
+_SYSTEM_TASKS: tuple[tuple[DatasetTaskType, str], ...] = (
     ("sft", "文献问答 SFT"),
     ("preference", "回答偏好"),
     ("evaluation", "评测"),
@@ -40,53 +40,6 @@ class PostgresFeedbackDatasetRepository:
             session.add(row)
             await session.flush()
         return dataset
-
-    async def ensure_system_datasets(
-        self,
-        *,
-        collection_id: str,
-        owner_user_id: str,
-    ) -> tuple[Dataset, ...]:
-        """Create the three Collection workbenches idempotently.
-
-        The browser never creates these records.  Their deterministic identity
-        lets analysis workers and the first workbench visit converge on the
-        same task queues even when two processes initialize a Collection at
-        the same time.
-        """
-
-        now = datetime.now(timezone.utc)
-        records: list[Dataset] = []
-        async with self.session_factory.begin() as session:
-            for task_type, name in _SYSTEM_TASKS:
-                dataset_id = system_dataset_id(collection_id, task_type)
-                row = await session.get(FeedbackDatasetRow, dataset_id)
-                if row is None:
-                    dataset = Dataset(
-                        dataset_id=dataset_id,
-                        collection_id=collection_id,
-                        name=name,
-                        task_type=task_type,  # type: ignore[arg-type]
-                        construction_spec={
-                            "mode": "automatic_feedback_workbench",
-                            "source": "feedback_case",
-                        },
-                        spec_version=1,
-                        created_by=owner_user_id,
-                    )
-                    try:
-                        async with session.begin_nested():
-                            session.add(FeedbackDatasetRow(**_row_values(dataset, now=now)))
-                            await session.flush()
-                    except IntegrityError:
-                        row = await session.get(FeedbackDatasetRow, dataset_id)
-                    else:
-                        records.append(dataset)
-                        continue
-                if row is None:
-                    raise RuntimeError("system feedback dataset creation raced and was not readable")
-                records.append(_to_domain(row))
-        return tuple(records)
 
     async def read(self, dataset_id: str) -> Dataset | None:
         async with self.session_factory() as session:
@@ -116,6 +69,39 @@ class PostgresFeedbackDatasetRepository:
         )
         async with self.session_factory() as session:
             return tuple(_to_record(row) for row in await session.scalars(statement))
+
+
+async def ensure_system_datasets(
+    session: AsyncSession, *, collection_id: str, owner_user_id: str, now: datetime,
+) -> tuple[Dataset, ...]:
+    """Use the caller's transaction for collection creation and case writes."""
+    records: list[Dataset] = []
+    for task_type, name in _SYSTEM_TASKS:
+        dataset_id = system_dataset_id(collection_id, task_type)
+        row = await session.get(FeedbackDatasetRow, dataset_id)
+        if row is None:
+            dataset = Dataset(
+                dataset_id=dataset_id,
+                collection_id=collection_id,
+                name=name,
+                task_type=task_type,
+                construction_spec={"mode": "automatic_feedback_workbench", "source": "feedback_case"},
+                spec_version=1,
+                created_by=owner_user_id,
+            )
+            try:
+                async with session.begin_nested():
+                    session.add(FeedbackDatasetRow(**_row_values(dataset, now=now)))
+                    await session.flush()
+            except IntegrityError:
+                row = await session.get(FeedbackDatasetRow, dataset_id)
+            else:
+                records.append(dataset)
+                continue
+        if row is None:
+            raise RuntimeError("system feedback dataset creation raced and was not readable")
+        records.append(_to_domain(row))
+    return tuple(records)
 
 
 def _row_values(dataset: Dataset, *, now: datetime | None = None) -> dict[str, Any]:

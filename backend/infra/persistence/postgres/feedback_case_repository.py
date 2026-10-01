@@ -26,6 +26,7 @@ from infra.persistence.postgres.models.feedback import (
     FeedbackSignalAnalysisResultRow,
     ToolFailureAnalysisResultRow,
 )
+from infra.persistence.postgres.feedback_dataset_sample_repository import enqueue_case_samples
 
 
 class PostgresFeedbackCaseRepository:
@@ -96,6 +97,7 @@ class PostgresFeedbackCaseRepository:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
             await session.flush()
+            await enqueue_case_samples(session, row, now=timestamp)
             return _case(row)
 
     async def save_correction_signal_analysis_result(
@@ -169,6 +171,7 @@ class PostgresFeedbackCaseRepository:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
             await session.flush()
+            await enqueue_case_samples(session, row, now=timestamp)
             return _case(row)
 
     async def save_tool_failure_analysis_result(
@@ -243,6 +246,7 @@ class PostgresFeedbackCaseRepository:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
             await session.flush()
+            await enqueue_case_samples(session, row, now=timestamp)
             return _case(row)
 
     async def read_case(self, case_id: str) -> FeedbackCase | None:
@@ -452,6 +456,7 @@ class PostgresFeedbackCaseRepository:
             case.status = "ready_for_review"
             case.updated_at = timestamp
             await session.flush()
+            await enqueue_case_samples(session, case, now=timestamp)
             return _annotation(row)
 
     async def read_review_decisions(self, case_id: str) -> tuple[ReviewDecision, ...]:

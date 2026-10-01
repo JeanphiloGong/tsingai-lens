@@ -345,8 +345,9 @@ described below.
 
 The maintained task-dataset flow is separate from an immutable historical
 snapshot. Every Collection has three fixed internal workbenches: SFT,
-preference, and evaluation. They are created idempotently when the first
-analysis case is written or when the workbench is opened; the browser chooses
+preference, and evaluation. They are created in the Collection creation
+transaction, or initialized for historical Collections by the sample Worker;
+the browser chooses
 one task type and never configures a Dataset or selects case IDs:
 
 - `GET /api/v1/feedback-datasets?collection_id={collection_id}`
@@ -364,9 +365,12 @@ one task type and never configures a Dataset or selects case IDs:
 The two POST operations from earlier migration checkpoints remain internal
 maintenance seams for importing or repairing data; they are not part of the
 user workflow. After any feedback, correction, or tool-failure analysis writes
-a `FeedbackCase`, the application enqueues one idempotent sample-build job for
-each of the three task workbenches. Opening the list also backfills cases that
-were created before automatic workbenches existed. The `dataset_sample_build`
+a `FeedbackCase`, its repository commits the analysis result, case, and all
+three sample-build jobs in one PostgreSQL transaction. A queue failure rolls
+back the entire write. List GETs only read; refreshing and pagination cannot
+enqueue model work. The sample Worker backfills historical cases in bounded
+batches once at process startup, skips withdrawn cases, and preserves existing
+samples through idempotent collection. The `dataset_sample_build`
 Worker reads the case's frozen context
 and readable evidence, writes an immutable task-specific candidate
 revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
@@ -392,6 +396,8 @@ recovery also changes the linked sample from `building` back to `pending`, so a
 container restart cannot leave the sample permanently stuck.
 Dataset build completion checks the claimed `worker_id`, `lease_version`, and
 unexpired lease under the job row lock before any sample or job mutation.
+It also locks and rechecks the current source case at completion; a changed or
+withdrawn source cannot produce a candidate awaiting confirmation.
 An abandoned Worker cannot save a candidate, report failure, or cancel the
 replacement claim; its return value reflects the persisted job state.
 Sample builds have a 600-second wall-clock limit, shortened when the remaining
@@ -416,6 +422,11 @@ Case updates merge the context from different signal types, retaining readable
 source observations and correction-owned fields when rating or tool-failure
 analysis arrives. A new correction analysis replaces its own pairing fields,
 so a withdrawn or changed-task pairing cannot survive as an old correction.
+The same case-write transaction invalidates samples whose source digest
+changed. Worker candidates receive a new generation and rebuild job. Human
+revisions remain readable, while confirmation is cleared and the sample moves
+to `needs_input` with `source_changed_since_collection`; edit or rebuild it
+before confirming again. Discarded samples remain discarded.
 
 The sample workbench reads the current immutable revision and the source case
 context. The PATCH body contains `expected_revision_id` and the complete

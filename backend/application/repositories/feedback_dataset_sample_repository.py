@@ -123,6 +123,8 @@ BuildCompletionKind = Literal["candidate", "needs_input", "failed"]
 
 
 class FeedbackDatasetSampleRepository(Protocol):
+    async def backfill_existing_cases(self) -> int: ...
+
     async def collect(
         self,
         *,

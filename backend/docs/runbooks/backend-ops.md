@@ -248,6 +248,28 @@ duplicate its destructive restore commands.
 
 ## Operational Notes
 
+The feedback sample Worker runs independently of HTTP requests:
+
+```bash
+./.venv/bin/python scripts/dataset_sample_worker.py
+```
+
+It initializes one application runtime per process and closes it on shutdown.
+Before polling, it backfills historical Collections and non-withdrawn cases in
+batches of 200. Restarting it repeats this idempotent backfill without replacing
+human revisions or duplicating sample jobs. Collection creation initializes
+the three fixed workbenches; analysis writes commit the case and all three
+sample queues atomically. Opening or refreshing the workbench does not enqueue
+work. Initialization and polling errors are logged and retried after the polling
+interval. `--once` initializes, backfills, handles at most one job, and exits.
+
+Each sample build is bounded to 600 seconds, or the remaining lease minus a
+five-second completion margin. The lease remains 900 seconds and is not renewed.
+Timeout cancels awaited model work and records `dataset_sample_build_timeout`;
+the sample becomes `build_failed` and can be retried. Recovery still returns
+expired builds to `pending`, and late results cannot overwrite a replacement
+lease. Source changes invalidate confirmation while retaining human revisions.
+
 - Application log timestamps use China Standard Time and include the explicit
   `+0800` offset. Persisted domain and runtime timestamps remain UTC.
 - Structured product state persists in PostgreSQL. `backend/data` holds

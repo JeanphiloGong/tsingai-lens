@@ -9,12 +9,6 @@ from domain.core.document_profile import (
     ProfileStatus,
     summarize_document_profile_collection,
 )
-from domain.core.evidence_backbone import (
-    CORE_NEUTRAL_DOMAIN_PROFILE,
-    MeasurementResult,
-    SampleVariant,
-    TestCondition,
-)
 from domain.core.scientific_fact import (
     SCIENTIFIC_CONTEXT_SCOPES,
     SCIENTIFIC_RESULT_DIRECTIONS,
@@ -102,7 +96,6 @@ from domain.core.research_process import (
 )
 
 __all__ = [
-    "CORE_NEUTRAL_DOMAIN_PROFILE",
     "DocumentProfile",
     "DocumentProfileSummary",
     "PROFILE_EXTRACTION_FAILED_WARNING",
@@ -151,7 +144,6 @@ __all__ = [
     "OBJECTIVE_CONFIRMATION_STATUSES",
     "OBJECTIVE_EVIDENCE_STATES",
     "OBJECTIVE_EVIDENCE_STATE_TRANSITIONS",
-    "MeasurementResult",
     "ObjectiveAnalysis",
     "ObjectiveEvidence",
     "ObjectiveFactSet",
@@ -177,13 +169,11 @@ __all__ = [
     "SCIENTIFIC_CONTEXT_SCOPES",
     "SCIENTIFIC_RESULT_DIRECTIONS",
     "SCIENTIFIC_RESULT_KINDS",
-    "SampleVariant",
     "ScientificAttribute",
     "ScientificComparison",
     "ScientificContext",
     "ScientificResult",
     "ScientificVariable",
-    "TestCondition",
     "build_research_objective_id",
     "is_question_shaped_objective",
     "normalize_objective_confidence",

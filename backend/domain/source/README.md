@@ -67,9 +67,9 @@ the Source business model. Memory repositories exist only for isolated tests.
 
 ## Related Infrastructure
 
-- `backend/infra/source/runtime/parsers/`
+- `backend/infra/source/parsers/`
   Parser-specific bundle builders.
-- `backend/infra/source/runtime/mapping/`
+- `backend/infra/source/mapping/`
   Parser-output mapping into Source domain records and artifact rows.
 - `backend/infra/source/contracts/`
   Persisted artifact field ordering and schema metadata.

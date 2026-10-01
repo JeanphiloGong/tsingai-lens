@@ -15,7 +15,7 @@ from typing import Any
 
 import pandas as pd
 
-from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
@@ -25,27 +25,27 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-from infra.source.runtime.input import create_input
-from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
-from infra.source.runtime.parsers.plain_text import build_text_bundle
-from infra.source.runtime.storage.file_pipeline_storage import FilePipelineStorage
-from infra.source.runtime.storage.table_io import write_table_to_storage
+from infra.source.artifact_bundle import SourceArtifactBundle
+from infra.source.input_inventory import load_document_inventory
+from infra.source.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
+from infra.source.parsers.plain_text import build_text_bundle
+from infra.source.storage.file_storage import FileStorage
+from infra.source.storage.table_io import write_table_to_storage
 
 logger = logging.getLogger(__name__)
 
 
 async def build_source_artifacts(
-    config: SourceRuntimeConfig,
+    config: SourceParserConfig,
     input_documents: pd.DataFrame | None = None,
 ) -> SourceArtifactBundle:
     """Parse supplied documents, or load an inventory from configured storage."""
     started_at = time.perf_counter()
-    input_storage = FilePipelineStorage(base_dir=config.input.storage.base_dir)
-    output_storage = FilePipelineStorage(base_dir=config.output.base_dir)
+    input_storage = FileStorage(base_dir=config.input.storage.base_dir)
+    output_storage = FileStorage(base_dir=config.output.base_dir)
     inventory = input_documents
     if inventory is None:
-        inventory = await create_input(config.input, input_storage)
+        inventory = await load_document_inventory(config.input, input_storage)
     input_load_time = time.perf_counter() - started_at
     failures: list[dict[str, str]] = []
     diagnostics = {

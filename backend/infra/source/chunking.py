@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Token chunking used by the Source runtime."""
+"""Token chunking used by Source parsers."""
 
 from __future__ import annotations
 

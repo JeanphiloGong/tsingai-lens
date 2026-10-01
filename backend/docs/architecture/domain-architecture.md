@@ -68,7 +68,7 @@ domain/
   chat/         trajectory and approval records
 
 infra/
-  source/       parsers and Source runtime
+  source/       parsers and Source infrastructure
   persistence/  explicit PostgreSQL and test-memory repositories
 ```
 

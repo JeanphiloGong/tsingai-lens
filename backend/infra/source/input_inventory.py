@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Source runtime input loading helpers."""
+"""Document inventory loading helpers."""
 
 import logging
 import re
@@ -10,15 +10,15 @@ from typing import Any
 
 import pandas as pd
 
-from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.storage.file_pipeline_storage import FilePipelineStorage
+from infra.source.hashing import gen_sha512_hash
+from infra.source.storage.file_storage import FileStorage
 
 logger = logging.getLogger(__name__)
 
 
-async def create_input(
+async def load_document_inventory(
     config: Any,
-    storage: FilePipelineStorage,
+    storage: FileStorage,
 ) -> pd.DataFrame:
     """Load the configured document inventory from file storage."""
     logger.info("loading input from root_dir=%s", config.storage.base_dir)
@@ -28,7 +28,7 @@ async def create_input(
     return await load_documents(config, storage)
 
 
-async def load_documents(config: Any, storage: FilePipelineStorage) -> pd.DataFrame:
+async def load_documents(config: Any, storage: FileStorage) -> pd.DataFrame:
     """Load mixed document inventories from storage without flattening binaries."""
 
     async def load_file(path: str, group: dict[str, Any] | None = None) -> pd.DataFrame:
@@ -59,7 +59,7 @@ async def load_documents(config: Any, storage: FilePipelineStorage) -> pd.DataFr
 async def load_files(
     loader: Any,
     config: Any,
-    storage: FilePipelineStorage,
+    storage: FileStorage,
 ) -> pd.DataFrame:
     """Load files from storage and apply a loader function."""
     files = list(

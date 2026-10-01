@@ -4,7 +4,7 @@ import logging
 
 import pandas as pd
 
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
+from infra.source.artifact_bundle import SourceArtifactBundle
 
 
 def test_to_documents_removes_nul_from_all_source_text(caplog):

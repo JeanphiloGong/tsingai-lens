@@ -48,7 +48,7 @@ _FIGURE_TITLE_PATTERN = re.compile(
 )
 
 
-def build_blocks(
+def build_plain_text_blocks(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
@@ -81,7 +81,7 @@ def build_blocks(
     )
 
 
-def build_table_rows(
+def build_plain_text_table_rows(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
@@ -107,7 +107,7 @@ def build_table_rows(
     )
 
 
-def build_table_cells(
+def build_plain_text_table_cells(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> pd.DataFrame:

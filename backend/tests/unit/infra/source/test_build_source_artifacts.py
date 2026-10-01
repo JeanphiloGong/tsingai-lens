@@ -5,7 +5,7 @@ import json
 import pandas as pd
 import pytest
 
-from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
@@ -15,8 +15,8 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-from infra.source.runtime.build_source_artifacts import build_source_artifacts
+from infra.source.artifact_bundle import SourceArtifactBundle
+from infra.source.build_source_artifacts import build_source_artifacts
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ async def test_parse_research_text_preserves_traceback_and_current_failures(tmp_
     )
     (input_dir / "laser-porosity.txt").write_text(paper_text, encoding="utf-8")
     (input_dir / "damaged.txt").write_bytes(b"\xff\xfe")
-    config = SourceRuntimeConfig(root_dir=str(tmp_path))
+    config = SourceParserConfig(root_dir=str(tmp_path))
 
     bundle = await build_source_artifacts(config)
 

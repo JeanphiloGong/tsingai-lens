@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Minimal Source runtime configuration models."""
+"""Configuration models for Source document parsing."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class InputStorageConfig(StorageConfig):
 
 
 class InputConfig(BaseModel):
-    """Input configuration for Source runtime normalization."""
+    """Input configuration for Source document normalization."""
 
     storage: InputStorageConfig = Field(default_factory=InputStorageConfig)
     file_type: str = Field(default="document")
@@ -33,15 +33,15 @@ class InputConfig(BaseModel):
 
 
 class ChunkingConfig(BaseModel):
-    """Chunking configuration used by the active Source runtime."""
+    """Token chunking configuration for document parsing."""
 
     size: int = Field(default=1200)
     overlap: int = Field(default=100)
     encoding_model: str = Field(default="cl100k_base")
 
 
-class SourceRuntimeConfig(BaseModel):
-    """Minimal config consumed by the active Source runtime."""
+class SourceParserConfig(BaseModel):
+    """Configuration consumed by the Source parser entrypoint."""
 
     root_dir: str = Field(default="")
     input: InputConfig = Field(default_factory=InputConfig)
@@ -76,7 +76,7 @@ class SourceRuntimeConfig(BaseModel):
         storage.base_dir = str((Path(self.root_dir) / storage.base_dir).resolve())
 
     @model_validator(mode="after")
-    def _validate_model(self) -> "SourceRuntimeConfig":
+    def _validate_model(self) -> "SourceParserConfig":
         self._resolve_root_dir()
         self._normalize_input_pattern()
         self._resolve_storage_dir(self.input.storage)

@@ -23,8 +23,8 @@ from infra.source.contracts.artifact_schemas import (
     TABLES_FINAL_COLUMNS,
     TABLE_ROWS_FINAL_COLUMNS,
 )
-from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.mapping.layout_binding import (
+from infra.source.hashing import gen_sha512_hash
+from infra.source.mapping.layout_binding import (
     first_bbox,
     first_page,
     normalize_label,

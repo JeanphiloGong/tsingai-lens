@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from domain.source import SourceDocument, SourceTextUnit
-from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
@@ -17,21 +17,21 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-from infra.source.runtime.chunking import get_encoding_fn
-from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.mapping.block_artifacts import (
+from infra.source.artifact_bundle import SourceArtifactBundle
+from infra.source.chunking import get_encoding_fn
+from infra.source.hashing import gen_sha512_hash
+from infra.source.mapping.block_artifacts import (
     build_pdf_blocks,
     collect_caption_ref_sets,
     collect_pdf_text_items,
 )
-from infra.source.runtime.mapping.figure_artifacts import build_pdf_figures
-from infra.source.runtime.mapping.table_artifacts import (
+from infra.source.mapping.figure_artifacts import build_pdf_figures
+from infra.source.mapping.table_artifacts import (
     build_pdf_table_cells,
     build_pdf_table_rows,
     build_pdf_tables,
 )
-from infra.source.runtime.parsers.common import (
+from infra.source.parsers.document_metadata import (
     build_source_metadata,
     resolve_document_id,
     resolve_document_title,
@@ -42,7 +42,7 @@ def build_pdf_bundle(
     *,
     row: pd.Series,
     payload: bytes,
-    config: SourceRuntimeConfig,
+    config: SourceParserConfig,
     converter: Any,
 ) -> SourceArtifactBundle:
     document = convert_pdf_document(
@@ -140,7 +140,7 @@ def convert_pdf_document(*, converter: Any, filename: str, payload: bytes) -> An
 def build_pdf_text_units(
     document_id: str,
     text_items: list[dict[str, Any]],
-    config: SourceRuntimeConfig,
+    config: SourceParserConfig,
 ) -> pd.DataFrame:
     encode, _ = get_encoding_fn(config.chunks.encoding_model)
     rows: list[dict[str, Any]] = []

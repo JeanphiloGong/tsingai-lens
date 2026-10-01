@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Hashing utilities used by the Source runtime."""
+"""Hashing utilities used by Source parsing."""
 
 from collections.abc import Iterable
 from hashlib import sha512

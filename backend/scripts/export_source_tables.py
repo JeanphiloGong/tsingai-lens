@@ -31,7 +31,7 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
@@ -41,7 +41,7 @@ from infra.source.contracts.artifact_schemas import (
     TABLES_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.parsers.docling_pdf import (
+from infra.source.parsers.docling_pdf import (
     build_pdf_bundle,
     build_pdf_converter,
 )
@@ -208,7 +208,7 @@ async def _reparse_collection_inputs(
     if not inputs:
         raise SystemExit(f"no input PDFs found for collection: {collection_dir}")
 
-    config = SourceRuntimeConfig(root_dir=str(backend_root))
+    config = SourceParserConfig(root_dir=str(backend_root))
     object_store = FileObjectStore(collection_dir.parent)
     converter = build_pdf_converter()
     bundles = []

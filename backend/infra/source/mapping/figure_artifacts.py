@@ -17,8 +17,8 @@ from domain.source import (
     resolve_heading_path_for_page,
 )
 from infra.source.contracts.artifact_schemas import FIGURES_FINAL_COLUMNS
-from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.mapping.layout_binding import (
+from infra.source.hashing import gen_sha512_hash
+from infra.source.mapping.layout_binding import (
     first_bbox,
     first_page,
     normalize_label,

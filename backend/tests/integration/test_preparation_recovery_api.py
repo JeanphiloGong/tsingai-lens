@@ -14,7 +14,7 @@ from application.source.document_preparation_service import (
     DocumentPreparationService,
     SOURCE_PARSER_VERSION,
 )
-from infra.source.runtime.build_source_artifacts import build_source_artifacts
+from infra.source.build_source_artifacts import build_source_artifacts
 from tests.integration.test_app_layer_api import _create_collection, _upload
 
 

@@ -29,13 +29,13 @@ from application.source.reference_extraction_service import (
 )
 from domain.core.document_profile import PROFILE_STATUS_COMPLETED
 from domain.source import Document, SourceDocument
-from infra.source.config.source_runtime_config import (
+from infra.source.config.source_parser_config import (
     InputConfig,
     InputStorageConfig,
-    SourceRuntimeConfig,
+    SourceParserConfig,
     StorageConfig,
 )
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
+from infra.source.artifact_bundle import SourceArtifactBundle
 
 logger = logging.getLogger(__name__)
 
@@ -496,10 +496,10 @@ class DocumentPreparationService:
         self,
         collection_id: str,
         document_id: str,
-    ) -> SourceRuntimeConfig:
+    ) -> SourceParserConfig:
         paths = self.collection_service.get_paths(collection_id)
         working_dir = paths.output_dir / "documents" / document_id
-        return SourceRuntimeConfig(
+        return SourceParserConfig(
             root_dir=str(paths.collection_dir),
             input=InputConfig(
                 storage=InputStorageConfig(base_dir=str(paths.input_dir)),
@@ -512,7 +512,7 @@ class DocumentPreparationService:
 
     def _get_source_artifact_builder(self) -> SourceArtifactBuilder:
         if self._source_artifact_builder is None:
-            from infra.source.runtime.build_source_artifacts import (
+            from infra.source.build_source_artifacts import (
                 build_source_artifacts,
             )
 

@@ -9,11 +9,11 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from infra.source.runtime.storage.file_pipeline_storage import FilePipelineStorage
+from infra.source.storage.file_storage import FileStorage
 
 
 async def write_table_to_storage(
-    table: pd.DataFrame, name: str, storage: FilePipelineStorage
+    table: pd.DataFrame, name: str, storage: FileStorage
 ) -> None:
     """Write a JSON table to storage."""
     payload = {

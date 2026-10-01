@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from infra.source.runtime.hashing import gen_sha512_hash
+from infra.source.hashing import gen_sha512_hash
 
 
 def resolve_document_id(row: pd.Series) -> str:

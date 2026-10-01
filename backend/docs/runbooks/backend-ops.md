@@ -274,7 +274,7 @@ lease. Source changes invalidate confirmation while retaining human revisions.
   `+0800` offset. Persisted domain and runtime timestamps remain UTC.
 - Structured product state persists in PostgreSQL. `backend/data` holds
   immutable object bytes and disposable runtime scratch.
-- Document preparation creates Source runtime settings from the owning
+- Document preparation creates Source parser settings from the owning
   Document's stored bytes and environment variables; no `default.yaml` file is
   required in Docker volumes.
 - Public HTTP paths are split between `/api/*` for docs and static assets and

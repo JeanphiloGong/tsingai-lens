@@ -516,7 +516,7 @@ def source_documents_from_records(
     table_cells: Iterable[Mapping[str, Any]] = (),
     figures: Iterable[Mapping[str, Any]] = (),
 ) -> tuple[SourceDocument, ...]:
-    """Build document aggregates from the Source runtime's flat records."""
+    """Build document aggregates from the Source parser's flat records."""
 
     return assemble_source_documents(
         documents=(SourceDocument.from_record(item) for item in documents),

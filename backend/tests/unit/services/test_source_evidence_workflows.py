@@ -13,7 +13,7 @@ from PIL import Image
 import pytest
 
 from domain.source import resolve_heading_path_for_page
-from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
@@ -23,18 +23,18 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-from infra.source.runtime.build_source_artifacts import build_source_artifacts
-from infra.source.runtime.mapping.block_artifacts import collect_pdf_text_items
-from infra.source.runtime.mapping.table_artifacts import build_pdf_table_cells
-from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
-from infra.source.runtime.parsers.plain_text import build_text_bundle
-from infra.source.runtime.source_evidence import (
-    build_blocks,
-    build_table_cells,
-    build_table_rows,
+from infra.source.artifact_bundle import SourceArtifactBundle
+from infra.source.build_source_artifacts import build_source_artifacts
+from infra.source.mapping.block_artifacts import collect_pdf_text_items
+from infra.source.mapping.table_artifacts import build_pdf_table_cells
+from infra.source.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
+from infra.source.parsers.plain_text import build_text_bundle
+from infra.source.mapping.plain_text_artifacts import (
+    build_plain_text_blocks,
+    build_plain_text_table_cells,
+    build_plain_text_table_rows,
 )
-from infra.source.runtime.input import load_files
+from infra.source.input_inventory import load_files
 
 
 def _source_bundle(document_id: str) -> SourceArtifactBundle:
@@ -148,17 +148,17 @@ async def test_build_source_artifacts_keeps_event_loop_responsive_during_pdf_wor
         return _source_bundle("doc-large")
 
     monkeypatch.setattr(
-        "infra.source.runtime.build_source_artifacts.build_pdf_converter",
+        "infra.source.build_source_artifacts.build_pdf_converter",
         build_converter,
     )
     monkeypatch.setattr(
-        "infra.source.runtime.build_source_artifacts.build_pdf_bundle",
+        "infra.source.build_source_artifacts.build_pdf_bundle",
         parse_pdf,
     )
     build_task = asyncio.create_task(
         build_source_artifacts(
             input_documents=inventory,
-            config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+            config=SourceParserConfig(root_dir=str(tmp_path)),
         )
     )
     try:
@@ -238,16 +238,16 @@ async def test_build_source_artifacts_keeps_valid_pdf_when_one_pdf_fails(
         )
 
     monkeypatch.setattr(
-        "infra.source.runtime.build_source_artifacts.build_pdf_converter",
+        "infra.source.build_source_artifacts.build_pdf_converter",
         lambda: object(),
     )
     monkeypatch.setattr(
-        "infra.source.runtime.build_source_artifacts.build_pdf_bundle",
+        "infra.source.build_source_artifacts.build_pdf_bundle",
         parse_pdf,
     )
     result = await build_source_artifacts(
         input_documents=inventory,
-        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+        config=SourceParserConfig(root_dir=str(tmp_path)),
     )
 
     assert result.documents["id"].tolist() == ["doc-good"]
@@ -286,11 +286,11 @@ async def test_build_source_artifacts_fails_when_every_pdf_fails(
     (tmp_path / "input" / "stored-damaged.pdf").write_bytes(b"bad")
 
     monkeypatch.setattr(
-        "infra.source.runtime.build_source_artifacts.build_pdf_converter",
+        "infra.source.build_source_artifacts.build_pdf_converter",
         lambda: object(),
     )
     monkeypatch.setattr(
-        "infra.source.runtime.build_source_artifacts.build_pdf_bundle",
+        "infra.source.build_source_artifacts.build_pdf_bundle",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("PDFium data format error")),
     )
     with pytest.raises(
@@ -299,7 +299,7 @@ async def test_build_source_artifacts_fails_when_every_pdf_fails(
     ):
         await build_source_artifacts(
             input_documents=inventory,
-            config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+            config=SourceParserConfig(root_dir=str(tmp_path)),
         )
     diagnostics = json.loads((tmp_path / "output" / "context.json").read_text())
     assert diagnostics["source_document_failures"][0]["error_code"] == "source_pdf_parse_failed"
@@ -330,7 +330,7 @@ def test_build_blocks_emits_structure_first_blocks_with_heading_context():
         ]
     )
 
-    blocks = build_blocks(documents, text_units)
+    blocks = build_plain_text_blocks(documents, text_units)
 
     assert set(blocks["document_id"]) == {"doc-1"}
     assert {"title", "heading", "paragraph"} <= set(blocks["block_type"])
@@ -359,7 +359,7 @@ def test_build_table_cells_extracts_pipe_delimited_rows():
     )
     text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
 
-    table_cells = build_table_cells(documents, text_units)
+    table_cells = build_plain_text_table_cells(documents, text_units)
 
     assert not table_cells.empty
     assert set(table_cells["document_id"]) == {"doc-1"}
@@ -375,7 +375,7 @@ def test_text_parser_returns_contract_shaped_empty_cells_without_tables(tmp_path
             "Ti-6Al-4V specimens were produced by laser powder bed "
             "fusion. Microstructure was characterized by SEM."
         ),
-        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+        config=SourceParserConfig(root_dir=str(tmp_path)),
     )
     assert bundle.table_cells.empty
     assert bundle.table_cells.columns.tolist() == TABLE_CELLS_FINAL_COLUMNS
@@ -429,7 +429,7 @@ def test_build_table_rows_extracts_row_level_evidence():
         ]
     )
 
-    table_rows = build_table_rows(documents, None)
+    table_rows = build_plain_text_table_rows(documents, None)
 
     assert len(table_rows) == 2
     assert set(table_rows["document_id"]) == {"doc-1"}
@@ -454,7 +454,7 @@ def test_build_blocks_marks_figure_caption_lines_for_plain_text_inputs():
         ]
     )
 
-    blocks = build_blocks(documents, None)
+    blocks = build_plain_text_blocks(documents, None)
 
     figure_captions = blocks[blocks["block_type"] == "figure_caption"]
     assert len(figure_captions) == 1
@@ -652,7 +652,7 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
             return "\n".join(item.text for item in self.texts)
 
     monkeypatch.setattr(
-        "infra.source.runtime.parsers.docling_pdf.convert_pdf_document",
+        "infra.source.parsers.docling_pdf.convert_pdf_document",
         lambda **_: FakeDocument(),
     )
 
@@ -667,7 +667,7 @@ def test_build_pdf_bundle_maps_docling_output_into_source_artifacts(monkeypatch,
             }
         ),
         payload=b"%PDF-1.4 test",
-        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+        config=SourceParserConfig(root_dir=str(tmp_path)),
         converter=object(),
     )
 
@@ -727,7 +727,7 @@ def test_build_pdf_bundle_skips_garbled_pdf_text_items(monkeypatch, tmp_path):
             return "\n".join(item.text for item in self.texts)
 
     monkeypatch.setattr(
-        "infra.source.runtime.parsers.docling_pdf.convert_pdf_document",
+        "infra.source.parsers.docling_pdf.convert_pdf_document",
         lambda **_: FakeDocument(),
     )
 
@@ -741,7 +741,7 @@ def test_build_pdf_bundle_skips_garbled_pdf_text_items(monkeypatch, tmp_path):
             }
         ),
         payload=b"%PDF-1.4 test",
-        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+        config=SourceParserConfig(root_dir=str(tmp_path)),
         converter=object(),
     )
 

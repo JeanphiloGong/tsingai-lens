@@ -26,7 +26,7 @@ the paper lacks scientific evidence, and it does not block preparation or
 research over other ready Documents.
 
 `DocumentPreparationService` owns user-visible preparation progress through
-`PipelineRunService`. Source runtime returns the bundle directly and raises
+`PipelineRunService`. The Source parser returns the bundle directly and raises
 parsing errors to that service. It has no workflow registry, factory, or generic
 pipeline runner. Its scratch output includes the seven artifact tables and
 figure bytes; `context.json` records input and document failures for the current
@@ -34,7 +34,7 @@ parse, and `stats.json` records document count and elapsed time. These files do
 not control preparation state or retries.
 
 Preparation reuses persisted Source and Profile artifacts through their
-fingerprints in `DocumentPreparationService`. Parsing has no runtime cache.
+fingerprints in `DocumentPreparationService`. Parsing has no cache.
 
 ## Source Artifacts
 
@@ -56,16 +56,17 @@ overwrites the current Source table.
 - `ingestion/upload_validation.py`: UTF-8, PDF readability, and supported upload
   type checks before original-file storage; it does not construct import models
   or parsed Source artifacts.
-- `config/`: parser runtime configuration.
+- `config/source_parser_config.py`: parser configuration.
 - `contracts/`: artifact schema columns.
-- `runtime/build_source_artifacts.py`: direct parsing and scratch-output entrypoint.
-- `runtime/parsers/`: PDF and text parsers, including text chunking and normalization.
-- `runtime/mapping/`: conversion into Source records.
-- `runtime/storage/`: file-backed scratch storage for parser input and output.
+- `input_inventory.py`: loads the configured document inventory.
+- `artifact_bundle.py`: parser output exchanged with the application layer.
+- `build_source_artifacts.py`: direct parsing and scratch-output entrypoint.
+- `parsers/`: PDF and text parsers, including text chunking and normalization.
+- `mapping/`: conversion into Source records.
+- `storage/`: file-backed scratch storage for parser input and output.
 
-Runtime logging is configured by the application logger. Source parsing uses
-module loggers and does not install its own handlers or logging namespace
-configuration.
+Logging is configured by the application logger. Source parsing uses module
+loggers and does not install its own handlers or logging namespace configuration.
 
 Related authorities:
 

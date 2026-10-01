@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pandas as pd
 
-from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
@@ -20,25 +20,26 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-from infra.source.runtime.chunking import chunk_text
-from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.parsers.common import (
+from infra.source.artifact_bundle import SourceArtifactBundle
+from infra.source.chunking import chunk_text
+from infra.source.hashing import gen_sha512_hash
+from infra.source.parsers.document_metadata import (
     build_source_metadata,
     resolve_document_id,
     resolve_document_title,
 )
-from infra.source.runtime.source_evidence import (
-    build_blocks,
-    build_table_cells,
-    build_table_rows,
+from infra.source.mapping.plain_text_artifacts import (
+    build_plain_text_blocks,
+    build_plain_text_table_cells,
+    build_plain_text_table_rows,
 )
+
 
 def build_text_bundle(
     *,
     row: pd.Series,
     text: str,
-    config: SourceRuntimeConfig,
+    config: SourceParserConfig,
 ) -> SourceArtifactBundle:
     document_id = resolve_document_id(row)
     title = resolve_document_title(row)
@@ -64,9 +65,11 @@ def build_text_bundle(
     )
     final_documents = _bind_text_units_to_documents(document_frame, base_text_units)
     final_text_units = _normalize_text_units(base_text_units)
-    final_blocks = build_blocks(final_documents, final_text_units)
-    final_table_rows = build_table_rows(final_documents, final_text_units)
-    final_table_cells = build_table_cells(final_documents, final_text_units).copy()
+    final_blocks = build_plain_text_blocks(final_documents, final_text_units)
+    final_table_rows = build_plain_text_table_rows(final_documents, final_text_units)
+    final_table_cells = build_plain_text_table_cells(
+        final_documents, final_text_units
+    ).copy()
     final_table_cells["id"] = final_table_cells.get("document_id")
     for column in TABLE_CELLS_FINAL_COLUMNS:
         if column not in final_table_cells.columns:

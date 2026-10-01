@@ -98,7 +98,7 @@ This cutover belongs to Layer 3, the Research Intelligence Core.
 It is not:
 
 - Goal Brief / Intake work
-- Source runtime parser ownership expansion
+- Source parser ownership expansion
 - Goal Consumer / Decision-layer work
 - a derived-surface graph or report redesign
 

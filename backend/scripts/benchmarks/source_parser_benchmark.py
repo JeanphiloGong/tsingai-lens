@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Run an offline Source parser benchmark for the active Docling path "
             "and, when installed, MinerU. This script does not change the "
-            "production Source runtime or backend dependency set."
+            "production Source parser or backend dependency set."
         )
     )
     parser.add_argument(
@@ -178,13 +178,13 @@ def run_docling_benchmark(
     try:
         import pandas as pd
 
-        from infra.source.config.source_runtime_config import SourceRuntimeConfig
-        from infra.source.runtime.parsers.docling_pdf import (
+        from infra.source.config.source_parser_config import SourceParserConfig
+        from infra.source.parsers.docling_pdf import (
             build_pdf_bundle,
             build_pdf_converter,
         )
 
-        config = SourceRuntimeConfig(root_dir=str(backend_root))
+        config = SourceParserConfig(root_dir=str(backend_root))
         converter = build_pdf_converter()
     except Exception as exc:
         return [

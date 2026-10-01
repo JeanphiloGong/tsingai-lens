@@ -10,11 +10,11 @@ from domain.source import (
     update_heading_stack,
 )
 from infra.source.contracts.artifact_schemas import BLOCKS_FINAL_COLUMNS
-from infra.source.runtime.mapping.layout_binding import (
+from infra.source.mapping.layout_binding import (
     first_bbox,
     first_page,
 )
-from infra.source.runtime.mapping.text_quality import is_garbled_pdf_text
+from infra.source.mapping.text_quality import is_garbled_pdf_text
 
 
 def build_pdf_blocks(

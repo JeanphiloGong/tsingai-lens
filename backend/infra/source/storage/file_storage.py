@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""File-backed storage used by the Source runtime."""
+"""File-backed storage for Source input and parser output."""
 
 import os
 import re
@@ -14,8 +14,8 @@ import aiofiles
 from aiofiles.os import remove
 from aiofiles.ospath import exists
 
-class FilePipelineStorage:
-    """File-backed Source runtime storage."""
+class FileStorage:
+    """File-backed storage for Source input and parser output."""
 
     _root_dir: str
     _encoding: str

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from infra.source.runtime.mapping.table_artifacts import (
+from infra.source.mapping.table_artifacts import (
     build_docling_header_paths,
     build_docling_header_row_count,
     build_pdf_table_cells,

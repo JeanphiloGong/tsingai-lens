@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from domain.core.research_objective import ResearchObjective
+
 
 @pytest.fixture
 def probe():
@@ -153,6 +155,37 @@ def test_core_probe_preserves_reading_scope_original_sources_and_joint_factors(
     assert probe.payload_hash(scenario) == before
     assert len(requests) == 1
     assert "draft_tool" not in result
+
+
+def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
+    probe, monkeypatch
+):
+    objective = ResearchObjective.from_mapping(
+        {
+            "collection_id": "probe",
+            "objective_id": "objective-1",
+            "question": "How does preheat temperature affect elongation?",
+            "material_scope": ["316L"],
+            "variables": ["preheat temperature"],
+            "outcomes": ["elongation"],
+            "seed_document_ids": ["paper-1"],
+            "confirmation_status": "candidate",
+        }
+    )
+    monkeypatch.setattr(
+        probe.ObjectiveCandidateService,
+        "discover_candidate_facts",
+        lambda *args, **kwargs: SimpleNamespace(research_objectives=(objective,)),
+    )
+
+    result = probe.run_baseline(
+        {"papers": []},
+        SimpleNamespace(model="test-model", reasoning_effort=None),
+        object(),
+    )
+
+    assert result["objectives"][0]["objective_id"] == "objective-1"
+    assert result["objectives"][0]["seed_document_ids"] == ["paper-1"]
 
 
 def test_core_prompt_keeps_source_context_without_hidden_expectations(

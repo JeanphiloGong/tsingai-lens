@@ -162,7 +162,13 @@ def run_baseline(scenario: dict, runtime, client) -> dict:
             ),
         )
     return {
-        "objectives": [o.to_record() for o in facts.research_objectives],
+        "objectives": [
+            {
+                key: list(value) if isinstance(value, tuple) else value
+                for key, value in asdict(objective).items()
+            }
+            for objective in facts.research_objectives
+        ],
         "execution_stats": usage.execution_stats(
             duration_ms=int((perf_counter() - started) * 1000)
         ).to_record(),

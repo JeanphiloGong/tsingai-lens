@@ -147,7 +147,7 @@ analysis of an explicitly selected ready subset.
   Objective analysis.
 - `application/chat/` owns conversation, capability trajectory, and approval;
   it references rather than duplicates scientific records.
-- `domain/` owns records and invariants.
+- `domain/` owns business objects, evidence, invariants, and business transitions.
 - [`application/repositories/`](../../application/repositories/README.md) owns
   storage contracts and repository-specific query results. Domain objects do
   not depend on those contracts.
@@ -155,6 +155,55 @@ analysis of an explicitly selected ready subset.
 
 PostgreSQL stores structured current state and analysis history. Object storage
 stores uploaded and extracted bytes. Local files are disposable runtime scratch.
+
+## Model Responsibilities
+
+Follow one complete research and feedback cycle when placing a field: the
+researcher selects prepared papers, confirms a question, inspects the resulting
+evidence, challenges an answer, then confirms a corrected training sample and
+exports a frozen revision. Objects describing those decisions and evidence are
+domain models. Run progress, database rows, and HTTP shapes support that cycle
+but have separate owners.
+
+| Model family | Domain responsibility | Execution, storage, or HTTP owner |
+| --- | --- | --- |
+| Source and Collection | Current paper membership, readable document structure, complete tables, source identities and preparation provenance | Repositories map ORM rows and artifact payloads; controllers own HTTP fields |
+| Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `application/repositories/objective_repository.py` |
+| Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `application/repositories/chat_repository.py` |
+| Feedback | Observed dissatisfaction/correction signals, evidence coverage, annotations, review decisions, sample revisions and export integrity | Jobs and leases live in `analysis_job_repository.py`; sample-build payloads and idempotency inputs live in `feedback_dataset_sample_repository.py` |
+| Goal | Authored experiment-plan content, immutable revision identity and revision-conflict rules | Repositories own record persistence; controllers validate requests and format responses |
+| Evaluation | Reference items, prediction snapshots, scores, failure judgments and expert Finding review | `evaluation_repository.py` owns persistence; controllers own review response schemas |
+| Pipeline | No scientific objects; a successful technical run is not scientific proof | `application/repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
+
+Repository-specific result types stay beside the contract that returns them.
+For example, `StoredDataset` contains the existing `Dataset` plus database record
+timestamps. `Dataset` itself has no `created_at`, `updated_at`, constructor input
+normalization, or HTTP encoder. Dataset creation validates names, task types,
+Collection access and public construction rules in the application service and
+request schema. The PostgreSQL implementation generates and reads record
+timestamps. No duplicate Dataset fields or generic conversion layer is needed.
+
+Other timestamps are judged by their use. Chat message chronology, tool approval
+time, authored evidence/review time, confirmation time and preview expiry affect
+ordering, provenance or validity and remain explicit. Persisting such a value
+does not make it database-only bookkeeping. Field constraints such as string
+length belong at input boundaries; evidence links, disjoint supporting and
+contradicting claims, immutable revision digests and valid business transitions
+retain their domain checks.
+
+Controllers use response schemas to read attributes or compose stored metadata.
+Existing `to_record()`/`from_mapping()` methods that define canonical artifact,
+snapshot or digest inputs retain their exact formats; replacing those with
+unqualified `asdict()` would change omitted fields, defaults or digests.
+They are not a reason to add encoders to new domain objects. Frozen dataclasses
+preserve revision identities, but nested dictionaries are still mutable; copied
+input and output payloads isolate the snapshots from caller-owned dictionaries.
+
+Obsolete artifact-status, evidence-backbone and generic record-normalization
+models have been removed. Their former definitions and exports are not retained
+as compatibility paths. See the
+[repository index](../../application/repositories/README.md) for the current
+import locations.
 
 ## Concurrency And Reuse
 

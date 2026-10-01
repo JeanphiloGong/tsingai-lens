@@ -18,7 +18,6 @@ from controllers.schemas.datasets import (
     DatasetSnapshotSummaryResponse,
 )
 
-
 router = APIRouter(prefix="/dataset-snapshots", tags=["feedback-workbench"])
 
 
@@ -36,7 +35,7 @@ def _service(request: Request) -> DatasetSnapshotService:
 
 
 def _response(snapshot: object) -> DatasetSnapshotResponse:
-    return DatasetSnapshotResponse.model_validate(snapshot.to_record())  # type: ignore[attr-defined]
+    return DatasetSnapshotResponse.model_validate(snapshot, from_attributes=True)  # type: ignore[attr-defined]
 
 
 @router.post("", response_model=DatasetSnapshotResponse, status_code=status.HTTP_201_CREATED)

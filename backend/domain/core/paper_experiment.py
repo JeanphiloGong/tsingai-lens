@@ -7,13 +7,13 @@ selects the parts it needs.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import re
-from typing import Any, Mapping
 import unicodedata
+from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import Any, Mapping
 
 from domain.core.scientific_fact import ScientificAttribute, ScientificVariable
-
 
 PAPER_EXPERIMENT_DESIGN_TYPES = frozenset(
     {"parallel", "factorial", "dose_response", "observational", "unknown"}
@@ -694,7 +694,13 @@ class PaperExperimentRevision:
         object.__setattr__(
             self,
             "unresolved_issues",
-            tuple(dict(item) for item in self.unresolved_issues if isinstance(item, Mapping)),
+            deepcopy(
+                tuple(
+                    dict(item)
+                    for item in self.unresolved_issues
+                    if isinstance(item, Mapping)
+                )
+            ),
         )
 
     @classmethod

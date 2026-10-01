@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Mapping
-
 
 GROUP_TARGETS = frozenset({"measurement", "within_paper_comparison"})
 GROUP_STATUSES = frozenset({"comparable", "conditional", "insufficient"})
@@ -102,7 +102,13 @@ class ComparisonGroup:
         object.__setattr__(
             self,
             "normalizations",
-            tuple(dict(item) for item in self.normalizations if isinstance(item, Mapping)),
+            deepcopy(
+                tuple(
+                    dict(item)
+                    for item in self.normalizations
+                    if isinstance(item, Mapping)
+                )
+            ),
         )
         object.__setattr__(self, "limitations", _terms(self.limitations))
 

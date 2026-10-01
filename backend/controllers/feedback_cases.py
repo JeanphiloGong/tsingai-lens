@@ -17,7 +17,6 @@ from controllers.schemas.feedback_cases import (
     FeedbackReviewRequest,
 )
 
-
 router = APIRouter(prefix="/feedback-cases", tags=["feedback-workbench"])
 
 
@@ -68,7 +67,6 @@ async def list_feedback_cases(
     )
 
 
-
 @router.get("/{case_id}", response_model=FeedbackCaseDetailResponse)
 async def get_feedback_case(
     case_id: str,
@@ -110,7 +108,7 @@ async def save_feedback_annotation(
             status_code=status,
             detail={"code": code, "message": code.replace("_", " ")},
         ) from exc
-    return FeedbackAnnotationResponse.model_validate(annotation.to_record())
+    return FeedbackAnnotationResponse.model_validate(annotation, from_attributes=True)
 
 
 @router.post("/{case_id}/review", response_model=FeedbackReviewDecisionResponse)
@@ -145,7 +143,7 @@ async def submit_feedback_review(
             status_code=status,
             detail={"code": code, "message": code.replace("_", " ")},
         ) from exc
-    return FeedbackReviewDecisionResponse.model_validate(decision.to_record())
+    return FeedbackReviewDecisionResponse.model_validate(decision, from_attributes=True)
 
 
 @router.get(
@@ -164,7 +162,10 @@ async def list_feedback_reviews(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return FeedbackReviewDecisionListResponse(
-        items=[FeedbackReviewDecisionResponse.model_validate(item.to_record()) for item in decisions]
+        items=[
+            FeedbackReviewDecisionResponse.model_validate(item, from_attributes=True)
+            for item in decisions
+        ]
     )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
@@ -12,7 +12,12 @@ from application.repositories.chat_repository import ChatRepository
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.source.collection_service import CollectionService
 from domain.chat import ChatMessageRole
-from domain.feedback import AnalysisResult, FeedbackAnnotation, FeedbackCase, ReviewDecision
+from domain.feedback import (
+    AnalysisResult,
+    FeedbackAnnotation,
+    FeedbackCase,
+    ReviewDecision,
+)
 
 
 @dataclass(frozen=True)
@@ -376,7 +381,7 @@ class FeedbackCaseService:
         )
         question = _previous_user_question(messages, answer)
         coverage = result.evidence_coverage if result else None
-        document_titles = _document_titles(coverage.to_record() if coverage else {})
+        document_titles = _document_titles(asdict(coverage) if coverage else {})
         return FeedbackCaseSummary(
             case_id=case.case_id,
             collection_id=case.collection_id,
@@ -417,7 +422,7 @@ def _detail(
             if message.role is ChatMessageRole.USER and message.created_at <= answer.created_at
         ]
         question = prior_users[-1] if prior_users else ""
-    coverage = latest.evidence_coverage.to_record() if latest else {}
+    coverage = asdict(latest.evidence_coverage) if latest else {}
     return {
         "case_id": case.case_id,
         "collection_id": case.collection_id,
@@ -433,24 +438,34 @@ def _detail(
                 "created_at": item.created_at,
             }
             for item in feedback
-        ] + list(correction_items) + list(_tool_failure_records(tool_failure_results)),
+        ]
+        + list(correction_items)
+        + list(_tool_failure_records(tool_failure_results)),
         "question": question,
-        "answer": answer.content if answer is not None else str(case.context_snapshot.get("answer") or ""),
-        "requested_scope": _readable_scope(
-            coverage.get("requested_scope", case.context_snapshot.get("requested_scope", []))
+        "answer": (
+            answer.content
+            if answer is not None
+            else str(case.context_snapshot.get("answer") or "")
         ),
-        "inspected_sources": coverage.get("inspected_sources", case.context_snapshot.get("inspected_sources", [])),
-        "omitted_candidates": coverage.get("omitted_candidates", case.context_snapshot.get("omitted_candidates", [])),
-        "claim_support": coverage.get("claim_support", case.context_snapshot.get("claim_support", [])),
+        "requested_scope": _readable_scope(
+            coverage.get(
+                "requested_scope", case.context_snapshot.get("requested_scope", [])
+            )
+        ),
+        "inspected_sources": coverage.get(
+            "inspected_sources", case.context_snapshot.get("inspected_sources", [])
+        ),
+        "omitted_candidates": coverage.get(
+            "omitted_candidates", case.context_snapshot.get("omitted_candidates", [])
+        ),
+        "claim_support": coverage.get(
+            "claim_support", case.context_snapshot.get("claim_support", [])
+        ),
         "gaps": coverage.get("gaps", case.context_snapshot.get("gaps", [])),
         "coverage_status": coverage.get("coverage_status", "unknown"),
-        "analysis": (
-            _analysis_projection(latest)
-            if latest
-            else None
-        ),
+        "analysis": (_analysis_projection(latest) if latest else None),
         "annotation": annotation.to_record() if annotation is not None else None,
-        "review_decisions": [item.to_record() for item in decisions],
+        "review_decisions": [asdict(item) for item in decisions],
         "current_annotation_digest": case.annotation_digest,
         "technical_error": case.context_snapshot.get("technical_error"),
         "created_at": case.created_at,
@@ -550,7 +565,7 @@ def _case_source_refs(
 ) -> set[str]:
     refs: set[str] = set()
     for result in results:
-        coverage = result.evidence_coverage.to_record()
+        coverage = asdict(result.evidence_coverage)
         for field in ("inspected_sources", "omitted_candidates", "claim_support"):
             for item in coverage.get(field) or ():
                 if isinstance(item, dict):

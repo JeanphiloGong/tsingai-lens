@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -40,7 +40,7 @@ def test_chat_session_round_trips_immutable_owner_and_collection() -> None:
         created_at="2026-08-19T00:00:00+00:00",
     )
 
-    assert ChatSession.from_mapping(session.to_record()) == session
+    assert ChatSession.from_mapping(asdict(session)) == session
     with pytest.raises(ValueError, match="session identity cannot be reassigned"):
         session.update(
             user_id="user-2",

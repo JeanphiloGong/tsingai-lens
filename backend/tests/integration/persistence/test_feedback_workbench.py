@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import subprocess
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -20,6 +20,11 @@ from application.feedback.dataset_snapshot_service import (
 from application.feedback.feedback_case_service import FeedbackCaseService
 from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
 from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
+from application.repositories.analysis_job_repository import (
+    TOOL_FAILURE_JOB_TYPE,
+    correction_signal_idempotency_key,
+    tool_failure_idempotency_key,
+)
 from application.repositories.auth_repository import AuthUserRecord
 from application.source.collection_service import CollectionService
 from domain.chat import (
@@ -33,15 +38,10 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
-from domain.feedback.tool_failure import (
-    TOOL_FAILURE_JOB_TYPE,
-    tool_failure_idempotency_key,
-    tool_failure_signal_id,
-    tool_result_digest,
-)
 from domain.feedback.analysis_result import AnalysisResult
-from domain.feedback.correction_signal import CorrectionSignalAnalysisResult, correction_signal_idempotency_key
+from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
 from domain.feedback.evidence_coverage import EvidenceCoverage
+from domain.feedback.tool_failure import tool_failure_signal_id, tool_result_digest
 from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
 from infra.persistence.postgres.analysis_job_repository import (
@@ -58,7 +58,6 @@ from infra.persistence.postgres.dataset_snapshot_repository import (
 from infra.persistence.postgres.feedback_case_repository import (
     PostgresFeedbackCaseRepository,
 )
-
 
 pytestmark = pytest.mark.anyio
 

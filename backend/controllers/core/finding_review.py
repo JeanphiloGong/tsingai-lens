@@ -12,13 +12,12 @@ from controllers.schemas.core.finding_review import (
     FindingCurationCreateRequest,
     FindingCurationListResponse,
     FindingCurationResponse,
+    FindingDatasetResponse,
     FindingFeedbackCreateRequest,
     FindingFeedbackListResponse,
     FindingFeedbackResponse,
-    FindingDatasetResponse,
     FindingGoldDraftResponse,
 )
-
 
 router = APIRouter(prefix="/collections", tags=["finding-review"])
 
@@ -82,7 +81,7 @@ async def record_finding_feedback(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingFeedbackResponse(**feedback.to_record())
+    return FindingFeedbackResponse.model_validate(feedback, from_attributes=True)
 
 
 @router.get(
@@ -113,7 +112,10 @@ async def list_finding_feedback(
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
-        items=[FindingFeedbackResponse(**item.to_record()) for item in records],
+        items=[
+            FindingFeedbackResponse.model_validate(item, from_attributes=True)
+            for item in records
+        ],
     )
 
 
@@ -144,7 +146,7 @@ async def record_finding_curation(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingCurationResponse(**curation.to_record())
+    return FindingCurationResponse.model_validate(curation, from_attributes=True)
 
 
 @router.get(
@@ -175,7 +177,10 @@ async def list_finding_curations(
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
-        items=[FindingCurationResponse(**item.to_record()) for item in records],
+        items=[
+            FindingCurationResponse.model_validate(item, from_attributes=True)
+            for item in records
+        ],
     )
 
 

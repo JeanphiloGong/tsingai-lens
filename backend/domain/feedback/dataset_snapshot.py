@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
-
 
 DatasetType = Literal["evaluation", "sft", "preference"]
 
@@ -50,10 +50,14 @@ class DatasetSnapshot:
                 raise ValueError("historical snapshot rows require train or eval split")
             if version == "feedback-dataset.v3" and "split" in row:
                 raise ValueError("export rows must not contain experiment splits")
-        object.__setattr__(self, "rows", tuple(dict(row) for row in self.rows))
-        object.__setattr__(self, "exclusions", tuple(dict(item) for item in self.exclusions))
-        object.__setattr__(self, "provenance", dict(self.provenance))
-        object.__setattr__(self, "manifest", dict(self.manifest))
+        object.__setattr__(
+            self, "rows", deepcopy(tuple(dict(row) for row in self.rows))
+        )
+        object.__setattr__(
+            self, "exclusions", deepcopy(tuple(dict(item) for item in self.exclusions))
+        )
+        object.__setattr__(self, "provenance", deepcopy(dict(self.provenance)))
+        object.__setattr__(self, "manifest", deepcopy(dict(self.manifest)))
 
     @property
     def row_count(self) -> int:
@@ -73,10 +77,10 @@ class DatasetSnapshot:
             "owner_id": self.owner_id,
             "collection_id": self.collection_id,
             "dataset_type": self.dataset_type,
-            "rows": [dict(row) for row in self.rows],
-            "exclusions": [dict(item) for item in self.exclusions],
-            "provenance": dict(self.provenance),
-            "manifest": dict(self.manifest),
+            "rows": [deepcopy(row) for row in self.rows],
+            "exclusions": [deepcopy(item) for item in self.exclusions],
+            "provenance": deepcopy(self.provenance),
+            "manifest": deepcopy(self.manifest),
             "manifest_digest": self.manifest_digest,
             "provenance_digest": self.provenance_digest,
             "content_digest": self.content_digest,

@@ -2,47 +2,46 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
+from application.chat.inline_citations import format_message_citations
 from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatBranchAlreadyStartedError,
-    ChatMessageNotFoundError,
     ChatFeedbackAnalysisEnqueueError,
+    ChatMessageNotFoundError,
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
-from application.chat.inline_citations import format_message_citations
 from application.repositories.chat_repository import ChatSessionBusyError
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.chat.session import (
-    ChatPermissionRequest,
-    ChatPermissionResponse,
-    ChatMessageFeedbackRequest,
     ChatBranchRequest,
+    ChatMessageFeedbackRequest,
     ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
     ChatModelCallResponse,
     ChatModelCallSummaryResponse,
+    ChatPermissionRequest,
+    ChatPermissionResponse,
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionListResponse,
     ChatSessionResponse,
     ChatToolCallResponse,
     ChatToolDecisionRequest,
+    ChatTreeNodeResponse,
+    ChatTreeResponse,
     ChatTurnRequest,
     ChatTurnResponse,
-    ChatTreeResponse,
-    ChatTreeNodeResponse,
 )
 from domain.chat import ChatSourceContext, ToolPermissionMode
-
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
 
@@ -115,7 +114,10 @@ async def list_chat_sessions(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ChatSessionListResponse(
-        items=[ChatSessionResponse.model_validate(item.to_record()) for item in sessions],
+        items=[
+            ChatSessionResponse.model_validate(item, from_attributes=True)
+            for item in sessions
+        ],
         limit=limit,
         offset=offset,
     )
@@ -138,7 +140,7 @@ async def create_chat_session(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ChatSessionResponse.model_validate(session.to_record())
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
 @router.get(
@@ -157,7 +159,7 @@ async def get_chat_session(
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    return ChatSessionResponse.model_validate(session.to_record())
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
 @router.post("/{session_id}/branches", response_model=ChatSessionResponse, status_code=201)
@@ -176,7 +178,7 @@ async def branch_chat_message(
         raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"code": "chat_branch_invalid", "message": str(exc)}) from exc
-    return ChatSessionResponse.model_validate(session.to_record())
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
 @router.get("/{session_id}/tree", response_model=ChatTreeResponse)
@@ -286,13 +288,20 @@ def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListRespon
     visible_messages = format_message_citations(trajectory["messages"])
     return ChatMessageListResponse(
         items=[_message_response(item) for item in visible_messages],
-        feedback=[ChatMessageFeedbackResponse.model_validate(item) for item in trajectory["feedback"]],
+        feedback=[
+            ChatMessageFeedbackResponse.model_validate(item)
+            for item in trajectory["feedback"]
+        ],
         branches=trajectory["branches"],
-        branch_draft=_message_response(trajectory["branch_draft"]) if trajectory["branch_draft"] else None,
+        branch_draft=(
+            _message_response(trajectory["branch_draft"])
+            if trajectory["branch_draft"]
+            else None
+        ),
         running=trajectory["running"],
         response=_snapshot_response(response) if response is not None else None,
         pending_approval=(
-            ChatToolCallResponse.model_validate(pending.to_record())
+            ChatToolCallResponse.model_validate(pending, from_attributes=True)
             if pending is not None
             else None
         ),
@@ -496,7 +505,7 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
         warnings=list(turn.get("warnings") or ()),
         messages=[_message_response(item) for item in turn.get("messages") or ()],
         pending_approval=(
-            ChatToolCallResponse.model_validate(pending.to_record())
+            ChatToolCallResponse.model_validate(pending, from_attributes=True)
             if pending is not None
             else None
         ),
@@ -507,7 +516,7 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
 
 
 def _message_response(message: Any) -> ChatMessageResponse:
-    return ChatMessageResponse.model_validate(message.to_record())
+    return ChatMessageResponse.model_validate(message, from_attributes=True)
 
 
 __all__ = ["router"]

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from application.source.reference_workflow_service import (
-    SourceReferenceWorkflowResult,
-)
+from application.source.reference_workflow_service import SourceReferenceWorkflowResult
 from controllers.schemas.source.reference import (
     SourceReferenceCandidateResponse,
     SourceReferenceEntryResponse,
@@ -13,6 +11,7 @@ from controllers.schemas.source.reference import (
     SourceReferenceSetResponse,
     SourceReferenceSummaryResponse,
 )
+
 router = APIRouter(
     prefix="/collections/{collection_id}/references",
     tags=["source-references"],
@@ -66,19 +65,23 @@ def _reference_set_response(
         resolution_count=len(references.resolutions),
         candidate_count=len(references.candidates),
         entries=[
-            SourceReferenceEntryResponse(**entry.to_record())
+            SourceReferenceEntryResponse.model_validate(entry, from_attributes=True)
             for entry in references.entries
         ],
         mentions=[
-            SourceReferenceMentionResponse(**mention.to_record())
+            SourceReferenceMentionResponse.model_validate(mention, from_attributes=True)
             for mention in references.mentions
         ],
         resolutions=[
-            SourceReferenceResolutionResponse(**resolution.to_record())
+            SourceReferenceResolutionResponse.model_validate(
+                resolution, from_attributes=True
+            )
             for resolution in references.resolutions
         ],
         candidates=[
-            SourceReferenceCandidateResponse(**candidate.to_record())
+            SourceReferenceCandidateResponse.model_validate(
+                candidate, from_attributes=True
+            )
             for candidate in references.candidates
         ],
     )

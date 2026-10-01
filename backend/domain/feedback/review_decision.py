@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import string
+from dataclasses import dataclass
 from typing import Literal
-
 
 ReviewDecisionValue = Literal["accept", "reject", "insufficient", "withdraw"]
 _DECISIONS = {"accept", "reject", "insufficient", "withdraw"}
@@ -36,18 +35,6 @@ class ReviewDecision:
         if self.decision in {"accept", "reject", "insufficient", "withdraw"} and not reason:
             raise ValueError("review decision reason is required")
         object.__setattr__(self, "reason", reason)
-
-    def to_record(self) -> dict[str, object]:
-        return {
-            "decision_id": self.decision_id,
-            "case_id": self.case_id,
-            "annotation_digest": self.annotation_digest,
-            "decision": self.decision,
-            "reason": self.reason,
-            "created_by": self.created_by,
-            "seq": self.seq,
-            "created_at": self.created_at,
-        }
 
 
 __all__ = ["ReviewDecision", "ReviewDecisionValue"]

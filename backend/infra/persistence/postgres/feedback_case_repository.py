@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import replace
-from datetime import datetime, timezone
 import json
+from copy import deepcopy
+from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -13,18 +13,18 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.feedback.analysis_result import AnalysisResult
-from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
-from domain.feedback.tool_failure import ToolFailureAnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
+from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.review_decision import ReviewDecision
+from domain.feedback.tool_failure import ToolFailureAnalysisResult
 from infra.persistence.postgres.models.feedback import (
-    FeedbackAnnotationRow,
     FeedbackAnalysisResultRow,
+    FeedbackAnnotationRow,
     FeedbackCaseRow,
+    FeedbackReviewDecisionRow,
     FeedbackSignalAnalysisResultRow,
     ToolFailureAnalysisResultRow,
-    FeedbackReviewDecisionRow,
 )
 
 
@@ -598,7 +598,7 @@ async def _save_result_row(
     row.related_message_ids = list(result.related_message_ids)
     row.suggested_evidence = list(result.suggested_evidence)
     row.suggested_target = result.suggested_target
-    row.evidence_coverage = result.evidence_coverage.to_record()
+    row.evidence_coverage = asdict(result.evidence_coverage)
     row.model = result.model
     row.input_digest = result.input_digest
     row.created_at = _datetime(result.created_at)
@@ -656,7 +656,7 @@ async def _save_correction_result_row(
     row.related_message_ids = list(result.related_message_ids)
     row.suggested_evidence = list(result.suggested_evidence)
     row.suggested_target = result.suggested_target
-    row.evidence_coverage = result.evidence_coverage.to_record()
+    row.evidence_coverage = asdict(result.evidence_coverage)
     row.model = result.model
     row.input_digest = result.input_digest
     row.created_at = _datetime(result.created_at)
@@ -717,7 +717,7 @@ async def _save_tool_failure_result_row(
     row.related_message_ids = list(result.related_message_ids)
     row.suggested_evidence = list(result.suggested_evidence)
     row.suggested_target = result.suggested_target
-    row.evidence_coverage = result.evidence_coverage.to_record()
+    row.evidence_coverage = asdict(result.evidence_coverage)
     row.model = result.model
     row.input_digest = result.input_digest
     row.created_at = _datetime(result.created_at)

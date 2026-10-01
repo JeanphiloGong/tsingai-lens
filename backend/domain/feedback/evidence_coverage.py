@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Literal
-
 
 CoverageStatus = Literal["complete", "partial", "failed", "unknown"]
 
@@ -27,18 +27,10 @@ class EvidenceCoverage:
             "omitted_candidates",
             "claim_support",
         ):
-            object.__setattr__(self, name, tuple(dict(item) for item in getattr(self, name)))
+            object.__setattr__(
+                self, name, deepcopy(tuple(dict(item) for item in getattr(self, name)))
+            )
         object.__setattr__(self, "gaps", tuple(str(item) for item in self.gaps))
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "requested_scope": [dict(item) for item in self.requested_scope],
-            "inspected_sources": [dict(item) for item in self.inspected_sources],
-            "omitted_candidates": [dict(item) for item in self.omitted_candidates],
-            "claim_support": [dict(item) for item in self.claim_support],
-            "gaps": list(self.gaps),
-            "coverage_status": self.coverage_status,
-        }
 
     @classmethod
     def from_record(cls, payload: dict[str, Any] | None) -> "EvidenceCoverage":

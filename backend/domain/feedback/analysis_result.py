@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
 from domain.feedback.evidence_coverage import EvidenceCoverage
-
 
 FeedbackProblemType = Literal[
     "fact_error",
@@ -75,7 +74,7 @@ class AnalysisResult:
             "related_message_ids": list(self.related_message_ids),
             "suggested_evidence": list(self.suggested_evidence),
             "suggested_target": self.suggested_target,
-            "evidence_coverage": self.evidence_coverage.to_record(),
+            "evidence_coverage": asdict(self.evidence_coverage),
             "model": self.model,
             "input_digest": self.input_digest,
             "created_at": self.created_at,

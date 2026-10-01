@@ -26,14 +26,16 @@ from controllers.schemas.chat.session import (
 )
 from domain.chat import (
     ChatMessage,
-    ChatResourceRef,
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
     ToolPermissionMode,
     ToolRisk,
 )
-from infra.persistence.memory import MemoryObjectiveRepository, MemoryPipelineRunRepository
+from infra.persistence.memory import (
+    MemoryObjectiveRepository,
+    MemoryPipelineRunRepository,
+)
 from main import create_app
 
 
@@ -299,14 +301,14 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
             ChatTurnRequest(message="Explain these blocks", source_contexts=[source_context] * 13)
     assert turn.messages[0].source_contexts[0].document_id == "doc-1"
     assert turn.messages[0].source_contexts[0].resource_ref.model_dump() == (
-        ChatResourceRef(
-            resource_type="source",
-            resource_id="doc-1:results",
-            href=(
+        {
+            "resource_type": "source",
+            "resource_id": "doc-1:results",
+            "href": (
                 "/collections/col-1/documents/doc-1"
                 "?view=parsed-paper&source_ref=results&page=3"
             ),
-        ).to_record()
+        }
     )
 
 

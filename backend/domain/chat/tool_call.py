@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
-import json
 from typing import Any, Mapping
 
 from domain.chat.resource_ref import ChatResourceRef
@@ -139,7 +139,7 @@ class ChatToolResult:
             "tool_call_id": self.tool_call_id,
             "status": self.status.value,
             "data": deepcopy(dict(self.data)),
-            "resource_refs": [item.to_record() for item in self.resource_refs],
+            "resource_refs": [asdict(item) for item in self.resource_refs],
             "warnings": list(self.warnings),
             "error_code": self.error_code,
             "error_message": self.error_message,

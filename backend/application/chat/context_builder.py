@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 from math import ceil, inf
 from typing import Any
@@ -269,12 +269,15 @@ class ChatContextBuilder:
                     "position": request.position, "arguments": project(request.arguments),
                 })
             for source in message.source_contexts:
-                entries.append({
-                    "source_context": True,
-                    "document_id": source.document_id, "source_ref": source.source_ref,
-                    "source_digest": source.source_digest,
-                    "resource": source.resource_ref.to_record(),
-                })
+                entries.append(
+                    {
+                        "source_context": True,
+                        "document_id": source.document_id,
+                        "source_ref": source.source_ref,
+                        "source_digest": source.source_digest,
+                        "resource": asdict(source.resource_ref),
+                    }
+                )
         if not entries:
             return ""
         # User-selected Sources are the durable context needed to resume a

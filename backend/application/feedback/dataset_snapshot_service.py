@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any, Iterable
 from uuid import uuid4
 
 from application.repositories.chat_repository import ChatRepository
-from application.repositories.dataset_snapshot_repository import DatasetSnapshotRepository
+from application.repositories.dataset_snapshot_repository import (
+    DatasetSnapshotRepository,
+)
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.source.collection_service import CollectionService
 from domain.chat import ChatMessageRole
-from domain.feedback import DatasetSnapshot, DatasetType, FeedbackCase
+from domain.feedback import DatasetSnapshot, DatasetType
 
 
 @dataclass(frozen=True)
@@ -418,7 +420,7 @@ def _question_before(messages: tuple[Any, ...], answer_created_at: str) -> str:
 def _latest_coverage(results: tuple[Any, ...], context: dict[str, Any]) -> dict[str, Any]:
     if results:
         latest = max(results, key=lambda item: (item.created_at, item.result_id))
-        return latest.evidence_coverage.to_record()
+        return asdict(latest.evidence_coverage)
     return dict(context.get("evidence_coverage") or context)
 
 

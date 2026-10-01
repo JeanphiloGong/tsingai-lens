@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from application.goal.experiment_plan_service import (
-    ExperimentPlanNotFoundError,
-)
+from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.goal.experiment_plan import (
     ExperimentPlanCreateRequest,
@@ -148,7 +146,7 @@ async def update_experiment_plan(
 
 
 def _plan_response(plan: ExperimentPlanRecord) -> ExperimentPlanResponse:
-    return ExperimentPlanResponse(**plan.to_record())
+    return ExperimentPlanResponse.model_validate(plan, from_attributes=True)
 
 
 def _not_found(exc: ExperimentPlanNotFoundError) -> HTTPException:

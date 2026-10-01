@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 
 import pytest
@@ -370,3 +371,38 @@ async def test_worker_reports_persisted_state_when_completion_loses_its_lease():
     assert result == replacement
     assert samples.sample.status == "building"
     assert samples.sample.current_revision_id is None
+
+
+async def test_worker_times_out_a_build_before_its_lease_expires():
+    class HangingBuilder:
+        async def build(self, **kwargs):
+            await asyncio.Event().wait()
+
+    samples = _Samples(_sample())
+    worker = DatasetSampleBuildWorker(
+        job_repository=_Jobs(_job()), dataset_repository=_Datasets(),
+        sample_repository=samples, case_repository=_Cases(),
+        builders={"sft": HangingBuilder()}, build_timeout_seconds=0.01,
+    )
+    result = await worker.run_once()
+    assert result.status == "failed"
+    assert samples.sample.status == "build_failed"
+    assert samples.completed["error_code"] == "dataset_sample_build_timeout"
+
+
+async def test_withdrawn_case_never_invokes_a_builder():
+    class UnusedBuilder:
+        async def build(self, **kwargs):
+            raise AssertionError("withdrawn cases must not consume model calls")
+
+    class WithdrawnCases(_Cases):
+        async def read_case(self, case_id):
+            return replace(_case(), status="withdrawn")
+
+    samples = _Samples(_sample())
+    result = await DatasetSampleBuildWorker(
+        job_repository=_Jobs(_job()), dataset_repository=_Datasets(), sample_repository=samples,
+        case_repository=WithdrawnCases(), builders={"sft": UnusedBuilder()},
+    ).run_once()
+    assert result.status == "succeeded"
+    assert samples.sample.status == "needs_input"

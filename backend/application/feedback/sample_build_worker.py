@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -39,11 +41,15 @@ class DatasetSampleBuildWorker:
         case_repository: FeedbackCaseRepository,
         builder: SftSampleBuilderProtocol | None = None,
         builders: Mapping[str, Any] | None = None,
+        build_timeout_seconds: float = 600,
     ) -> None:
         self.job_repository = job_repository
         self.dataset_repository = dataset_repository
         self.sample_repository = sample_repository
         self.case_repository = case_repository
+        if not math.isfinite(build_timeout_seconds) or build_timeout_seconds <= 0:
+            raise ValueError("sample build timeout must be finite and positive")
+        self.build_timeout_seconds = build_timeout_seconds
         self.builders = dict(builders or {})
         if builder is not None:
             # Runtime overrides can continue to provide a custom SFT builder.
@@ -61,6 +67,26 @@ class DatasetSampleBuildWorker:
             return None
         if job.status != "running":
             return job
+        timeout = min(self.build_timeout_seconds, 600)
+        if job.lease_expires_at:
+            remaining = (datetime.fromisoformat(job.lease_expires_at) - datetime.now(timezone.utc)).total_seconds()
+            timeout = min(timeout, remaining - 5)
+        if timeout <= 0:
+            return await self._read_finished(job, status="running")
+        try:
+            async with asyncio.timeout(timeout):
+                return await self._build(job)
+        except TimeoutError:
+            payload = job.payload
+            await self.sample_repository.complete_build(
+                job=job, sample_id=str(payload.get("sample_id") or ""),
+                generation=int(payload.get("generation") or 0), revision=None,
+                outcome="failed", error_code="dataset_sample_build_timeout",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+            )
+            return await self._read_finished(job, status="failed", error_code="dataset_sample_build_timeout")
+
+    async def _build(self, job: Any) -> Any:
         payload = dict(job.payload or {})
         try:
             dataset_id = _required_payload(payload, "dataset_id")
@@ -89,7 +115,7 @@ class DatasetSampleBuildWorker:
             case = await self.case_repository.read_case(sample.source_case_id)
             if case is None or case.collection_id != dataset.collection_id:
                 raise ValueError("dataset_sample_build_case_missing")
-            if source_digest_for_case(case.to_record()) != source_digest:
+            if case.status == "withdrawn" or source_digest_for_case(case.to_record()) != source_digest:
                 await self.sample_repository.complete_build(
                     job=job,
                     sample_id=sample_id,

@@ -394,6 +394,10 @@ Dataset build completion checks the claimed `worker_id`, `lease_version`, and
 unexpired lease under the job row lock before any sample or job mutation.
 An abandoned Worker cannot save a candidate, report failure, or cancel the
 replacement claim; its return value reflects the persisted job state.
+Sample builds have a 600-second wall-clock limit, shortened when the remaining
+lease leaves less time. Timeout cancels the awaited build and records
+`build_failed` with `dataset_sample_build_timeout` before the 900-second lease
+expires. This Worker uses bounded execution rather than heartbeat renewal.
 
 Natural-language correction analysis first assesses whether the follow-up
 preserves the original research task (papers, comparison scope, outcome and

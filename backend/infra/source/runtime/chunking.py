@@ -12,9 +12,6 @@ from typing import Any, cast
 import pandas as pd
 import tiktoken
 
-from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
-from infra.source.runtime.progress import ProgressTicker, progress_ticker
-
 EncodedText = list[int]
 DecodeFn = Callable[[EncodedText], str]
 EncodeFn = Callable[[str], EncodedText]
@@ -49,7 +46,7 @@ class ChunkingConfig:
 
 
 ChunkInput = str | list[str] | list[tuple[str, str]]
-ChunkStrategy = Callable[[list[str], ChunkingConfig, ProgressTicker], Iterable[TextChunk]]
+ChunkStrategy = Callable[[list[str], ChunkingConfig], Iterable[TextChunk]]
 
 
 def get_encoding_fn(encoding_name: str) -> tuple[EncodeFn, DecodeFn]:
@@ -74,11 +71,9 @@ def chunk_text(
     overlap: int,
     encoding_model: str,
     strategy: Any,
-    callbacks: WorkflowCallbacks,
 ) -> pd.Series:
     """Chunk a piece of text into smaller pieces."""
     strategy_exec = load_strategy(strategy)
-    tick = progress_ticker(callbacks.progress, _get_num_total(input_frame, column))
     config = ChunkingConfig(
         size=size,
         overlap=overlap,
@@ -90,7 +85,7 @@ def chunk_text(
         input_frame.apply(
             cast(
                 "Any",
-                lambda row: run_strategy(strategy_exec, row[column], config, tick),
+                lambda row: run_strategy(strategy_exec, row[column], config),
             ),
             axis=1,
         ),
@@ -101,14 +96,13 @@ def run_strategy(
     strategy_exec: ChunkStrategy,
     input_value: ChunkInput,
     config: ChunkingConfig,
-    tick: ProgressTicker,
 ) -> list[str | tuple[list[str] | None, str, int]]:
     """Run a chunking strategy."""
     if isinstance(input_value, str):
-        return [item.text_chunk for item in strategy_exec([input_value], config, tick)]
+        return [item.text_chunk for item in strategy_exec([input_value], config)]
 
     texts = [item if isinstance(item, str) else item[1] for item in input_value]
-    strategy_results = strategy_exec(texts, config, tick)
+    strategy_results = strategy_exec(texts, config)
 
     results = []
     for strategy_result in strategy_results:
@@ -135,7 +129,6 @@ def load_strategy(strategy: Any) -> ChunkStrategy:
 def run_tokens(
     input_texts: list[str],
     config: ChunkingConfig,
-    tick: ProgressTicker,
 ) -> Iterable[TextChunk]:
     """Chunk text using token windows."""
     encode, decode = get_encoding_fn(config.encoding_model)
@@ -147,14 +140,12 @@ def run_tokens(
             encode=encode,
             decode=decode,
         ),
-        tick,
     )
 
 
 def run_sentences(
     input_texts: list[str],
     _config: ChunkingConfig,
-    tick: ProgressTicker,
 ) -> Iterable[TextChunk]:
     """Chunk text by sentence."""
     import nltk
@@ -165,11 +156,10 @@ def run_sentences(
                 text_chunk=sentence,
                 source_doc_indices=[doc_idx],
             )
-        tick(1)
 
 
 def split_multiple_texts_on_tokens(
-    texts: list[str], tokenizer: TokenChunkerOptions, tick: ProgressTicker
+    texts: list[str], tokenizer: TokenChunkerOptions
 ) -> list[TextChunk]:
     """Split multiple texts and return chunks with metadata."""
     result = []
@@ -177,7 +167,6 @@ def split_multiple_texts_on_tokens(
 
     for source_doc_idx, text in enumerate(texts):
         encoded = tokenizer.encode(text)
-        tick(1)
         mapped_ids.append((source_doc_idx, encoded))
 
     input_ids = [
@@ -201,16 +190,6 @@ def split_multiple_texts_on_tokens(
         chunk_ids = input_ids[start_idx:cur_idx]
 
     return result
-
-
-def _get_num_total(output: pd.DataFrame, column: str) -> int:
-    num_total = 0
-    for row in output[column]:
-        if isinstance(row, str):
-            num_total += 1
-        else:
-            num_total += len(row)
-    return num_total
 
 
 def _normalize_strategy_name(strategy: Any) -> str:

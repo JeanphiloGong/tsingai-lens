@@ -18,10 +18,6 @@ class Pipeline:
         """Return a Generator over the pipeline workflows."""
         yield from self.workflows
 
-    def names(self) -> list[str]:
-        """Return the names of the workflows in the pipeline."""
-        return [name for name, _ in self.workflows]
-
     def remove(self, name: str) -> None:
         """Remove a workflow from the pipeline by name."""
         self.workflows = [w for w in self.workflows if w[0] != name]

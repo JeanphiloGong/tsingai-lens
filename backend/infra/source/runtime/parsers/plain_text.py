@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import pandas as pd
 
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
@@ -32,7 +30,6 @@ def build_text_bundle(
     row: pd.Series,
     text: str,
     config: SourceRuntimeConfig,
-    callbacks: Any,
 ) -> SourceArtifactBundle:
     document_id = resolve_document_id(row)
     title = resolve_document_title(row)
@@ -51,7 +48,6 @@ def build_text_bundle(
 
     base_text_units = create_base_text_units(
         document_frame,
-        callbacks,
         config.chunks.group_by_columns,
         config.chunks.size,
         config.chunks.overlap,

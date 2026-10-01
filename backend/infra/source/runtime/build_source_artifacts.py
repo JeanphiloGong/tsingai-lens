@@ -7,11 +7,8 @@ import pandas as pd
 
 import infra.source.runtime.workflows as _source_runtime_workflows
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
-from infra.source.runtime.callbacks.noop_workflow_callbacks import NoopWorkflowCallbacks
-from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.logging import init_runtime_loggers
 from infra.source.runtime.run_pipeline import run_pipeline
-from infra.source.runtime.run_context import create_callback_chain
 from infra.source.runtime.typing.pipeline_run_result import PipelineRunResult
 from infra.source.runtime.workflows.factory import PipelineFactory
 
@@ -33,7 +30,6 @@ def _summarize_workflow_result(result: Any) -> str:
 async def build_source_artifacts(
     config: SourceRuntimeConfig,
     memory_profile: bool = False,
-    callbacks: list[WorkflowCallbacks] | None = None,
     additional_context: dict[str, Any] | None = None,
     verbose: bool = False,
     input_documents: pd.DataFrame | None = None,
@@ -46,8 +42,6 @@ async def build_source_artifacts(
         The configuration.
     memory_profile : bool
         Whether to enable memory profiling.
-    callbacks : list[WorkflowCallbacks] | None default=None
-        A list of callbacks to register.
     additional_context : dict[str, Any] | None default=None
         Additional context to pass to the pipeline run. This can be accessed in the pipeline state under the 'additional_context' key.
     input_documents : pd.DataFrame | None default=None.
@@ -60,11 +54,6 @@ async def build_source_artifacts(
     """
     init_runtime_loggers(config=config, verbose=verbose)
 
-    # Create callbacks for pipeline lifecycle events if provided
-    workflow_callbacks = (
-        create_callback_chain(callbacks) if callbacks else NoopWorkflowCallbacks()
-    )
-
     outputs: list[PipelineRunResult] = []
 
     if memory_profile:
@@ -73,12 +62,9 @@ async def build_source_artifacts(
     logger.info("Initializing source artifact pipeline...")
     pipeline = PipelineFactory.create_pipeline(config)
 
-    workflow_callbacks.pipeline_start(pipeline.names())
-
     async for output in run_pipeline(
         pipeline,
         config,
-        callbacks=workflow_callbacks,
         additional_context=additional_context,
         input_documents=input_documents,
     ):
@@ -93,5 +79,4 @@ async def build_source_artifacts(
             _summarize_workflow_result(output.result),
         )
 
-    workflow_callbacks.pipeline_end(outputs)
     return outputs

@@ -25,6 +25,10 @@ A parser failure is technical failure for that Document. It does not claim that
 the paper lacks scientific evidence, and it does not block preparation or
 research over other ready Documents.
 
+`DocumentPreparationService` owns user-visible preparation progress through
+`PipelineRunService`. Source runtime executes parsing directly and records
+workflow results, errors, timings, and logs without a workflow callback registry.
+
 ## Source Artifacts
 
 - `documents`: document metadata and parsed text.

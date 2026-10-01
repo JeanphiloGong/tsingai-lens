@@ -14,7 +14,6 @@ import pandas as pd
 
 from infra.source.runtime.cache.factory import create_cache_from_config
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
-from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.run_context import create_run_context
 from infra.source.runtime.storage.factory import create_storage_from_config
 from infra.source.runtime.storage.table_io import write_table_to_storage
@@ -28,7 +27,6 @@ logger = logging.getLogger(__name__)
 async def run_pipeline(
     pipeline: Pipeline,
     config: SourceRuntimeConfig,
-    callbacks: WorkflowCallbacks,
     additional_context: dict[str, Any] | None = None,
     input_documents: pd.DataFrame | None = None,
 ) -> AsyncIterable[PipelineRunResult]:
@@ -57,7 +55,6 @@ async def run_pipeline(
         input_storage=input_storage,
         output_storage=output_storage,
         cache=cache,
-        callbacks=callbacks,
         state=state,
     )
 
@@ -84,10 +81,8 @@ async def _run_pipeline(
         logger.info("Executing pipeline...")
         for name, workflow_function in pipeline.run():
             last_workflow = name
-            context.callbacks.workflow_start(name, None)
             work_time = time.time()
             result = await workflow_function(config, context)
-            context.callbacks.workflow_end(name, result)
             yield PipelineRunResult(
                 workflow=name, result=result.result, state=context.state, errors=None
             )

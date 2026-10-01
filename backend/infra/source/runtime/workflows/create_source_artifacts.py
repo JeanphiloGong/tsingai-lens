@@ -112,7 +112,6 @@ async def create_source_artifacts(
                     row=row,
                     text=str(text or ""),
                     config=config,
-                    callbacks=context.callbacks,
                 )
             )
             figure_assets.update(bundles[-1].figure_assets)

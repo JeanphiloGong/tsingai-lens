@@ -11,7 +11,6 @@ import pandas as pd
 
 from infra.source.runtime.chunking import chunk_text, get_encoding_fn
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
-from infra.source.runtime.callbacks.workflow_callbacks import WorkflowCallbacks
 from infra.source.runtime.hashing import gen_sha512_hash
 from infra.source.runtime.storage.table_io import (
     load_table_from_storage,
@@ -35,7 +34,6 @@ async def run_workflow(
 
     output = create_base_text_units(
         documents,
-        context.callbacks,
         chunks.group_by_columns,
         chunks.size,
         chunks.overlap,
@@ -53,7 +51,6 @@ async def run_workflow(
 
 def create_base_text_units(
     documents: pd.DataFrame,
-    callbacks: WorkflowCallbacks,
     group_by_columns: list[str],
     size: int,
     overlap: int,
@@ -113,7 +110,6 @@ def create_base_text_units(
             overlap=overlap,
             encoding_model=encoding_model,
             strategy=strategy,
-            callbacks=callbacks,
         )[0]
 
         if prepend_metadata:

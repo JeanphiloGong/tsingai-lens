@@ -9,7 +9,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
-from application.chat.capability_policy import complete_source_reads, _successful_results_by_name
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
@@ -560,6 +559,12 @@ class ProposePaperExperimentDraftCapability:
         context: CapabilityExecutionContext,
         arguments: PaperExperimentDraftToolRequest,
     ) -> ChatToolResult:
+        # Capability registration also loads policy; defer this reverse dependency.
+        from application.chat.capability_policy import (
+            _successful_results_by_name,
+            complete_source_reads,
+        )
+
         prepared = await self.authoring_service.prepare(
             collection_id=context.collection_id,
             user_id=context.user_id,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,6 +18,9 @@ from application.core.objectives.analysis.paper_experiment_contract import (
     ReconciledPaperExperimentOutput,
     reconcile_model_output,
 )
+from application.core.objectives.finding_authoring_service import (
+    FindingAuthoringService,
+)
 from application.repositories.experiment_analysis_repository import (
     ExperimentAnalysisWrite,
     StoredExperimentAnalysis,
@@ -22,7 +29,12 @@ from application.repositories.objective_repository import ObjectiveAnalysis
 from application.repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
-from domain.core.research_objective import ResearchObjective
+from domain.core.research_objective import (
+    ObjectiveFactSet,
+    PaperContribution,
+    ResearchObjective,
+)
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -517,6 +529,167 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
     assert first.findings == second.findings
     assert first.findings[0].paper_contributions == ()
     assert len(analyses.graphs) == 2
+
+
+async def test_authored_selection_revision_preserves_parent_limits_and_provenance():
+    writer, _, _ = _writer()
+    original = await writer.write_experiment_analysis(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        experiment_outputs=(_comparison_experiment("paper-a"),),
+    )
+    revision = await writer.write_selection_finding_revision(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=replace(
+            _analysis(2),
+            origin="human_authored",
+            source_analysis_version=1,
+            created_by_user_id="researcher-1",
+        ),
+        revisions=original.revisions,
+        selections=original.selections,
+        created_by="researcher-1",
+        parent_finding_id=original.findings[0].finding_id,
+        limitations=("Only the tested preheat conditions are supported.",),
+    )
+    (finding,) = revision.findings
+    assert finding.parent_finding_id == original.findings[0].finding_id
+    assert finding.origin == "hybrid"
+    assert finding.source_analysis_version == 1
+    assert finding.created_by_user_id == "researcher-1"
+    assert finding.created_at.tzinfo is not None
+    assert "Only the tested preheat conditions are supported." in finding.limitations
+    assert revision.selections[0].analysis_version == 2
+    assert original.selections[0].analysis_version == 1
+    assert original.findings[0].parent_finding_id is None
+
+
+async def test_abstention_revision_writes_no_placeholder_finding():
+    writer, _, analyses = _writer()
+    result = await writer.write_selection_finding_revision(
+        collection_id="collection-1",
+        objective=_objective(),
+        analysis=_analysis(2),
+        revisions=(),
+        selections=(),
+        created_by="researcher-1",
+        limitations=("No comparable measurement was found.",),
+    )
+    assert result.findings == ()
+    assert result.selections == ()
+    assert result.groups == ()
+    assert len(analyses.graphs) == 1
+
+
+async def test_researcher_revises_limits_then_abstains_without_changing_source(
+    collection_service,
+):
+    collection = await collection_service.create_collection(
+        "316L preheat and elongation",
+        owner_user_id="researcher-1",
+    )
+    collection_id = collection["collection_id"]
+    objective = replace(_objective(), collection_id=collection_id)
+    repository = MemoryObjectiveRepository()
+    await repository.replace(
+        collection_id,
+        ObjectiveFactSet(research_objectives=(objective,)),
+    )
+    await repository.queue_analysis(
+        collection_id,
+        objective.objective_id,
+        document_inputs=_analysis().document_inputs,
+        pipeline_version="test",
+        model_name=None,
+        prompt_versions={},
+    )
+    analysis = await repository.claim_analysis(collection_id, objective.objective_id, 1)
+    writer, _, graphs = _writer()
+    source = await writer.write_experiment_analysis(
+        collection_id=collection_id,
+        objective=objective,
+        analysis=analysis,
+        experiment_outputs=(_comparison_experiment("paper-a"),),
+    )
+    coverage = tuple(
+        PaperContribution.from_mapping(
+            {
+                "collection_id": collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": 1,
+                "document_id": paper,
+                "analysis_status": "analyzed" if paper == "paper-a" else "excluded",
+                "warnings": (
+                    []
+                    if paper == "paper-a"
+                    else ["No comparable elongation measurement."]
+                ),
+            }
+        )
+        for paper in ("paper-a", "paper-b")
+    )
+    await repository.publish_experiment_analysis(
+        collection_id,
+        objective.objective_id,
+        1,
+        contributions=coverage,
+    )
+    query = SimpleNamespace(read_analysis_bundle=AsyncMock(return_value=source))
+
+    @asynccontextmanager
+    async def transaction():
+        yield None
+
+    service = FindingAuthoringService(
+        collection_service=collection_service,
+        objective_repository=repository,
+        experiment_query_service=query,
+        experiment_analysis_writer=writer,
+        experiment_analysis_transaction_factory=SimpleNamespace(begin=transaction),
+    )
+    revised = await service.create_selection_version(
+        collection_id=collection_id,
+        objective_id=objective.objective_id,
+        source_analysis_version=1,
+        selection_ids=tuple(item.selection_id for item in source.selections),
+        parent_finding_id=source.findings[0].finding_id,
+        limitations=(" Supported only within the tested preheat conditions. ",),
+        created_by_user_id="researcher-1",
+    )
+    assert revised.analysis.status == "succeeded"
+    assert revised.finding.parent_finding_id == source.findings[0].finding_id
+    assert (
+        "Supported only within the tested preheat conditions."
+        in revised.finding.limitations
+    )
+    query.read_analysis_bundle.return_value = SimpleNamespace(
+        revisions=source.revisions,
+        selections=graphs.graphs[-1].selections,
+        groups=graphs.graphs[-1].groups,
+        findings=graphs.graphs[-1].findings,
+    )
+    abstained = await service.create_selection_version(
+        collection_id=collection_id,
+        objective_id=objective.objective_id,
+        source_analysis_version=2,
+        selection_ids=(),
+        created_by_user_id="researcher-1",
+        abstention_reason="no_comparable_evidence",
+        limitations=("The second paper lacks a comparable elongation measurement.",),
+    )
+    assert abstained.analysis.analysis_version == 3
+    assert abstained.analysis.abstention_reason == "no_comparable_evidence"
+    assert abstained.finding is None
+    assert graphs.graphs[-1].findings == ()
+    assert await repository.list_contributions(
+        collection_id, objective.objective_id, 3
+    ) == tuple(replace(item, analysis_version=3) for item in coverage)
+    assert (
+        await repository.read_analysis(collection_id, objective.objective_id, 1)
+    ).status == "succeeded"
+    assert source.findings[0].parent_finding_id is None
 
 
 async def test_writer_keeps_selection_for_exact_partial_protocol() -> None:

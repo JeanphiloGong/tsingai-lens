@@ -11,6 +11,7 @@ from application.core.objectives.analysis.experiment_query_service import (
     ExperimentQueryService,
 )
 from application.repositories.objective_repository import (
+    OBJECTIVE_ANALYSIS_ABSTENTION_REASONS,
     ObjectiveAnalysis,
     ObjectiveRepository,
 )
@@ -53,7 +54,26 @@ class FindingAuthoringService:
         comparison_group_ids: tuple[str, ...] = (),
         created_by_user_id: str,
         parent_finding_id: str | None = None,
+        limitations: tuple[str, ...] = (),
+        abstention_reason: str | None = None,
     ) -> FindingAuthoringResult:
+        limitations = tuple(
+            dict.fromkeys(item.strip() for item in limitations if item.strip())
+        )
+        if len(limitations) > 20 or any(len(item) > 1000 for item in limitations):
+            raise ValueError("Finding limitations exceed the allowed length")
+        if abstention_reason is not None:
+            if abstention_reason not in OBJECTIVE_ANALYSIS_ABSTENTION_REASONS:
+                raise ValueError("unsupported Finding abstention")
+            if (
+                selection_ids
+                or comparison_group_ids
+                or parent_finding_id
+                or not limitations
+            ):
+                raise ValueError(
+                    "abstention requires an explanation and no experiment selections or parent"
+                )
         if self.experiment_analysis_transaction_factory is None:
             raise RuntimeError(
                 "Finding authoring requires a shared analysis transaction"
@@ -87,8 +107,23 @@ class FindingAuthoringService:
         chosen = tuple(
             item for item in source.selections if item.selection_id in selected_ids
         )
-        if not chosen or len(chosen) != len(selected_ids):
+        if abstention_reason is None and (
+            not chosen or len(chosen) != len(selected_ids)
+        ):
             raise ValueError("Finding references an unknown experiment selection")
+        if parent_finding_id is not None:
+            parent = next(
+                (
+                    item
+                    for item in source.findings
+                    if item.finding_id == parent_finding_id
+                ),
+                None,
+            )
+            if parent is None:
+                raise ValueError(
+                    "parent Finding is not in the source analysis snapshot"
+                )
         coverage = await self.objective_repository.list_contributions(
             collection_id, objective_id, source_analysis_version
         )
@@ -114,6 +149,7 @@ class FindingAuthoringService:
                     selections=chosen,
                     created_by=created_by_user_id,
                     parent_finding_id=parent_finding_id,
+                    limitations=limitations,
                     transaction=transaction,
                 )
                 await self.objective_repository.publish_experiment_analysis(
@@ -125,6 +161,10 @@ class FindingAuthoringService:
                         for item in coverage
                     ),
                     transaction=transaction,
+                    abstention_reason=abstention_reason,
+                    abstention_note=(
+                        "\n".join(limitations) if abstention_reason else None
+                    ),
                 )
         except Exception as exc:
             await self.objective_repository.fail_analysis(

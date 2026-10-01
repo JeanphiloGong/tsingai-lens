@@ -15,7 +15,7 @@ class _Service:
     def __init__(self) -> None:
         self.authoring_kwargs = None
 
-    async def create_version(self, **kwargs):
+    async def create_selection_version(self, **kwargs):
         from application.core.objectives.finding_authoring_service import (
             FindingAuthoringResult,
         )
@@ -42,20 +42,34 @@ class _Service:
                 "origin": "hybrid",
                 "source_analysis_version": 1,
                 "created_by_user_id": kwargs["created_by_user_id"],
+                "abstention_reason": kwargs.get("abstention_reason"),
+                "abstention_note": (
+                    "\n".join(kwargs.get("limitations", ()))
+                    if kwargs.get("abstention_reason")
+                    else None
+                ),
             }
         )
         finding = Finding.from_mapping(
             {
-                **_finding_record(kwargs["statement"]),
+                **_finding_record(),
                 "analysis_version": 2,
                 "finding_id": "finding-manual-1",
-                "origin": "human_authored",
+                "origin": (
+                    "hybrid" if kwargs.get("parent_finding_id") else "human_authored"
+                ),
                 "source_analysis_version": 1,
                 "created_by_user_id": kwargs["created_by_user_id"],
                 "created_at": "2026-09-01T00:00:00+00:00",
+                "parent_finding_id": kwargs.get("parent_finding_id"),
+                "limitations": list(kwargs.get("limitations", ()))
+                or ["Supported by one paper."],
             }
         )
-        return FindingAuthoringResult(analysis=analysis, finding=finding)
+        return FindingAuthoringResult(
+            analysis=analysis,
+            finding=None if kwargs.get("abstention_reason") else finding,
+        )
 
     async def record_feedback(self, **kwargs):
         return FindingFeedback.from_mapping(
@@ -269,6 +283,41 @@ def test_author_finding_api_requires_experiment_selection() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_author_finding_api_preserves_parent_and_limitations() -> None:
+    service = _Service()
+    response = _client(service).post(
+        "/collections/col-1/objectives/obj-1/findings",
+        json={
+            "source_analysis_version": 1,
+            "selection_ids": ["selection-1"],
+            "parent_finding_id": "finding-1",
+            "limitations": ["Only the tested material is supported."],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["finding"]["parent_finding_id"] == "finding-1"
+    assert response.json()["finding"]["limitations"] == [
+        "Only the tested material is supported."
+    ]
+
+
+def test_author_finding_api_records_abstention_without_placeholder() -> None:
+    response = _client().post(
+        "/collections/col-1/objectives/obj-1/findings",
+        json={
+            "source_analysis_version": 1,
+            "abstention_reason": "insufficient_evidence",
+            "limitations": ["The second paper has no comparable measurement."],
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["finding"] is None
+    assert (
+        response.json()["analysis"]["abstention_note"]
+        == "The second paper has no comparable measurement."
+    )
 
 
 def test_author_evidence_api_is_removed() -> None:

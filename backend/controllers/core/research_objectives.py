@@ -1,25 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-
-from application.repositories.objective_repository import StoredObjective
-from application.core.objectives.finding_summary import FindingSummaryUnavailable
+from pydantic import BaseModel, ConfigDict, Field
 
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
+from application.core.objectives.finding_summary import FindingSummaryUnavailable
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
 )
-
-from controllers.schemas.core.research_objectives import (
+from application.repositories.objective_repository import StoredObjective
+from controllers.core.research_objective_schemas import (
     FindingDetailResponse,
-    FindingSummaryRequest,
-    FindingSummaryResponse,
     FindingListResponse,
-    DocumentSelectionRequest,
+    FindingSummaryResponse,
     ObjectiveAnalysisResponse,
     ObjectiveAnalysisStatusResponse,
     ObjectiveEvidenceListResponse,
@@ -28,6 +26,17 @@ from controllers.schemas.core.research_objectives import (
     PaginatedObjectiveListResponse,
 )
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
+
+
+class DocumentSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_ids: list[str] = Field(min_length=1)
+
+
+class FindingSummaryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    analysis_version: int = Field(ge=1)
+    language: Literal["en", "zh"] = "en"
 
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])

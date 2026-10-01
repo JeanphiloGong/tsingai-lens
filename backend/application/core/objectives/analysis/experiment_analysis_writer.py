@@ -12,6 +12,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 from application.core.objectives.analysis.experiment_finding_synthesis import (
@@ -881,6 +882,7 @@ class ExperimentAnalysisWriter:
         selections: Sequence[ObjectiveExperimentSelection],
         created_by: str | None = None,
         parent_finding_id: str | None = None,
+        limitations: tuple[str, ...] = (),
         transaction: RepositoryTransaction | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Copy fixed selections into a new snapshot and synthesize its Finding."""
@@ -905,8 +907,15 @@ class ExperimentAnalysisWriter:
             selections=copied,
         )
         findings = tuple(
-            replace(item, parent_finding_id=parent_finding_id)
-            if parent_finding_id is not None else item
+            replace(
+                item,
+                parent_finding_id=parent_finding_id,
+                limitations=tuple(dict.fromkeys((*item.limitations, *limitations))),
+                origin="hybrid" if parent_finding_id is not None else "human_authored",
+                source_analysis_version=analysis.source_analysis_version,
+                created_by_user_id=created_by,
+                created_at=datetime.now(timezone.utc),
+            )
             for item in synthesis.findings
         )
         stored = await _repository_call(

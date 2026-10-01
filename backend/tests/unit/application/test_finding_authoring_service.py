@@ -131,6 +131,7 @@ class _Query:
             selections=(_selection(),),
             groups=(),
             revisions=(SimpleNamespace(revision=SimpleNamespace()),),
+            findings=(SimpleNamespace(finding_id="finding-parent"),),
         )
 
 
@@ -140,6 +141,8 @@ class _Writer:
 
     async def write_selection_finding_revision(self, **kwargs):
         self.call = kwargs
+        if not kwargs["selections"]:
+            return SimpleNamespace(findings=(), revisions=(), selections=(), groups=())
         selection = kwargs["selections"][0]
         finding = SimpleNamespace(selection_ids=(selection.selection_id,))
         return SimpleNamespace(findings=(finding,), revisions=(), selections=(), groups=())
@@ -169,6 +172,82 @@ async def test_selection_version_copies_contributions_and_uses_one_transaction()
     assert repository.published["contributions"][0].analysis_version == 2
     assert "contributions" not in writer.call
     assert result.finding is not None
+
+
+async def test_selection_revision_preserves_parent_and_expert_limitations():
+    writer = _Writer()
+    repository = _Repository()
+    service = FindingAuthoringService(
+        collection_service=_Collection(),
+        objective_repository=repository,
+        experiment_query_service=_Query(),
+        experiment_analysis_writer=writer,
+        experiment_analysis_transaction_factory=_Transactions(),
+    )
+    await service.create_selection_version(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        source_analysis_version=1,
+        selection_ids=("selection-1",),
+        created_by_user_id="user-1",
+        parent_finding_id="finding-parent",
+        limitations=(" Only tested conditions. ",),
+    )
+    assert writer.call["parent_finding_id"] == "finding-parent"
+    assert writer.call["limitations"] == ("Only tested conditions.",)
+
+
+async def test_abstention_publishes_explanation_and_coverage_without_finding():
+    repository = _Repository()
+    transactions = _Transactions()
+    service = FindingAuthoringService(
+        collection_service=_Collection(),
+        objective_repository=repository,
+        experiment_query_service=_Query(),
+        experiment_analysis_writer=_Writer(),
+        experiment_analysis_transaction_factory=transactions,
+    )
+    result = await service.create_selection_version(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        source_analysis_version=1,
+        selection_ids=(),
+        created_by_user_id="user-1",
+        abstention_reason="insufficient_evidence",
+        limitations=("No comparable measurement in the second paper.",),
+    )
+    assert result.finding is None
+    assert transactions.events == ["begin", "commit"]
+    assert repository.published["abstention_reason"] == "insufficient_evidence"
+    assert (
+        repository.published["abstention_note"]
+        == "No comparable measurement in the second paper."
+    )
+    assert repository.published["contributions"][0].analysis_version == 2
+
+
+async def test_unknown_parent_is_rejected_before_creating_a_revision():
+    repository = _Repository()
+    writer = _Writer()
+    transactions = _Transactions()
+    service = FindingAuthoringService(
+        collection_service=_Collection(),
+        objective_repository=repository,
+        experiment_query_service=_Query(),
+        experiment_analysis_writer=writer,
+        experiment_analysis_transaction_factory=transactions,
+    )
+    with pytest.raises(ValueError, match="parent Finding"):
+        await service.create_selection_version(
+            collection_id="collection-1",
+            objective_id="objective-1",
+            source_analysis_version=1,
+            selection_ids=("selection-1",),
+            created_by_user_id="user-1",
+            parent_finding_id="foreign-parent",
+        )
+    assert transactions.events == []
+    assert writer.call is None
 
 
 @pytest.mark.anyio

@@ -192,11 +192,11 @@ timestamps. No duplicate Dataset fields or generic conversion layer is needed.
 
 Small HTTP models used by one route file are declared in that file. Larger
 route-local families stay in the owning module (`controllers/chat/schemas.py`
-and `controllers/feedback/task_dataset_schemas.py` beside their routes). Only
-models consumed by multiple route files belong in `controllers/schemas/`.
-Service-local results stay beside their service, and repository projections
-beside their contract.
-
+and the `task_dataset_schemas.py` / `research_objective_schemas.py` files beside
+their feedback and research-objective routes). Only models consumed by
+multiple route files belong in `controllers/schemas/`, including the shared
+Objective/Finding responses and Pipeline Run responses. Service-local results
+stay beside their service, and repository projections beside their contract.
 `ResearchObjective` owns scientific normalization and transitions; PostgreSQL
 encodes its persisted payload, and controllers format its HTTP response.
 

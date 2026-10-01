@@ -1100,8 +1100,7 @@ experiment analysis snapshot. The request identifies the
 `source_analysis_version`, one or more `selection_ids`, and optional
 `comparison_group_ids`. The authenticated user identity is server-derived;
 the conclusion, factors, outcome, direction, and evidence projection remain
-derived from the experiment records.
-The authenticated user identity is server-derived. Paper coverage, factors,
+derived from the experiment records. Paper coverage, factors,
 outcome, direction, attribution, synthesis status, certainty, target version,
 and Source content are also server-derived and cannot be supplied by the
 browser.
@@ -1119,9 +1118,22 @@ the canonical Finding synthesized from the requested selection/group set.
 Unknown selections, groups, or an unaggregated combination are rejected; the
 source snapshot remains unchanged.
 
+Optional `parent_finding_id` must identify a Finding in the source experiment
+analysis graph. The new Finding records that parent, hybrid origin, source
+analysis version, authenticated author, and authoring time. Optional
+`limitations` are trimmed, deduplicated, and appended to synthesized scientific
+limitations (at most 20 supplied entries, 1000 characters each). They do not
+replace the Source-grounded conclusion or its experiment selections.
+Experiment-backed Finding responses expose their `selection_ids` and optional
+`comparison_group_ids`; their legacy Evidence `paper_contributions` may be
+empty because selections carry that support. A one-study Finding uses
+`synthesis_status=single_study`. Responses require either paper contributions
+or experiment selections rather than accepting an unsupported conclusion.
+
 A researcher may instead submit one of `no_comparable_evidence`,
 `no_grounded_evidence`, or `insufficient_evidence` as `abstention_reason`, with
-an explanatory `limitations` entry and no statement, parent, or Evidence roles.
+an explanatory `limitations` entry and no selections, comparison groups, or
+parent. The new version retains the source analysis's document coverage.
 
 The new analysis version records the abstention as metadata and creates no
 placeholder Finding. An unauthenticated request returns `401`; missing or

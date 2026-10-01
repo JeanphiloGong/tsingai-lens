@@ -269,9 +269,15 @@ async def preview_feedback_dataset_export(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset not found") from exc
     except (DatasetExportError, FeedbackDatasetError) as exc:
+        code = str(exc)
+        status_code = (
+            409
+            if "stale" in code or "conflict" in code or "expired" in code
+            else 422
+        )
         raise HTTPException(
-            status_code=422,
-            detail={"code": str(exc), "message": str(exc)},
+            status_code=status_code,
+            detail={"code": code, "message": code},
         ) from exc
     return _preview_response(preview)
 

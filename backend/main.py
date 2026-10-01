@@ -613,6 +613,13 @@ async def build_application_runtime(
                 sample_repository=feedback_dataset_sample_repository,
                 case_repository=feedback_case_repository,
             )
+        for worker in (
+            feedback_analysis_worker,
+            correction_signal_analysis_worker,
+            tool_failure_analysis_worker,
+        ):
+            if worker is not None and feedback_dataset_service is not None:
+                worker.dataset_service = feedback_dataset_service
 
         feedback_dataset_export_service = overrides.feedback_dataset_export_service
         if (

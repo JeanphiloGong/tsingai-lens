@@ -18,6 +18,7 @@ from application.repositories.feedback_dataset_export_repository import (
 )
 from application.repositories.feedback_dataset_sample_repository import (
     ConfirmedDatasetMember,
+    DatasetSampleRevisionConflict,
     FeedbackDatasetSampleRepository,
 )
 from domain.feedback.dataset_export import (
@@ -68,7 +69,7 @@ class FeedbackDatasetExportService:
         self, *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
     ) -> ExportPreview:
         dataset = await self._read_dataset(user_id, dataset_id)
-        members = await self.sample_repository.read_confirmed_members(dataset_id=dataset_id)
+        members = await self._read_confirmed_members(dataset_id)
         if sample_ids is not None:
             selected = set(sample_ids)
             available = {item.sample.sample_id for item in members}
@@ -119,7 +120,7 @@ class FeedbackDatasetExportService:
 
         current = tuple(
             _export_member(item)
-            for item in await self.sample_repository.read_confirmed_members(dataset_id=dataset_id)
+            for item in await self._read_confirmed_members(dataset_id)
         )
         selected = {member.sample_id for member in preview.members}
         current = tuple(member for member in current if member.sample_id in selected)
@@ -240,6 +241,16 @@ class FeedbackDatasetExportService:
         return await self.dataset_service.read_for_user(
             user_id=user_id, dataset_id=dataset_id
         )
+
+    async def _read_confirmed_members(
+        self, dataset_id: str
+    ) -> tuple[ConfirmedDatasetMember, ...]:
+        try:
+            return await self.sample_repository.read_confirmed_members(
+                dataset_id=dataset_id
+            )
+        except DatasetSampleRevisionConflict as exc:
+            raise DatasetExportError(str(exc)) from exc
 
 
 def _export_member(item: ConfirmedDatasetMember) -> ExportMember:

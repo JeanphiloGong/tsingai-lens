@@ -22,7 +22,8 @@ from domain.feedback.dataset_sample import (
     ensure_action_allowed,
 )
 from domain.feedback.sample_revision import SampleRevision, parse_revision_content
-from infra.persistence.postgres.models.feedback import AnalysisJobRow
+from infra.persistence.postgres.models.feedback import AnalysisJobRow, FeedbackCaseRow
+from application.repositories.feedback_dataset_sample_repository import source_digest_for_case
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetSampleRow,
     FeedbackSampleActionRow,
@@ -79,16 +80,27 @@ class PostgresFeedbackDatasetSampleRepository:
                     confirmed_at=_datetime(sample.confirmed_at) if sample.confirmed_at else None,
                 )
                 job_row = _job_row(job)
-                session.add(row)
-                session.add(job_row)
                 try:
-                    await session.flush()
+                    async with session.begin_nested():
+                        session.add(row)
+                        session.add(job_row)
+                        await session.flush()
                 except IntegrityError:
-                    # A concurrent collector may have inserted this exact
-                    # dataset/source pair.  The outer transaction is not
-                    # reusable after a flush failure, so surface the error;
-                    # callers can retry the idempotent collect operation.
-                    raise
+                    # A worker and a first page visit can enqueue the same
+                    # case concurrently.  The savepoint keeps the outer
+                    # transaction usable so the winner can be returned.
+                    existing = await session.scalar(
+                        select(FeedbackDatasetSampleRow)
+                        .where(
+                            FeedbackDatasetSampleRow.dataset_id == sample.dataset_id,
+                            FeedbackDatasetSampleRow.source_case_id == sample.source_case_id,
+                        )
+                        .with_for_update()
+                    )
+                    if existing is None:
+                        raise
+                    collected.append(CollectedDatasetSample(_sample(existing), None))
+                    continue
                 collected.append(CollectedDatasetSample(sample, job))
         return tuple(collected)
 
@@ -151,11 +163,15 @@ class PostgresFeedbackDatasetSampleRepository:
         self, *, dataset_id: str
     ) -> tuple[ConfirmedDatasetMember, ...]:
         statement = (
-            select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow)
+            select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow, FeedbackCaseRow)
             .join(
                 FeedbackSampleRevisionRow,
                 FeedbackDatasetSampleRow.confirmed_revision_id
                 == FeedbackSampleRevisionRow.revision_id,
+            )
+            .join(
+                FeedbackCaseRow,
+                FeedbackCaseRow.case_id == FeedbackDatasetSampleRow.source_case_id,
             )
             .where(
                 FeedbackDatasetSampleRow.dataset_id == dataset_id,
@@ -170,10 +186,16 @@ class PostgresFeedbackDatasetSampleRepository:
         )
         async with self.session_factory() as session:
             rows = (await session.execute(statement)).all()
-            return tuple(
-                ConfirmedDatasetMember(sample=_sample(sample), revision=_revision(revision))
-                for sample, revision in rows
-            )
+            members: list[ConfirmedDatasetMember] = []
+            for sample, revision, case in rows:
+                if case.status == "withdrawn":
+                    raise DatasetSampleRevisionConflict("sample_source_stale")
+                if source_digest_for_case(_case_record(case)) != sample.source_digest:
+                    raise DatasetSampleRevisionConflict("sample_source_stale")
+                members.append(
+                    ConfirmedDatasetMember(sample=_sample(sample), revision=_revision(revision))
+                )
+            return tuple(members)
 
     async def append_human_revision(
         self,
@@ -181,6 +203,7 @@ class PostgresFeedbackDatasetSampleRepository:
         sample_id: str,
         expected_revision_id: str | None,
         expected_generation: int | None = None,
+        expected_source_digest: str,
         revision: SampleRevision,
         updated_at: str,
     ) -> DatasetSample:
@@ -201,6 +224,15 @@ class PostgresFeedbackDatasetSampleRepository:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
             if row.status not in {"needs_input", "needs_confirmation", "confirmed"}:
                 raise DatasetSampleRevisionConflict("sample_not_editable")
+            case = await session.scalar(
+                select(FeedbackCaseRow)
+                .where(FeedbackCaseRow.case_id == row.source_case_id)
+                .with_for_update()
+            )
+            if case is None or case.status == "withdrawn":
+                raise DatasetSampleRevisionConflict("sample_source_stale")
+            if source_digest_for_case(_case_record(case)) != expected_source_digest:
+                raise DatasetSampleRevisionConflict("sample_source_stale")
             if expected_revision_id is None and expected_generation is None:
                 raise ValueError("sample_generation_required")
             session.add(_revision_row(revision))
@@ -220,6 +252,7 @@ class PostgresFeedbackDatasetSampleRepository:
         *,
         sample_id: str,
         expected_revision_id: str,
+        expected_source_digest: str,
         confirmed_by: str,
         confirmed_at: str,
     ) -> DatasetSample:
@@ -238,6 +271,15 @@ class PostgresFeedbackDatasetSampleRepository:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
             if row.status != "needs_confirmation":
                 raise ValueError("sample_not_confirmable")
+            case = await session.scalar(
+                select(FeedbackCaseRow)
+                .where(FeedbackCaseRow.case_id == row.source_case_id)
+                .with_for_update()
+            )
+            if case is None or case.status == "withdrawn":
+                raise DatasetSampleRevisionConflict("sample_source_stale")
+            if source_digest_for_case(_case_record(case)) != expected_source_digest:
+                raise DatasetSampleRevisionConflict("sample_source_stale")
             revision = await session.get(FeedbackSampleRevisionRow, expected_revision_id)
             if revision is None or revision.sample_id != sample_id:
                 raise ValueError("sample_revision_missing")
@@ -520,6 +562,23 @@ def _lease_matches(row: AnalysisJobRow, job: AnalysisJob, timestamp: datetime) -
         and row.lease_expires_at is not None
         and row.lease_expires_at > timestamp
     )
+
+
+def _case_record(row: FeedbackCaseRow) -> dict[str, object]:
+    return {
+        "case_id": row.case_id,
+        "collection_id": row.collection_id,
+        "session_id": row.session_id,
+        "anchor_message_id": row.anchor_message_id,
+        "source_signal_ids": list(row.source_signal_ids or ()),
+        "analysis_result_ids": list(row.analysis_result_ids or ()),
+        "signal_analysis_result_ids": list(row.signal_analysis_result_ids or ()),
+        "tool_failure_analysis_result_ids": list(
+            row.tool_failure_analysis_result_ids or ()
+        ),
+        "context_snapshot": row.context_snapshot or {},
+        "annotation_digest": row.annotation_digest,
+    }
 
 
 def _sample(row: FeedbackDatasetSampleRow) -> DatasetSample:

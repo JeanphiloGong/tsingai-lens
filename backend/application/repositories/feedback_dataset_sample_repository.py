@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Mapping, Protocol
 
 from application.repositories.analysis_job_repository import AnalysisJob
 from domain.feedback.dataset_sample import DatasetSample, SampleAction, _is_sha256
@@ -27,9 +27,34 @@ def sample_action_digest(
     return sha256(encoded).hexdigest()
 
 
-def source_digest_for_case(case_record: dict[str, Any]) -> str:
+_SOURCE_DIGEST_FIELDS = (
+    "case_id",
+    "collection_id",
+    "session_id",
+    "anchor_message_id",
+    "source_signal_ids",
+    "analysis_result_ids",
+    "signal_analysis_result_ids",
+    "tool_failure_analysis_result_ids",
+    "context_snapshot",
+    "annotation_digest",
+)
+
+
+def source_digest_for_case(case_record: Mapping[str, Any]) -> str:
+    """Hash the case content that can change a generated sample.
+
+    Timestamps and workflow status are deliberately excluded.  A review state
+    transition must not invalidate training content; a changed question,
+    answer, evidence snapshot, or annotation must.
+    """
+    canonical = {
+        field: case_record.get(field)
+        for field in _SOURCE_DIGEST_FIELDS
+        if field in case_record
+    }
     encoded = json.dumps(
-        case_record,
+        canonical,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -132,6 +157,7 @@ class FeedbackDatasetSampleRepository(Protocol):
         sample_id: str,
         expected_revision_id: str | None,
         expected_generation: int | None = None,
+        expected_source_digest: str,
         revision: SampleRevision,
         updated_at: str,
     ) -> DatasetSample: ...
@@ -141,6 +167,7 @@ class FeedbackDatasetSampleRepository(Protocol):
         *,
         sample_id: str,
         expected_revision_id: str,
+        expected_source_digest: str,
         confirmed_by: str,
         confirmed_at: str,
     ) -> DatasetSample: ...

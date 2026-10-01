@@ -19,10 +19,12 @@ class FeedbackAnalysisWorker:
         job_repository: Any,
         case_repository: Any,
         handler: FeedbackAnalysisHandler,
+        dataset_service: Any | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.case_repository = case_repository
         self.handler = handler
+        self.dataset_service = dataset_service
 
     async def run_once(self) -> Any | None:
         now = datetime.now(timezone.utc).isoformat()
@@ -59,12 +61,17 @@ class FeedbackAnalysisWorker:
             # The Postgres case repository persists the result and case in one
             # transaction. Keeping this as one repository operation prevents
             # an orphan AnalysisResult when case assembly fails.
-            await self.case_repository.upsert_case_from_analysis(
+            case = await self.case_repository.upsert_case_from_analysis(
                 result,
                 context_snapshot=context_snapshot,
                 source_signal_ids=source_signal_ids,
                 now=datetime.now(timezone.utc).isoformat(),
             )
+            if self.dataset_service is not None and case is not None:
+                await self.dataset_service.enqueue_case_samples(
+                    collection_id=case.collection_id,
+                    case_id=case.case_id,
+                )
         except Exception:  # noqa: BLE001
             logger.exception("feedback analysis persistence failed job_id=%s", job.job_id)
             return await self.job_repository.mark_failed(

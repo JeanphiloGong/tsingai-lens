@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { resolve } from '$app/paths';
 	import {
 		ArrowLeft,
 		CheckCircle2,
@@ -14,10 +15,8 @@
 	} from '@lucide/svelte';
 	import { errorMessage, isHttpStatusError } from '../../../../../_shared/api';
 	import { t } from '../../../../../_shared/i18n';
-	import { fetchFeedbackCases, type FeedbackCaseSummary } from '../../../../../_shared/feedbackCases';
 	import {
 		confirmDatasetSample,
-		collectDatasetCases,
 		actOnDatasetSample,
 		downloadFeedbackDatasetExport,
 		fetchFeedbackDatasetExports,
@@ -63,13 +62,6 @@
 	let downloadingExport = '';
 	let loadedDatasetId = '';
 	let loadGeneration = 0;
-	let collectOpen = false;
-	let cases: FeedbackCaseSummary[] = [];
-	let caseOffset = 0;
-	let casesLoading = false;
-	let collecting = false;
-	let collectError = '';
-	let chosenCases: string[] = [];
 	let chosenExports: string[] = [];
 	let polling = false;
 	let caseQuestions: Record<string, string> = {};
@@ -84,7 +76,6 @@
 		} while (response.items.length === 200 && items.length < response.total);
 		return { items };
 	}
-	$: collectedCases = new Set(samples.map((item) => item.source_case_id));
 	$: exportSelection = chosenExports.filter((id) => samples.some((item) => item.sample_id === id && item.status === 'confirmed'));
 
 	onMount(() => {
@@ -106,36 +97,6 @@
 		finally { polling = false; }
 	}
 
-	async function openCases(offset = 0) {
-		collectOpen = true;
-		casesLoading = true;
-		collectError = '';
-		const generation = loadGeneration;
-		try {
-			const response = await fetchFeedbackCases(collectionId, { limit: 50, offset });
-			if (generation !== loadGeneration) return;
-			cases = response.items;
-			caseQuestions = { ...caseQuestions, ...Object.fromEntries(cases.map((item) => [item.case_id, item.question_preview])) };
-			caseOffset = offset;
-		} catch (err) { collectError = errorMessage(err); }
-		finally { casesLoading = false; }
-	}
-
-	async function collectCases() {
-		if (collecting || !chosenCases.length) return;
-		const generation = loadGeneration;
-		collecting = true;
-		collectError = '';
-		try {
-			await collectDatasetCases(datasetId, chosenCases);
-			if (generation !== loadGeneration) return;
-			chosenCases = [];
-			collectOpen = false;
-			await load();
-		} catch (err) { collectError = errorMessage(err); }
-		finally { collecting = false; }
-	}
-
 	$: collectionId = $page.params.id ?? '';
 	$: datasetId = $page.params.dataset_id ?? '';
 	$: pendingCount = samples.filter((item) => item.status === 'needs_confirmation').length;
@@ -151,8 +112,6 @@
 
 	function reset() {
 		caseQuestions = {};
-		collectOpen = false;
-		chosenCases = [];
 		chosenExports = [];
 		dataset = null;
 		samples = [];
@@ -200,7 +159,6 @@
 				: undefined;
 			const first = current ?? samples.find((item) => item.status === 'needs_confirmation') ?? samples[0];
 			if (first) await selectSample(first, generation);
-			else if (!collectOpen) await openCases();
 		} catch (err) {
 			if (generation === loadGeneration) error = errorMessage(err);
 		} finally {
@@ -438,21 +396,19 @@
 </script>
 
 <svelte:head>
-	<title>{dataset?.name ?? '任务数据集'} | Lens</title>
+	<title>{taskLabel(dataset?.task_type) || '反馈任务工作台'} | Lens</title>
 </svelte:head>
 
 <main class="page-shell">
 	<header class="page-header">
 		<div>
-			<a class="back-link" href={`/collections/${encodeURIComponent(collectionId)}/feedback`}>
-				<ArrowLeft size={16} aria-hidden="true" />返回数据集
+			<a class="back-link" href={resolve('/collections/[id]/feedback', { id: collectionId })}>
+				<ArrowLeft size={16} aria-hidden="true" />返回任务工作台
 			</a>
 			<div class="eyebrow">{taskLabel(dataset?.task_type)}</div>
-			<h1>{dataset?.name ?? '加载数据集…'}</h1>
+			<h1>{taskLabel(dataset?.task_type) || '加载工作台…'}</h1>
 		</div>
 		<div class="header-actions">
-			<button class="primary-button primary-button--compact" type="button" on:click={() => openCases()}><FileText size={16} aria-hidden="true" />{$t('taskDatasets.collect')}</button>
-			{#if dataset}<span class="spec">构建规则 v{dataset.spec_version}</span>{/if}
 			<button class="icon-button" type="button" on:click={refresh} disabled={loading} title="刷新样本队列" aria-label="刷新样本队列">
 				<span class:spin={loading}><RefreshCw size={17} aria-hidden="true" /></span>
 			</button>
@@ -465,24 +421,6 @@
 	{#if loading}
 		<div class="loading" role="status"><span></span><span></span><span></span></div>
 	{:else}
-		{#if collectOpen}
-			<section class="collection-panel" aria-labelledby="collect-title">
-				<div class="collection-heading"><h2 id="collect-title">{$t('taskDatasets.collectTitle')}</h2><button class="link-button" type="button" on:click={() => collectOpen = false}>{$t('taskDatasets.close')}</button></div>
-				{#if collectError}<p role="alert">{collectError}</p>{/if}
-				{#if casesLoading}<p role="status">…</p>{:else}
-					<div class="case-options">
-						{#each cases as item (item.case_id)}
-							<label class="case-option" class:already-collected={collectedCases.has(item.case_id)}>
-								<input type="checkbox" value={item.case_id} bind:group={chosenCases} disabled={collectedCases.has(item.case_id) || collecting} />
-								<span><strong>{item.question_preview || item.answer_preview}</strong><small>{item.document_titles.join(' · ')}</small></span>
-								{#if collectedCases.has(item.case_id)}<small>{$t('taskDatasets.collected')}</small>{/if}
-							</label>
-						{:else}<p>{$t('taskDatasets.collectEmpty')}</p>{/each}
-					</div>
-				{/if}
-				<div class="collection-footer"><div><button class="link-button" type="button" on:click={() => openCases(caseOffset - 50)} disabled={caseOffset === 0 || casesLoading}>{$t('taskDatasets.previous')}</button><button class="link-button" type="button" on:click={() => openCases(caseOffset + 50)} disabled={cases.length < 50 || casesLoading}>{$t('taskDatasets.next')}</button></div><button class="primary-button primary-button--compact" type="button" on:click={collectCases} disabled={collecting || !chosenCases.length}>{$t('taskDatasets.collectBuild')} ({chosenCases.length})</button></div>
-			</section>
-		{/if}
 			<section class="summary-strip" aria-label="样本状态">
 				<div><strong>{samples.length}</strong><span>全部样本</span></div>
 				<div class="summary--attention"><strong>{pendingCount}</strong><span>待确认</span></div>
@@ -588,7 +526,7 @@
 					<span>{samples.length}</span>
 				</div>
 				{#if !samples.length}
-					<div class="queue-empty"><FileText size={22} aria-hidden="true" /><p>还没有候选样本。</p><small>先从反馈案例收集素材并运行 Worker。</small></div>
+					<div class="queue-empty"><FileText size={22} aria-hidden="true" /><p>还没有候选样本。</p><small>后台 Worker 会持续整理当前 Collection 的反馈案例。</small></div>
 				{:else}
 					<div class="queue-list">
 						{#each samples as item (item.sample_id)}
@@ -628,15 +566,6 @@
 
 <style>
 	.export-panel > summary { cursor: pointer; font-size: 14px; font-weight: 700; color: var(--brand-primary); padding: 12px 16px; }
-	.collection-panel { border-top: 1px solid var(--border-default); border-bottom: 1px solid var(--border-default); padding: 18px 0; margin-bottom: 20px; }
-	.collection-heading, .collection-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-	.collection-heading h2 { font-size: 18px; margin: 0; }
-	.case-options { max-height: 340px; overflow: auto; margin: 14px 0; }
-	.case-option { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-default); padding: 14px 8px; cursor: pointer; }
-	.case-option span { flex: 1; min-width: 0; display: grid; gap: 5px; overflow-wrap: anywhere; }
-	.case-option strong { font-size: 14px; }
-	.case-option small { font-size: 12px; color: var(--text-secondary); }
-	.already-collected { opacity: .6; }
 	.queue-row { display: flex; align-items: center; }
 	.queue-row > input { flex: 0 0 auto; margin-left: 12px; }
 	.queue-row .queue-item { flex: 1; min-width: 0; }
@@ -648,7 +577,6 @@
 	.eyebrow { color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }
 	h1 { margin: 7px 0 5px; font-size: 28px; line-height: 1.15; letter-spacing: 0; }
 	.header-actions { display: flex; gap: 12px; align-items: center; }
-	.spec { border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-card); color: var(--text-secondary); padding: 7px 11px; font-size: 12px; }
 	.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); cursor: pointer; }
 	.icon-button:hover:not(:disabled) { border-color: var(--brand-primary); color: var(--brand-primary); }
 	.icon-button:disabled { cursor: not-allowed; opacity: .5; }

@@ -17,6 +17,7 @@ from application.repositories.feedback_dataset_export_repository import (
     DatasetExportIdempotencyConflict,
     DatasetExportSummary,
 )
+from application.repositories.feedback_dataset_sample_repository import source_digest_for_case
 from domain.feedback.dataset_export import (
     EXPORT_SCHEMA_VERSION,
     DatasetExport,
@@ -35,6 +36,7 @@ from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetSampleRow,
     FeedbackSampleRevisionRow,
 )
+from infra.persistence.postgres.models.feedback import FeedbackCaseRow
 
 
 class PostgresFeedbackDatasetExportRepository:
@@ -194,11 +196,15 @@ async def _read_current_members(
     session: AsyncSession, dataset_id: str
 ) -> tuple[ExportMember, ...]:
     statement = (
-        select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow)
+        select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow, FeedbackCaseRow)
         .join(
             FeedbackSampleRevisionRow,
             FeedbackDatasetSampleRow.confirmed_revision_id
             == FeedbackSampleRevisionRow.revision_id,
+        )
+        .join(
+            FeedbackCaseRow,
+            FeedbackCaseRow.case_id == FeedbackDatasetSampleRow.source_case_id,
         )
         .where(
             FeedbackDatasetSampleRow.dataset_id == dataset_id,
@@ -209,6 +215,11 @@ async def _read_current_members(
         .with_for_update()
     )
     rows = (await session.execute(statement)).all()
+    for sample, _revision_row, case in rows:
+        if case.status == "withdrawn":
+            raise DatasetExportConflict("sample_source_stale")
+        if source_digest_for_case(_case_record(case)) != sample.source_digest:
+            raise DatasetExportConflict("sample_source_stale")
     return tuple(
         ExportMember(
             sample_id=sample.sample_id,
@@ -220,7 +231,7 @@ async def _read_current_members(
             input_digest=revision.input_digest,
             provenance=deepcopy(revision.provenance or {}),
         )
-        for sample, revision in rows
+        for sample, revision, _case in rows
     )
 
 
@@ -307,6 +318,23 @@ def _member(value: dict[str, Any]) -> ExportMember:
         input_digest=str(value["input_digest"]),
         provenance=deepcopy(value.get("provenance") or {}),
     )
+
+
+def _case_record(row: FeedbackCaseRow) -> dict[str, Any]:
+    return {
+        "case_id": row.case_id,
+        "collection_id": row.collection_id,
+        "session_id": row.session_id,
+        "anchor_message_id": row.anchor_message_id,
+        "source_signal_ids": list(row.source_signal_ids or ()),
+        "analysis_result_ids": list(row.analysis_result_ids or ()),
+        "signal_analysis_result_ids": list(row.signal_analysis_result_ids or ()),
+        "tool_failure_analysis_result_ids": list(
+            row.tool_failure_analysis_result_ids or ()
+        ),
+        "context_snapshot": row.context_snapshot or {},
+        "annotation_digest": row.annotation_digest,
+    }
 
 
 def _issue(value: dict[str, Any]) -> ExportIssue:

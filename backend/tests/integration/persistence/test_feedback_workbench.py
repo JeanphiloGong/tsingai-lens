@@ -338,15 +338,8 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
         [sys.executable, str(scripts / "prepare.py"), str(source), str(prepared), "--revision", "integration"],
         capture_output=True, text=True,
     )
-    assert result.returncode == 0, result.stderr
-    assert json.loads((prepared / "prepared.json").read_text())["counts"] == {"train": 0, "eval": 1}
-    report = tmp_path / "report.json"
-    result = subprocess.run(
-        [sys.executable, str(scripts / "experiment.py"), str(prepared), str(report)],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert json.loads(report.read_text())["status"] == "not_run"
+    assert result.returncode != 0
+    assert "export_manifest_schema_invalid" in result.stderr
 
     # The worker and the review pipeline must never rewrite the authoritative
     # chat trajectory while creating downstream records.

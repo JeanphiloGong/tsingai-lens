@@ -151,24 +151,6 @@ function datasetPath(datasetId = '') {
 	return `/feedback-datasets${datasetId ? `/${encodeURIComponent(datasetId)}` : ''}`;
 }
 
-export async function createFeedbackDataset(
-	collectionId: string,
-	name: string,
-	taskType: FeedbackDatasetTaskType = 'sft',
-	constructionSpec: Record<string, unknown> = {}
-) {
-	return (await requestJson(datasetPath(), {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			collection_id: collectionId,
-			name,
-			task_type: taskType,
-			construction_spec: constructionSpec
-		})
-	})) as FeedbackDataset;
-}
-
 export async function fetchFeedbackDatasets(
 	collectionId: string,
 	options: { limit?: number; offset?: number } = {}
@@ -191,13 +173,6 @@ export async function fetchFeedbackDataset(datasetId: string) {
 
 function samplePath(datasetId: string, suffix = '') {
 	return `${datasetPath(datasetId)}/samples${suffix}`;
-}
-
-export async function collectDatasetCases(datasetId: string, sourceCaseIds: string[]) {
-	return await requestJson(`${datasetPath(datasetId)}/collections`, {
-		method: 'POST', headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ source_case_ids: sourceCaseIds })
-	}) as { created_count: number; existing_count: number };
 }
 
 export async function fetchDatasetSamples(

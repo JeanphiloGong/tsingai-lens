@@ -19,6 +19,13 @@ class StoredDataset:
 class FeedbackDatasetRepository(Protocol):
     async def create(self, dataset: Dataset) -> Dataset: ...
 
+    async def ensure_system_datasets(
+        self,
+        *,
+        collection_id: str,
+        owner_user_id: str,
+    ) -> tuple[Dataset, ...]: ...
+
     async def read(self, dataset_id: str) -> Dataset | None: ...
 
     async def read_record(self, dataset_id: str) -> StoredDataset | None: ...

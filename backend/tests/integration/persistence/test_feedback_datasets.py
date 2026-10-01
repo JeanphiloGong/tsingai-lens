@@ -64,6 +64,49 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def test_feedback_analysis_worker_auto_creates_three_task_samples(
+    feedback_chain, postgres_session_factory
+) -> None:
+    chain = feedback_chain
+    feedback = await chain.chat_service.set_message_feedback_for_user(
+        SESSION_ID,
+        chain.answer.message_id,
+        USER_ID,
+        rating="not_helpful",
+        reason="incorrect",
+        comment="The figure caption contains the missing preheating condition.",
+    )
+    assert feedback is not None
+
+    datasets = PostgresFeedbackDatasetRepository(postgres_session_factory)
+    samples = PostgresFeedbackDatasetSampleRepository(postgres_session_factory)
+    service = FeedbackDatasetService(
+        repository=datasets,
+        collection_service=chain.collection_service,
+        sample_repository=samples,
+        case_repository=chain.cases,
+    )
+    worker = FeedbackAnalysisWorker(
+        job_repository=chain.jobs,
+        case_repository=chain.cases,
+        handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
+        dataset_service=service,
+    )
+
+    terminal = await worker.run_once()
+    assert terminal is not None and terminal.status == "succeeded"
+    listed = await service.list_records_for_user(
+        user_id=USER_ID, collection_id=COLLECTION_ID
+    )
+    system = {item.dataset.task_type: item.dataset for item in listed}
+    assert {"sft", "preference", "evaluation"} <= set(system)
+    for dataset in system.values():
+        queued = await samples.list_samples(dataset_id=dataset.dataset_id)
+        assert len(queued) == 1
+        assert queued[0].source_case_id
+        assert queued[0].status == "pending"
+
+
 @pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
 async def test_missing_candidate_first_revision_confirmation_and_export(
     task_type, feedback_chain, postgres_session_factory
@@ -89,11 +132,29 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     listed = await service.list_records_for_user(
         user_id=USER_ID, collection_id=COLLECTION_ID
     )
-    assert listed == (stored,)
+    listed_by_id = {item.dataset.dataset_id: item for item in listed}
+    assert listed_by_id[stored.dataset.dataset_id] == stored
+    assert {item.dataset.task_type for item in listed} >= {
+        "sft",
+        "preference",
+        "evaluation",
+    }
     collected = await service.collect_cases_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,))
     sample_id = collected.items[0].sample.sample_id
-    await DatasetSampleBuildWorker(job_repository=chain.jobs, dataset_repository=datasets,
-        sample_repository=samples, case_repository=chain.cases, builder=SftSampleBuilder()).run_once()
+    build_worker = DatasetSampleBuildWorker(
+        job_repository=chain.jobs,
+        dataset_repository=datasets,
+        sample_repository=samples,
+        case_repository=chain.cases,
+        builder=SftSampleBuilder(),
+    )
+    # The automatic Collection workbenches may have queued their own samples
+    # first. Drain the queue until this explicitly created dataset is built.
+    for _ in range(4):
+        await build_worker.run_once()
+        sample = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id)
+        if sample is not None and sample.status != "pending":
+            break
     sample = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id)
     assert sample.status == "needs_input" and sample.current_revision_id is None
     content = {"schema_version": f"literature-{task_type}.v1",

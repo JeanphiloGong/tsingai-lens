@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from application.repositories.feedback_dataset_repository import StoredDataset
+from application.feedback.dataset_export_service import DatasetExportError
 from controllers.feedback import task_datasets
 from controllers.schemas.task_datasets import (
     SampleConfirmRequest,
@@ -192,6 +193,27 @@ def test_task_dataset_route_maps_missing_to_404() -> None:
     with pytest.raises(HTTPException) as error:
         asyncio.run(task_datasets.get_feedback_dataset("missing", _request(_Service())))
     assert error.value.status_code == 404
+
+
+def test_export_preview_maps_stale_source_to_conflict() -> None:
+    class ExportService:
+        async def preview_for_user(self, **kwargs):
+            raise DatasetExportError("sample_source_stale")
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(feedback_dataset_export_service=ExportService())
+        ),
+        state=SimpleNamespace(current_user={"user_id": "user-1"}),
+    )
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            task_datasets.preview_feedback_dataset_export(
+                "fdset_1", request, payload=None
+            )
+        )
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "sample_source_stale"
 
 
 def test_task_dataset_request_accepts_task_types_and_rejects_extra_fields() -> None:

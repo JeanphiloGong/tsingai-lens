@@ -54,6 +54,21 @@ binding checks. Live-provider validation artifacts live outside the production
 script surface; do not add a probe link here unless the script exists and its
 input, model, and output contract are documented.
 
+## Dataset Sample Worker
+
+Run the worker that turns automatically queued Collection cases into
+task-specific SFT, preference, or evaluation candidate revisions:
+
+```bash
+cd backend
+./.venv/bin/python scripts/dataset_sample_worker.py --once
+```
+
+The Collection workbench creates one internal queue per task type. The worker
+only builds a candidate; a human must still edit or confirm it before an
+export can be published. Use `--interval <seconds>` for a long-running
+process. Docker Compose starts this worker as `dataset-sample-worker`.
+
 ## Expert Gold Evaluation
 
 Use [`evaluation/expert_gold/`](evaluation/expert_gold/) for offline utilities

@@ -22,10 +22,12 @@ class ToolFailureAnalysisWorker:
         job_repository: Any,
         case_repository: Any,
         handler: ToolFailureAnalysisHandler,
+        dataset_service: Any | None = None,
     ) -> None:
         self.job_repository = job_repository
         self.case_repository = case_repository
         self.handler = handler
+        self.dataset_service = dataset_service
 
     async def run_once(self) -> Any | None:
         now = datetime.now(timezone.utc).isoformat()
@@ -66,12 +68,17 @@ class ToolFailureAnalysisWorker:
             )
 
         try:
-            await self.case_repository.upsert_case_from_tool_failure(
+            case = await self.case_repository.upsert_case_from_tool_failure(
                 result,
                 context_snapshot=context_snapshot,
                 source_signal_ids=source_signal_ids,
                 now=datetime.now(timezone.utc).isoformat(),
             )
+            if self.dataset_service is not None and case is not None:
+                await self.dataset_service.enqueue_case_samples(
+                    collection_id=case.collection_id,
+                    case_id=case.case_id,
+                )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "tool failure persistence failed job_id=%s", job.job_id

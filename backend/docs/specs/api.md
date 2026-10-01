@@ -286,9 +286,10 @@ containing the current user's records, alongside `items` and `pending_approval`.
 The immutable message records and turn/stream contracts contain no feedback.
 The rating is not supplied directly to a model and does not itself assert that
 an answer is wrong. In the current feedback-workbench flow, a saved rating is
-an input signal for an internal analysis job; only a later human annotation,
-review decision, confirmed DatasetSample revision, and immutable DatasetExport
-can make it available to an evaluation or training export.
+an input signal for an internal analysis job. The analysis Worker creates a
+candidate case and the task-specific sample Worker prepares a candidate for
+each fixed task; a human then edits or confirms the task sample before an
+immutable DatasetExport can include it.
 
 ### Feedback Analysis Workbench
 
@@ -299,8 +300,9 @@ legacy snapshots only from the one-way migration script; after migration there
 is no old snapshot detail, download, or compatibility query. A retained legacy
 table or file is an operations archive, not a browser contract.
 
-The feedback workbench turns a saved Chat rating into a reviewable, source-
-grounded case. It does not rewrite the original messages or model-call audit:
+The case APIs expose the source-grounded analysis record for inspection and
+advanced correction. They do not rewrite the original messages or model-call
+audit:
 
 - `GET /api/v1/feedback-cases`
 - `GET /api/v1/feedback-cases/{case_id}`
@@ -310,49 +312,45 @@ grounded case. It does not rewrite the original messages or model-call audit:
 
 The authenticated user must be able to access the case's Collection. The
 current validation phase has no separate annotator, reviewer, or dataset-admin
-role, so one authorized Collection user may perform each step. The frontend
-chooses cases, Sources, labels, targets, and dataset uses; it carries business
-IDs and annotation digests automatically rather than asking the user to type
+role, so one authorized Collection user may inspect or edit a case. The fixed
+task workbench does not require a separate case annotation/review pass: it
+shows the case's readable evidence inside the task-specific editor and lets
+the user confirm or revise the generated sample. The browser carries business
+IDs and concurrency digests automatically rather than asking the user to type
 them.
 
-Candidate analysis is available only through the case list/detail workbench and
-is an internal review signal. There is no candidate-analysis download endpoint
-and no default “approve everything” export. A case becomes downloadable only
-after the current annotation is reviewed and included in an immutable
-`DatasetExport`; its model file contains readable evidence, while audit
-identities remain in the separate provenance sidecar.
+Candidate analysis is an internal review signal. There is no
+candidate-analysis download endpoint and no automatic confirmation. A task
+sample becomes downloadable only after its current revision is confirmed and
+included in an immutable `DatasetExport`; its model file contains readable
+evidence, while audit identities remain in the separate provenance sidecar.
 
 The flow is ordered:
 
 ```text
-Chat feedback
-  -> internal feedback_analysis job
+Chat feedback, correction, or tool failure
+  -> matching analysis job
   -> candidate AnalysisResult and FeedbackCase
-  -> human Annotation
-  -> append-only ReviewDecision
-  -> task-specific DatasetSample revisions
+  -> one task-specific sample-build job per fixed task
+  -> human edit or confirmation in SFT / Preference / Evaluation
   -> confirmed DatasetExport / provenance sidecar
 ```
 
 Analysis is a candidate signal only. A failed worker records a technical job
-failure; it cannot declare an answer incorrect or approve data. Annotation
-requires the current `expected_digest`. Review requires the current
-`expected_annotation_digest` and validates dataset-use prerequisites. The
-review POST also accepts an optional `Idempotency-Key` header (1..128
-characters): the same authenticated user, case, key, and request body replay
-returns the original decision, while reusing the key with a different digest,
-decision, or reason returns `422 review_decision_identity_conflict`. Different
-users and cases are isolated, and requests without the header keep the
-append-only random decision identity.
+failure; it cannot declare an answer incorrect or approve data. The case
+annotation/review endpoints remain available for detailed case-level review,
+but they are not prerequisites for the fixed task workbenches. Task sample
+edits and confirmations use the sample revision and generation digests
+described below.
 
 The maintained task-dataset flow is separate from an immutable historical
-snapshot. It starts with a fixed task type and creates samples from explicitly
-selected feedback cases:
+snapshot. Every Collection has three fixed internal workbenches: SFT,
+preference, and evaluation. They are created idempotently when the first
+analysis case is written or when the workbench is opened; the browser chooses
+one task type and never configures a Dataset or selects case IDs:
 
-- `POST /api/v1/feedback-datasets`
 - `GET /api/v1/feedback-datasets?collection_id={collection_id}`
 - `GET /api/v1/feedback-datasets/{dataset_id}`
-- `POST /api/v1/feedback-datasets/{dataset_id}/collections`
 - `GET /api/v1/feedback-datasets/{dataset_id}/samples?status={status}&limit={limit}&offset={offset}`
 - `GET /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}`
 - `PATCH /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}`
@@ -363,12 +361,13 @@ selected feedback cases:
 - `GET /api/v1/feedback-datasets/{dataset_id}/exports?limit={limit}&offset={offset}`
 - `GET /api/v1/feedback-datasets/{dataset_id}/exports/{export_id}/download?format=jsonl|json|provenance|manifest`
 
-Creation accepts `task_type: "sft"`, `"preference"` or `"evaluation"`; the
-dataset's Collection and task type are fixed at creation. The collection request contains `source_case_ids`; it is
-idempotent for an existing `(dataset_id, source_case_id)` pair and returns
-HTTP 202 with the sample and pending build-job identities. It does not ask the
-user to type IDs in the interface; the browser carries them from the selected
-case rows. The `dataset_sample_build` Worker reads the case's frozen context
+The two POST operations from earlier migration checkpoints remain internal
+maintenance seams for importing or repairing data; they are not part of the
+user workflow. After any feedback, correction, or tool-failure analysis writes
+a `FeedbackCase`, the application enqueues one idempotent sample-build job for
+each of the three task workbenches. Opening the list also backfills cases that
+were created before automatic workbenches existed. The `dataset_sample_build`
+Worker reads the case's frozen context
 and readable evidence, writes an immutable task-specific candidate
 revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
 builders use the configured model to generate missing answers or criteria from
@@ -423,8 +422,8 @@ and complete task-specific content. This creates the first human revision and
 transitions to `needs_confirmation`, without confirming it. Generation is also
 checked under the row lock, preventing an old editor from overwriting a rebuild.
 The service recomputes the source case digest before saving or confirming; if
-the case changed after collection, it returns `409 sample_source_stale` and
-requires collecting a fresh sample.
+the case changed after the candidate was built, it returns `409
+sample_source_stale` and requires a rebuild from the current case.
 The browser provides editors for all three tasks, including missing questions,
 answers, criteria, and add/remove controls for readable evidence. The confirm
 body contains the same expected revision ID. Confirmation is conditional on the

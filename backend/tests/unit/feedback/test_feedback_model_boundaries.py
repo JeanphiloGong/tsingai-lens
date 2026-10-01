@@ -60,6 +60,31 @@ def test_reading_or_mutating_supplied_evidence_does_not_change_case_digest() -> 
     assert source_digest_for_case(case.to_record()) == original_digest
 
 
+def test_case_digest_ignores_workflow_timestamps_and_status() -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    case = FeedbackCase(
+        case_id="case-1",
+        collection_id="col-1",
+        session_id="session-1",
+        anchor_message_id="answer-1",
+        source_signal_ids=("signal-1",),
+        analysis_result_ids=("analysis-1",),
+        context_snapshot={"question": "Compare A and B."},
+        status="needs_annotation",
+        created_at=now,
+        updated_at=now,
+    )
+    changed_workflow = case.to_record() | {
+        "status": "accepted",
+        "updated_at": "2026-10-01T01:00:00+00:00",
+    }
+
+    assert source_digest_for_case(changed_workflow) == source_digest_for_case(case.to_record())
+    assert source_digest_for_case(
+        case.to_record() | {"context_snapshot": {"question": "A different question."}}
+    ) != source_digest_for_case(case.to_record())
+
+
 def test_coverage_preserves_nested_source_evidence_when_input_is_reused() -> None:
     source = {"document_id": "paper-b", "evidence": {"quote": "Preheated at 200 C."}}
     coverage = EvidenceCoverage(inspected_sources=(source,), coverage_status="partial")

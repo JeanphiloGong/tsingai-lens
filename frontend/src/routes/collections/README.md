@@ -142,14 +142,12 @@ This node owns the Collection route family.
   sessions keep their own permission record and must be changed from the
   conversation control.
 - `collections/[id]/feedback/+page.svelte`
-  Task dataset entry for the current Collection, grouped into SFT, preference,
-  and evaluation tabs. Creating a dataset opens its task-specific sample editor
-  under `feedback/datasets/[dataset_id]`. The collection picker shows real case
-  questions and document titles, submits selected cases for construction, and
-  automatically refreshes pending builds without replacing an editable draft.
+  Fixed task workbenches for the current Collection: SFT, preference, and
+  evaluation. Analysis workers continuously turn new feedback cases into
+  candidate samples; opening a task takes the user directly to its queue.
   The entry and all three annotation editors use the application's shared
   brand, surface, text, and state tokens in both light and dark themes. The
-  entry uses a compact creation row and dataset list; sample questions sit
+  entry uses a compact task selector; sample questions sit
   above the answer and evidence columns. Rebuild, discard, restore, and retry
   controls stay available in the expandable additional-actions section.
   Candidate analysis stays inside the workbench as an internal review signal;
@@ -160,12 +158,12 @@ This node owns the Collection route family.
   `10.1038/s41467-020-14453-3`, on scan strategy and side-branching. The
   detail view keeps their material, process variable, outcome, page, DOI, and
   Source excerpt together so a reviewer can judge comparability from the
-  papers themselves. Incomplete cases can be collected; the builder identifies
-  missing inputs instead of pretending they are confirmed training examples.
+  papers themselves. Workers identify missing inputs instead of pretending they
+  are confirmed training examples.
 
 ## Objective Interaction
 
-The maintained feedback dataset page opens a fixed task dataset and shows its
+The maintained feedback task page opens one fixed task workbench and shows its
 sample queue. SFT and evaluation candidates are generated from the case's
 readable evidence; preference candidates use the original and corrected
 answers when both exist. For SFT, the page keeps the question and readable evidence beside

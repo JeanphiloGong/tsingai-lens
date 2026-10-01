@@ -12,7 +12,6 @@ from typing import Any
 
 import pandas as pd
 
-from infra.source.runtime.cache.factory import create_cache_from_config
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.run_context import create_run_context
 from infra.source.runtime.storage.factory import create_storage_from_config
@@ -31,11 +30,8 @@ async def run_pipeline(
     input_documents: pd.DataFrame | None = None,
 ) -> AsyncIterable[PipelineRunResult]:
     """Run all workflows using a simplified pipeline."""
-    root_dir = config.root_dir
-
     input_storage = create_storage_from_config(config.input.storage)
     output_storage = create_storage_from_config(config.output)
-    cache = create_cache_from_config(config.cache, root_dir)
 
     # load existing state in case any workflows are stateful
     state_json = await output_storage.get("context.json")
@@ -54,7 +50,6 @@ async def run_pipeline(
     context = create_run_context(
         input_storage=input_storage,
         output_storage=output_storage,
-        cache=cache,
         state=state,
     )
 

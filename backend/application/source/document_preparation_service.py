@@ -25,7 +25,6 @@ from application.repositories.source_artifact_repository import SourceArtifactRe
 from domain.source import Document, SourceDocument
 from domain.core.document_profile import PROFILE_STATUS_COMPLETED
 from infra.source.config.source_runtime_config import (
-    CacheConfig,
     InputConfig,
     InputStorageConfig,
     SourceRuntimeConfig,
@@ -515,7 +514,6 @@ class DocumentPreparationService:
                 file_pattern=r".*\.(txt|pdf)$",
             ),
             output=StorageConfig(base_dir=str(working_dir)),
-            cache=CacheConfig(base_dir=str(working_dir / "cache")),
         )
 
     def _get_source_artifact_builder(self) -> SourceArtifactBuilder:

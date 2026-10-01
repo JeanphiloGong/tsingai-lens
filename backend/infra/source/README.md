@@ -29,6 +29,9 @@ research over other ready Documents.
 `PipelineRunService`. Source runtime executes parsing directly and records
 workflow results, errors, timings, and logs without a workflow callback registry.
 
+Preparation reuses persisted Source and Profile artifacts through their
+fingerprints in `DocumentPreparationService`. Parsing has no runtime cache.
+
 ## Source Artifacts
 
 - `documents`: document metadata and parsed text.
@@ -51,7 +54,7 @@ overwrites the current Source table.
 - `runtime/workflows/`: registered Source workflow entrypoints.
 - `runtime/parsers/`: PDF and text parsers.
 - `runtime/mapping/`: conversion into Source records.
-- `runtime/storage/` and `runtime/cache/`: disposable runtime support.
+- `runtime/storage/`: runtime file and memory storage.
 
 Related authorities:
 

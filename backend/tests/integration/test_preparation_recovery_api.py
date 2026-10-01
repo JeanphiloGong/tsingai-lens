@@ -76,6 +76,13 @@ def test_upload_classification_retry_content_and_research_readiness(app_client):
     content = app_client.get(f"{document_path}/content")
     assert content.status_code == 200
     assert "2.0%" in content.json()["content_text"]
+    source_output_dir = (
+        state.collection_service.get_paths(collection_id).output_dir
+        / "documents"
+        / document_id
+    )
+    assert (source_output_dir / "documents.json").is_file()
+    assert not (source_output_dir / "cache").exists()
     input_service = state.objective_discovery_service.objective_input_service
     with pytest.raises(ResearchObjectivesNotReadyError):
         app_client.portal.call(

@@ -11,16 +11,6 @@ from enum import Enum
 from pydantic import BaseModel, Field, model_validator
 
 
-class CacheType(str, Enum):
-    """Supported cache types for the active Source runtime."""
-
-    file = "file"
-    memory = "memory"
-    none = "none"
-    blob = "blob"
-    cosmosdb = "cosmosdb"
-
-
 class InputFileType(str, Enum):
     """Supported input file types for the active Source runtime."""
 
@@ -63,17 +53,6 @@ class InputStorageConfig(StorageConfig):
     base_dir: str = Field(default="input")
 
 
-class CacheConfig(BaseModel):
-    """Cache configuration used by the active Source runtime."""
-
-    type: CacheType | str = Field(default=CacheType.file)
-    base_dir: str = Field(default="cache")
-    connection_string: str | None = None
-    container_name: str | None = None
-    storage_account_blob_url: str | None = None
-    cosmosdb_account_url: str | None = None
-
-
 class InputConfig(BaseModel):
     """Input configuration for Source runtime normalization."""
 
@@ -106,7 +85,6 @@ class SourceRuntimeConfig(BaseModel):
     input: InputConfig = Field(default_factory=InputConfig)
     chunks: ChunkingConfig = Field(default_factory=ChunkingConfig)
     output: StorageConfig = Field(default_factory=StorageConfig)
-    cache: CacheConfig = Field(default_factory=CacheConfig)
     workflows: list[str] | None = None
 
     def __str__(self) -> str:

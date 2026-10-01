@@ -50,7 +50,7 @@ selected ready Documents
 DocumentProfile. It prepares different Documents concurrently while allowing at
 most one active preparation run for the same Document. Failure updates only
 that Document and run; input loading preserves skipped-file failures in the
-pipeline trace, and reference extraction warnings do not invalidate a
+parser diagnostics, and reference extraction warnings do not invalidate a
 successfully parsed Source. PaperMap construction is owned by the Objective core
 and is lazy: discovery or analysis builds it only for the explicitly selected
 ready Documents, then reuses it while its document and PaperMap policy

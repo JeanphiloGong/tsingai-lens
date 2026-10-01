@@ -85,7 +85,6 @@ class SourceRuntimeConfig(BaseModel):
     input: InputConfig = Field(default_factory=InputConfig)
     chunks: ChunkingConfig = Field(default_factory=ChunkingConfig)
     output: StorageConfig = Field(default_factory=StorageConfig)
-    workflows: list[str] | None = None
 
     def __str__(self) -> str:
         return self.model_dump_json(indent=4)

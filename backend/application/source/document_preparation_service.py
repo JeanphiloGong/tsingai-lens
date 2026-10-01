@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable
 
 import pandas as pd
 
@@ -41,7 +41,7 @@ DOCUMENT_ANALYSIS_VERSION = DOCUMENT_PROFILE_PROMPT_VERSION
 # Status polling and run finalization need connections while workers parse papers.
 _DEFAULT_PREPARATION_CONCURRENCY = 3
 
-SourceArtifactBuilder = Callable[..., Awaitable[list[Any]]]
+SourceArtifactBuilder = Callable[..., Awaitable[SourceArtifactBundle]]
 
 
 def _stage_fingerprint(stage: str, **values: str) -> str:
@@ -430,7 +430,7 @@ class DocumentPreparationService:
         collection_id: str,
         document: Document,
     ) -> SourceDocument:
-        outputs = await self._get_source_artifact_builder()(
+        bundle = await self._get_source_artifact_builder()(
             config=self._source_config(collection_id, document.document_id),
             input_documents=pd.DataFrame(
                 [
@@ -445,20 +445,6 @@ class DocumentPreparationService:
                 ]
             ),
         )
-        errors = [str(error) for output in outputs for error in output.errors or ()]
-        if errors:
-            raise RuntimeError("; ".join(errors))
-        bundle_output = next(
-            (
-                output
-                for output in reversed(outputs)
-                if isinstance(output.result, SourceArtifactBundle)
-            ),
-            None,
-        )
-        if bundle_output is None:
-            raise RuntimeError("Source pipeline did not return an artifact bundle")
-        bundle = cast(SourceArtifactBundle, bundle_output.result)
         parsed = bundle.to_documents()
         if len(parsed) != 1 or parsed[0].document_id != document.document_id:
             raise RuntimeError("Source pipeline returned the wrong document identity")

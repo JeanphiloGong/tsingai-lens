@@ -1,82 +1,194 @@
-"""Source artifact build entrypoint."""
+# Copyright (c) 2024 Microsoft Corporation.
+# Licensed under the MIT License
 
+"""Parse input documents and write the Source handoff artifacts."""
+
+from __future__ import annotations
+
+from asyncio import to_thread
+import json
 import logging
+from pathlib import Path
+import re
+import time
 from typing import Any
 
 import pandas as pd
 
-import infra.source.runtime.workflows as _source_runtime_workflows
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.contracts.artifact_schemas import (
+    BLOCKS_FINAL_COLUMNS,
+    DOCUMENTS_FINAL_COLUMNS,
+    FIGURES_FINAL_COLUMNS,
+    TABLE_CELLS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
+    TABLE_ROWS_FINAL_COLUMNS,
+    TEXT_UNITS_FINAL_COLUMNS,
+)
+from infra.source.runtime.artifact_bundle import SourceArtifactBundle
+from infra.source.runtime.input import create_input
 from infra.source.runtime.logging import init_runtime_loggers
-from infra.source.runtime.run_pipeline import run_pipeline
-from infra.source.runtime.typing.pipeline_run_result import PipelineRunResult
-from infra.source.runtime.workflows.factory import PipelineFactory
+from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
+from infra.source.runtime.parsers.plain_text import build_text_bundle
+from infra.source.runtime.storage.factory import create_storage_from_config
+from infra.source.runtime.storage.table_io import write_table_to_storage
 
 logger = logging.getLogger(__name__)
-_ = _source_runtime_workflows
-
-
-def _summarize_workflow_result(result: Any) -> str:
-    if isinstance(result, dict):
-        keys = sorted(str(key) for key in result.keys())
-        preview = ", ".join(keys[:6])
-        suffix = "" if len(keys) <= 6 else ", ..."
-        return f"dict[{len(keys)}]: {preview}{suffix}"
-    if isinstance(result, list):
-        return f"list[{len(result)}]"
-    return type(result).__name__
 
 
 async def build_source_artifacts(
     config: SourceRuntimeConfig,
-    memory_profile: bool = False,
-    additional_context: dict[str, Any] | None = None,
     verbose: bool = False,
     input_documents: pd.DataFrame | None = None,
-) -> list[PipelineRunResult]:
-    """Run the pipeline with the given configuration.
-
-    Parameters
-    ----------
-    config : SourceRuntimeConfig
-        The configuration.
-    memory_profile : bool
-        Whether to enable memory profiling.
-    additional_context : dict[str, Any] | None default=None
-        Additional context to pass to the pipeline run. This can be accessed in the pipeline state under the 'additional_context' key.
-    input_documents : pd.DataFrame | None default=None.
-        Override document loading and parsing and supply your own dataframe of documents to index.
-
-    Returns
-    -------
-    list[PipelineRunResult]
-        The list of pipeline run results
-    """
+) -> SourceArtifactBundle:
+    """Parse supplied documents, or load an inventory from configured storage."""
     init_runtime_loggers(config=config, verbose=verbose)
+    started_at = time.perf_counter()
+    input_storage = create_storage_from_config(config.input.storage)
+    output_storage = create_storage_from_config(config.output)
+    inventory = input_documents
+    if inventory is None:
+        inventory = await create_input(config.input, input_storage)
+    input_load_time = time.perf_counter() - started_at
+    failures: list[dict[str, str]] = []
+    diagnostics = {
+        "source_input_failures": list(inventory.attrs.get("load_failures") or []),
+        "source_document_failures": failures,
+    }
+    await output_storage.set(
+        "context.json", json.dumps(diagnostics, indent=4, ensure_ascii=False)
+    )
 
-    outputs: list[PipelineRunResult] = []
+    bundles: list[SourceArtifactBundle] = []
+    figure_assets: dict[str, bytes] = {}
+    pdf_converter: Any | None = None
 
-    if memory_profile:
-        logger.warning("New pipeline does not yet support memory profiling.")
+    for _, row in inventory.iterrows():
+        source_path = str(row.get("source_path") or "").strip()
+        suffix = Path(source_path).suffix.lower()
+        try:
+            if source_path and suffix == ".pdf":
+                if pdf_converter is None:
+                    pdf_converter = await to_thread(build_pdf_converter)
+                payload = await input_storage.get(source_path, as_bytes=True)
+                if payload is None:
+                    raise FileNotFoundError(
+                        f"input document not found: {source_path}"
+                    )
+                bundle = await to_thread(
+                    build_pdf_bundle,
+                    row=row,
+                    payload=payload,
+                    config=config,
+                    converter=pdf_converter,
+                )
+            else:
+                text = row.get("text")
+                if text is None and source_path:
+                    text = await input_storage.get(
+                        source_path, encoding=config.input.encoding
+                    )
+                bundle = build_text_bundle(row=row, text=str(text or ""), config=config)
+            bundles.append(bundle)
+            figure_assets.update(bundle.figure_assets)
+        except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, FileNotFoundError):
+                error_code = "source_input_unavailable"
+            elif suffix == ".pdf":
+                error_code = "source_pdf_parse_failed"
+            else:
+                error_code = "source_text_parse_failed"
+            failure = {
+                "source_path": source_path or str(row.get("title") or "").strip(),
+                "error_code": error_code,
+                "error_type": type(exc).__name__,
+            }
+            failures.append(failure)
+            logger.exception(
+                "Source document parsing failed source_path=%r error_code=%s",
+                failure["source_path"],
+                error_code,
+            )
 
-    logger.info("Initializing source artifact pipeline...")
-    pipeline = PipelineFactory.create_pipeline(config)
-
-    async for output in run_pipeline(
-        pipeline,
-        config,
-        additional_context=additional_context,
-        input_documents=input_documents,
-    ):
-        outputs.append(output)
-        if output.errors and len(output.errors) > 0:
-            logger.error("Workflow %s completed with errors", output.workflow)
-        else:
-            logger.info("Workflow %s completed successfully", output.workflow)
-        logger.debug(
-            "Workflow %s result summary: %s",
-            output.workflow,
-            _summarize_workflow_result(output.result),
+    await output_storage.set(
+        "context.json", json.dumps(diagnostics, indent=4, ensure_ascii=False)
+    )
+    if failures and not bundles:
+        unit = "document" if len(failures) == 1 else "documents"
+        raise RuntimeError(
+            f"Source parsing failed for all {len(failures)} input {unit}"
         )
 
-    return outputs
+    documents = _concat_frames(
+        [bundle.documents for bundle in bundles], DOCUMENTS_FINAL_COLUMNS
+    )
+    text_units = _concat_frames(
+        [bundle.text_units for bundle in bundles], TEXT_UNITS_FINAL_COLUMNS
+    )
+    if not documents.empty:
+        documents["document_order"] = range(len(documents))
+    if not text_units.empty:
+        text_units["text_unit_order"] = range(len(text_units))
+
+    output = SourceArtifactBundle(
+        documents=documents,
+        text_units=text_units,
+        blocks=_concat_frames(
+            [bundle.blocks for bundle in bundles], BLOCKS_FINAL_COLUMNS
+        ),
+        figures=_concat_frames(
+            [bundle.figures for bundle in bundles], FIGURES_FINAL_COLUMNS
+        ),
+        tables=_concat_frames(
+            [bundle.tables for bundle in bundles], TABLES_FINAL_COLUMNS
+        ),
+        table_rows=_concat_frames(
+            [bundle.table_rows for bundle in bundles], TABLE_ROWS_FINAL_COLUMNS
+        ),
+        table_cells=_concat_frames(
+            [bundle.table_cells for bundle in bundles], TABLE_CELLS_FINAL_COLUMNS
+        ),
+        figure_assets=figure_assets,
+    )
+    for name in (
+        "documents",
+        "text_units",
+        "blocks",
+        "figures",
+        "tables",
+        "table_rows",
+        "table_cells",
+    ):
+        await write_table_to_storage(getattr(output, name), name, output_storage)
+    asset_keys = [
+        key
+        for key, _ in output_storage.find(
+            re.compile(r"^(?P<path>.+)$"), base_dir="image_assets"
+        )
+    ]
+    for key in asset_keys:
+        await output_storage.delete(key)
+    for asset_path, asset_bytes in output.figure_assets.items():
+        await output_storage.set(asset_path, asset_bytes)
+    await output_storage.set(
+        "stats.json",
+        json.dumps(
+            {
+                "num_documents": len(output.documents),
+                "input_load_time": input_load_time,
+                "total_runtime": time.perf_counter() - started_at,
+            },
+            indent=4,
+        ),
+    )
+    logger.info("Source parsing completed documents=%d", len(output.documents))
+    return output
+
+
+def _concat_frames(frames: list[pd.DataFrame], columns: list[str]) -> pd.DataFrame:
+    usable = [
+        frame.loc[:, columns] for frame in frames if frame is not None and not frame.empty
+    ]
+    if not usable:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(usable, ignore_index=True)

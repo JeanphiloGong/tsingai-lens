@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import ast
-from pathlib import Path
+from dataclasses import replace
+from hashlib import sha256
+from io import BytesIO
+import json
 from threading import Event
 from types import SimpleNamespace
 
@@ -22,18 +24,16 @@ from infra.source.contracts.artifact_schemas import (
     TEXT_UNITS_FINAL_COLUMNS,
 )
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
+from infra.source.runtime.build_source_artifacts import build_source_artifacts
 from infra.source.runtime.mapping.block_artifacts import collect_pdf_text_items
 from infra.source.runtime.mapping.table_artifacts import build_pdf_table_cells
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
+from infra.source.runtime.parsers.plain_text import build_text_bundle
 from infra.source.runtime.source_evidence import (
     build_blocks,
     build_table_cells,
     build_table_rows,
 )
-from infra.source.runtime.workflows.create_source_artifacts import (
-    create_source_artifacts,
-)
-from infra.source.runtime.workflows.create_table_cells import create_table_cells
 from infra.source.runtime.input import load_files
 
 
@@ -66,38 +66,6 @@ def _source_bundle(document_id: str) -> SourceArtifactBundle:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
-
-
-def test_default_source_pipeline_uses_structure_first_handoff_workflow():
-    factory_path = (
-        Path(__file__).resolve().parents[3]
-        / "infra"
-        / "source"
-        / "runtime"
-        / "workflows"
-        / "factory.py"
-    )
-    module = ast.parse(factory_path.read_text(encoding="utf-8"))
-
-    workflow_names: list[str] | None = None
-    for node in module.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        if node.targets[0].id != "_DEFAULT_SOURCE_WORKFLOWS":
-            continue
-        workflow_names = [
-            element.value
-            for element in node.value.elts
-            if isinstance(element, ast.Constant) and isinstance(element.value, str)
-        ]
-        break
-
-    assert workflow_names == [
-        "load_input_documents",
-        "create_source_artifacts",
-    ]
 
 
 @pytest.mark.anyio
@@ -145,7 +113,7 @@ async def test_load_files_reports_when_every_input_fails():
 
 
 @pytest.mark.anyio
-async def test_create_source_artifacts_keeps_event_loop_responsive_during_pdf_work(
+async def test_build_source_artifacts_keeps_event_loop_responsive_during_pdf_work(
     monkeypatch,
     tmp_path,
 ):
@@ -159,9 +127,8 @@ async def test_create_source_artifacts_keeps_event_loop_responsive_during_pdf_wo
         ]
     )
 
-    class InputStorage:
-        async def get(self, _path, **_kwargs):  # noqa: ANN001
-            return b"pdf"
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "stored-large-review.pdf").write_bytes(b"pdf")
 
     converter_started = Event()
     release_converter = Event()
@@ -181,20 +148,17 @@ async def test_create_source_artifacts_keeps_event_loop_responsive_during_pdf_wo
         return _source_bundle("doc-large")
 
     monkeypatch.setattr(
-        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_converter",
+        "infra.source.runtime.build_source_artifacts.build_pdf_converter",
         build_converter,
     )
     monkeypatch.setattr(
-        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_bundle",
+        "infra.source.runtime.build_source_artifacts.build_pdf_bundle",
         parse_pdf,
     )
-    context = SimpleNamespace(input_storage=InputStorage(), state={})
-
     build_task = asyncio.create_task(
-        create_source_artifacts(
-            inventory=inventory,
+        build_source_artifacts(
+            input_documents=inventory,
             config=SourceRuntimeConfig(root_dir=str(tmp_path)),
-            context=context,
         )
     )
     try:
@@ -221,7 +185,7 @@ async def test_create_source_artifacts_keeps_event_loop_responsive_during_pdf_wo
 
 
 @pytest.mark.anyio
-async def test_create_source_artifacts_keeps_valid_pdf_when_one_pdf_fails(
+async def test_build_source_artifacts_keeps_valid_pdf_when_one_pdf_fails(
     monkeypatch,
     tmp_path,
 ):
@@ -240,33 +204,61 @@ async def test_create_source_artifacts_keeps_valid_pdf_when_one_pdf_fails(
         ]
     )
 
-    class InputStorage:
-        async def get(self, path, **_kwargs):  # noqa: ANN001
-            return {"stored-damaged.pdf": b"bad", "stored-valid.pdf": b"valid"}[path]
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "stored-damaged.pdf").write_bytes(b"bad")
+    (tmp_path / "input" / "stored-valid.pdf").write_bytes(b"valid")
+    old_asset = tmp_path / "output" / "image_assets" / "previous.png"
+    old_asset.parent.mkdir(parents=True)
+    old_asset.write_bytes(b"old")
+    image_buffer = BytesIO()
+    Image.new("RGB", (20, 10), color="white").save(image_buffer, format="PNG")
+    image_bytes = image_buffer.getvalue()
+    image_path = "image_assets/doc-good/fig-1.png"
 
     def parse_pdf(*, row, **_kwargs):  # noqa: ANN001
         if row["id"] == "doc-bad":
             raise RuntimeError("PDFium data format error")
-        return _source_bundle("doc-good")
+        return replace(
+            _source_bundle("doc-good"),
+            figures=pd.DataFrame(
+                [{
+                    "figure_id": "fig-1",
+                    "document_id": "doc-good",
+                    "figure_order": 0,
+                    "caption_text": "SEM image of LPBF Ti-6Al-4V specimens.",
+                    "image_path": image_path,
+                    "image_mime_type": "image/png",
+                    "image_width": 20,
+                    "image_height": 10,
+                    "asset_sha256": sha256(image_bytes).hexdigest(),
+                }],
+                columns=FIGURES_FINAL_COLUMNS,
+            ),
+            figure_assets={image_path: image_bytes},
+        )
 
     monkeypatch.setattr(
-        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_converter",
+        "infra.source.runtime.build_source_artifacts.build_pdf_converter",
         lambda: object(),
     )
     monkeypatch.setattr(
-        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_bundle",
+        "infra.source.runtime.build_source_artifacts.build_pdf_bundle",
         parse_pdf,
     )
-    context = SimpleNamespace(input_storage=InputStorage(), state={})
-
-    result = await create_source_artifacts(
-        inventory=inventory,
+    result = await build_source_artifacts(
+        input_documents=inventory,
         config=SourceRuntimeConfig(root_dir=str(tmp_path)),
-        context=context,
     )
 
     assert result.documents["id"].tolist() == ["doc-good"]
-    assert context.state["source_document_failures"] == [
+    figure = result.to_documents()[0].figures[0]
+    assert figure.figure_id == "fig-1"
+    assert figure.image_path == image_path
+    assert figure.asset_sha256 == sha256(image_bytes).hexdigest()
+    assert (tmp_path / "output" / image_path).read_bytes() == image_bytes
+    assert not old_asset.exists()
+    diagnostics = json.loads((tmp_path / "output" / "context.json").read_text())
+    assert diagnostics["source_document_failures"] == [
         {
             "source_path": "stored-damaged.pdf",
             "error_code": "source_pdf_parse_failed",
@@ -276,7 +268,7 @@ async def test_create_source_artifacts_keeps_valid_pdf_when_one_pdf_fails(
 
 
 @pytest.mark.anyio
-async def test_create_source_artifacts_fails_when_every_pdf_fails(
+async def test_build_source_artifacts_fails_when_every_pdf_fails(
     monkeypatch,
     tmp_path,
 ):
@@ -290,29 +282,27 @@ async def test_create_source_artifacts_fails_when_every_pdf_fails(
         ]
     )
 
-    class InputStorage:
-        async def get(self, _path, **_kwargs):  # noqa: ANN001
-            return b"bad"
+    (tmp_path / "input").mkdir()
+    (tmp_path / "input" / "stored-damaged.pdf").write_bytes(b"bad")
 
     monkeypatch.setattr(
-        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_converter",
+        "infra.source.runtime.build_source_artifacts.build_pdf_converter",
         lambda: object(),
     )
     monkeypatch.setattr(
-        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_bundle",
+        "infra.source.runtime.build_source_artifacts.build_pdf_bundle",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("PDFium data format error")),
     )
-    context = SimpleNamespace(input_storage=InputStorage(), state={})
-
     with pytest.raises(
         RuntimeError,
         match="Source parsing failed for all 1 input document",
     ):
-        await create_source_artifacts(
-            inventory=inventory,
+        await build_source_artifacts(
+            input_documents=inventory,
             config=SourceRuntimeConfig(root_dir=str(tmp_path)),
-            context=context,
         )
+    diagnostics = json.loads((tmp_path / "output" / "context.json").read_text())
+    assert diagnostics["source_document_failures"][0]["error_code"] == "source_pdf_parse_failed"
 
 
 def test_build_blocks_emits_structure_first_blocks_with_heading_context():
@@ -378,25 +368,17 @@ def test_build_table_cells_extracts_pipe_delimited_rows():
     assert "mS/cm" in set(table_cells["unit_hint"].dropna())
 
 
-def test_create_table_cells_returns_contract_shaped_empty_frame_without_tables():
-    documents = pd.DataFrame(
-        [
-            {
-                "id": "doc-1",
-                "title": "LPBF Ti-6Al-4V Study",
-                "text": (
-                    "Ti-6Al-4V specimens were produced by laser powder bed "
-                    "fusion. Microstructure was characterized by SEM."
-                ),
-            }
-        ]
+def test_text_parser_returns_contract_shaped_empty_cells_without_tables(tmp_path):
+    bundle = build_text_bundle(
+        row=pd.Series({"id": "doc-1", "title": "LPBF Ti-6Al-4V Study"}),
+        text=(
+            "Ti-6Al-4V specimens were produced by laser powder bed "
+            "fusion. Microstructure was characterized by SEM."
+        ),
+        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
     )
-    text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
-
-    table_cells = create_table_cells(documents, text_units)
-
-    assert table_cells.empty
-    assert table_cells.columns.tolist() == TABLE_CELLS_FINAL_COLUMNS
+    assert bundle.table_cells.empty
+    assert bundle.table_cells.columns.tolist() == TABLE_CELLS_FINAL_COLUMNS
 
 
 def test_build_pdf_table_cells_preserves_docling_logical_topology():

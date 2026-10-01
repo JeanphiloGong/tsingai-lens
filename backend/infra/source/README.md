@@ -10,8 +10,8 @@ measurements, comparisons, or Findings.
 
 ```text
 Document bytes
-  -> load_input_documents
-  -> create_source_artifacts
+  -> build_source_artifacts
+  -> PDF or plain-text parser
   -> SourceArtifactBundle
   -> SourceDocument
 ```
@@ -26,8 +26,12 @@ the paper lacks scientific evidence, and it does not block preparation or
 research over other ready Documents.
 
 `DocumentPreparationService` owns user-visible preparation progress through
-`PipelineRunService`. Source runtime executes parsing directly and records
-workflow results, errors, timings, and logs without a workflow callback registry.
+`PipelineRunService`. Source runtime returns the bundle directly and raises
+parsing errors to that service. It has no workflow registry, factory, or generic
+pipeline runner. Its scratch output includes the seven artifact tables and
+figure bytes; `context.json` records input and document failures for the current
+parse, and `stats.json` records document count and elapsed time. These files do
+not control preparation state or retries.
 
 Preparation reuses persisted Source and Profile artifacts through their
 fingerprints in `DocumentPreparationService`. Parsing has no runtime cache.
@@ -51,8 +55,8 @@ overwrites the current Source table.
 
 - `config/`: parser runtime configuration.
 - `contracts/`: artifact schema columns.
-- `runtime/workflows/`: registered Source workflow entrypoints.
-- `runtime/parsers/`: PDF and text parsers.
+- `runtime/build_source_artifacts.py`: direct parsing and scratch-output entrypoint.
+- `runtime/parsers/`: PDF and text parsers, including text chunking and normalization.
 - `runtime/mapping/`: conversion into Source records.
 - `runtime/storage/`: runtime file and memory storage.
 

@@ -12,25 +12,25 @@ from itertools import combinations
 from typing import Any, Literal
 
 from application.core.objectives import property_matching
-from application.core.objectives.domain_knowledge.registry import MaterialMatchQuality
 from application.core.objectives.discovery.axis_equivalence import (
-    ResearchAxisEquivalenceClassifier,
     AxisCanonicalizationPlanModelOutput,
+    ResearchAxisEquivalenceClassifier,
 )
 from application.core.objectives.discovery.question_formation import (
-    CandidateQuestionsModelOutput,
     QUESTION_FORMATION_PROMPT_VERSION,
     QUESTION_FORMATION_SYSTEM_PROMPT,
+    CandidateQuestionsModelOutput,
 )
+from application.core.objectives.domain_knowledge.registry import MaterialMatchQuality
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
     ObjectiveFactSet,
     PaperResearchMap,
-    PaperSourceUnitCoverageStatus,
+    PaperResearchRelationship,
     PaperResearchScope,
+    PaperSourceUnitCoverageStatus,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
-    PaperResearchRelationship,
     PreparedDocumentInput,
     ResearchObjective,
 )
@@ -393,7 +393,7 @@ class ObjectiveCandidateService:
                         "in the bounded candidate review set.",
                     )
         research_objectives = tuple(
-            ResearchObjective.from_mapping({**objective.to_record(), "rank": rank})
+            replace(objective, rank=rank)
             for rank, objective in enumerate(research_objectives, start=1)
         )
         dispositions = self._study_dispositions(

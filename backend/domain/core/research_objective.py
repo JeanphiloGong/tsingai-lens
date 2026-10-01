@@ -1126,34 +1126,6 @@ class ResearchObjective:
             raise ValueError("only succeeded analysis can be published")
         return replace(self, published_analysis_version=analysis_version)
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "question": self.question,
-            "material_scope": list(self.material_scope),
-            "variables": list(self.variables),
-            "outcomes": list(self.outcomes),
-            "mechanisms": list(self.mechanisms),
-            "constraints": list(self.constraints),
-            "requested_comparator": self.requested_comparator,
-            "seed_document_ids": list(self.seed_document_ids),
-            "excluded_document_ids": list(self.excluded_document_ids),
-            "confidence": self.confidence,
-            "reason": self.reason,
-            "source_relationship_ids": list(self.source_relationship_ids),
-            "parent_objective_id": self.parent_objective_id,
-            "parent_analysis_version": self.parent_analysis_version,
-            "derivation_basis": [deepcopy(item) for item in self.derivation_basis],
-            "rank": self.rank,
-            "confirmation_status": self.confirmation_status,
-            "active_analysis_version": self.active_analysis_version,
-            "published_analysis_version": self.published_analysis_version,
-            "origin": self.origin,
-            "created_by_user_id": self.created_by_user_id,
-            "created_by_tool_call_id": self.created_by_tool_call_id,
-        }
-
 
 @dataclass(frozen=True)
 class InspectedObjectiveSourceRef:

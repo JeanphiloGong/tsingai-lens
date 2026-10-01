@@ -64,7 +64,7 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
         origin="system_discovered",
         created_by_tool_call_id=None,
         payload={
-            **_objective().to_record(),
+            **PostgresObjectiveRepository._objective_payload(_objective()),
             "created_at": legacy_created_at.isoformat(),
             "updated_at": legacy_updated_at.isoformat(),
         },

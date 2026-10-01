@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from application.repositories.objective_repository import StoredObjective
@@ -350,7 +352,7 @@ async def get_objective_evidence_map(
 
 def _objective_response_record(stored: StoredObjective) -> dict:
     return {
-        **stored.objective.to_record(),
+        **asdict(stored.objective),
         "created_at": stored.created_at.isoformat() if stored.created_at else None,
         "updated_at": stored.updated_at.isoformat() if stored.updated_at else None,
     }

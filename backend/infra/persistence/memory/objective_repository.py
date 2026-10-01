@@ -157,15 +157,11 @@ class MemoryObjectiveRepository:
         for existing in self._objectives.values():
             if existing.created_by_tool_call_id != created_by_tool_call_id:
                 continue
-            existing_record = existing.to_record()
-            objective_record = objective.to_record()
-            existing_record["rank"] = None
-            objective_record["rank"] = None
             if (
                 existing.collection_id != objective.collection_id
                 or existing.objective_id != objective.objective_id
                 or existing.created_by_user_id != created_by_user_id
-                or existing_record != objective_record
+                or replace(existing, rank=None) != replace(objective, rank=None)
             ):
                 raise ValueError(
                     "authored candidate tool call already created a different objective"
@@ -174,7 +170,7 @@ class MemoryObjectiveRepository:
         key = (objective.collection_id, objective.objective_id)
         existing = self._objectives.get(key)
         if existing is not None:
-            if existing.to_record() != objective.to_record():
+            if existing != objective:
                 raise ValueError("research objective identity collision")
             return existing
         rank = max(

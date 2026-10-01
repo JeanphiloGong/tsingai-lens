@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveScopeNotReadyError,
     ObjectiveExperimentAnalysisService,
+    ObjectiveScopeNotReadyError,
 )
 from application.core.objectives.scope_screening import screen_objective_scope
 from domain.core import PaperResearchMap, ResearchObjective
-
 
 pytestmark = pytest.mark.anyio
 
@@ -192,11 +192,9 @@ def test_review_citation_lead_is_navigation_for_inspection_not_recommended_scope
 
 
 def test_explicit_objective_exclusion_never_reenters_recommended_scope() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            **_objective(seed_document_ids=()).to_record(),
-            "excluded_document_ids": ["paper-excluded"],
-        }
+    objective = replace(
+        _objective(seed_document_ids=()),
+        excluded_document_ids=("paper-excluded",),
     )
 
     preview = screen_objective_scope(

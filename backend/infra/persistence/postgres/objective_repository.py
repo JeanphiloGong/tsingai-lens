@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -196,15 +196,11 @@ class PostgresObjectiveRepository:
             )
             if prior is not None:
                 existing = self._objective_from_row(prior)
-                existing_record = existing.to_record()
-                objective_record = objective.to_record()
-                existing_record["rank"] = None
-                objective_record["rank"] = None
                 if (
                     existing.collection_id != objective.collection_id
                     or existing.objective_id != objective.objective_id
                     or existing.created_by_user_id != created_by_user_id
-                    or existing_record != objective_record
+                    or replace(existing, rank=None) != replace(objective, rank=None)
                 ):
                     raise ValueError(
                         "authored candidate tool call already created a different objective"
@@ -874,7 +870,7 @@ class PostgresObjectiveRepository:
             rank=objective.rank or 1,
             origin=objective.origin,
             created_by_tool_call_id=objective.created_by_tool_call_id,
-            payload=objective.to_record(),
+            payload=PostgresObjectiveRepository._objective_payload(objective),
             created_at=now,
             updated_at=now,
         )
@@ -889,8 +885,15 @@ class PostgresObjectiveRepository:
         row.rank = objective.rank or row.rank
         row.origin = objective.origin
         row.created_by_tool_call_id = objective.created_by_tool_call_id
-        row.payload = objective.to_record()
+        row.payload = PostgresObjectiveRepository._objective_payload(objective)
         row.updated_at = now
+
+    @staticmethod
+    def _objective_payload(objective: ResearchObjective) -> dict[str, Any]:
+        return {
+            key: list(value) if isinstance(value, tuple) else value
+            for key, value in asdict(objective).items()
+        }
 
     @staticmethod
     def _new_analysis_row(

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from hashlib import sha256
 import importlib.util
 import json
 import sys
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -164,10 +164,19 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 
     class ObjectiveRepository:
         async def read_objective(self, _collection_id, _objective_id):
-            return Record(
-                collection_id="col-1",
-                objective_id="objective-1",
-                published_analysis_version=2,
+            from domain.core.research_objective import ResearchObjective
+
+            return ResearchObjective.from_mapping(
+                {
+                    "collection_id": "col-1",
+                    "objective_id": "objective-1",
+                    "question": "Does preheat affect elongation?",
+                    "variables": ["preheat"],
+                    "outcomes": ["elongation"],
+                    "confirmation_status": "confirmed",
+                    "active_analysis_version": 2,
+                    "published_analysis_version": 2,
+                }
             )
 
         async def read_analysis(self, *_args):

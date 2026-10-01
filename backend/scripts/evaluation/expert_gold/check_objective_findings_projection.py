@@ -4,20 +4,20 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-from datetime import datetime
-from decimal import Decimal, InvalidOperation
-from hashlib import sha256
 import io
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from dataclasses import asdict
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 from urllib import request as request_url
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _SPACE_RE = re.compile(r"\s+")
@@ -895,18 +895,18 @@ async def _local_objective_bundle(
     objective_id: str,
 ) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
+        from application.evaluation import FindingFeedbackService  # noqa: PLC0415
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
             build_database_engine,
             build_session_factory,
         )
-        from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
-            PostgresObjectiveRepository,
-        )
         from infra.persistence.postgres.finding_review_repository import (  # noqa: PLC0415
             PostgresFindingReviewRepository,
         )
-        from application.evaluation import FindingFeedbackService  # noqa: PLC0415
+        from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
+            PostgresObjectiveRepository,
+        )
 
         engine = build_database_engine(DatabaseSettings())
         try:
@@ -973,7 +973,10 @@ async def _local_objective_bundle(
         finally:
             await engine.dispose()
     return {
-        "objective": objective.to_record(),
+        "objective": {
+            key: list(value) if isinstance(value, tuple) else value
+            for key, value in asdict(objective).items()
+        },
         "published_analysis": analysis.to_record() if analysis else None,
         "paper_contributions": [item.to_record() for item in paper_contributions],
         "findings": [item.to_record() for item in findings],

@@ -14,12 +14,6 @@ from domain.core.research_objective import (
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
-    _choice,
-    _datetime_or_none,
-    _datetime_record,
-    _positive_int_or_none,
-    _required_text,
-    _text,
 )
 
 OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
@@ -40,6 +34,51 @@ OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     "succeeded": frozenset(),
     "failed": frozenset(),
 }
+
+
+def _text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _required_text(value: Any, message: str) -> str:
+    text = _text(value)
+    if text is None:
+        raise ValueError(message)
+    return text
+
+
+def _choice(value: Any, allowed: frozenset[str], default: str) -> str:
+    normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in allowed else default
+
+
+def _positive_int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if numeric > 0 else None
+
+
+def _datetime_or_none(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = _text(value)
+    if text is None:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"invalid datetime value: {text}") from exc
+
+
+def _datetime_record(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 @dataclass(frozen=True)

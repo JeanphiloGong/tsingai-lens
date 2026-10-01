@@ -73,6 +73,11 @@ transport-specific normalization. See the
 [model ownership rules](../../docs/architecture/overview.md#model-responsibilities)
 for the package-by-package boundary.
 
+`ResearchObjective` has no persistence encoder. The PostgreSQL repository maps
+its scientific fields to the existing JSON payload and supplies timestamps
+through `StoredObjective`. Record parsers in `objective_repository.py` own their
+local parsing helpers instead of importing domain-private functions.
+
 Collection summaries use two queries without loading preparation artifacts.
 Pipeline history reads only its indexed and JSON summary fields; full diagnostics
 remain available through detail reads. These are read-path choices, not changes

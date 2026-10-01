@@ -1,20 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.objective_candidate import (
-    CreateObjectiveCandidateToolRequest,
     CreateObjectiveCandidateCapability,
+    CreateObjectiveCandidateToolRequest,
 )
 from application.core.objectives.objective_authoring_service import (
     ObjectiveAuthoringService,
 )
 from domain.core import ResearchObjective
 from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
-
 
 pytestmark = pytest.mark.anyio
 
@@ -320,7 +320,6 @@ async def test_derived_candidate_lineage_round_trips_through_memory_repository()
     assert restored.parent_objective_id == "objective-parent"
     assert restored.parent_analysis_version == 3
     assert restored.derivation_basis == tuple(_lineage())
-    assert restored.to_record()["derivation_basis"] == _lineage()
 
 
 async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> None:
@@ -338,13 +337,11 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> No
             "created_by_tool_call_id": "call-retry",
         }
     )
-    second = ResearchObjective.from_mapping(
-        {
-            **first.to_record(),
-            "parent_objective_id": "objective-parent",
-            "parent_analysis_version": 3,
-            "derivation_basis": _lineage(),
-        }
+    second = replace(
+        first,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=3,
+        derivation_basis=tuple(_lineage()),
     )
 
     await repository.create_authored_candidate(
@@ -385,7 +382,7 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent() -
     )
 
     retried = await repository.create_authored_candidate(
-        ResearchObjective.from_mapping({**first.to_record(), "rank": None}),
+        replace(first, rank=None),
         created_by_user_id="user-1",
         created_by_tool_call_id="call-idempotent",
     )

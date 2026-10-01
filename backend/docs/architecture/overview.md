@@ -190,6 +190,9 @@ models consumed by multiple route files belong in `controllers/schemas/`.
 Service-local results stay beside their service, and repository projections
 beside their contract.
 
+`ResearchObjective` owns scientific normalization and transitions; PostgreSQL
+encodes its persisted payload, and controllers format its HTTP response.
+
 Other timestamps are judged by their use. Chat message chronology, tool approval
 time, authored evidence/review time, confirmation time and preview expiry affect
 ordering, provenance or validity and remain explicit. Persisting such a value

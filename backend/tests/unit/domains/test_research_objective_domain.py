@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
 import pytest
@@ -330,7 +330,7 @@ def test_research_objective_normalizes_scope_and_round_trips() -> None:
         }
     )
 
-    record = objective.to_record()
+    record = asdict(objective)
 
     assert record["collection_id"] == "collection-1"
     assert record["objective_id"] == build_research_objective_id(
@@ -342,14 +342,14 @@ def test_research_objective_normalizes_scope_and_round_trips() -> None:
         constraints=tuple(record["constraints"]),
         requested_comparator=record["requested_comparator"],
     )
-    assert record["material_scope"] == ["316L"]
-    assert record["variables"] == ["heat treatment"]
-    assert record["outcomes"] == ["corrosion", "EIS"]
-    assert record["mechanisms"] == ["passive film stability"]
-    assert record["constraints"] == [
+    assert record["material_scope"] == ("316L",)
+    assert record["variables"] == ("heat treatment",)
+    assert record["outcomes"] == ("corrosion", "EIS")
+    assert record["mechanisms"] == ("passive film stability",)
+    assert record["constraints"] == (
         "LPBF",
         "room-temperature electrochemical testing",
-    ]
+    )
     assert record["requested_comparator"] == "as-built material"
     assert record["confidence"] == 1.0
     assert record["confirmation_status"] == "candidate"

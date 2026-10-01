@@ -53,7 +53,7 @@ class PostgresFeedbackCaseRepository:
         async with self.session_factory.begin() as session:
             # Keep this method usable when a caller has not separately persisted
             # the result, while preserving the same result identity and payload.
-            await _save_result_row(session, result)
+            saved_result = await _save_result_row(session, result)
             row = await session.scalar(
                 select(FeedbackCaseRow)
                 .where(
@@ -69,7 +69,7 @@ class PostgresFeedbackCaseRepository:
                     session_id=result.session_id,
                     anchor_message_id=result.anchor_message_id,
                     source_signal_ids=list(signals),
-                    analysis_result_ids=[result.result_id],
+                    analysis_result_ids=[saved_result.result_id],
                     context_snapshot=deepcopy(context_snapshot),
                     status="needs_annotation",
                     created_at=timestamp,
@@ -85,7 +85,7 @@ class PostgresFeedbackCaseRepository:
                 )
                 row.analysis_result_ids = list(
                     _ordered_unique(
-                        tuple(row.analysis_result_ids or ()) + (result.result_id,)
+                        tuple(row.analysis_result_ids or ()) + (saved_result.result_id,)
                     )
                 )
                 if context_snapshot:
@@ -125,7 +125,7 @@ class PostgresFeedbackCaseRepository:
         timestamp = _datetime(now)
         signals = _ordered_unique(source_signal_ids or (result.signal_id,))
         async with self.session_factory.begin() as session:
-            await _save_correction_result_row(session, result)
+            saved_result = await _save_correction_result_row(session, result)
             row = await session.scalar(
                 select(FeedbackCaseRow)
                 .where(
@@ -142,7 +142,7 @@ class PostgresFeedbackCaseRepository:
                     anchor_message_id=result.anchor_message_id,
                     source_signal_ids=list(signals),
                     analysis_result_ids=[],
-                    signal_analysis_result_ids=[result.result_id],
+                    signal_analysis_result_ids=[saved_result.result_id],
                     context_snapshot=deepcopy(context_snapshot),
                     status="needs_annotation",
                     created_at=timestamp,
@@ -158,7 +158,7 @@ class PostgresFeedbackCaseRepository:
                 )
                 row.signal_analysis_result_ids = list(
                     _ordered_unique(
-                        tuple(row.signal_analysis_result_ids or ()) + (result.result_id,)
+                        tuple(row.signal_analysis_result_ids or ()) + (saved_result.result_id,)
                     )
                 )
                 if context_snapshot:
@@ -197,7 +197,7 @@ class PostgresFeedbackCaseRepository:
         if not anchor_message_id:
             raise ValueError("tool failure case requires an anchor message")
         async with self.session_factory.begin() as session:
-            await _save_tool_failure_result_row(session, result)
+            saved_result = await _save_tool_failure_result_row(session, result)
             row = await session.scalar(
                 select(FeedbackCaseRow)
                 .where(
@@ -215,7 +215,7 @@ class PostgresFeedbackCaseRepository:
                     source_signal_ids=list(signals),
                     analysis_result_ids=[],
                     signal_analysis_result_ids=[],
-                    tool_failure_analysis_result_ids=[result.result_id],
+                    tool_failure_analysis_result_ids=[saved_result.result_id],
                     context_snapshot=deepcopy(context_snapshot),
                     status="needs_annotation",
                     created_at=timestamp,
@@ -232,7 +232,7 @@ class PostgresFeedbackCaseRepository:
                 row.tool_failure_analysis_result_ids = list(
                     _ordered_unique(
                         tuple(row.tool_failure_analysis_result_ids or ())
-                        + (result.result_id,)
+                        + (saved_result.result_id,)
                     )
                 )
                 if context_snapshot:
@@ -565,7 +565,26 @@ async def _save_result_row(
     if row is not None and row.job_id != result.job_id:
         raise ValueError("analysis result identity cannot be reassigned")
     if by_job is not None and by_job.result_id != result.result_id:
-        raise ValueError("analysis job already has another result")
+        # A worker may have persisted the result and crashed before marking
+        # its job terminal.  Replays must reuse that result identity instead
+        # of attempting a second insert for the same immutable job.
+        existing_identity = (
+            by_job.job_id,
+            by_job.feedback_id,
+            by_job.session_id,
+            by_job.collection_id,
+            by_job.anchor_message_id,
+        )
+        requested_identity = (
+            result.job_id,
+            result.feedback_id,
+            result.session_id,
+            result.collection_id,
+            result.anchor_message_id,
+        )
+        if existing_identity != requested_identity:
+            raise ValueError("analysis job already has another result")
+        return by_job
     existing = row or by_job
     if existing is not None:
         identity = (
@@ -617,7 +636,27 @@ async def _save_correction_result_row(
     if row is not None and row.job_id != result.job_id:
         raise ValueError("correction analysis result identity cannot be reassigned")
     if by_job is not None and by_job.result_id != result.result_id:
-        raise ValueError("correction analysis job already has another result")
+        existing_identity = (
+            by_job.job_id,
+            by_job.signal_id,
+            by_job.signal_type,
+            by_job.session_id,
+            by_job.collection_id,
+            by_job.anchor_message_id,
+            by_job.trigger_message_id,
+        )
+        requested_identity = (
+            result.job_id,
+            result.signal_id,
+            result.signal_type,
+            result.session_id,
+            result.collection_id,
+            result.anchor_message_id,
+            result.trigger_message_id,
+        )
+        if existing_identity != requested_identity:
+            raise ValueError("correction analysis job already has another result")
+        return by_job
     existing = row or by_job
     if existing is not None:
         identity = (
@@ -675,7 +714,27 @@ async def _save_tool_failure_result_row(
     if row is not None and row.job_id != result.job_id:
         raise ValueError("tool failure analysis result identity cannot be reassigned")
     if by_job is not None and by_job.result_id != result.result_id:
-        raise ValueError("tool failure analysis job already has another result")
+        existing_identity = (
+            by_job.job_id,
+            by_job.signal_id,
+            by_job.session_id,
+            by_job.collection_id,
+            by_job.tool_call_id,
+            by_job.assistant_message_id,
+            by_job.result_message_id,
+        )
+        requested_identity = (
+            result.job_id,
+            result.signal_id,
+            result.session_id,
+            result.collection_id,
+            result.tool_call_id,
+            result.assistant_message_id,
+            result.result_message_id,
+        )
+        if existing_identity != requested_identity:
+            raise ValueError("tool failure analysis job already has another result")
+        return by_job
     existing = row or by_job
     if existing is not None:
         identity = (

@@ -616,3 +616,58 @@ async def test_multiple_analysis_sources_preserve_correction_pair_and_evidence(
     current = await chain.cases.read_case(cases[0].case_id)
     assert "corrected_answer" not in current.context_snapshot
     assert "corrected_message_id" not in current.context_snapshot
+
+
+async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
+    feedback_chain,
+):
+    chain = feedback_chain
+    feedback = await chain.chat_service.set_message_feedback_for_user(
+        SESSION_ID,
+        chain.answer.message_id,
+        USER_ID,
+        rating="not_helpful",
+        reason="incorrect",
+    )
+    job = (await chain.jobs.list_jobs(job_type="feedback_analysis"))[0]
+    result = AnalysisResult(
+        result_id="analysis-result-first",
+        job_id=job.job_id,
+        feedback_id=feedback.feedback_id,
+        session_id=SESSION_ID,
+        collection_id=COLLECTION_ID,
+        anchor_message_id=chain.answer.message_id,
+        problem_type="source_missing",
+        confidence=0.8,
+        related_message_ids=(chain.question.message_id, chain.answer.message_id),
+        suggested_evidence=(),
+        suggested_target=None,
+        evidence_coverage=EvidenceCoverage(coverage_status="partial"),
+        model="test",
+        input_digest="a" * 64,
+        created_at=NOW,
+    )
+    snapshot = {
+        "question": chain.question.content,
+        "answer": chain.answer.content,
+        "inspected_sources": [],
+    }
+    await chain.cases.upsert_case_from_analysis(
+        result,
+        context_snapshot=snapshot,
+        now=NOW,
+    )
+
+    # Simulate the worker retrying after the result transaction committed but
+    # before the job status update was observed by the worker.
+    replay = replace(result, result_id="analysis-result-retry")
+    await chain.cases.upsert_case_from_analysis(
+        replay,
+        context_snapshot=snapshot,
+        now=NOW,
+    )
+
+    case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
+    assert case.analysis_result_ids == (result.result_id,)
+    stored = await chain.cases.read_analysis_results((result.result_id,))
+    assert tuple(item.result_id for item in stored) == (result.result_id,)

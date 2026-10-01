@@ -6,16 +6,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
-
-
-class ChunkStrategyType(str, Enum):
-    """Supported chunking strategies for the active Source runtime."""
-
-    tokens = "tokens"
-    sentence = "sentence"
 
 
 class StorageConfig(BaseModel):
@@ -45,11 +37,7 @@ class ChunkingConfig(BaseModel):
 
     size: int = Field(default=1200)
     overlap: int = Field(default=100)
-    group_by_columns: list[str] = Field(default_factory=lambda: ["id"])
-    strategy: ChunkStrategyType | str = Field(default=ChunkStrategyType.tokens)
     encoding_model: str = Field(default="cl100k_base")
-    prepend_metadata: bool = False
-    chunk_size_includes_metadata: bool = False
 
 
 class SourceRuntimeConfig(BaseModel):

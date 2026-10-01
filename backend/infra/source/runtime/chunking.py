@@ -1,15 +1,13 @@
 # Copyright (c) 2024 Microsoft Corporation.
 # Licensed under the MIT License
 
-"""Chunking helpers used by the Source runtime."""
+"""Token chunking used by the Source runtime."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
 
-import pandas as pd
 import tiktoken
 
 EncodedText = list[int]
@@ -17,36 +15,12 @@ DecodeFn = Callable[[EncodedText], str]
 EncodeFn = Callable[[str], EncodedText]
 
 
-@dataclass(frozen=True)
-class TokenChunkerOptions:
-    """Token chunking options."""
-
-    chunk_overlap: int
-    tokens_per_chunk: int
-    decode: DecodeFn
-    encode: EncodeFn
-
-
 @dataclass
 class TextChunk:
-    """Chunk payload with source metadata."""
+    """One token-bounded text window."""
 
     text_chunk: str
-    source_doc_indices: list[int]
-    n_tokens: int | None = None
-
-
-@dataclass
-class ChunkingConfig:
-    """Minimal chunking config used by the Source runtime."""
-
-    size: int
-    overlap: int
-    encoding_model: str
-
-
-ChunkInput = str | list[str] | list[tuple[str, str]]
-ChunkStrategy = Callable[[list[str], ChunkingConfig], Iterable[TextChunk]]
+    n_tokens: int
 
 
 def get_encoding_fn(encoding_name: str) -> tuple[EncodeFn, DecodeFn]:
@@ -65,156 +39,21 @@ def get_encoding_fn(encoding_name: str) -> tuple[EncodeFn, DecodeFn]:
 
 
 def chunk_text(
-    input_frame: pd.DataFrame,
-    column: str,
+    text: str,
     size: int,
     overlap: int,
     encoding_model: str,
-    strategy: Any,
-) -> pd.Series:
-    """Chunk a piece of text into smaller pieces."""
-    strategy_exec = load_strategy(strategy)
-    config = ChunkingConfig(
-        size=size,
-        overlap=overlap,
-        encoding_model=encoding_model,
-    )
-
-    return cast(
-        "pd.Series",
-        input_frame.apply(
-            cast(
-                "Any",
-                lambda row: run_strategy(strategy_exec, row[column], config),
-            ),
-            axis=1,
-        ),
-    )
-
-
-def run_strategy(
-    strategy_exec: ChunkStrategy,
-    input_value: ChunkInput,
-    config: ChunkingConfig,
-) -> list[str | tuple[list[str] | None, str, int]]:
-    """Run a chunking strategy."""
-    if isinstance(input_value, str):
-        return [item.text_chunk for item in strategy_exec([input_value], config)]
-
-    texts = [item if isinstance(item, str) else item[1] for item in input_value]
-    strategy_results = strategy_exec(texts, config)
-
-    results = []
-    for strategy_result in strategy_results:
-        doc_indices = strategy_result.source_doc_indices
-        if isinstance(input_value[doc_indices[0]], str):
-            results.append(strategy_result.text_chunk)
-        else:
-            doc_ids = [input_value[doc_idx][0] for doc_idx in doc_indices]
-            results.append((doc_ids, strategy_result.text_chunk, strategy_result.n_tokens))
-    return results
-
-
-def load_strategy(strategy: Any) -> ChunkStrategy:
-    """Load the requested chunking strategy."""
-    strategy_name = _normalize_strategy_name(strategy)
-    if strategy_name == "tokens":
-        return run_tokens
-    if strategy_name == "sentence":
-        _bootstrap_nltk()
-        return run_sentences
-    raise ValueError(f"Unknown strategy: {strategy_name}")
-
-
-def run_tokens(
-    input_texts: list[str],
-    config: ChunkingConfig,
-) -> Iterable[TextChunk]:
-    """Chunk text using token windows."""
-    encode, decode = get_encoding_fn(config.encoding_model)
-    return split_multiple_texts_on_tokens(
-        input_texts,
-        TokenChunkerOptions(
-            chunk_overlap=config.overlap,
-            tokens_per_chunk=config.size,
-            encode=encode,
-            decode=decode,
-        ),
-    )
-
-
-def run_sentences(
-    input_texts: list[str],
-    _config: ChunkingConfig,
-) -> Iterable[TextChunk]:
-    """Chunk text by sentence."""
-    import nltk
-
-    for doc_idx, text in enumerate(input_texts):
-        for sentence in nltk.sent_tokenize(text):
-            yield TextChunk(
-                text_chunk=sentence,
-                source_doc_indices=[doc_idx],
-            )
-
-
-def split_multiple_texts_on_tokens(
-    texts: list[str], tokenizer: TokenChunkerOptions
 ) -> list[TextChunk]:
-    """Split multiple texts and return chunks with metadata."""
-    result = []
-    mapped_ids = []
+    """Split one document into overlapping token windows."""
+    encode, decode = get_encoding_fn(encoding_model)
+    token_ids = encode(text)
+    step = size - overlap
+    chunks: list[TextChunk] = []
 
-    for source_doc_idx, text in enumerate(texts):
-        encoded = tokenizer.encode(text)
-        mapped_ids.append((source_doc_idx, encoded))
-
-    input_ids = [
-        (source_doc_idx, token_id)
-        for source_doc_idx, token_ids in mapped_ids
-        for token_id in token_ids
-    ]
-
-    start_idx = 0
-    cur_idx = min(start_idx + tokenizer.tokens_per_chunk, len(input_ids))
-    chunk_ids = input_ids[start_idx:cur_idx]
-
-    while start_idx < len(input_ids):
-        chunk_text_value = tokenizer.decode([token_id for _, token_id in chunk_ids])
-        doc_indices = list({doc_idx for doc_idx, _ in chunk_ids})
-        result.append(TextChunk(chunk_text_value, doc_indices, len(chunk_ids)))
-        if cur_idx == len(input_ids):
+    for start in range(0, len(token_ids), step):
+        chunk_ids = token_ids[start : start + size]
+        chunks.append(TextChunk(decode(chunk_ids), len(chunk_ids)))
+        if start + size >= len(token_ids):
             break
-        start_idx += tokenizer.tokens_per_chunk - tokenizer.chunk_overlap
-        cur_idx = min(start_idx + tokenizer.tokens_per_chunk, len(input_ids))
-        chunk_ids = input_ids[start_idx:cur_idx]
 
-    return result
-
-
-def _normalize_strategy_name(strategy: Any) -> str:
-    return str(getattr(strategy, "value", strategy))
-
-
-_nltk_bootstrapped = False
-
-
-def _bootstrap_nltk() -> None:
-    """Bootstrap nltk resources lazily."""
-    global _nltk_bootstrapped
-    if _nltk_bootstrapped:
-        return
-
-    import nltk
-    from nltk.corpus import wordnet as wn
-
-    nltk.download("punkt")
-    nltk.download("punkt_tab")
-    nltk.download("averaged_perceptron_tagger")
-    nltk.download("averaged_perceptron_tagger_eng")
-    nltk.download("maxent_ne_chunker")
-    nltk.download("maxent_ne_chunker_tab")
-    nltk.download("words")
-    nltk.download("wordnet")
-    wn.ensure_loaded()
-    _nltk_bootstrapped = True
+    return chunks

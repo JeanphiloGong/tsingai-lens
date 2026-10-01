@@ -323,7 +323,9 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     assert concurrent_discards[0].generation == restored.generation + 1
 
     # Different keys race against the same generation; only one can restore it.
-    from domain.feedback.dataset_sample import sample_action_digest
+    from application.repositories.feedback_dataset_sample_repository import (
+        sample_action_digest,
+    )
 
     restored_in_race = await asyncio.gather(*(
         samples.apply_action(

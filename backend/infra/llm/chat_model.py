@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
-import asyncio
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
@@ -14,18 +14,17 @@ from openai import AsyncOpenAI
 from application.chat.capabilities import ToolSpec
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat.model import (
+    RESEARCH_AGENT_PROMPT_VERSION,
+    RESEARCH_AGENT_SYSTEM_PROMPT,
+    RESEARCH_COMPACTION_SYSTEM_PROMPT,
     ModelResponseError,
     ModelToolCall,
     ModelTurn,
     ModelUsage,
-    RESEARCH_AGENT_PROMPT_VERSION,
-    RESEARCH_AGENT_SYSTEM_PROMPT,
-    RESEARCH_COMPACTION_SYSTEM_PROMPT,
 )
-from domain.chat.model_call import ModelCallInput, ModelCallOutcome
+from application.repositories.chat_repository import ModelCallInput, ModelCallOutcome
 from domain.chat import ToolRisk
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
-
 
 logger = logging.getLogger(__name__)
 

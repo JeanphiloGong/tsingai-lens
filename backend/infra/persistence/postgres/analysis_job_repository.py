@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import os
 import socket
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -12,18 +12,18 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from domain.feedback.analysis_job import AnalysisJob
-from domain.feedback.correction_signal import (
+from application.repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     CORRECTION_SIGNAL_PAYLOAD_VERSION,
-    correction_signal_idempotency_key,
-)
-from domain.feedback.tool_failure import (
     TOOL_FAILURE_JOB_TYPE,
     TOOL_FAILURE_PAYLOAD_VERSION,
+    AnalysisJob,
+    correction_signal_idempotency_key,
     tool_failure_idempotency_key,
 )
-from domain.feedback.dataset_sample import DATASET_SAMPLE_BUILD_JOB_TYPE
+from application.repositories.feedback_dataset_sample_repository import (
+    DATASET_SAMPLE_BUILD_JOB_TYPE,
+)
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
 

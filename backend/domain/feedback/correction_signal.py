@@ -8,17 +8,14 @@ it is never treated as a correction or a training target by this module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Any
 
 from domain.feedback.analysis_result import FeedbackProblemType
 from domain.feedback.evidence_coverage import EvidenceCoverage
 
-
 CORRECTION_SIGNAL_TYPE = "natural_language_correction"
-CORRECTION_SIGNAL_JOB_TYPE = "correction_signal_analysis"
-CORRECTION_SIGNAL_PAYLOAD_VERSION = 1
 
 # The detector is intentionally conservative.  Ordinary follow-up questions
 # remain ordinary Chat turns; only an explicit challenge/retraction marker
@@ -70,31 +67,6 @@ def correction_signal_id(trigger_message_id: str) -> str:
     if not value:
         raise ValueError("trigger_message_id is required")
     return f"correction_signal:{value}"
-
-
-def correction_signal_idempotency_key(
-    *,
-    session_id: str,
-    anchor_message_id: str,
-    trigger_message_id: str,
-    trigger_digest: str,
-) -> str:
-    """Return a bounded immutable job identity for a candidate input.
-
-    Chat/session IDs are allowed to be 128 characters each, while the shared
-    analysis envelope stores idempotency keys in a 255-character column.  Keep
-    the complete identity in the JSON payload and use a digest for the unique
-    key so no valid message identity can overflow that column.
-    """
-
-    values = tuple(
-        str(value or "").strip()
-        for value in (session_id, anchor_message_id, trigger_message_id, trigger_digest)
-    )
-    if any(not value for value in values):
-        raise ValueError("correction signal identity is incomplete")
-    canonical = "\x1f".join(values).encode("utf-8")
-    return "correction-signal:" + sha256(canonical).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -236,7 +208,7 @@ class CorrectionSignalAnalysisResult:
             "related_message_ids": list(self.related_message_ids),
             "suggested_evidence": list(self.suggested_evidence),
             "suggested_target": self.suggested_target,
-            "evidence_coverage": self.evidence_coverage.to_record(),
+            "evidence_coverage": asdict(self.evidence_coverage),
             "model": self.model,
             "input_digest": self.input_digest,
             "created_at": self.created_at,
@@ -244,12 +216,9 @@ class CorrectionSignalAnalysisResult:
 
 
 __all__ = [
-    "CORRECTION_SIGNAL_JOB_TYPE",
-    "CORRECTION_SIGNAL_PAYLOAD_VERSION",
     "CORRECTION_SIGNAL_TYPE",
     "CorrectionSignal",
     "CorrectionSignalAnalysisResult",
     "correction_signal_id",
-    "correction_signal_idempotency_key",
     "is_correction_challenge",
 ]

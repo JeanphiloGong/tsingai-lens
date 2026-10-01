@@ -4,22 +4,22 @@ from dataclasses import replace
 
 import pytest
 
+from application.feedback.preference_sample_builder import PreferenceSampleBuilder
 from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
-from application.feedback.preference_sample_builder import PreferenceSampleBuilder
-from domain.feedback import (
-    AnalysisJob,
-    Dataset,
-    DatasetSample,
-    FeedbackCase,
-    SftRevisionContent,
+from application.repositories.analysis_job_repository import AnalysisJob
+from application.repositories.feedback_dataset_sample_repository import (
     build_job_payload,
     sample_build_idempotency_key,
     source_digest_for_case,
+)
+from domain.feedback import (
+    Dataset,
+    DatasetSample,
+    FeedbackCase,
     PreferenceRevisionContent,
     SampleRevision,
 )
-
 
 pytestmark = pytest.mark.anyio
 

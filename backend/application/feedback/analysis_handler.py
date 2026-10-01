@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
-import json
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -155,7 +155,7 @@ class FeedbackAnalysisHandler:
             },
             "session_id": feedback.session_id,
             "answer": answer.to_record(),
-            "coverage": coverage.to_record(),
+            "coverage": asdict(coverage),
         }
         input_digest = sha256(
             json.dumps(input_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()

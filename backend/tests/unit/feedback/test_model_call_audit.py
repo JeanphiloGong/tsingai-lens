@@ -5,10 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from application.chat.context_builder import ChatModelContext
+from application.repositories.chat_repository import ModelCallInput, ModelCallOutcome
 from domain.chat import ChatMessage
-from domain.chat.model_call import ModelCallInput, ModelCallOutcome
 from infra.llm.chat_model import OpenAIChatModel
-
 
 pytestmark = pytest.mark.anyio
 

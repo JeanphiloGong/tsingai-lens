@@ -5,10 +5,9 @@ from dataclasses import replace
 import pytest
 
 from application.chat.session_service import ChatSessionService
+from application.repositories.analysis_job_repository import AnalysisJob
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
-from domain.feedback import AnalysisJob
-
 
 pytestmark = pytest.mark.anyio
 

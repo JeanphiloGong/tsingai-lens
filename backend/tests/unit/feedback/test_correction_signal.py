@@ -6,21 +6,24 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.chat.agent_runner import AgentCompletionReason, AgentRunResult, AgentRunStatus
+from application.chat.agent_runner import (
+    AgentCompletionReason,
+    AgentRunResult,
+    AgentRunStatus,
+)
 from application.chat.session_service import ChatSessionService
 from application.feedback.correction_signal_handler import (
-    CorrectionSignalAnalysisHandler,
     CorrectionSignalAnalysisDraft,
+    CorrectionSignalAnalysisHandler,
 )
 from application.feedback.correction_signal_worker import CorrectionSignalAnalysisWorker
-from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
-from domain.feedback import (
+from application.repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     AnalysisJob,
     correction_signal_idempotency_key,
-    is_correction_challenge,
 )
-
+from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
+from domain.feedback import is_correction_challenge
 
 pytestmark = pytest.mark.anyio
 

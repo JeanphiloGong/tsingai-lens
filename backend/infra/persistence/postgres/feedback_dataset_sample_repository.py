@@ -3,26 +3,29 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from application.repositories.analysis_job_repository import AnalysisJob
 from application.repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
     ConfirmedDatasetMember,
     DatasetSampleActionConflict,
     DatasetSampleRevisionConflict,
 )
-from domain.feedback.analysis_job import AnalysisJob
-from domain.feedback.dataset_sample import DatasetSample, SampleAction, ensure_action_allowed
+from domain.feedback.dataset_sample import (
+    DatasetSample,
+    SampleAction,
+    ensure_action_allowed,
+)
 from domain.feedback.sample_revision import SampleRevision, parse_revision_content
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
 from infra.persistence.postgres.models.feedback_dataset import (
-    FeedbackSampleActionRow,
     FeedbackDatasetSampleRow,
+    FeedbackSampleActionRow,
     FeedbackSampleRevisionRow,
 )
 

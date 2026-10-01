@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import json
+from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-import json
 from uuid import uuid4
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from application.repositories.chat_repository import (
+    ChatModelCall,
+    ChatResponseSnapshot,
+    ChatSessionBusyError,
+    ModelCallOutcome,
+)
 from domain.chat import (
     ChatMessage,
     ChatSession,
@@ -21,12 +27,10 @@ from domain.chat import (
     ToolCallStatus,
 )
 from domain.chat.feedback import ChatMessageFeedback
-from domain.chat.permissions import change_permission, permission_record, permits_automatic
-from domain.chat.model_call import ModelCallOutcome
-from application.repositories.chat_repository import (
-    ChatModelCall,
-    ChatResponseSnapshot,
-    ChatSessionBusyError,
+from domain.chat.permissions import (
+    change_permission,
+    permission_record,
+    permits_automatic,
 )
 from infra.persistence.postgres.models.chat import (
     ChatMessageFeedbackRow,
@@ -165,11 +169,15 @@ class PostgresChatRepository:
             result_ids = {row.tool_call_id for row in rows if row.role == "tool"}
             if set(call_ids) != result_ids:
                 raise ValueError("branch history has unresolved tool results")
-            database.add(ChatSessionRow(**{
-                **session.to_record(),
-                "created_at": _datetime(session.created_at),
-                "updated_at": _datetime(session.updated_at),
-            }))
+            database.add(
+                ChatSessionRow(
+                    **{
+                        **asdict(session),
+                        "created_at": _datetime(session.created_at),
+                        "updated_at": _datetime(session.updated_at),
+                    }
+                )
+            )
             await database.flush()
             for row in rows:
                 content = row.content
@@ -527,7 +535,7 @@ class PostgresChatRepository:
                 call_row.result_status = result.status.value
                 call_row.result_data = dict(result.data)
                 call_row.result_resource_refs = [
-                    item.to_record() for item in result.resource_refs
+                    asdict(item) for item in result.resource_refs
                 ]
                 call_row.result_warnings = list(result.warnings)
                 call_row.result_error_code = result.error_code

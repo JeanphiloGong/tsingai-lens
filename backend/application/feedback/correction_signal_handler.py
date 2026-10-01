@@ -2,24 +2,29 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from dataclasses import dataclass
-from hashlib import sha256
 import json
 import re
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from application.feedback.analysis_handler import AnalysisInputError, read_chat_coverage_audit
+from application.feedback.analysis_handler import (
+    AnalysisInputError,
+    read_chat_coverage_audit,
+)
 from application.feedback.source_coverage import build_evidence_coverage
-from domain.chat import ChatMessage, ChatMessageRole
-from domain.feedback import (
+from application.repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     CORRECTION_SIGNAL_PAYLOAD_VERSION,
+    correction_signal_idempotency_key,
+)
+from domain.chat import ChatMessage, ChatMessageRole
+from domain.feedback import (
     CorrectionSignal,
     CorrectionSignalAnalysisResult,
     EvidenceCoverage,
-    correction_signal_idempotency_key,
     is_correction_challenge,
 )
 
@@ -190,10 +195,12 @@ class CorrectionSignalAnalysisHandler:
         input_payload = {
             "signal": signal.to_record(),
             "anchor": anchor.to_record(),
-            "coverage": coverage.to_record(),
+            "coverage": asdict(coverage),
             "related_message_ids": [item.message_id for item in related_messages],
             "corrected_answer": corrected.to_record() if corrected else None,
-            "corrected_coverage": corrected_coverage.to_record() if corrected_coverage else None,
+            "corrected_coverage": (
+                asdict(corrected_coverage) if corrected_coverage else None
+            ),
             "pairing_assessment": pairing_assessment,
         }
         input_digest = sha256(
@@ -255,14 +262,16 @@ class CorrectionSignalAnalysisHandler:
             },
         }
         if corrected is not None:
-            context_snapshot.update({
-                "corrected_answer": corrected.content,
-                "corrected_message_id": corrected.message_id,
-                "corrected_evidence_coverage": corrected_coverage.to_record(),
-                "original_message_id": anchor.message_id,
-                "corrected_question": original_question,
-                "pairing_basis": "task_scope_assessed_review_input",
-            })
+            context_snapshot.update(
+                {
+                    "corrected_answer": corrected.content,
+                    "corrected_message_id": corrected.message_id,
+                    "corrected_evidence_coverage": asdict(corrected_coverage),
+                    "original_message_id": anchor.message_id,
+                    "corrected_question": original_question,
+                    "pairing_basis": "task_scope_assessed_review_input",
+                }
+            )
         return result, context_snapshot, (signal.signal_id,)
 
 

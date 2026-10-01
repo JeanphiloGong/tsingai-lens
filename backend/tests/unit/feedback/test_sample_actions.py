@@ -9,10 +9,12 @@ from application.feedback.dataset_service import (
     FeedbackDatasetConflict,
     FeedbackDatasetService,
 )
-from application.repositories.feedback_dataset_sample_repository import DatasetSampleActionConflict
+from application.repositories.feedback_dataset_sample_repository import (
+    DatasetSampleActionConflict,
+    sample_action_digest,
+)
 from domain.feedback import Dataset, DatasetSample, FeedbackCase
-from domain.feedback.dataset_sample import ensure_action_allowed, sample_action_digest
-
+from domain.feedback.dataset_sample import ensure_action_allowed
 
 pytestmark = pytest.mark.anyio
 

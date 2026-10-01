@@ -8,18 +8,15 @@ instead of borrowing the thumbs-up/thumbs-down ``feedback_id`` contract.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha256
 import json
+from dataclasses import asdict, dataclass
+from hashlib import sha256
 from typing import Any
 
 from domain.feedback.analysis_result import FeedbackProblemType
 from domain.feedback.evidence_coverage import EvidenceCoverage
 
-
 TOOL_FAILURE_SIGNAL_TYPE = "tool_failure"
-TOOL_FAILURE_JOB_TYPE = "tool_failure_analysis"
-TOOL_FAILURE_PAYLOAD_VERSION = 1
 
 
 def _text(value: Any, field_name: str) -> str:
@@ -47,29 +44,6 @@ def tool_result_digest(result_record: dict[str, Any]) -> str:
         separators=(",", ":"),
     )
     return sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def tool_failure_idempotency_key(
-    *,
-    session_id: str,
-    tool_call_id: str,
-    assistant_message_id: str,
-    result_message_id: str,
-    result_digest: str,
-) -> str:
-    """Return a bounded key for one immutable tool failure observation."""
-
-    values = tuple(
-        _text(value, name)
-        for name, value in (
-            ("session_id", session_id),
-            ("tool_call_id", tool_call_id),
-            ("assistant_message_id", assistant_message_id),
-            ("result_message_id", result_message_id),
-            ("result_digest", result_digest),
-        )
-    )
-    return "tool-failure:" + sha256("\x1f".join(values).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -202,7 +176,7 @@ class ToolFailureAnalysisResult:
             "related_message_ids": list(self.related_message_ids),
             "suggested_evidence": list(self.suggested_evidence),
             "suggested_target": self.suggested_target,
-            "evidence_coverage": self.evidence_coverage.to_record(),
+            "evidence_coverage": asdict(self.evidence_coverage),
             "model": self.model,
             "input_digest": self.input_digest,
             "created_at": self.created_at,
@@ -210,12 +184,9 @@ class ToolFailureAnalysisResult:
 
 
 __all__ = [
-    "TOOL_FAILURE_JOB_TYPE",
-    "TOOL_FAILURE_PAYLOAD_VERSION",
     "TOOL_FAILURE_SIGNAL_TYPE",
     "ToolFailureAnalysisResult",
     "ToolFailureSignal",
-    "tool_failure_idempotency_key",
     "tool_failure_signal_id",
     "tool_result_digest",
 ]

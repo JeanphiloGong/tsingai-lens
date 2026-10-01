@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import ToolSpec
 from application.chat.context_builder import ChatModelContext
-from domain.chat.model_call import (
+from application.repositories.chat_repository import (
     ModelCallInput,
     ModelCallObserver,
     ModelCallOutcome,
     ModelCallPurpose,
     ModelCallStatus,
 )
-
 
 RESEARCH_COMPACTION_SYSTEM_PROMPT = """You maintain a researcher's working notes while older tool operations leave the active context.
 INPUT: the current research request, previous working notes, and archived messages

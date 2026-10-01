@@ -4,19 +4,16 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from application.repositories.analysis_job_repository import (
+    CORRECTION_SIGNAL_JOB_TYPE,
+    TOOL_FAILURE_JOB_TYPE,
+    correction_signal_idempotency_key,
+    tool_failure_idempotency_key,
+)
 from infra.persistence.postgres.analysis_job_repository import (
     PostgresAnalysisJobRepository,
 )
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
-from domain.feedback.correction_signal import (
-    CORRECTION_SIGNAL_JOB_TYPE,
-    correction_signal_idempotency_key,
-)
-from domain.feedback.tool_failure import (
-    TOOL_FAILURE_JOB_TYPE,
-    tool_failure_idempotency_key,
-)
-
 
 pytestmark = pytest.mark.anyio
 

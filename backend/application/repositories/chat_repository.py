@@ -1,12 +1,45 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
 from contextlib import AbstractAsyncContextManager
+from dataclasses import dataclass, field
+from typing import Any, Literal, Mapping, Protocol
 
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 from domain.chat.feedback import ChatMessageFeedback
-from domain.chat.model_call import ModelCallOutcome, ModelCallPurpose, ModelCallStatus
+
+ModelCallPurpose = Literal["decision", "compaction", "finalization"]
+ModelCallStatus = Literal[
+    "recorded",
+    "provider_succeeded",
+    "provider_failed",
+    "response_invalid",
+    "cancelled",
+]
+
+
+@dataclass(frozen=True)
+class ModelCallInput:
+    session_id: str
+    trigger_message_id: str | None
+    response_message_id: str | None
+    purpose: ModelCallPurpose
+    request: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ModelCallOutcome:
+    status: ModelCallStatus
+    finished_at: str
+    error_code: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+class ModelCallObserver(Protocol):
+    async def start(self, call: ModelCallInput) -> str: ...
+
+    async def finish(self, call_id: str, outcome: ModelCallOutcome) -> None: ...
 
 
 class ChatSessionBusyError(RuntimeError):

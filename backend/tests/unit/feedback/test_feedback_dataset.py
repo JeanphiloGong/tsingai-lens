@@ -8,9 +8,10 @@ from application.feedback.dataset_service import (
     FeedbackDatasetError,
     FeedbackDatasetService,
 )
-from domain.feedback import Dataset
-from domain.feedback import FeedbackCase, source_digest_for_case
-
+from application.repositories.feedback_dataset_sample_repository import (
+    source_digest_for_case,
+)
+from domain.feedback import Dataset, FeedbackCase
 
 pytestmark = pytest.mark.anyio
 

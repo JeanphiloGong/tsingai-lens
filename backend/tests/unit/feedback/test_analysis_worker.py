@@ -6,10 +6,9 @@ import pytest
 
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
+from application.repositories.analysis_job_repository import AnalysisJob
 from domain.chat import ChatMessage, ChatSession
 from domain.chat.feedback import ChatMessageFeedback
-from domain.feedback import AnalysisJob
-
 
 pytestmark = pytest.mark.anyio
 

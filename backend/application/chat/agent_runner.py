@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from hashlib import sha256
-import json
-import logging
 from math import isfinite
 from random import uniform
 from time import monotonic
@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 
+from application.chat import capability_policy
 from application.chat.capabilities import (
     AgentContext,
     CapabilityExecutionContext,
@@ -26,16 +27,18 @@ from application.chat.capabilities import (
 )
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat.inline_citations import format_inline_citations
-from application.chat import capability_policy, intent_policy
-from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
-from domain.chat.model_call import ModelCallObserver
 from application.chat.model import (
     RESEARCH_AGENT_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT,
+    ChatModel,
+    ModelResponseError,
+    ModelTurn,
+    ModelUsage,
     ResearchWorkingCheckModelOutput,
     ResearchWorkingNotesModelOutput,
 )
 from application.core.structured_extraction.json_support import extract_json_object
+from application.repositories.chat_repository import ModelCallObserver
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
@@ -48,7 +51,6 @@ from domain.chat import (
     ToolRisk,
 )
 from utils.logger import get_request_id
-
 
 logger = logging.getLogger(__name__)
 

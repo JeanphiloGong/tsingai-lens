@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
-import json
 from typing import Any, Protocol
 from uuid import uuid4
 
 from application.feedback.analysis_handler import AnalysisInputError
+from application.repositories.analysis_job_repository import (
+    TOOL_FAILURE_JOB_TYPE,
+    TOOL_FAILURE_PAYLOAD_VERSION,
+    tool_failure_idempotency_key,
+)
 from domain.chat import ChatMessage, ChatMessageRole, ToolCallStatus, ToolResultStatus
 from domain.feedback import (
     EvidenceCoverage,
-    TOOL_FAILURE_JOB_TYPE,
-    TOOL_FAILURE_PAYLOAD_VERSION,
     ToolFailureAnalysisResult,
     ToolFailureSignal,
-    tool_failure_idempotency_key,
     tool_result_digest,
 )
 
@@ -186,7 +188,7 @@ class ToolFailureAnalysisHandler:
                 "error_code": call.error_code,
             },
             "result": result.to_record(),
-            "coverage": coverage.to_record(),
+            "coverage": asdict(coverage),
             "related_message_ids": list(related),
             "answer_message_id": answer_message_id,
         }

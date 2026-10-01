@@ -8,21 +8,17 @@ from typing import Any, Mapping, cast
 from uuid import uuid4
 
 from application.repositories.feedback_case_repository import FeedbackCaseRepository
+from application.repositories.analysis_job_repository import AnalysisJob
 from application.repositories.feedback_dataset_repository import (
     FeedbackDatasetRepository,
 )
 from application.repositories.feedback_dataset_sample_repository import (
     CollectedDatasetSample,
     DatasetSampleActionConflict,
-    DatasetSampleRevisionConflict,
-    FeedbackDatasetSampleRepository,
-)
-from domain.feedback.analysis_job import AnalysisJob
-from domain.feedback.dataset_sample import (
     DATASET_SAMPLE_BUILD_JOB_TYPE,
     DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
-    DatasetSample,
-    SampleAction,
+    DatasetSampleRevisionConflict,
+    FeedbackDatasetSampleRepository,
     build_job_payload,
     sample_action_digest,
     sample_build_idempotency_key,
@@ -30,9 +26,9 @@ from domain.feedback.dataset_sample import (
 )
 from application.source.collection_service import CollectionService
 from domain.feedback.dataset import DATASET_TASK_TYPES, Dataset, DatasetTaskType
+from domain.feedback.dataset_sample import DatasetSample, SampleAction
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.sample_revision import (
-    RevisionContent,
     SampleRevision,
     content_digest_for,
     parse_revision_content,

@@ -1,15 +1,9 @@
-"""Dataset sample identity, build state, and job identity."""
+"""Dataset sample identity, confirmation rules, and allowed actions."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
-import json
 from typing import Any, Literal
-
-
-DATASET_SAMPLE_BUILD_JOB_TYPE = "dataset_sample_build"
-DATASET_SAMPLE_BUILD_PAYLOAD_VERSION = 1
 
 DatasetSampleStatus = Literal[
     "pending",
@@ -36,18 +30,6 @@ _ALLOWED_ACTIONS: dict[DatasetSampleStatus, frozenset[SampleAction]] = {
 def ensure_action_allowed(status: DatasetSampleStatus, action: SampleAction) -> None:
     if action not in _ALLOWED_ACTIONS.get(status, frozenset()):
         raise ValueError("sample_action_not_allowed")
-
-
-def sample_action_digest(
-    *, action: SampleAction, expected_revision_id: str | None, reason: str | None
-) -> str:
-    payload = {
-        "action": action,
-        "expected_revision_id": expected_revision_id,
-        "reason": (reason or "").strip(),
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -144,66 +126,13 @@ class DatasetSample:
         }
 
 
-def source_digest_for_case(case_record: dict[str, Any]) -> str:
-    encoded = json.dumps(
-        case_record,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return sha256(encoded).hexdigest()
-
-
-def sample_build_idempotency_key(
-    *,
-    sample_id: str,
-    generation: int,
-    spec_version: int,
-    source_digest: str,
-) -> str:
-    if generation < 1 or spec_version < 1 or not _is_sha256(source_digest):
-        raise ValueError("invalid sample build identity")
-    return ":".join(
-        (
-            DATASET_SAMPLE_BUILD_JOB_TYPE,
-            sample_id,
-            str(generation),
-            str(spec_version),
-            source_digest,
-        )
-    )
-
-
-def build_job_payload(
-    *,
-    dataset_id: str,
-    sample_id: str,
-    generation: int,
-    spec_version: int,
-    source_digest: str,
-) -> dict[str, Any]:
-    return {
-        "dataset_id": dataset_id,
-        "sample_id": sample_id,
-        "generation": generation,
-        "spec_version": spec_version,
-        "source_digest": source_digest,
-    }
-
-
 def _is_sha256(value: str) -> bool:
     return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
 
 
 __all__ = [
-    "DATASET_SAMPLE_BUILD_JOB_TYPE",
-    "DATASET_SAMPLE_BUILD_PAYLOAD_VERSION",
     "DatasetSample",
     "DatasetSampleStatus",
     "SampleAction",
-    "build_job_payload",
     "ensure_action_allowed",
-    "sample_action_digest",
-    "sample_build_idempotency_key",
-    "source_digest_for_case",
 ]

@@ -61,7 +61,7 @@ class _Jobs:
         self.job = replace(self.job, status="running", started_at=now, updated_at=now)
         return self.job
 
-    async def mark_succeeded(self, job_id: str, result_id: str, finished_at: str):
+    async def mark_succeeded(self, job_id: str, result_id: str, finished_at: str, **_lease):
         self.finished = ("succeeded", result_id)
         self.job = replace(
             self.job,
@@ -72,7 +72,7 @@ class _Jobs:
         )
         return self.job
 
-    async def mark_failed(self, job_id: str, error_code: str, finished_at: str):
+    async def mark_failed(self, job_id: str, error_code: str, finished_at: str, **_lease):
         self.finished = ("failed", error_code)
         self.job = replace(
             self.job,
@@ -83,7 +83,7 @@ class _Jobs:
         )
         return self.job
 
-    async def mark_cancelled(self, job_id: str, error_code: str, finished_at: str):
+    async def mark_cancelled(self, job_id: str, error_code: str, finished_at: str, **_lease):
         self.finished = ("cancelled", error_code)
         self.job = replace(
             self.job,

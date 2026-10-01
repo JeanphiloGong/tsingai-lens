@@ -407,6 +407,9 @@ class PostgresAnalysisJobRepository:
         job_id: str,
         result_id: str,
         finished_at: str,
+        *,
+        worker_id: str | None = None,
+        lease_version: int | None = None,
     ) -> AnalysisJob:
         return await self._mark_finished(
             job_id=job_id,
@@ -414,6 +417,8 @@ class PostgresAnalysisJobRepository:
             finished_at=finished_at,
             result_id=result_id,
             error_code=None,
+            worker_id=worker_id,
+            lease_version=lease_version,
         )
 
     async def mark_failed(
@@ -421,6 +426,9 @@ class PostgresAnalysisJobRepository:
         job_id: str,
         error_code: str,
         finished_at: str,
+        *,
+        worker_id: str | None = None,
+        lease_version: int | None = None,
     ) -> AnalysisJob:
         return await self._mark_finished(
             job_id=job_id,
@@ -428,6 +436,8 @@ class PostgresAnalysisJobRepository:
             finished_at=finished_at,
             result_id=None,
             error_code=error_code,
+            worker_id=worker_id,
+            lease_version=lease_version,
         )
 
     async def mark_cancelled(
@@ -435,6 +445,9 @@ class PostgresAnalysisJobRepository:
         job_id: str,
         error_code: str,
         finished_at: str,
+        *,
+        worker_id: str | None = None,
+        lease_version: int | None = None,
     ) -> AnalysisJob:
         return await self._mark_finished(
             job_id=job_id,
@@ -442,6 +455,8 @@ class PostgresAnalysisJobRepository:
             finished_at=finished_at,
             result_id=None,
             error_code=error_code,
+            worker_id=worker_id,
+            lease_version=lease_version,
         )
 
     async def requeue_failed_feedback_analysis_job(
@@ -601,12 +616,24 @@ class PostgresAnalysisJobRepository:
         finished_at: str,
         result_id: str | None,
         error_code: str | None,
+        worker_id: str | None,
+        lease_version: int | None,
     ) -> AnalysisJob:
         timestamp = _datetime(finished_at)
         async with self.session_factory.begin() as session:
             row = await session.get(AnalysisJobRow, job_id, with_for_update=True)
             if row is None:
                 raise FileNotFoundError(f"analysis job not found: {job_id}")
+            if worker_id is not None or lease_version is not None:
+                # A late worker must not finish a lease that recovery or a
+                # replacement worker has already superseded.
+                if not _completion_lease_matches(
+                    row,
+                    worker_id=worker_id,
+                    lease_version=lease_version,
+                    timestamp=timestamp,
+                ):
+                    return _job(row)
             if row.status in {"succeeded", "failed", "cancelled"}:
                 if (
                     row.status != status
@@ -669,6 +696,22 @@ def _claimable_job_filter(timestamp: datetime):
             AnalysisJobRow.lease_expires_at.is_not(None),
             AnalysisJobRow.lease_expires_at <= timestamp,
         ),
+    )
+
+
+def _completion_lease_matches(
+    row: AnalysisJobRow,
+    *,
+    worker_id: str | None,
+    lease_version: int | None,
+    timestamp: datetime,
+) -> bool:
+    return bool(worker_id) and lease_version is not None and (
+        row.status == "running"
+        and row.worker_id == worker_id
+        and row.lease_version == lease_version
+        and row.lease_expires_at is not None
+        and row.lease_expires_at > timestamp
     )
 
 

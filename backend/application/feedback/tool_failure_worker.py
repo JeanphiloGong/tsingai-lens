@@ -50,6 +50,8 @@ class ToolFailureAnalysisWorker:
                     job_id=job.job_id,
                     error_code=code,
                     finished_at=datetime.now(timezone.utc).isoformat(),
+                    worker_id=job.worker_id,
+                    lease_version=job.lease_version,
                 )
             logger.warning(
                 "tool failure input rejected job_id=%s code=%s", job.job_id, code
@@ -58,6 +60,8 @@ class ToolFailureAnalysisWorker:
                 job_id=job.job_id,
                 error_code=code,
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
         except Exception:  # noqa: BLE001
             logger.exception("tool failure worker failed job_id=%s", job.job_id)
@@ -65,6 +69,8 @@ class ToolFailureAnalysisWorker:
                 job_id=job.job_id,
                 error_code="tool_failure_analysis_failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
 
         try:
@@ -87,11 +93,15 @@ class ToolFailureAnalysisWorker:
                 job_id=job.job_id,
                 error_code="tool_failure_persistence_failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
         return await self.job_repository.mark_succeeded(
             job_id=job.job_id,
             result_id=result.result_id,
             finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
         )
 
 

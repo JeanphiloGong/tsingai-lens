@@ -42,12 +42,16 @@ class FeedbackAnalysisWorker:
                     job_id=job.job_id,
                     error_code=str(exc),
                     finished_at=datetime.now(timezone.utc).isoformat(),
+                    worker_id=job.worker_id,
+                    lease_version=job.lease_version,
                 )
             logger.warning("feedback analysis input rejected job_id=%s code=%s", job.job_id, exc)
             return await self.job_repository.mark_failed(
                 job_id=job.job_id,
                 error_code=str(exc),
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
         except Exception:  # noqa: BLE001
             logger.exception("feedback analysis worker failed job_id=%s", job.job_id)
@@ -55,6 +59,8 @@ class FeedbackAnalysisWorker:
                 job_id=job.job_id,
                 error_code="feedback_analysis_failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
 
         try:
@@ -78,11 +84,15 @@ class FeedbackAnalysisWorker:
                 job_id=job.job_id,
                 error_code="feedback_analysis_persistence_failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
         return await self.job_repository.mark_succeeded(
             job_id=job.job_id,
             result_id=result.result_id,
             finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
         )
 
 

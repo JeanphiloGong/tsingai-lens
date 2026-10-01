@@ -135,6 +135,44 @@ async def test_expired_running_job_is_recovered_and_claimed_again(
     assert claimed.error_code is None
 
 
+async def test_old_worker_cannot_finish_reclaimed_job(
+    postgres_session_factory,
+) -> None:
+    repository = PostgresAnalysisJobRepository(
+        postgres_session_factory,
+        worker_id="worker-next",
+    )
+    await _insert_job(
+        postgres_session_factory,
+        job_id="job-fenced-completion",
+        status="running",
+        worker_id="worker-crashed",
+        lease_expires_at=BASE_TIME + timedelta(seconds=5),
+        lease_version=1,
+    )
+
+    recovery_time = BASE_TIME + timedelta(seconds=6)
+    assert await repository.recover_expired_jobs(recovery_time.isoformat()) == 1
+    replacement = await repository.claim_next_feedback_analysis_job(
+        (recovery_time + timedelta(seconds=1)).isoformat()
+    )
+    assert replacement is not None
+    assert replacement.worker_id == "worker-next"
+    assert replacement.lease_version == 2
+
+    late = await repository.mark_failed(
+        replacement.job_id,
+        error_code="late-worker-result",
+        finished_at=(recovery_time + timedelta(seconds=2)).isoformat(),
+        worker_id="worker-crashed",
+        lease_version=1,
+    )
+    assert late.status == "running"
+    assert late.worker_id == "worker-next"
+    assert late.lease_version == 2
+    assert late.error_code is None
+
+
 @pytest.mark.parametrize(
     ("job_type", "status", "result_id"),
     [

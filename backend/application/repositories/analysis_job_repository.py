@@ -185,6 +185,9 @@ class AnalysisJobRepository(Protocol):
         job_id: str,
         result_id: str,
         finished_at: str,
+        *,
+        worker_id: str | None = None,
+        lease_version: int | None = None,
     ) -> AnalysisJob: ...
 
     async def mark_failed(
@@ -192,6 +195,9 @@ class AnalysisJobRepository(Protocol):
         job_id: str,
         error_code: str,
         finished_at: str,
+        *,
+        worker_id: str | None = None,
+        lease_version: int | None = None,
     ) -> AnalysisJob: ...
 
     async def mark_cancelled(
@@ -199,6 +205,9 @@ class AnalysisJobRepository(Protocol):
         job_id: str,
         error_code: str,
         finished_at: str,
+        *,
+        worker_id: str | None = None,
+        lease_version: int | None = None,
     ) -> AnalysisJob: ...
 
     async def requeue_failed_feedback_analysis_job(

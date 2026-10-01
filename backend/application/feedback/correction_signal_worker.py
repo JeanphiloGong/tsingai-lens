@@ -55,6 +55,8 @@ class CorrectionSignalAnalysisWorker:
                     job_id=job.job_id,
                     error_code=code,
                     finished_at=datetime.now(timezone.utc).isoformat(),
+                    worker_id=job.worker_id,
+                    lease_version=job.lease_version,
                 )
             logger.warning(
                 "correction signal input rejected job_id=%s code=%s",
@@ -65,6 +67,8 @@ class CorrectionSignalAnalysisWorker:
                 job_id=job.job_id,
                 error_code=code,
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
         except Exception:  # noqa: BLE001
             logger.exception(
@@ -74,6 +78,8 @@ class CorrectionSignalAnalysisWorker:
                 job_id=job.job_id,
                 error_code="correction_signal_analysis_failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
 
         try:
@@ -96,11 +102,15 @@ class CorrectionSignalAnalysisWorker:
                 job_id=job.job_id,
                 error_code="correction_signal_persistence_failed",
                 finished_at=datetime.now(timezone.utc).isoformat(),
+                worker_id=job.worker_id,
+                lease_version=job.lease_version,
             )
         return await self.job_repository.mark_succeeded(
             job_id=job.job_id,
             result_id=result.result_id,
             finished_at=datetime.now(timezone.utc).isoformat(),
+            worker_id=job.worker_id,
+            lease_version=job.lease_version,
         )
 
 

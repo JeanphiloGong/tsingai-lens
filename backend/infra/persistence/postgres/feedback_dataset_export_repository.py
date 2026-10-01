@@ -118,10 +118,9 @@ class PostgresFeedbackDatasetExportRepository:
             if preview.expires_at <= now:
                 raise DatasetExportConflict("export_preview_expired")
 
-            current_members = await _read_current_members(session, draft.dataset_id)
             preview_members = tuple(_member(record) for record in (preview.members or ()))
             selected = {member.sample_id for member in preview_members}
-            current_members = tuple(member for member in current_members if member.sample_id in selected)
+            current_members = await _read_current_members(session, draft.dataset_id, sample_ids=tuple(selected))
             if member_digest(current_members) != draft.member_digest:
                 raise DatasetExportConflict("export_preview_stale")
             if member_digest(preview_members) != draft.member_digest:
@@ -193,7 +192,7 @@ class PostgresFeedbackDatasetExportRepository:
 
 
 async def _read_current_members(
-    session: AsyncSession, dataset_id: str
+    session: AsyncSession, dataset_id: str, *, sample_ids: tuple[str, ...]
 ) -> tuple[ExportMember, ...]:
     statement = (
         select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow, FeedbackCaseRow)
@@ -208,12 +207,16 @@ async def _read_current_members(
         )
         .where(
             FeedbackDatasetSampleRow.dataset_id == dataset_id,
+            FeedbackDatasetSampleRow.sample_id.in_(sample_ids),
             FeedbackDatasetSampleRow.status == "confirmed",
             FeedbackDatasetSampleRow.current_revision_id
             == FeedbackDatasetSampleRow.confirmed_revision_id,
         )
-        .with_for_update()
+        .order_by(FeedbackCaseRow.case_id, FeedbackDatasetSampleRow.sample_id)
     )
+    # Case writers lock the source before its samples; publication uses the same order.
+    await session.execute(statement.with_for_update(of=FeedbackCaseRow))
+    statement = statement.with_for_update(of=(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow))
     rows = (await session.execute(statement)).all()
     for sample, _revision_row, case in rows:
         if case.status == "withdrawn":

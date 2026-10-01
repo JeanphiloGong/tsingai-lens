@@ -148,7 +148,7 @@ class FeedbackDatasetSampleRepository(Protocol):
     async def count_samples(self, *, dataset_id: str, status: str | None = None) -> int: ...
 
     async def read_confirmed_members(
-        self, *, dataset_id: str
+        self, *, dataset_id: str, sample_ids: tuple[str, ...] | None = None
     ) -> tuple[ConfirmedDatasetMember, ...]: ...
 
     async def append_human_revision(

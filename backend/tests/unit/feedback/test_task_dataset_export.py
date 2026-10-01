@@ -140,9 +140,29 @@ class _Samples:
     def __init__(self, *members: ConfirmedDatasetMember) -> None:
         self.members = list(members)
 
-    async def read_confirmed_members(self, *, dataset_id: str):
+    async def read_confirmed_members(self, *, dataset_id: str, sample_ids=None):
         assert dataset_id == "fdset_export_test"
-        return tuple(self.members)
+        return tuple(member for member in self.members if sample_ids is None or member.sample.sample_id in sample_ids)
+
+
+async def test_selected_export_never_reads_unselected_stale_members() -> None:
+    class SamplesWithStaleUnselectedMember(_Samples):
+        async def read_confirmed_members(self, *, dataset_id, sample_ids=None):
+            if sample_ids is None or "sample-2" in sample_ids:
+                from application.repositories.feedback_dataset_sample_repository import DatasetSampleRevisionConflict
+                raise DatasetSampleRevisionConflict("sample_source_stale")
+            return await super().read_confirmed_members(dataset_id=dataset_id, sample_ids=sample_ids)
+
+    service = FeedbackDatasetExportService(
+        dataset_service=_DatasetService(), sample_repository=SamplesWithStaleUnselectedMember(_member(1), _member(2)),
+        repository=_Exports(),
+    )
+    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test", sample_ids=["sample-1"])
+    export = await service.publish_for_user(
+        user_id="user-1", dataset_id="fdset_export_test", preview_id=preview.preview_id,
+        preview_digest=preview.preview_digest, allow_partial=False, idempotency_key="selected-healthy",
+    )
+    assert len(export.rows) == 1
 
 
 class _Exports:

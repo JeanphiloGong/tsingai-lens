@@ -464,7 +464,9 @@ the preview ID and digest plus an `Idempotency-Key`; without
 explicit partial consent, only the valid members are published; invalid samples
 remain in the queue. If a selected revision or confirmation changes after preview,
 publishing returns `409 export_preview_stale` and the browser must run a new
-preview. Unselected sample changes do not invalidate the preview or add rows to
+preview. Both preview queries and publication transaction checks are restricted
+to selected sample IDs. Unselected stale or withdrawn samples cannot block a
+selected export. Unselected sample changes do not invalidate the preview or add rows to
 the export. An empty export is rejected.
 
 Each published export is immutable and has its own `export_id` and sequential

@@ -160,7 +160,7 @@ class PostgresFeedbackDatasetSampleRepository:
             return int((await session.scalar(statement)) or 0)
 
     async def read_confirmed_members(
-        self, *, dataset_id: str
+        self, *, dataset_id: str, sample_ids: tuple[str, ...] | None = None
     ) -> tuple[ConfirmedDatasetMember, ...]:
         statement = (
             select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow, FeedbackCaseRow)
@@ -184,6 +184,8 @@ class PostgresFeedbackDatasetSampleRepository:
                 FeedbackDatasetSampleRow.sample_id,
             )
         )
+        if sample_ids is not None:
+            statement = statement.where(FeedbackDatasetSampleRow.sample_id.in_(sample_ids))
         async with self.session_factory() as session:
             rows = (await session.execute(statement)).all()
             members: list[ConfirmedDatasetMember] = []

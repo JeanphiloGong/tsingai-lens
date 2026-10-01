@@ -69,7 +69,9 @@ class FeedbackDatasetExportService:
         self, *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
     ) -> ExportPreview:
         dataset = await self._read_dataset(user_id, dataset_id)
-        members = await self._read_confirmed_members(dataset_id)
+        if sample_ids is not None and (not sample_ids or len(set(sample_ids)) != len(sample_ids)):
+            raise DatasetExportError("export_sample_selection_invalid")
+        members = await self._read_confirmed_members(dataset_id, sample_ids=sample_ids)
         if sample_ids is not None:
             selected = set(sample_ids)
             available = {item.sample.sample_id for item in members}
@@ -118,12 +120,11 @@ class FeedbackDatasetExportService:
         if preview.issues and not allow_partial:
             raise DatasetExportError("export_preview_has_issues")
 
+        selected = {member.sample_id for member in preview.members}
         current = tuple(
             _export_member(item)
-            for item in await self._read_confirmed_members(dataset_id)
+            for item in await self._read_confirmed_members(dataset_id, sample_ids=list(selected))
         )
-        selected = {member.sample_id for member in preview.members}
-        current = tuple(member for member in current if member.sample_id in selected)
         if member_digest(current) != member_digest(preview.members):
             raise DatasetExportError("export_preview_stale")
         issues_by_sample = {issue.sample_id for issue in preview.issues}
@@ -243,11 +244,11 @@ class FeedbackDatasetExportService:
         )
 
     async def _read_confirmed_members(
-        self, dataset_id: str
+        self, dataset_id: str, *, sample_ids: list[str] | None = None
     ) -> tuple[ConfirmedDatasetMember, ...]:
         try:
             return await self.sample_repository.read_confirmed_members(
-                dataset_id=dataset_id
+                dataset_id=dataset_id, sample_ids=tuple(sample_ids) if sample_ids is not None else None
             )
         except DatasetSampleRevisionConflict as exc:
             raise DatasetExportError(str(exc)) from exc

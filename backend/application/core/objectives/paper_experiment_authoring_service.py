@@ -160,8 +160,8 @@ class PaperExperimentAuthoringService:
             collection_id, document_id
         )
         source_fingerprint = str(
-            getattr(document_record, "preparation_fingerprint", None)
-            or getattr(document_record, "source_fingerprint", None)
+            document_record.document.preparation_fingerprint
+            or document_record.document.source_fingerprint
             or document.metadata.get("source_fingerprint")
             or ""
         ).strip()

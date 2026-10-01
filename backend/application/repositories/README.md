@@ -29,7 +29,7 @@ versions and review decisions also remain domain concepts even when persisted.
 | File | Records returned |
 | --- | --- |
 | [objective_repository.py](objective_repository.py) | Objectives, Evidence, Findings; `StoredObjective` for metadata reads and `ObjectiveAnalysis` for versioned execution snapshots |
-| [collection_repository.py](collection_repository.py) | Collection/Document detail; `CollectionSummary` and `CollectionDocumentSummary` for listing |
+| [collection_repository.py](collection_repository.py) | `StoredCollection`/`StoredDocument` for storage metadata; `CollectionSummary` and `CollectionDocumentSummary` for listing |
 | [pipeline_run_repository.py](pipeline_run_repository.py) | `PipelineRun`, node execution records and model usage; `PipelineRunSummary` for history |
 | [auth_repository.py](auth_repository.py) | `AuthUserRecord` and `AuthSessionRecord`; token hashes are separate write inputs |
 | [source_artifact_repository.py](source_artifact_repository.py) | Source documents, trees, tables, figures and references |
@@ -63,6 +63,13 @@ request schema. The PostgreSQL implementation assigns database record timestamps
 `StoredDataset` includes them for metadata reads without copying the domain
 fields. Builders read `Dataset` directly. Controllers combine the domain object
 and stored timestamps into the existing response.
+
+`StoredCollection.collection` and `StoredDocument.document` likewise contain
+the business objects directly. Stored records own timestamps and object-storage
+addresses; domain objects keep content identities, preparation provenance and
+business status. Callers access each object through its declared field rather
+than through forwarding properties. Collection detail formatting remains in the
+existing application service, while list responses are formatted by controllers.
 
 HTTP schemas can read domain attributes directly with Pydantic
 `from_attributes`; domain entities do not need a dictionary conversion solely

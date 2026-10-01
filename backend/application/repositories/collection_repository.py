@@ -7,6 +7,23 @@ from domain.source import Collection, Document
 
 
 @dataclass(frozen=True)
+class StoredDocument:
+    document: Document
+    stored_filename: str
+    storage_key: str
+    created_at: str
+    updated_at: str | None = None
+
+
+@dataclass(frozen=True)
+class StoredCollection:
+    collection: Collection
+    created_at: str
+    updated_at: str
+    documents: tuple[StoredDocument, ...] = ()
+
+
+@dataclass(frozen=True)
 class CollectionDocumentSummary:
     document_id: str
     original_filename: str
@@ -29,24 +46,23 @@ class CollectionSummary:
 
 
 class CollectionRepository(Protocol):
-    async def add_collection(self, collection: Collection) -> None: ...
+
+    async def add_collection(self, collection: StoredCollection) -> None: ...
 
     async def list_collections(
         self,
         owner_user_id: str | None = None,
     ) -> tuple[CollectionSummary, ...]: ...
 
-    async def read_collection(
-        self, collection_id: str
-    ) -> Collection | None: ...
+    async def read_collection(self, collection_id: str) -> StoredCollection | None: ...
 
     async def read_document(
         self,
         collection_id: str,
         document_id: str,
-    ) -> Document | None: ...
+    ) -> StoredDocument | None: ...
 
-    async def update_collection(self, collection: Collection) -> bool: ...
+    async def update_collection(self, collection: StoredCollection) -> bool: ...
 
     async def read_agent_default_permission(
         self, collection_id: str
@@ -63,11 +79,11 @@ class CollectionRepository(Protocol):
     async def add_documents(
         self,
         collection_id: str,
-        documents: tuple[Document, ...],
+        documents: tuple[StoredDocument, ...],
         *,
         updated_at: str,
     ) -> None: ...
 
-    async def update_document(self, document: Document) -> bool: ...
+    async def update_document(self, document: StoredDocument) -> bool: ...
 
     async def delete_collection(self, collection_id: str) -> bool: ...

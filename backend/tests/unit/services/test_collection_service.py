@@ -18,6 +18,7 @@ from application.source.source_archive_service import (
     SourceArchiveService,
 )
 from application.source.source_import_service import SourceImportService
+from application.repositories.collection_repository import StoredDocument
 from domain.source import Document
 from domain.chat.permissions import AUTO_ACTIONS
 from infra.persistence.memory import MemoryCollectionRepository
@@ -365,15 +366,17 @@ async def test_source_resolution_reads_only_current_collection_documents(tmp_pat
 async def test_source_resolution_rejects_invalid_storage_key(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Unsafe")
-    document = Document(
-        document_id="doc_unsafe",
-        original_filename="unsafe.pdf",
+    document = StoredDocument(
+        document=Document(
+            document_id="doc_unsafe",
+            original_filename="unsafe.pdf",
+            sha256="a" * 64,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=1,
+        ),
         stored_filename="unsafe.pdf",
         storage_key="other/input/unsafe.pdf",
-        sha256="a" * 64,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=1,
         created_at="2026-08-27T00:00:00+00:00",
     )
     await service.repository.add_documents(
@@ -384,7 +387,7 @@ async def test_source_resolution_rejects_invalid_storage_key(tmp_path) -> None:
 
     with pytest.raises(DocumentSourceUnavailableError) as exc_info:
         await _archive_service(service).resolve_document_source_file(
-            collection["collection_id"], document.document_id
+            collection["collection_id"], document.document.document_id
         )
     assert exc_info.value.code == "document_source_path_invalid"
 

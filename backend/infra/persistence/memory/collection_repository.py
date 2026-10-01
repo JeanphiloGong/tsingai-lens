@@ -6,24 +6,23 @@ from typing import Any
 from application.repositories.collection_repository import (
     CollectionDocumentSummary,
     CollectionSummary,
+    StoredCollection,
+    StoredDocument,
 )
-
-from domain.source import Collection, Document
 
 
 class MemoryCollectionRepository:
     """In-memory persistence for collections and their current documents."""
 
     def __init__(self) -> None:
-        self._collections: dict[str, Collection] = {}
+        self._collections: dict[str, StoredCollection] = {}
         self._agent_default_permissions: dict[str, dict[str, Any]] = {}
 
-    async def add_collection(self, collection: Collection) -> None:
-        if collection.collection_id in self._collections:
-            raise ValueError(
-                f"collection already exists: {collection.collection_id}"
-            )
-        self._collections[collection.collection_id] = collection
+    async def add_collection(self, collection: StoredCollection) -> None:
+        collection_id = collection.collection.collection_id
+        if collection_id in self._collections:
+            raise ValueError(f"collection already exists: {collection_id}")
+        self._collections[collection_id] = collection
 
     async def list_collections(
         self,
@@ -31,19 +30,19 @@ class MemoryCollectionRepository:
     ) -> tuple[CollectionSummary, ...]:
         return tuple(
             CollectionSummary(
-                collection_id=collection.collection_id,
-                name=collection.name,
-                description=collection.description,
-                status=collection.status,
+                collection_id=collection.collection.collection_id,
+                name=collection.collection.name,
+                description=collection.collection.description,
+                status=collection.collection.status,
                 created_at=collection.created_at,
                 updated_at=collection.updated_at,
                 documents=tuple(
                     CollectionDocumentSummary(
-                        document_id=document.document_id,
-                        original_filename=document.original_filename,
-                        media_type=document.media_type,
-                        status=document.status,
-                        size_bytes=document.size_bytes,
+                        document_id=document.document.document_id,
+                        original_filename=document.document.original_filename,
+                        media_type=document.document.media_type,
+                        status=document.document.status,
+                        size_bytes=document.document.size_bytes,
                         created_at=document.created_at,
                         updated_at=document.updated_at or document.created_at,
                     )
@@ -52,17 +51,17 @@ class MemoryCollectionRepository:
             )
             for _, collection in sorted(self._collections.items())
             if owner_user_id is None
-            or collection.owner_user_id == owner_user_id
+            or collection.collection.owner_user_id == owner_user_id
         )
 
-    async def read_collection(self, collection_id: str) -> Collection | None:
+    async def read_collection(self, collection_id: str) -> StoredCollection | None:
         return self._collections.get(collection_id)
 
     async def read_document(
         self,
         collection_id: str,
         document_id: str,
-    ) -> Document | None:
+    ) -> StoredDocument | None:
         collection = self._collections.get(collection_id)
         if collection is None:
             return None
@@ -70,15 +69,16 @@ class MemoryCollectionRepository:
             (
                 document
                 for document in collection.documents
-                if document.document_id == document_id
+                if document.document.document_id == document_id
             ),
             None,
         )
 
-    async def update_collection(self, collection: Collection) -> bool:
-        if collection.collection_id not in self._collections:
+    async def update_collection(self, collection: StoredCollection) -> bool:
+        collection_id = collection.collection.collection_id
+        if collection_id not in self._collections:
             return False
-        self._collections[collection.collection_id] = collection
+        self._collections[collection_id] = collection
         return True
 
     async def read_agent_default_permission(
@@ -106,7 +106,7 @@ class MemoryCollectionRepository:
     async def add_documents(
         self,
         collection_id: str,
-        documents: tuple[Document, ...],
+        documents: tuple[StoredDocument, ...],
         *,
         updated_at: str,
     ) -> None:
@@ -116,33 +116,35 @@ class MemoryCollectionRepository:
         if not documents:
             raise ValueError("at least one document is required")
 
-        existing_ids = {document.document_id for document in collection.documents}
-        existing_hashes = {document.sha256 for document in collection.documents}
-        if any(document.document_id in existing_ids for document in documents):
+        existing_ids = {record.document.document_id for record in collection.documents}
+        existing_hashes = {record.document.sha256 for record in collection.documents}
+        if any(record.document.document_id in existing_ids for record in documents):
             raise ValueError("document already exists")
-        if any(document.sha256 in existing_hashes for document in documents):
+        if any(record.document.sha256 in existing_hashes for record in documents):
             raise ValueError("document content already exists in collection")
 
         self._collections[collection_id] = replace(
             collection,
-            status="uploaded",
+            collection=replace(collection.collection, status="uploaded"),
             updated_at=updated_at,
             documents=collection.documents + documents,
         )
 
-    async def update_document(self, document: Document) -> bool:
+    async def update_document(self, document: StoredDocument) -> bool:
         for collection_id, collection in self._collections.items():
             if not any(
-                current.document_id == document.document_id
+                current.document.document_id == document.document.document_id
                 for current in collection.documents
             ):
                 continue
             self._collections[collection_id] = replace(
                 collection,
                 documents=tuple(
-                    document
-                    if current.document_id == document.document_id
-                    else current
+                    (
+                        document
+                        if current.document.document_id == document.document.document_id
+                        else current
+                    )
                     for current in collection.documents
                 ),
                 updated_at=document.updated_at or collection.updated_at,

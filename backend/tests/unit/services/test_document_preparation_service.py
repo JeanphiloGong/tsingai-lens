@@ -3,23 +3,27 @@ from dataclasses import replace
 
 import pytest
 
-from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION
+from application.core.document_profiles.extraction import (
+    DOCUMENT_PROFILE_PROMPT_VERSION,
+)
+from application.pipeline import PipelineRunService
+from application.repositories.collection_repository import StoredDocument
 from application.source.document_preparation_service import (
     DOCUMENT_ANALYSIS_VERSION,
     DocumentPreparationService,
     profile_fingerprint,
     source_fingerprint,
 )
+from application.source.reference_extraction_service import (
+    SourceReferenceExtractionService,
+)
 from domain.core import DocumentProfile
 from domain.source import Document, SourceDocument
 from infra.persistence.memory import (
-    MemorySourceArtifactRepository,
     MemoryPipelineRunRepository,
+    MemorySourceArtifactRepository,
 )
-from application.pipeline import PipelineRunService
-from application.source.reference_extraction_service import SourceReferenceExtractionService
 from utils.logger import bind_request_id, clear_request_id, get_request_id
-
 
 pytestmark = pytest.mark.anyio
 
@@ -70,15 +74,17 @@ def test_document_preparation_version_covers_only_profile_triage() -> None:
 async def test_queued_preparation_inherits_request_trace_without_argument_forwarding(
     monkeypatch,
 ) -> None:
-    document = Document(
-        document_id="doc_trace",
-        original_filename="paper.pdf",
+    document = StoredDocument(
+        document=Document(
+            document_id="doc_trace",
+            original_filename="paper.pdf",
+            sha256="a" * 64,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=100,
+        ),
         stored_filename="paper.pdf",
         storage_key="col_trace/input/paper.pdf",
-        sha256="a" * 64,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=100,
         created_at="2026-09-09T00:00:00+00:00",
     )
 
@@ -120,27 +126,29 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
 async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts() -> None:
     collection_id = "col_restart"
     document_id = "doc_restart"
-    original = Document(
-        document_id=document_id,
-        original_filename="paper.pdf",
+    original = StoredDocument(
+        document=Document(
+            document_id=document_id,
+            original_filename="paper.pdf",
+            sha256="b" * 64,
+            media_type="application/pdf",
+            status="processing",
+            size_bytes=100,
+            source_fingerprint="source-current",
+            profile_fingerprint="profile-current",
+            preparation_fingerprint="paper-map-current",
+            parser_version="source-runtime.v1",
+        ),
         stored_filename="paper.pdf",
         storage_key="col_restart/inputs/paper.pdf",
-        sha256="b" * 64,
-        media_type="application/pdf",
-        status="processing",
-        size_bytes=100,
         created_at="2026-08-28T01:00:00+00:00",
-        source_fingerprint="source-current",
-        profile_fingerprint="profile-current",
-        preparation_fingerprint="paper-map-current",
-        parser_version="source-runtime.v1",
     )
 
     class CollectionService:
         def __init__(self) -> None:
             self.document = original
 
-        async def get_document(self, owner: str, selected: str) -> Document:
+        async def get_document(self, owner: str, selected: str) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
             return self.document
 
@@ -149,9 +157,11 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
             owner: str,
             selected: str,
             **fields,
-        ) -> Document:
+        ) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
-            self.document = replace(self.document, **fields)
+            self.document = replace(
+                self.document, document=replace(self.document.document, **fields)
+            )
             return self.document
 
     pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
@@ -179,7 +189,9 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     assert interrupted["status"] == "failed"
     assert interrupted["current_node"] == "interrupted"
     assert interrupted["finished_at"] is not None
-    assert collection_service.document == replace(original, status="stored")
+    assert collection_service.document == replace(
+        original, document=replace(original.document, status="stored")
+    )
 
     replacement, replacement_created = (
         await pipeline_run_service.get_or_create_document_run(
@@ -196,24 +208,29 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
 async def test_restart_keeps_preparation_active_when_document_reset_fails() -> None:
     collection_id = "col_restart_retry"
     document_id = "doc_restart_retry"
-    document = Document(
-        document_id=document_id,
-        original_filename="paper.pdf",
+    document = StoredDocument(
+        document=Document(
+            document_id=document_id,
+            original_filename="paper.pdf",
+            sha256="c" * 64,
+            media_type="application/pdf",
+            status="processing",
+            size_bytes=100,
+        ),
         stored_filename="paper.pdf",
         storage_key="col_restart_retry/inputs/paper.pdf",
-        sha256="c" * 64,
-        media_type="application/pdf",
-        status="processing",
-        size_bytes=100,
         created_at="2026-08-28T01:00:00+00:00",
     )
 
     class CollectionService:
-        async def get_document(self, owner: str, selected: str) -> Document:
+
+        async def get_document(self, owner: str, selected: str) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
             return document
 
-        async def update_document_preparation(self, *_args, **_fields) -> Document:
+        async def update_document_preparation(
+            self, *_args, **_fields
+        ) -> StoredDocument:
             raise OSError("database temporarily unavailable")
 
     pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
@@ -244,31 +261,36 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
 async def test_profile_preparation_reuses_current_source_and_profile() -> None:
     collection_id = "col_test"
     document_id = "doc_test"
-    base_document = Document(
-        document_id=document_id,
-        original_filename="paper.pdf",
+    base_document = StoredDocument(
+        document=Document(
+            document_id=document_id,
+            original_filename="paper.pdf",
+            sha256="a" * 64,
+            media_type="application/pdf",
+            status="failed",
+            size_bytes=100,
+        ),
         stored_filename="paper.pdf",
         storage_key="col_test/inputs/paper.pdf",
-        sha256="a" * 64,
-        media_type="application/pdf",
-        status="failed",
-        size_bytes=100,
         created_at="2026-08-27T10:00:00+00:00",
     )
     source_identity, profile_identity = DocumentPreparationService.fingerprints_for(
-        base_document
+        base_document.document
     )
 
     class CollectionService:
         def __init__(self) -> None:
             self.document = replace(
                 base_document,
-                source_fingerprint=source_identity,
-                profile_fingerprint=profile_identity,
-                preparation_fingerprint="outdated-paper-map",
+                document=replace(
+                    base_document.document,
+                    source_fingerprint=source_identity,
+                    profile_fingerprint=profile_identity,
+                    preparation_fingerprint="outdated-paper-map",
+                ),
             )
 
-        async def get_document(self, owner: str, selected: str) -> Document:
+        async def get_document(self, owner: str, selected: str) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
             return self.document
 
@@ -277,9 +299,11 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
             owner: str,
             selected: str,
             **fields,
-        ) -> Document:
+        ) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
-            self.document = replace(self.document, **fields)
+            self.document = replace(
+                self.document, document=replace(self.document.document, **fields)
+            )
             return self.document
 
     class PipelineRunService:
@@ -337,7 +361,7 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
     )
 
     assert result["status"] == "completed"
-    assert collection_service.document.status == "ready"
+    assert collection_service.document.document.status == "ready"
 
 
 async def test_reference_failure_keeps_source_preparation_ready_with_warning(
@@ -345,15 +369,17 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
 ) -> None:
     collection_id = "col_reference_warning"
     document_id = "doc_reference_warning"
-    document = Document(
-        document_id=document_id,
-        original_filename="paper.pdf",
+    document = StoredDocument(
+        document=Document(
+            document_id=document_id,
+            original_filename="paper.pdf",
+            sha256="e" * 64,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=100,
+        ),
         stored_filename="paper.pdf",
         storage_key=f"{collection_id}/input/paper.pdf",
-        sha256="e" * 64,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=100,
         created_at="2026-08-28T10:00:00+00:00",
     )
 
@@ -361,15 +387,17 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
         def __init__(self) -> None:
             self.document = document
 
-        async def get_document(self, owner: str, selected: str) -> Document:
+        async def get_document(self, owner: str, selected: str) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
             return self.document
 
         async def update_document_preparation(
             self, owner: str, selected: str, **fields
-        ) -> Document:
+        ) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
-            self.document = replace(self.document, **fields)
+            self.document = replace(
+                self.document, document=replace(self.document.document, **fields)
+            )
             return self.document
 
     class RunService:
@@ -431,27 +459,32 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
 async def test_document_preparation_does_not_build_paper_map_before_objective_selection() -> None:
     collection_id = "col_lazy_map"
     document_id = "doc_lazy_map"
-    base_document = Document(
-        document_id=document_id,
-        original_filename="paper.pdf",
+    base_document = StoredDocument(
+        document=Document(
+            document_id=document_id,
+            original_filename="paper.pdf",
+            sha256="d" * 64,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=100,
+        ),
         stored_filename="paper.pdf",
         storage_key="col_lazy_map/inputs/paper.pdf",
-        sha256="d" * 64,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=100,
         created_at="2026-08-28T10:00:00+00:00",
     )
-    source_identity, _profile_identity = (
-        DocumentPreparationService.fingerprints_for(base_document)
+    source_identity, _profile_identity = DocumentPreparationService.fingerprints_for(
+        base_document.document
     )
-    base_document = replace(base_document, source_fingerprint=source_identity)
+    base_document = replace(
+        base_document,
+        document=replace(base_document.document, source_fingerprint=source_identity),
+    )
 
     class CollectionService:
         def __init__(self) -> None:
             self.document = base_document
 
-        async def get_document(self, owner: str, selected: str) -> Document:
+        async def get_document(self, owner: str, selected: str) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
             return self.document
 
@@ -460,9 +493,11 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             owner: str,
             selected: str,
             **fields,
-        ) -> Document:
+        ) -> StoredDocument:
             assert (owner, selected) == (collection_id, document_id)
-            self.document = replace(self.document, **fields)
+            self.document = replace(
+                self.document, document=replace(self.document.document, **fields)
+            )
             return self.document
 
     class PipelineRunService:
@@ -513,4 +548,4 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
     )
 
     assert result["status"] == "completed"
-    assert collection_service.document.status == "ready"
+    assert collection_service.document.document.status == "ready"

@@ -2,28 +2,33 @@
 
 from __future__ import annotations
 
-from asyncio import CancelledError, Semaphore, Task as AsyncTask, create_task
-from dataclasses import replace
-from hashlib import sha256 as hash_sha256
 import json
 import logging
 import os
+from asyncio import CancelledError, Semaphore
+from asyncio import Task as AsyncTask
+from asyncio import create_task
+from dataclasses import replace
+from hashlib import sha256 as hash_sha256
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import pandas as pd
 
-from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION
+from application.core.document_profiles.extraction import (
+    DOCUMENT_PROFILE_PROMPT_VERSION,
+)
 from application.core.document_profiles.service import DocumentProfileService
 from application.pipeline import PipelineRunService
 from application.pipeline.pipeline_run_service import document_preparation_error_message
+from application.repositories.collection_repository import StoredDocument
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
-from application.repositories.source_artifact_repository import SourceArtifactRepository
-from domain.source import Document, SourceDocument
 from domain.core.document_profile import PROFILE_STATUS_COMPLETED
+from domain.source import Document, SourceDocument
 from infra.source.config.source_runtime_config import (
     InputConfig,
     InputStorageConfig,
@@ -31,7 +36,6 @@ from infra.source.config.source_runtime_config import (
     StorageConfig,
 )
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +131,7 @@ class DocumentPreparationService:
                 )
             except FileNotFoundError:
                 document = None
-            if document is not None and document.status == "processing":
+            if document is not None and document.document.status == "processing":
                 await self.collection_service.update_document_preparation(
                     run["collection_id"],
                     document_id,
@@ -162,7 +166,7 @@ class DocumentPreparationService:
             collection_id,
             document_id,
         )
-        fingerprint = self.preparation_fingerprint_for(document)
+        fingerprint = self.preparation_fingerprint_for(document.document)
         run, created = await self.pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,
             document_id=document_id,
@@ -195,8 +199,9 @@ class DocumentPreparationService:
         return run
 
     async def _can_reuse_preparation(
-        self, collection_id: str, document: Document
+        self, collection_id: str, record: StoredDocument
     ) -> bool:
+        document = record.document
         source_identity, profile_identity = self.fingerprints_for(document)
         if (
             document.status != "ready"
@@ -229,9 +234,10 @@ class DocumentPreparationService:
             stage = "source_parsing"
             preparation_warnings: list[str] = []
             try:
-                document = await self.collection_service.get_document(
+                record = await self.collection_service.get_document(
                     collection_id, document_id
                 )
+                document = record.document
                 source_identity, profile_identity = self.fingerprints_for(document)
                 fingerprint = profile_identity
                 await self.pipeline_run_service.update_run(
@@ -260,7 +266,7 @@ class DocumentPreparationService:
                 ):
                     source_document = await self._parse_document(
                         collection_id,
-                        document,
+                        record,
                     )
                     source_document = replace(
                         source_document,
@@ -291,13 +297,14 @@ class DocumentPreparationService:
                             document_id,
                             exc_info=True,
                         )
-                    document = await self.collection_service.update_document_preparation(
+                    record = await self.collection_service.update_document_preparation(
                         collection_id,
                         document_id,
                         status="processing",
                         source_fingerprint=source_identity,
                         parser_version=SOURCE_PARSER_VERSION,
                     )
+                    document = record.document
                 stage = "document_profile"
                 await self.pipeline_run_service.update_run(
                     run_id,
@@ -428,18 +435,19 @@ class DocumentPreparationService:
     async def _parse_document(
         self,
         collection_id: str,
-        document: Document,
+        record: StoredDocument,
     ) -> SourceDocument:
+        document = record.document
         bundle = await self._get_source_artifact_builder()(
             config=self._source_config(collection_id, document.document_id),
             input_documents=pd.DataFrame(
                 [
                     {
                         "id": document.document_id,
-                        "source_path": document.stored_filename,
-                        "source_type": Path(document.stored_filename).suffix.lstrip("."),
+                        "source_path": record.stored_filename,
+                        "source_type": Path(record.stored_filename).suffix.lstrip("."),
                         "title": document.original_filename,
-                        "creation_date": document.created_at,
+                        "creation_date": record.created_at,
                         "text": None,
                     }
                 ]
@@ -504,7 +512,9 @@ class DocumentPreparationService:
 
     def _get_source_artifact_builder(self) -> SourceArtifactBuilder:
         if self._source_artifact_builder is None:
-            from infra.source.runtime.build_source_artifacts import build_source_artifacts
+            from infra.source.runtime.build_source_artifacts import (
+                build_source_artifacts,
+            )
 
             self._source_artifact_builder = build_source_artifacts
         return self._source_artifact_builder

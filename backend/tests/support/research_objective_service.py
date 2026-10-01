@@ -12,6 +12,7 @@ from application.core.objectives.objective_input_service import ObjectiveInputSe
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
+from application.repositories.collection_repository import StoredDocument
 from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
 from domain.source import Document
@@ -101,28 +102,32 @@ async def seed_document_profiles(
     )
     assert current_collection is not None
     existing_document_ids = {
-        document.document_id for document in current_collection.documents
+        document.document.document_id for document in current_collection.documents
     }
     now = datetime.now(timezone.utc).isoformat()
     new_documents = tuple(
-        Document(
-            document_id=document.document_id,
-            original_filename=str(
-                document.metadata.get("source_filename") or f"{document.document_id}.pdf"
+        StoredDocument(
+            document=Document(
+                document_id=document.document_id,
+                original_filename=str(
+                    document.metadata.get("source_filename")
+                    or f"{document.document_id}.pdf"
+                ),
+                sha256=sha256(document.document_id.encode("utf-8")).hexdigest(),
+                media_type="application/pdf",
+                status="ready",
+                size_bytes=max(len(document.text.encode("utf-8")), 1),
+                parser_version="test-parser.v1",
+                document_analysis_version="test-analysis.v1",
+                preparation_fingerprint=f"fingerprint-{document.document_id}",
             ),
             stored_filename=str(
-                document.metadata.get("source_filename") or f"{document.document_id}.pdf"
+                document.metadata.get("source_filename")
+                or f"{document.document_id}.pdf"
             ),
             storage_key=f"{collection_id}/input/{document.document_id}.pdf",
-            sha256=sha256(document.document_id.encode("utf-8")).hexdigest(),
-            media_type="application/pdf",
-            status="ready",
-            size_bytes=max(len(document.text.encode("utf-8")), 1),
             created_at=now,
             updated_at=now,
-            parser_version="test-parser.v1",
-            document_analysis_version="test-analysis.v1",
-            preparation_fingerprint=f"fingerprint-{document.document_id}",
         )
         for document in documents
         if document.document_id not in existing_document_ids

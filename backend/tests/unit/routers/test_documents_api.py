@@ -4,6 +4,8 @@ import base64
 from hashlib import sha256
 from types import SimpleNamespace
 
+from application.repositories.collection_repository import StoredDocument
+
 import pytest
 
 try:
@@ -504,15 +506,17 @@ async def test_document_source_route_rejects_path_outside_collection(
     ) = document_services
     record = await collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
-    unsafe_document = Document(
-        document_id="paper-1",
-        original_filename="paper-1.pdf",
+    unsafe_document = StoredDocument(
+        document=Document(
+            document_id="paper-1",
+            original_filename="paper-1.pdf",
+            sha256=sha256(b"outside").hexdigest(),
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=len(b"outside"),
+        ),
         stored_filename="outside.pdf",
         storage_key="../outside.pdf",
-        sha256=sha256(b"outside").hexdigest(),
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=len(b"outside"),
         created_at="2026-07-19T00:00:00+00:00",
     )
     await collection_service.repository.add_documents(
@@ -548,15 +552,17 @@ async def test_document_source_route_rejects_another_collections_storage_key(
     storage_key = f"{second['collection_id']}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
     collection_service.object_store.write(storage_key, payload, digest)
-    foreign_document = Document(
-        document_id="paper-1",
-        original_filename="paper-2.pdf",
+    foreign_document = StoredDocument(
+        document=Document(
+            document_id="paper-1",
+            original_filename="paper-2.pdf",
+            sha256=digest,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=len(payload),
+        ),
         stored_filename="paper-2.pdf",
         storage_key=storage_key,
-        sha256=digest,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=len(payload),
         created_at="2026-07-19T00:00:00+00:00",
     )
     await collection_service.repository.add_documents(

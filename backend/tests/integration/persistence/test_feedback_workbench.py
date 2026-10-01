@@ -26,6 +26,7 @@ from application.repositories.analysis_job_repository import (
     tool_failure_idempotency_key,
 )
 from application.repositories.auth_repository import AuthUserRecord
+from application.repositories.collection_repository import StoredCollection
 from application.source.collection_service import CollectionService
 from domain.chat import (
     ChatMessage,
@@ -86,12 +87,16 @@ async def feedback_chain(postgres_session_factory, tmp_path):
 
     collections = PostgresCollectionRepository(postgres_session_factory)
     await collections.add_collection(
-        Collection.create(
-            collection_id=COLLECTION_ID,
-            owner_user_id=USER_ID,
-            name="Feedback chain collection",
-            description="Persistent workbench integration fixture",
-            now_iso=NOW,
+        StoredCollection(
+            collection=Collection(
+                collection_id=COLLECTION_ID,
+                owner_user_id=USER_ID,
+                name="Feedback chain collection",
+                description="Persistent workbench integration fixture",
+                status="idle",
+            ),
+            created_at=NOW,
+            updated_at=NOW,
         )
     )
     collection_service = CollectionService(

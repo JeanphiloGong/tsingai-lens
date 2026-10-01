@@ -1,14 +1,17 @@
-from datetime import datetime, timedelta, timezone
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from application.repositories.auth_repository import AuthUserRecord
+from application.repositories.collection_repository import StoredCollection
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ToolRisk
 from domain.source import Collection
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -19,8 +22,19 @@ async def permission_case(postgres_session_factory):
     await PostgresAuthRepository(postgres_session_factory).add_user(AuthUserRecord(
         user_id="u", email="permission@example.com", display_name=None,
         password_hash="test-only", created_at=now))
-    await PostgresCollectionRepository(postgres_session_factory).add_collection(Collection.create(
-        collection_id="c", owner_user_id="u", name="Test", description=None, now_iso=now))
+    await PostgresCollectionRepository(postgres_session_factory).add_collection(
+        StoredCollection(
+            collection=Collection(
+                collection_id="c",
+                owner_user_id="u",
+                name="Test",
+                description=None,
+                status="idle",
+            ),
+            created_at=now,
+            updated_at=now,
+        )
+    )
     repo = PostgresChatRepository(postgres_session_factory)
     session = ChatSession.create(session_id="s", user_id="u", collection_id="c", created_at=now)
     await repo.add_session(session)

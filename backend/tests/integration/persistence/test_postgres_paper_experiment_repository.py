@@ -7,17 +7,22 @@ from datetime import datetime, timezone
 import pytest
 
 from application.repositories.auth_repository import AuthUserRecord
+from application.repositories.collection_repository import (
+    StoredCollection,
+    StoredDocument,
+)
 from application.repositories.paper_experiment_repository import (
     PaperExperimentRevisionConflictError,
 )
 from domain.core.paper_experiment import PaperExperimentRevision
 from domain.source import Collection, Document
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 from infra.persistence.postgres.paper_experiment_repository import (
     PostgresPaperExperimentRepository,
 )
-
 
 pytestmark = pytest.mark.anyio
 
@@ -38,26 +43,32 @@ async def paper_experiment_repository(postgres_session_factory):
         )
     )
     collections = PostgresCollectionRepository(postgres_session_factory)
-    collection = Collection.create(
-        collection_id="experiment-collection",
-        owner_user_id="experiment-owner",
-        name="Experiment collection",
-        description=None,
-        now_iso=NOW.isoformat(),
+    collection = StoredCollection(
+        collection=Collection(
+            collection_id="experiment-collection",
+            owner_user_id="experiment-owner",
+            name="Experiment collection",
+            description=None,
+            status="idle",
+        ),
+        created_at=NOW.isoformat(),
+        updated_at=NOW.isoformat(),
     )
     await collections.add_collection(collection)
     await collections.add_documents(
-        collection.collection_id,
+        collection.collection.collection_id,
         (
-            Document(
-                document_id="paper-experiment-doc",
-                original_filename="paper.pdf",
+            StoredDocument(
+                document=Document(
+                    document_id="paper-experiment-doc",
+                    original_filename="paper.pdf",
+                    sha256="a" * 64,
+                    media_type="application/pdf",
+                    status="ready",
+                    size_bytes=10,
+                ),
                 stored_filename="paper.pdf",
                 storage_key="experiment-collection/paper.pdf",
-                sha256="a" * 64,
-                media_type="application/pdf",
-                status="ready",
-                size_bytes=10,
                 created_at=NOW.isoformat(),
                 updated_at=NOW.isoformat(),
             ),

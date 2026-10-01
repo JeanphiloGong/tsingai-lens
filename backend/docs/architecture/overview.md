@@ -176,6 +176,13 @@ but have separate owners.
 | Pipeline | No scientific objects; a successful technical run is not scientific proof | `application/repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
 
 Repository-specific result types stay beside the contract that returns them.
+`StoredCollection` contains the existing `Collection`, record timestamps, and
+the current `StoredDocument` members. Each `StoredDocument` contains a `Document`
+plus its storage key, stored filename, and record timestamps. Content hashes,
+preparation fingerprints, and scientific analysis versions remain document
+provenance. The upload, preparation, and archive services consume these records
+directly; domain objects do not format storage or HTTP dictionaries.
+
 For example, `StoredDataset` contains the existing `Dataset` plus database record
 timestamps. `Dataset` itself has no `created_at`, `updated_at`, constructor input
 normalization, or HTTP encoder. Dataset creation validates names, task types,

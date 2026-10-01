@@ -5,20 +5,23 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from application.repositories.collection_repository import (
-    CollectionDocumentSummary,
-    CollectionSummary,
-)
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from application.repositories.collection_repository import (
+    CollectionDocumentSummary,
+    CollectionSummary,
+    StoredCollection,
+    StoredDocument,
+)
 from domain.chat.permissions import permission_record
 from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
-from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
+from infra.persistence.postgres.models.document_preparation import (
+    DocumentPreparationRow,
+)
 
 
 class PostgresCollectionRepository:
@@ -28,15 +31,15 @@ class PostgresCollectionRepository:
     ) -> None:
         self.session_factory = session_factory
 
-    async def add_collection(self, record: CollectionAggregate) -> None:
+    async def add_collection(self, record: StoredCollection) -> None:
         async with self.session_factory.begin() as session:
             session.add(
                 Collection(
-                    collection_id=record.collection_id,
-                    owner_user_id=record.owner_user_id,
-                    name=record.name,
-                    description=record.description,
-                    status=record.status,
+                    collection_id=record.collection.collection_id,
+                    owner_user_id=record.collection.owner_user_id,
+                    name=record.collection.name,
+                    description=record.collection.description,
+                    status=record.collection.status,
                     created_at=_datetime(record.created_at),
                     updated_at=_datetime(record.updated_at),
                 )
@@ -96,7 +99,7 @@ class PostgresCollectionRepository:
     async def read_collection(
         self,
         collection_id: str,
-    ) -> CollectionAggregate | None:
+    ) -> StoredCollection | None:
         async with self.session_factory() as session:
             row = await session.get(Collection, collection_id)
             if row is None:
@@ -110,7 +113,7 @@ class PostgresCollectionRepository:
         self,
         collection_id: str,
         document_id: str,
-    ) -> DocumentAggregate | None:
+    ) -> StoredDocument | None:
         async with self.session_factory() as session:
             row = (await session.execute(
                 select(Document, DocumentPreparationRow)
@@ -125,15 +128,15 @@ class PostgresCollectionRepository:
             )).one_or_none()
             return _to_document(*row) if row is not None else None
 
-    async def update_collection(self, record: CollectionAggregate) -> bool:
+    async def update_collection(self, record: StoredCollection) -> bool:
         async with self.session_factory.begin() as session:
-            row = await session.get(Collection, record.collection_id)
+            row = await session.get(Collection, record.collection.collection_id)
             if row is None:
                 return False
-            row.owner_user_id = record.owner_user_id
-            row.name = record.name
-            row.description = record.description
-            row.status = record.status
+            row.owner_user_id = record.collection.owner_user_id
+            row.name = record.collection.name
+            row.description = record.collection.description
+            row.status = record.collection.status
             row.updated_at = _datetime(record.updated_at)
             return True
 
@@ -166,7 +169,7 @@ class PostgresCollectionRepository:
     async def add_documents(
         self,
         collection_id: str,
-        documents: tuple[DocumentAggregate, ...],
+        documents: tuple[StoredDocument, ...],
         *,
         updated_at: str,
     ) -> None:
@@ -194,13 +197,13 @@ class PostgresCollectionRepository:
                     )
                 )
             )
-            if len({item.document_id for item in documents}) != len(documents) or any(
-                item.document_id in existing_ids for item in documents
-            ):
+            if len({item.document.document_id for item in documents}) != len(
+                documents
+            ) or any(item.document.document_id in existing_ids for item in documents):
                 raise ValueError("document already exists")
-            if len({item.sha256 for item in documents}) != len(documents) or any(
-                item.sha256 in existing_hashes for item in documents
-            ):
+            if len({item.document.sha256 for item in documents}) != len(
+                documents
+            ) or any(item.document.sha256 in existing_hashes for item in documents):
                 raise ValueError("document content already exists in collection")
             next_order = int(
                 await session.scalar(
@@ -216,18 +219,19 @@ class PostgresCollectionRepository:
             collection.status = "uploaded"
             collection.updated_at = _datetime(updated_at)
 
-    async def update_document(self, record: DocumentAggregate) -> bool:
+    async def update_document(self, record: StoredDocument) -> bool:
         async with self.session_factory.begin() as session:
-            row = await session.get(Document, record.document_id)
+            document = record.document
+            row = await session.get(Document, document.document_id)
             if row is None:
                 return False
-            row.original_filename = record.original_filename
+            row.original_filename = document.original_filename
             row.stored_filename = record.stored_filename
             row.storage_key = record.storage_key
-            row.sha256 = record.sha256
-            row.media_type = record.media_type
-            row.status = record.status
-            row.size_bytes = record.size_bytes
+            row.sha256 = document.sha256
+            row.media_type = document.media_type
+            row.status = document.status
+            row.size_bytes = document.size_bytes
             row.updated_at = _datetime(record.updated_at or record.created_at)
             return True
 
@@ -242,14 +246,16 @@ class PostgresCollectionRepository:
 
 def _to_collection(
     row: Collection,
-    documents: tuple[DocumentAggregate, ...],
-) -> CollectionAggregate:
-    return CollectionAggregate(
-        collection_id=row.collection_id,
-        owner_user_id=row.owner_user_id,
-        name=row.name,
-        description=row.description,
-        status=row.status,
+    documents: tuple[StoredDocument, ...],
+) -> StoredCollection:
+    return StoredCollection(
+        collection=CollectionAggregate(
+            collection_id=row.collection_id,
+            owner_user_id=row.owner_user_id,
+            name=row.name,
+            description=row.description,
+            status=row.status,
+        ),
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
         documents=documents,
@@ -258,19 +264,19 @@ def _to_collection(
 
 def _document_row(
     collection_id: str,
-    record: DocumentAggregate,
+    record: StoredDocument,
     document_order: int,
 ) -> Document:
     return Document(
-        document_id=record.document_id,
+        document_id=record.document.document_id,
         collection_id=collection_id,
-        original_filename=record.original_filename,
+        original_filename=record.document.original_filename,
         stored_filename=record.stored_filename,
         storage_key=record.storage_key,
-        sha256=record.sha256,
-        media_type=record.media_type,
-        status=record.status,
-        size_bytes=record.size_bytes,
+        sha256=record.document.sha256,
+        media_type=record.document.media_type,
+        status=record.document.status,
+        size_bytes=record.document.size_bytes,
         document_order=document_order,
         created_at=_datetime(record.created_at),
         updated_at=_datetime(record.updated_at or record.created_at),
@@ -280,37 +286,39 @@ def _document_row(
 def _to_document(
     row: Document,
     preparation_row: DocumentPreparationRow | None = None,
-) -> DocumentAggregate:
+) -> StoredDocument:
     profile_payload = dict(preparation_row.profile_json or {}) if preparation_row else {}
     source_fingerprint = preparation_row.source_fingerprint if preparation_row else None
     profile_fingerprint = profile_payload.get("profile_fingerprint")
-    return DocumentAggregate(
-        document_id=row.document_id,
-        original_filename=row.original_filename,
+    return StoredDocument(
+        document=DocumentAggregate(
+            document_id=row.document_id,
+            original_filename=row.original_filename,
+            sha256=row.sha256,
+            media_type=row.media_type,
+            status=row.status,
+            size_bytes=row.size_bytes,
+            parser_version=preparation_row.parser_version if preparation_row else None,
+            document_analysis_version=profile_payload.get("profile_version"),
+            source_fingerprint=source_fingerprint,
+            profile_fingerprint=profile_fingerprint,
+            # A fully prepared document uses the profile fingerprint as its
+            # preparation identity.  Source-only fixtures and documents that are
+            # still between parsing and profile generation retain a usable
+            # source identity until the profile artifact is available.
+            preparation_fingerprint=profile_fingerprint or source_fingerprint,
+        ),
         stored_filename=row.stored_filename,
         storage_key=row.storage_key,
-        sha256=row.sha256,
-        media_type=row.media_type,
-        status=row.status,
-        size_bytes=row.size_bytes,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
-        parser_version=preparation_row.parser_version if preparation_row else None,
-        document_analysis_version=profile_payload.get("profile_version"),
-        source_fingerprint=source_fingerprint,
-        profile_fingerprint=profile_fingerprint,
-        # A fully prepared document uses the profile fingerprint as its
-        # preparation identity.  Source-only fixtures and documents that are
-        # still between parsing and profile generation retain a usable
-        # source identity until the profile artifact is available.
-        preparation_fingerprint=profile_fingerprint or source_fingerprint,
     )
 
 
 async def _documents_for_collection(
     session: AsyncSession,
     collection_id: str,
-) -> tuple[DocumentAggregate, ...]:
+) -> tuple[StoredDocument, ...]:
     rows = await session.execute(
         select(Document, DocumentPreparationRow)
         .outerjoin(

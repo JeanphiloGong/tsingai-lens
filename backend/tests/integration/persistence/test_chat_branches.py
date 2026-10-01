@@ -6,24 +6,43 @@ from hashlib import sha256
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-import pytest
 from sqlalchemy import inspect
 
-from application.auth.session_service import AuthSessionService, SESSION_COOKIE_NAME
-from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
+from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
+from application.chat import (
+    CapabilityRegistry,
+    ModelToolCall,
+    ModelTurn,
+    ResearchAgentRunner,
+)
 from application.chat.session_service import ChatSessionService
+from application.repositories.collection_repository import (
+    StoredCollection,
+    StoredDocument,
+)
 from application.source.collection_service import CollectionService
 from controllers.chat.sessions import router
-from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext, ChatToolCall, ChatToolResult, ToolRisk
+from domain.chat import (
+    ChatMessage,
+    ChatResourceRef,
+    ChatSession,
+    ChatSourceContext,
+    ChatToolCall,
+    ChatToolResult,
+    ToolRisk,
+)
 from domain.source import Collection, Document, SourceBlock, SourceDocument
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 from tests.unit.application.test_chat_session_service import _WriteCapability
 from tests.unit.application.test_research_agent_runner import _Model
 
@@ -56,15 +75,38 @@ async def branch_app(postgres_session_factory, tmp_path):
         users.append(await auth.create_user(email=email, password="synthetic-test-password"))
         cookies.append((await auth.login(email=email, password="synthetic-test-password"))["session_id"])
     collections = PostgresCollectionRepository(postgres_session_factory)
-    await collections.add_collection(Collection.create(
-        collection_id="collection", owner_user_id=users[0]["user_id"], name="LPBF comparison",
-        description=None, now_iso=NOW,
-    ))
-    await collections.add_documents("collection", (Document(
-        document_id="paper", original_filename="lpbf.pdf", stored_filename="lpbf.pdf",
-        storage_key="synthetic/lpbf.pdf", sha256="a" * 64, media_type="application/pdf",
-        status="ready", size_bytes=100, created_at=NOW,
-    ),), updated_at=NOW)
+    await collections.add_collection(
+        StoredCollection(
+            collection=Collection(
+                collection_id="collection",
+                owner_user_id=users[0]["user_id"],
+                name="LPBF comparison",
+                description=None,
+                status="idle",
+            ),
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    await collections.add_documents(
+        "collection",
+        (
+            StoredDocument(
+                document=Document(
+                    document_id="paper",
+                    original_filename="lpbf.pdf",
+                    sha256="a" * 64,
+                    media_type="application/pdf",
+                    status="ready",
+                    size_bytes=100,
+                ),
+                stored_filename="lpbf.pdf",
+                storage_key="synthetic/lpbf.pdf",
+                created_at=NOW,
+            ),
+        ),
+        updated_at=NOW,
+    )
     repository = PostgresChatRepository(postgres_session_factory)
     chat = ChatSession.create(session_id="original", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW)
     await repository.add_session(chat)

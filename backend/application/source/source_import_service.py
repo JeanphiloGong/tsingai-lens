@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from application.repositories.collection_repository import CollectionRepository
+from application.repositories.collection_repository import (
+    CollectionRepository,
+    StoredDocument,
+)
+from application.source.collection_service import collection_details, document_details
 from domain.source import Document
 from application.repositories.object_store import ObjectStore
 from infra.source.ingestion import (
@@ -110,7 +114,7 @@ class SourceImportService:
             )
 
         text_by_source_document = self._group_text_units(batch)
-        created_documents: list[Document] = []
+        created_documents: list[StoredDocument] = []
         try:
             for document in batch.documents:
                 stored_filename = document.stored_filename or (
@@ -125,15 +129,17 @@ class SourceImportService:
                 payload_sha256 = sha256(payload).hexdigest()
                 self.object_store.write(storage_key, payload, payload_sha256)
                 created_documents.append(
-                    Document(
-                        document_id=f"doc_{uuid4().hex[:12]}",
-                        original_filename=document.original_filename,
+                    StoredDocument(
+                        document=Document(
+                            document_id=f"doc_{uuid4().hex[:12]}",
+                            original_filename=document.original_filename,
+                            sha256=payload_sha256,
+                            media_type=document.media_type,
+                            status="stored",
+                            size_bytes=len(payload),
+                        ),
                         stored_filename=stored_filename,
                         storage_key=storage_key,
-                        sha256=payload_sha256,
-                        media_type=document.media_type,
-                        status="stored",
-                        size_bytes=len(payload),
                         created_at=_now_iso(),
                         updated_at=_now_iso(),
                     )
@@ -156,13 +162,13 @@ class SourceImportService:
                 if record.storage_key not in registered_keys:
                     self.object_store.delete(record.storage_key)
             raise
-        return [record.to_record() for record in created_documents]
+        return [document_details(record) for record in created_documents]
 
     async def _get_collection(self, collection_id: str) -> dict[str, Any]:
         record = await self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return record.to_record()
+        return collection_details(record)
 
     @staticmethod
     def _input_storage_key(collection_id: str, stored_filename: str) -> str:

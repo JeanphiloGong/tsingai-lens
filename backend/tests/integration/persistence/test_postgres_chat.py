@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from application.repositories.auth_repository import AuthUserRecord
-
-from domain.chat import ChatToolRequest
-
 import pytest
 
+from application.repositories.auth_repository import AuthUserRecord
+from application.repositories.collection_repository import StoredCollection
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
+    ChatToolRequest,
     ChatToolResult,
     ToolCallStatus,
     ToolRisk,
@@ -22,7 +21,6 @@ from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
-
 
 pytestmark = pytest.mark.anyio
 
@@ -38,12 +36,16 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         "created_at": "2026-08-19T00:00:00+00:00",
     }
     await PostgresAuthRepository(postgres_session_factory).add_user(AuthUserRecord(**user))
-    collection = Collection.create(
-        collection_id="col-chat",
-        owner_user_id=user["user_id"],
-        name="Agent collection",
-        description=None,
-        now_iso="2026-08-19T00:00:00+00:00",
+    collection = StoredCollection(
+        collection=Collection(
+            collection_id="col-chat",
+            owner_user_id=user["user_id"],
+            name="Agent collection",
+            description=None,
+            status="idle",
+        ),
+        created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:00:00+00:00",
     )
     await PostgresCollectionRepository(postgres_session_factory).add_collection(
         collection
@@ -52,7 +54,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     chat = ChatSession.create(
         session_id="chat-1",
         user_id=user["user_id"],
-        collection_id=collection.collection_id,
+        collection_id=collection.collection.collection_id,
         created_at="2026-08-19T00:00:00+00:00",
     )
     await repository.add_session(chat)

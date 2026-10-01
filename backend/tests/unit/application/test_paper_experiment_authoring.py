@@ -342,7 +342,12 @@ class _CollectionService:
         return {"collection_id": collection_id, "owner_user_id": user_id}
 
     async def get_document(self, collection_id, document_id):
-        return SimpleNamespace(preparation_fingerprint="prep-1")
+        return SimpleNamespace(
+            document=SimpleNamespace(
+                preparation_fingerprint="prep-1",
+                source_fingerprint=None,
+            )
+        )
 
 
 async def test_review_digest_changes_when_source_analysis_advances():

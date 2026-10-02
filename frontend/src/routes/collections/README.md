@@ -144,7 +144,11 @@ This node owns the Collection route family.
 - `collections/[id]/feedback/+page.svelte`
   Fixed task workbenches for the current Collection: SFT, preference, and
   evaluation. Analysis workers continuously turn new feedback cases into
-  candidate samples; opening a task takes the user directly to its queue.
+  candidate samples; opening a task takes the user directly to its queue. The
+  dataset workbench keeps SFT, preference, and evaluation task tabs together,
+  exposes status filters and question search, and provides a header shortcut
+  that selects every confirmed sample before opening the existing export
+  preflight flow.
   The entry and all three annotation editors use the application's shared
   brand, surface, text, and state tokens in both light and dark themes. The
   entry uses a compact task selector; sample questions sit

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import {
 		ArrowLeft,
@@ -9,6 +10,7 @@
 		Download,
 		FileJson,
 		FileText,
+		Search,
 		RefreshCw,
 		ShieldCheck,
 		TriangleAlert
@@ -20,6 +22,7 @@
 		actOnDatasetSample,
 		downloadFeedbackDatasetExport,
 		fetchFeedbackDatasetExports,
+		fetchFeedbackDatasets,
 		fetchDatasetSample,
 		fetchDatasetSamples,
 		fetchFeedbackDataset,
@@ -33,6 +36,7 @@
 		type DatasetExportSummary,
 		type DatasetExportFormat,
 		type FeedbackDataset,
+		type FeedbackDatasetTaskType,
 		type RevisionContent
 	} from '../../../../../_shared/feedbackDatasets';
 	import SftAnnotation from './_components/SftAnnotation.svelte';
@@ -40,6 +44,7 @@
 	import EvaluationAnnotation from './_components/EvaluationAnnotation.svelte';
 
 	let dataset: FeedbackDataset | null = null;
+	let relatedDatasets: FeedbackDataset[] = [];
 	let samples: DatasetSample[] = [];
 	let selectedSample: DatasetSample | null = null;
 	let sampleDetail: DatasetSampleDetail | null = null;
@@ -65,6 +70,9 @@
 	let chosenExports: string[] = [];
 	let polling = false;
 	let caseQuestions: Record<string, string> = {};
+	let statusFilter = 'all';
+	let searchQuery = '';
+	let exportPanel: HTMLDetailsElement;
 
 	async function readSamples() {
 		const requestedDatasetId = datasetId;
@@ -75,6 +83,22 @@
 			items.push(...response.items);
 		} while (response.items.length === 200 && items.length < response.total);
 		return { items };
+	}
+
+	async function hydrateQueueQuestions(items: DatasetSample[], generation: number) {
+		const candidates = items.filter((item) => !caseQuestions[item.source_case_id]).slice(0, 30);
+		if (!candidates.length) return;
+		const updates = await Promise.all(candidates.map(async (item) => {
+			try {
+				const detail = await fetchDatasetSample(datasetId, item.sample_id);
+				return [item.source_case_id, detail.source_case.question] as const;
+			} catch {
+				return null;
+			}
+		}));
+		if (generation !== loadGeneration) return;
+		const next = Object.fromEntries(updates.filter((entry): entry is readonly [string, string] => Boolean(entry)));
+		if (Object.keys(next).length) caseQuestions = { ...caseQuestions, ...next };
 	}
 	$: exportSelection = chosenExports.filter((id) => samples.some((item) => item.sample_id === id && item.status === 'confirmed'));
 
@@ -91,6 +115,7 @@
 			const response = await readSamples();
 			if (generation !== loadGeneration) return;
 			samples = response.items;
+			void hydrateQueueQuestions(samples, generation);
 			const updated = samples.find((item) => item.sample_id === selectedSample?.sample_id);
 			if (updated && ['pending', 'building'].includes(selectedSample?.status ?? '') && updated.status !== selectedSample?.status) await selectSample(updated, generation);
 		} catch (err) { if (generation === loadGeneration) error = errorMessage(err); }
@@ -102,6 +127,19 @@
 	$: pendingCount = samples.filter((item) => item.status === 'needs_confirmation').length;
 	$: inputCount = samples.filter((item) => item.status === 'needs_input').length;
 	$: confirmedCount = samples.filter((item) => item.status === 'confirmed').length;
+	$: failedCount = samples.filter((item) => item.status === 'build_failed').length;
+	$: filteredSamples = samples.filter((item) => {
+		const statusMatches = statusFilter === 'all' || item.status === statusFilter;
+		const query = searchQuery.trim().toLowerCase();
+		const question = (caseQuestions[item.source_case_id] ?? '').toLowerCase();
+		return statusMatches && (!query || question.includes(query));
+	});
+	$: currentTaskType = dataset?.task_type ?? 'sft';
+	$: taskTabs = (['sft', 'preference', 'evaluation'] as FeedbackDatasetTaskType[]).map((taskType) => ({
+		taskType,
+		label: taskLabel(taskType),
+		dataset: relatedDatasets.find((item) => item.task_type === taskType && item.construction_spec?.mode === 'automatic_feedback_workbench')
+	}));
 
 	$: if (datasetId && datasetId !== loadedDatasetId) {
 		loadedDatasetId = datasetId;
@@ -114,6 +152,7 @@
 		caseQuestions = {};
 		chosenExports = [];
 		dataset = null;
+		relatedDatasets = [];
 		samples = [];
 		selectedSample = null;
 		sampleDetail = null;
@@ -134,6 +173,8 @@
 		exportNotice = '';
 		allowPartialExport = false;
 		downloadingExport = '';
+		statusFilter = 'all';
+		searchQuery = '';
 	}
 
 	async function load(generation = loadGeneration) {
@@ -147,6 +188,14 @@
 			if (generation !== loadGeneration) return;
 			dataset = loadedDataset;
 			samples = response.items;
+			void hydrateQueueQuestions(samples, generation);
+			try {
+				const related = await fetchFeedbackDatasets(collectionId, { limit: 200 });
+				if (generation === loadGeneration) relatedDatasets = Array.isArray(related.items) ? related.items : [];
+			} catch {
+				// Older deployments may not expose the collection dataset listing here.
+				relatedDatasets = [];
+			}
 			try {
 				const exports = await fetchFeedbackDatasetExports(datasetId, { limit: 50 });
 				if (generation === loadGeneration) exportItems = exports.items;
@@ -384,6 +433,21 @@
 		}[taskType ?? 'sft'];
 	}
 
+	function openTask(taskType: FeedbackDatasetTaskType) {
+		const target = taskTabs.find((item) => item.taskType === taskType)?.dataset;
+		if (!target || target.dataset_id === datasetId) return;
+		void goto(resolve('/collections/[id]/feedback/datasets/[dataset_id]', {
+			id: collectionId,
+			dataset_id: target.dataset_id
+		}));
+	}
+
+	function openFullExport() {
+		chosenExports = samples.filter((item) => item.status === 'confirmed').map((item) => item.sample_id);
+		exportPreview = null;
+		if (exportPanel) exportPanel.open = true;
+	}
+
 	function previewRowSummary(row: DatasetExportPreview['sample_rows'][number]) {
 		if (dataset?.task_type === 'preference') {
 			return `A：${row.response_a_preview || '无'} · B：${row.response_b_preview || '无'} · 选择：${row.human_preference ?? '未选择'} · 证据 ${row.evidence_count} 段`;
@@ -402,16 +466,24 @@
 <main class="page-shell">
 	<header class="page-header">
 		<div>
-			<a class="back-link" href={resolve('/collections/[id]/feedback', { id: collectionId })}>
-				<ArrowLeft size={16} aria-hidden="true" />返回任务工作台
-			</a>
-			<div class="eyebrow">{taskLabel(dataset?.task_type)}</div>
+			<div class="header-line">
+				<a class="back-link" href={resolve('/collections/[id]/feedback', { id: collectionId })}>
+					<ArrowLeft size={16} aria-hidden="true" />返回任务工作台
+				</a>
+				<span class="header-context">反馈工作台</span>
+			</div>
 			<h1>{taskLabel(dataset?.task_type) || '加载工作台…'}</h1>
+			<p class="page-subtitle">逐条核对候选回答，确认后再交付训练文件</p>
 		</div>
 		<div class="header-actions">
-			<button class="icon-button" type="button" on:click={refresh} disabled={loading} title="刷新样本队列" aria-label="刷新样本队列">
+			<button class="toolbar-button" type="button" on:click={refresh} disabled={loading} title="刷新样本队列" aria-label="刷新样本队列">
 				<span class:spin={loading}><RefreshCw size={17} aria-hidden="true" /></span>
+				<span>刷新队列</span>
 			</button>
+			<button class="toolbar-button" type="button" on:click={openFullExport} disabled={confirmedCount === 0} title="导出全部已确认样本">
+				<Download size={16} aria-hidden="true" /><span class="export-label">导出全部已确认</span><span class="toolbar-count">{confirmedCount}</span>
+			</button>
+			<a class="toolbar-button toolbar-button--quiet" href={resolve('/collections/[id]/feedback', { id: collectionId })}>切换任务</a>
 		</div>
 	</header>
 
@@ -421,14 +493,38 @@
 	{#if loading}
 		<div class="loading" role="status"><span></span><span></span><span></span></div>
 	{:else}
-			<section class="summary-strip" aria-label="样本状态">
+			<nav class="task-tabs" aria-label="反馈任务类型">
+				{#each taskTabs as tab (tab.taskType)}
+					<button class:active={tab.taskType === currentTaskType} class="task-tab" type="button" on:click={() => openTask(tab.taskType)} disabled={!tab.dataset || tab.taskType === currentTaskType} aria-current={tab.taskType === currentTaskType ? 'page' : undefined}>
+						<span>{tab.label}</span>
+						{#if tab.dataset && tab.taskType === currentTaskType}<span class="task-tab__count">当前</span>{/if}
+					</button>
+				{/each}
+			</nav>
+
+			<section class="workbench-toolbar" aria-label="样本筛选">
+				<div class="status-tabs" role="tablist" aria-label="样本状态">
+					<button class:active={statusFilter === 'all'} type="button" role="tab" aria-selected={statusFilter === 'all'} on:click={() => statusFilter = 'all'}>全部 <span>{samples.length}</span></button>
+					<button class:active={statusFilter === 'needs_confirmation'} type="button" role="tab" aria-selected={statusFilter === 'needs_confirmation'} on:click={() => statusFilter = 'needs_confirmation'}>待确认 <span>{pendingCount}</span></button>
+					<button class:active={statusFilter === 'needs_input'} type="button" role="tab" aria-selected={statusFilter === 'needs_input'} on:click={() => statusFilter = 'needs_input'}>待补充 <span>{inputCount}</span></button>
+					<button class:active={statusFilter === 'build_failed'} type="button" role="tab" aria-selected={statusFilter === 'build_failed'} on:click={() => statusFilter = 'build_failed'}>构建失败 <span>{failedCount}</span></button>
+					<button class:active={statusFilter === 'confirmed'} type="button" role="tab" aria-selected={statusFilter === 'confirmed'} on:click={() => statusFilter = 'confirmed'}>已确认 <span>{confirmedCount}</span></button>
+				</div>
+				<label class="search-field" aria-label="搜索问题">
+					<Search size={16} aria-hidden="true" />
+					<input type="search" bind:value={searchQuery} placeholder="搜索问题" />
+				</label>
+			</section>
+
+			<section class="summary-strip" aria-label="样本状态摘要">
 				<div><strong>{samples.length}</strong><span>全部样本</span></div>
 				<div class="summary--attention"><strong>{pendingCount}</strong><span>待确认</span></div>
 				<div class="summary--input"><strong>{inputCount}</strong><span>待补充</span></div>
 				<div class="summary--done"><strong>{confirmedCount}</strong><span>已确认</span></div>
+				<div class="summary--failed"><strong>{failedCount}</strong><span>构建失败</span></div>
 			</section>
 
-			<details class="export-panel">
+			<details class="export-panel" bind:this={exportPanel}>
 				<summary>{$t('taskDatasets.exportTitle')} · {confirmedCount}</summary>
 				<div class="export-heading">
 					<div>
@@ -439,7 +535,7 @@
 					<div class="export-heading-meta">
 						<span class="export-count"><ShieldCheck size={15} aria-hidden="true" />{confirmedCount} 条已确认</span>
 						<span>{$t('taskDatasets.selected', { count: exportSelection.length })}</span>
-						<button class="secondary-button" type="button" on:click={() => { chosenExports = samples.filter((item) => item.status === 'confirmed').map((item) => item.sample_id); exportPreview = null; }} disabled={confirmedCount === 0}>{$t('taskDatasets.selectAll')}</button>
+						<button class="secondary-button" type="button" on:click={openFullExport} disabled={confirmedCount === 0}>{$t('taskDatasets.selectAll')}</button>
 						<button class="secondary-button" type="button" on:click={runExportPreview} disabled={exportLoading || exportPublishing || exportSelection.length === 0}>
 							<FileJson size={16} aria-hidden="true" />{exportLoading ? '正在检查…' : '检查导出'}
 						</button>
@@ -527,9 +623,11 @@
 				</div>
 				{#if !samples.length}
 					<div class="queue-empty"><FileText size={22} aria-hidden="true" /><p>还没有候选样本。</p><small>后台 Worker 会持续整理当前 Collection 的反馈案例。</small></div>
+				{:else if !filteredSamples.length}
+					<div class="queue-empty"><Search size={22} aria-hidden="true" /><p>没有匹配的样本。</p><small>调整状态筛选或搜索关键词后再试。</small></div>
 				{:else}
 					<div class="queue-list">
-						{#each samples as item (item.sample_id)}
+						{#each filteredSamples as item (item.sample_id)}
 							<div class="queue-row">
 								{#if item.status === 'confirmed'}<input type="checkbox" aria-label={$t('taskDatasets.selectExport')} value={item.sample_id} bind:group={chosenExports} on:change={() => exportPreview = null} />{/if}
 							<button class:active={selectedSample?.sample_id === item.sample_id} class="queue-item" type="button" on:click={() => selectSample(item)}>
@@ -551,13 +649,13 @@
 				{:else if editorError && !sampleDetail}
 					<div class="detail-error" role="alert"><TriangleAlert size={22} aria-hidden="true" /><p>{editorError}</p><button type="button" on:click={() => selectedSample && selectSample(selectedSample)}>重新加载</button></div>
 				{:else}
-						{#if dataset?.task_type === 'preference'}
-							<PreferenceAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
-						{:else if dataset?.task_type === 'evaluation'}
-							<EvaluationAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
-						{:else}
-							<SftAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
-						{/if}
+					{#if dataset?.task_type === 'preference'}
+						<PreferenceAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
+					{:else if dataset?.task_type === 'evaluation'}
+						<EvaluationAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
+					{:else}
+						<SftAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />
+					{/if}
 				{/if}
 			</section>
 		</div>
@@ -570,26 +668,47 @@
 	.queue-row > input { flex: 0 0 auto; margin-left: 12px; }
 	.queue-row .queue-item { flex: 1; min-width: 0; }
 	:global(button) { font: inherit; }
-	.page-shell { width: 100%; box-sizing: border-box; margin: 0; padding: 24px; background: var(--surface-card); color: var(--text-primary); }
-	.page-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 24px; }
+	.page-shell { width: 100%; max-width: 1600px; box-sizing: border-box; margin: 0 auto; padding: 28px 32px 64px; background: var(--surface-card); color: var(--text-primary); }
+	.page-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 18px; }
+	.header-line { display: flex; align-items: center; gap: 14px; }
+	.header-context { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
 	.back-link { display: inline-flex; gap: 7px; align-items: center; color: var(--text-secondary); font-size: 13px; text-decoration: none; }
 	.back-link:hover { color: var(--brand-primary); }
 	.eyebrow { color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }
-	h1 { margin: 7px 0 5px; font-size: 28px; line-height: 1.15; letter-spacing: 0; }
+	h1 { margin: 18px 0 4px; font-size: 30px; line-height: 1.15; letter-spacing: 0; }
+	.page-subtitle { margin: 0; color: var(--text-secondary); font-size: 13px; }
 	.header-actions { display: flex; gap: 12px; align-items: center; }
-	.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); cursor: pointer; }
-	.icon-button:hover:not(:disabled) { border-color: var(--brand-primary); color: var(--brand-primary); }
-	.icon-button:disabled { cursor: not-allowed; opacity: .5; }
+	.toolbar-button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; min-height: 36px; border: 1px solid var(--brand-primary); border-radius: 6px; background: var(--brand-primary); color: white; padding: 0 12px; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
+	.toolbar-button:hover:not(:disabled) { background: var(--brand-primary-hover); color: white; }
+	.toolbar-button--quiet { border-color: var(--border-strong); background: var(--surface-card); color: var(--text-secondary); }
+	.toolbar-button--quiet:hover { border-color: var(--brand-primary); background: var(--brand-soft); color: var(--brand-primary); }
+	.toolbar-button:disabled { cursor: not-allowed; opacity: .5; }
+	.toolbar-count { min-width: 18px; border-radius: 999px; background: rgb(255 255 255 / 18%); padding: 2px 5px; text-align: center; font-size: 10px; }
 	.spin { display: inline-flex; }
 	.spin :global(svg) { animation: spin 1s linear infinite; }
+	.task-tabs { display: flex; gap: 2px; margin: 0 -4px 16px; border-bottom: 1px solid var(--border-default); overflow-x: auto; }
+	.task-tab { display: inline-flex; gap: 8px; align-items: center; min-height: 44px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); padding: 0 16px; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+	.task-tab:hover:not(:disabled) { color: var(--brand-primary); }
+	.task-tab.active { border-bottom-color: var(--brand-primary); color: var(--brand-primary); }
+	.task-tab:disabled { cursor: default; }
+	.task-tab__count { border-radius: 999px; background: var(--brand-soft); padding: 3px 7px; color: var(--brand-primary); font-size: 10px; font-weight: 700; }
+	.workbench-toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 14px; }
+	.status-tabs { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
+	.status-tabs button { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-secondary); padding: 0 9px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+	.status-tabs button:hover { background: var(--bg-subtle); color: var(--text-primary); }
+	.status-tabs button.active { border-color: var(--border-strong); background: var(--surface-card); color: var(--text-primary); box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
+	.status-tabs span { color: var(--text-tertiary, var(--text-secondary)); font-variant-numeric: tabular-nums; }
+	.search-field { display: flex; flex: 0 1 220px; gap: 8px; align-items: center; min-height: 34px; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); padding: 0 10px; }
+	.search-field input { min-width: 0; border: 0; outline: 0; background: transparent; padding: 0; }
 	.alert { display: flex; gap: 8px; align-items: center; margin-bottom: 18px; border: 1px solid var(--danger-border); border-radius: 7px; background: var(--danger-bg); color: var(--danger-text); padding: 11px 13px; font-size: 13px; }
-	.summary-strip { display: flex; flex-wrap: wrap; gap: 24px; padding-block: 16px; margin-bottom: 20px; border-block: 1px solid var(--border-default); }
+	.summary-strip { display: flex; flex-wrap: wrap; gap: 24px; padding: 12px 16px; margin-bottom: 18px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-subtle); }
 	.summary-strip > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
 	.summary-strip strong { font-size: 18px; line-height: 1; }
 	.summary-strip span { color: var(--text-secondary); font-size: 12px; }
 	.summary--attention strong { color: var(--warning-text); }
 	.summary--input strong { color: var(--warning-text); }
 	.summary--done strong { color: var(--success-text); }
+	.summary--failed strong { color: var(--danger-text); }
 	.workbench { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; gap: 18px; }
 	.queue { position: sticky; top: 18px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface-card); overflow: hidden; }
 	.queue-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 18px 18px 15px; border-bottom: 1px solid var(--border-default); }
@@ -683,5 +802,5 @@
 	@keyframes pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 	@media (max-width: 900px) { .page-shell { padding: 22px 17px 56px; } .workbench { grid-template-columns: 1fr; } .queue { position: static; } .queue-list { display: flex; max-height: none; overflow-x: auto; } .queue-item { min-width: 245px; border-right: 1px solid var(--bg-subtle); border-bottom: 0; } }
 	@media (max-width: 760px) { .export-heading { display: block; } .export-heading-meta { justify-content: space-between; margin-top: 14px; } .export-subheading { display: block; } .export-subheading span { display: block; margin-top: 3px; } .export-footer { align-items: flex-start; flex-direction: column; } .export-history-row { align-items: flex-start; flex-direction: column; } .download-actions { justify-content: flex-start; } }
-	@media (max-width: 560px) { .page-header { display: block; } .header-actions { justify-content: space-between; margin-top: 15px; } .summary-strip { display: grid; grid-template-columns: repeat(2, 1fr); } .summary-strip > div { min-width: 0; } .queue-list { display: grid; } .queue-item { min-width: 0; border-right: 0; border-bottom: 1px solid var(--bg-subtle); } .export-heading, .export-preview { padding-left: 16px; padding-right: 16px; } .export-history { margin-left: 16px; margin-right: 16px; } .export-metrics strong { font-size: 18px; } .export-issue, .preview-row { align-items: flex-start; flex-direction: column; gap: 6px; } .preview-row > div { max-width: 100%; } }
+	@media (max-width: 560px) { .page-shell { padding: 18px 12px 44px; } .page-header { display: block; } .header-actions { justify-content: space-between; margin-top: 15px; } .header-actions .toolbar-button { flex: 1; min-width: 0; padding-inline: 8px; } .export-label { display: none; } .task-tabs { margin-inline: -2px; } .task-tab { padding-inline: 12px; } .workbench-toolbar { display: block; } .status-tabs { padding-bottom: 4px; } .search-field { max-width: none; margin-top: 8px; } .summary-strip { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; } .summary-strip > div { min-width: 0; } .queue-list { display: grid; } .queue-item { min-width: 0; border-right: 0; border-bottom: 1px solid var(--bg-subtle); } .export-heading, .export-preview { padding-left: 16px; padding-right: 16px; } .export-history { margin-left: 16px; margin-right: 16px; } .export-metrics strong { font-size: 18px; } .export-issue, .preview-row { align-items: flex-start; flex-direction: column; gap: 6px; } .preview-row > div { max-width: 100%; } }
 </style>

@@ -177,4 +177,11 @@
 	input[type="radio"] { accent-color: var(--brand-primary); }
 	.actions button.primary:hover:not(:disabled) { color: white; background: var(--brand-primary-hover); }
 	@media (max-width: 760px) { .annotation-grid { display: block; } .evidence-column { border-top: 1px solid var(--border-default); } }
+
+	/* P1 keeps both answers together while the evidence rail stays visible beside them. */
+	.annotation-grid { grid-template-columns: minmax(0, 1fr) minmax(280px, .38fr); align-items: stretch; }
+	.question-column { grid-column: 1; grid-row: 1; border-bottom: 1px solid var(--border-default); }
+	.editor-column { grid-column: 1; grid-row: 2; }
+	.evidence-column { grid-column: 2; grid-row: 1 / span 2; border-left: 1px solid var(--border-default); }
+	@media (max-width: 760px) { .annotation-grid { display: block; } .question-column, .editor-column, .evidence-column { grid-column: auto; grid-row: auto; } .evidence-column { border-left: 0; } }
 </style>

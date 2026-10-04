@@ -375,12 +375,23 @@ Worker reads the case's frozen context
 and readable evidence, writes an immutable task-specific candidate
 revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
 builders use the configured model to generate missing answers or criteria from
-the readable evidence. Preference rebuilds pass the review note and the current
+the readable evidence. A first Preference build uses the configured model to
+assess the fixed answer pair against its shared readable evidence without
+rewriting or swapping either answer. It records `suggested_preference`
+(`a`, `b`, `tie`, or `unclear`) and a nonempty evidence-grounded `rationale`,
+while leaving `human_preference` unset. Missing assessment configuration leaves
+an unassessed pair in `needs_input`; invalid or unexplained model opinions are
+technical build failures. Preference rebuilds pass the review note and the current
 answer pair to the configured model when its source digest and construction
 version still match, preserving the review input and recording which revision
 was reviewed. A changed source is rebuilt from the current case evidence.
 The model may revise the requested answer or its
-suggestion and rationale; it cannot supply a human preference. An invalid or
+suggestion and rationale; it cannot supply a human preference. The browser
+displays the suggestion and rationale beside the answer pair. Accepting the
+suggestion or choosing another preference is an explicit reviewer decision.
+Confirmation saves any local Preference changes first and confirms exactly
+the revision returned by that save through the existing PATCH and confirm
+endpoints; a failed save cannot submit a confirmation. An invalid or
 unchanged result does not become a new confirmed sample.
 Missing evidence or an explicit model abstention produces `needs_input`;
 provider errors and invalid responses produce `build_failed`. No Worker result

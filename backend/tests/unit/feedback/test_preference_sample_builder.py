@@ -67,6 +67,7 @@ async def test_builder_creates_same_input_pair_without_selecting_for_human() -> 
                 "original_answer": "回答 A",
                 "candidate_target": "回答 B",
                 "suggested_preference": "b",
+                "rationale": "回答 B 与图注一致。",
                 "inspected_sources": [
                     {"document_title": "文献 B", "source_ref": "source-b", "quote": "图注原文"}
                 ],
@@ -80,6 +81,83 @@ async def test_builder_creates_same_input_pair_without_selecting_for_human() -> 
     assert result.content.suggested_preference == "b"
     assert result.provenance["input_digest_a"] == result.provenance["input_digest_b"]
     assert "source_ref" not in result.content.context[0]
+
+
+@pytest.mark.parametrize("choice", ["a", "b", "tie", "unclear"])
+async def test_first_build_assesses_fixed_answers_without_selecting_for_human(choice) -> None:
+    class Generator:
+        model_name = "preference-judge"
+
+        async def generate(self, **inputs):
+            assert inputs["review_note"] is None
+            assert inputs["snapshot"]["response_a"] == "B 没有预热。"
+            assert inputs["snapshot"]["response_b"] == "B 预热到 200 C。"
+            assert inputs["context"] == ({"document_title": "B", "text": "Preheated at 200 C."},)
+            return {"suggested_preference": choice, "rationale": "根据原文核对预热条件。", "missing_reasons": []}
+
+    result = await PreferenceSampleBuilder(generator=Generator()).build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({
+            "question": "B 的预热条件是什么？", "answer": "B 没有预热。",
+            "corrected_answer": "B 预热到 200 C。", "pairing_assessment": {"task_relation": "same_task"},
+            "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}],
+        }),
+    )
+    assert isinstance(result, PreferenceBuildCandidate)
+    assert result.content.response_a == "B 没有预热。"
+    assert result.content.response_b == "B 预热到 200 C。"
+    assert result.content.suggested_preference == choice
+    assert result.content.rationale == "根据原文核对预热条件。"
+    assert result.content.human_preference is None
+    assert result.provenance["builder"] == "preference-judge"
+    assert result.provenance["candidate_origin"] == "model_assessment"
+
+
+@pytest.mark.parametrize("assessment", [
+    {"suggested_preference": None, "rationale": "缺少判断。"},
+    {"suggested_preference": "b_preferred", "rationale": "无效选择。"},
+    {"suggested_preference": "b", "rationale": " "},
+    {"suggested_preference": "b", "rationale": 1},
+])
+async def test_first_build_rejects_an_invalid_or_unexplained_opinion(assessment) -> None:
+    class Generator:
+        model_name = "preference-judge"
+
+        async def generate(self, **inputs):
+            return assessment
+
+    with pytest.raises(ValueError, match="sample_generation_preference_"):
+        await PreferenceSampleBuilder(generator=Generator()).build(
+            dataset=_dataset(), sample=_sample(), annotation=None,
+            case=_case({"question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
+                "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
+        )
+
+
+async def test_first_build_abstains_on_missing_evidence_without_inventing_an_opinion() -> None:
+    class Generator:
+        model_name = "preference-judge"
+
+        async def generate(self, **inputs):
+            return {"missing_reasons": ["measurement_context_missing"]}
+
+    result = await PreferenceSampleBuilder(generator=Generator()).build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
+            "inspected_sources": [{"document_title": "B", "quote": "Processing conditions varied."}]}),
+    )
+    assert isinstance(result, PreferenceBuildNeedsInput)
+    assert result.missing_reasons == ("measurement_context_missing",)
+
+
+async def test_first_build_does_not_publish_an_unassessed_pair_without_a_generator() -> None:
+    result = await PreferenceSampleBuilder().build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
+            "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
+    )
+    assert isinstance(result, PreferenceBuildNeedsInput)
+    assert result.missing_reasons == ("preference_assessment_generator_unavailable",)
 
 
 async def test_builder_rejects_missing_or_identical_pair() -> None:

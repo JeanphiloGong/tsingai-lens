@@ -3145,6 +3145,10 @@ const translations: Record<Language, Translations> = {
 			reasonOther: 'Could not include this selection'
 		},
 		taskDatasets: {
+			workerRecommendation: 'Worker recommendation',
+			noRecommendation: 'No recommendation yet',
+			acceptRecommendation: 'Accept recommendation',
+			preferenceChoices: { a: 'A is better', b: 'B is better', tie: 'Equal quality', unclear: 'Cannot determine' },
 			criteria: 'Evaluation criteria',
 			criterion: 'Evaluation criterion {count}',
 			addCriterion: 'Add criterion',
@@ -6181,6 +6185,10 @@ const translations: Record<Language, Translations> = {
 			reasonOther: '无法纳入此选择'
 		},
 		taskDatasets: {
+			workerRecommendation: 'Worker 建议',
+			noRecommendation: '尚无建议',
+			acceptRecommendation: '采用建议',
+			preferenceChoices: { a: 'A 更好', b: 'B 更好', tie: '相当', unclear: '无法判断' },
 			criteria: '评分标准',
 			criterion: '评分标准 {count}',
 			addCriterion: '添加标准',

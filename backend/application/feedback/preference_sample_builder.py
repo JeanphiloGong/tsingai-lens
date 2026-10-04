@@ -118,7 +118,7 @@ class PreferenceSampleBuilder:
         rationale = _rationale(snapshot)
         if reviewing_previous:
             suggested, rationale = previous.suggested_preference, previous.rationale
-        if self.generator is not None and review_note and sources:
+        if self.generator is not None:
             value = await self.generator.generate(
                 task_type="preference",
                 question=question,
@@ -137,19 +137,28 @@ class PreferenceSampleBuilder:
             reasons = generation_missing_reasons(value)
             if reasons:
                 return PreferenceBuildNeedsInput(reasons)
-            if any(not isinstance(value.get(key), str) for key in ("response_a", "response_b", "rationale")):
-                raise ValueError("sample_generation_preference_responses_invalid")
-            response_a = strip_internal_references(value.get("response_a"))
-            response_b = strip_internal_references(value.get("response_b"))
-            if not response_a or not response_b:
-                raise ValueError("sample_generation_preference_responses_invalid")
-            if response_a == response_b:
-                raise ValueError("sample_generation_preference_responses_identical")
+            if review_note:
+                if any(not isinstance(value.get(key), str) for key in ("response_a", "response_b")):
+                    raise ValueError("sample_generation_preference_responses_invalid")
+                response_a = strip_internal_references(value.get("response_a"))
+                response_b = strip_internal_references(value.get("response_b"))
+                if not response_a or not response_b:
+                    raise ValueError("sample_generation_preference_responses_invalid")
+                if response_a == response_b:
+                    raise ValueError("sample_generation_preference_responses_identical")
             suggested = _choice_from_value(value.get("suggested_preference"))
+            if suggested is None:
+                raise ValueError("sample_generation_preference_choice_missing")
+            if not isinstance(value.get("rationale"), str):
+                raise ValueError("sample_generation_preference_rationale_invalid")
             rationale = strip_internal_references(value.get("rationale"))
+            if not rationale:
+                raise ValueError("sample_generation_preference_rationale_missing")
             generated = True
         elif review_note:
             return PreferenceBuildNeedsInput(("preference_rebuild_generator_unavailable",))
+        elif suggested is None or not rationale:
+            return PreferenceBuildNeedsInput(("preference_assessment_generator_unavailable",))
 
         context = tuple(sources)
         content = PreferenceRevisionContent(
@@ -174,7 +183,10 @@ class PreferenceSampleBuilder:
             "corrected_message_id": snapshot.get("corrected_message_id"),
             "pairing_basis": snapshot.get("pairing_basis", "same_case_review_input"),
             "pairing_assessment": assessment,
-            "candidate_origin": "model_rebuild" if generated else "persisted_answers",
+            "candidate_origin": (
+                "model_rebuild" if generated and review_note
+                else "model_assessment" if generated else "persisted_answers"
+            ),
             "reviewed_revision_id": previous_revision.revision_id if reviewing_previous else None,
             "source_signal_ids": list(case.source_signal_ids),
             "analysis_result_ids": list(case.analysis_result_ids),

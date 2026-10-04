@@ -183,6 +183,14 @@ the local draft. Users operate on questions, answers, and evidence text; sample,
 case, message, and source identities remain browser request parameters rather
 than visible labels. A reviewer can send a candidate back with a reason, retry
 a failed build, discard a sample, or restore it to an unconfirmed state.
+Preference review displays the Worker's recommendation and evidence-grounded
+rationale beside the unchanged answer pair. The reviewer explicitly accepts
+that recommendation or selects a different preference. Confirming saves any
+local preference changes and then confirms the returned revision, so no
+separate save click is required. If saving fails, confirmation is not sent;
+if confirmation fails after saving, the saved version and choice remain
+available for retry. Worker suggestions never populate the human choice
+without a reviewer action.
 The queue keeps discarded and incomplete samples reachable for recovery. All
 three task editors also open for `needs_input` samples without a revision.
 Users can complete a missing question, answer pair or reference and criteria,

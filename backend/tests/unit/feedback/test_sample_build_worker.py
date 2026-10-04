@@ -307,17 +307,29 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
         async def read_case(self, case_id: str):
             return case
 
+    class Generator:
+        model_name = "preference-judge"
+
+        async def generate(self, **inputs):
+            assert inputs["review_note"] is None
+            return {"suggested_preference": "b", "rationale": "回答 B 保留图注的条件。"}
+
     worker = DatasetSampleBuildWorker(
         job_repository=jobs,
         dataset_repository=_Datasets(dataset),
         sample_repository=samples,
         case_repository=Cases(),
+        builders={"preference": PreferenceSampleBuilder(generator=Generator())},
     )
     result = await worker.run_once()
 
     assert result.status == "succeeded"
     assert samples.revision is not None
     assert samples.revision.content.schema_version == "literature-preference.v1"
+    assert samples.revision.content.suggested_preference == "b"
+    assert samples.revision.content.rationale == "回答 B 保留图注的条件。"
+    assert samples.revision.content.human_preference is None
+    assert samples.sample.status == "needs_confirmation"
 
 
 def _job_for_case(case: FeedbackCase) -> AnalysisJob:

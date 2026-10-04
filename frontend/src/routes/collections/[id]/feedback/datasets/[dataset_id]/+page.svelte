@@ -332,16 +332,29 @@
 		}
 	}
 
-	async function confirmSample(event: CustomEvent<{ next: boolean }>) {
+	async function confirmSample(event: CustomEvent<{ next: boolean; content?: RevisionContent }>) {
 		if (!sampleDetail?.sample.current_revision_id || confirming || saving || acting) return;
 		const generation = loadGeneration;
+		const requestedDatasetId = datasetId;
 		const sampleId = sampleDetail.sample.sample_id;
-		const revisionId = sampleDetail.sample.current_revision_id;
+		let revisionId = sampleDetail.sample.current_revision_id;
 		confirming = true;
 		editorError = '';
 		notice = '';
 		try {
-			await confirmDatasetSample(datasetId, sampleId, revisionId);
+			if (event.detail.content) {
+				const saved = await updateDatasetSample(requestedDatasetId, sampleId, {
+					expected_revision_id: revisionId,
+					expected_generation: sampleDetail.sample.generation,
+					content: event.detail.content
+				});
+				if (!saved.current_revision_id) throw new Error('sample_current_revision_missing');
+				revisionId = saved.current_revision_id;
+				if (generation !== loadGeneration || selectedSample?.sample_id !== sampleId) return;
+				await reloadSelected(generation);
+				if (generation !== loadGeneration || selectedSample?.sample_id !== sampleId) return;
+			}
+			await confirmDatasetSample(requestedDatasetId, sampleId, revisionId);
 			await load(generation);
 			if (event.detail.next && generation === loadGeneration) {
 				const next = samples.find(

@@ -65,7 +65,7 @@ async def test_preference_rebuild_transmits_pair_note_and_explicit_choice_contra
             assert payload["response_a"] == "B had no preheating."
             assert payload["response_b"] == "B was preheated at 300 C."
             assert payload["review_note"] == "Keep A; correct B's temperature."
-            assert 'exactly "a", "b", "tie", "unclear", or JSON null' in request["messages"][0]["content"]
+            assert 'exactly "a", "b", "tie", or "unclear"' in request["messages"][0]["content"]
             return SimpleNamespace(choices=[SimpleNamespace(
                 finish_reason="stop", message=SimpleNamespace(content=json.dumps({
                     "response_a": payload["response_a"],
@@ -84,6 +84,35 @@ async def test_preference_rebuild_transmits_pair_note_and_explicit_choice_contra
         construction_spec={}, review_note="Keep A; correct B's temperature.",
     )
     assert value["response_b"] == "B was preheated at 200 C."
+    assert value["suggested_preference"] == "b"
+
+
+async def test_first_preference_assessment_requests_an_opinion_without_rewriting_answers():
+    class Completions:
+        async def create(self, **request):
+            payload = json.loads(request["messages"][1]["content"])
+            prompt = request["messages"][0]["content"]
+            assert payload["response_a"] == "B had no preheating."
+            assert payload["response_b"] == "B was preheated at 200 C."
+            assert payload["review_note"] is None
+            assert "Do not rewrite either answer" in prompt
+            assert '"tie"' in prompt and '"unclear"' in prompt
+            assert '"response_a":' not in prompt and '"response_b":' not in prompt
+            return SimpleNamespace(choices=[SimpleNamespace(
+                finish_reason="stop", message=SimpleNamespace(content=json.dumps({
+                    "suggested_preference": "b", "rationale": "The source reports preheating at 200 C.",
+                    "missing_reasons": [],
+                })),
+            )])
+
+    value = await OpenAIFeedbackSampleGenerator(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())), model="test-model",
+    ).generate(
+        task_type="preference", question="What was B's preheating?",
+        context=({"document_title": "B", "text": "Preheated at 200 C."},),
+        snapshot={"response_a": "B had no preheating.", "response_b": "B was preheated at 200 C."},
+        construction_spec={},
+    )
     assert value["suggested_preference"] == "b"
 
 

@@ -126,11 +126,51 @@ for (const width of [1440, 390]) {
 		await page.getByRole('button', { name: '保存修改' }).click();
 		await expect(page.getByRole('status')).toContainText('修改已保存');
 		await page.getByRole('button', { name: '确认样本' }).click();
-		await expect(page.getByText('已确认', { exact: true })).toBeVisible();
+		await expect(page.getByRole('region', { name: '样本编辑器' }).getByText('已确认', { exact: true })).toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
 		await page.screenshot({ path: testInfo.outputPath(`task-dataset-${width}.png`), fullPage: true });
 	});
 }
+
+test('a mobile reviewer can scan and select seven candidates without compressed queue items', async ({ page }) => {
+	await mockTaskDataset(page);
+	await page.setViewportSize({ width: 390, height: 900 });
+	const items = Array.from({ length: 7 }, (_, index) => ({
+		sample_id: `sample_${index + 1}`, dataset_id: datasetId, source_case_id: `case_${index + 1}`,
+		status: 'needs_confirmation', current_revision_id: `revision_${index + 1}`,
+		confirmed_revision_id: null, generation: 1, missing_reasons: [],
+		created_at: '2026-09-29T00:00:00Z', updated_at: '2026-09-29T00:00:00Z'
+	}));
+	await page.route(`**/api/v1/feedback-datasets/${datasetId}/samples**`, async route => {
+		const path = new URL(route.request().url()).pathname;
+		if (path.endsWith('/samples')) return route.fulfill(json({ items, total: items.length, limit: 200, offset: 0 }));
+		const item = items.find(sample => path.endsWith(`/${sample.sample_id}`));
+		if (!item) return route.fallback();
+		const question = `核查第 ${item.sample_id.slice(-1)} 个扫描条件的预测与实测屈服强度，并保留构建方向限制。`;
+		return route.fulfill(json({
+			sample: item,
+			source_case: { case_id: item.source_case_id, question, answer: '待核对的原始回答。',
+				status: 'needs_annotation', requested_scope: [], inspected_sources: [], omitted_candidates: [], gaps: [], context_snapshot: {} },
+			current_revision: { revision_id: item.current_revision_id, revision_no: 1, author_kind: 'worker', provenance: {},
+				content: { schema_version: 'literature-sft.v1', messages: [{ role: 'user', content: question }],
+					context: [{ document_title: '文献 A', text: '该组测试固定了构建方向。' }],
+					target: `第 ${item.sample_id.slice(-1)} 个扫描条件的候选回答。`,
+					evidence: [{ document_title: '文献 A', text: '该组测试固定了构建方向。' }] } },
+			confirmed_revision: null
+		}));
+	});
+	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
+	await expect(page.locator('.queue-item')).toHaveCount(7);
+	const queue = await page.locator('.queue-list').evaluate(element => ({
+		width: element.clientWidth, scrollWidth: element.scrollWidth,
+		itemWidths: [...element.querySelectorAll('.queue-row')].map(row => row.getBoundingClientRect().width)
+	}));
+	expect(queue.scrollWidth).toBeGreaterThan(queue.width);
+	expect(queue.itemWidths.every(width => width >= 220)).toBe(true);
+	await page.locator('.queue-item').last().click();
+	await expect(page.getByRole('textbox', { name: '回答内容' })).toHaveValue('第 7 个扫描条件的候选回答。');
+	expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
 
 test('a sample can be rebuilt, discarded, restored, and retried', async ({ page }) => {
 	const mock = await mockTaskDataset(page);

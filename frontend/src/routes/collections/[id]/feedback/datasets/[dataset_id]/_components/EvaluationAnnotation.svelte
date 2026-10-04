@@ -21,7 +21,7 @@
 	let loadedRevisionId = '';
 	let reference = '';
 	let question = '';
-	let criteriaText = '';
+	let criterionValues: string[] = [''];
 	let evaluationMode: 'reference' | 'rubric' = 'reference';
 	let evidence: Array<{ document_title: string; text: string }> = [];
 	let rebuildReason = '';
@@ -32,7 +32,7 @@
 		const content = sample.current_revision?.content as EvaluationRevisionContent | undefined;
 		question = content?.messages.filter(item => item.role === 'user').at(-1)?.content ?? sample.source_case.question;
 		reference = content?.reference ?? String(sample.source_case.context_snapshot.evaluation_reference ?? sample.source_case.context_snapshot.corrected_answer ?? '');
-		criteriaText = content?.criteria.join('\n') ?? '';
+		criterionValues = content?.criteria.length ? [...content.criteria] : [''];
 		evaluationMode = content?.evaluation_mode ?? 'reference';
 		evidence = content ? content.evidence.map((item) => ({ ...item })) : initialAnnotationEvidence(sample);
 		rebuildReason = '';
@@ -40,7 +40,7 @@
 
 	$: currentRevision = sample?.current_revision ?? null;
 	$: currentContent = currentRevision?.content as EvaluationRevisionContent | undefined;
-	$: criteria = criteriaText.split('\n').map((item) => item.trim()).filter(Boolean);
+	$: criteria = criterionValues.map((item) => item.trim()).filter(Boolean);
 	$: draftChanged = (canEdit && !currentContent) || Boolean(currentContent && (
 		reference.trim() !== currentContent.reference ||
 		JSON.stringify(criteria) !== JSON.stringify(currentContent.criteria) ||
@@ -48,7 +48,7 @@
 		JSON.stringify(evidence) !== JSON.stringify(currentContent.evidence)
 	));
 	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed' || sample?.sample.status === 'needs_input';
-	$: complete = Boolean(question.trim() && criteria.length && (evaluationMode === 'rubric' || reference.trim()) && evidence.length && evidence.every(item => item.document_title.trim() && item.text.trim()));
+	$: complete = Boolean(question.trim() && criteria.length && criterionValues.every(item => item.trim()) && (evaluationMode === 'rubric' || reference.trim()) && evidence.length && evidence.every(item => item.document_title.trim() && item.text.trim()));
 	$: canConfirm = Boolean(
 		currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged && complete &&
 		criteria.length && (evaluationMode === 'rubric' || reference.trim()) &&
@@ -81,17 +81,18 @@
 	}
 
 	function updateCriterion(index: number, value: string) {
-		const next = [...criteria];
+		const next = [...criterionValues];
 		next[index] = value;
-		criteriaText = next.join('\n');
+		criterionValues = next;
 	}
 
 	function addCriterion() {
-		criteriaText = [...criteria, '待补充评分标准'].join('\n');
+		criterionValues = [...criterionValues, ''];
 	}
 
 	function removeCriterion(index: number) {
-		criteriaText = criteria.filter((_, criterionIndex) => criterionIndex !== index).join('\n');
+		const next = criterionValues.filter((_, criterionIndex) => criterionIndex !== index);
+		criterionValues = next.length ? next : [''];
 	}
 </script>
 
@@ -111,15 +112,12 @@
 			{#if currentRevision || canEdit}
 				<span class="field-label">评测模式</span><div class="mode-toggle" role="group" aria-label="评测模式"><button class:active={evaluationMode === 'reference'} type="button" on:click={() => evaluationMode = 'reference'} disabled={!canEdit || saving || confirming || acting}>参考答案</button><button class:active={evaluationMode === 'rubric'} type="button" on:click={() => evaluationMode = 'rubric'} disabled={!canEdit || saving || confirming || acting}>评分标准</button></div>
 				<label for="evaluation-reference">参考答案{evaluationMode === 'rubric' ? '（可选）' : ''}</label><textarea id="evaluation-reference" bind:value={reference} rows="6" disabled={!canEdit || saving || confirming || acting} placeholder="写出可判定的参考结果"></textarea>
-				<div class="criteria-heading"><label for="evaluation-criteria">评分标准（每行一条）</label>{#if canEdit}<button class="criteria-add" type="button" on:click={addCriterion} disabled={saving || confirming || acting}><Plus size={14} aria-hidden="true" />添加标准</button>{/if}</div>
-				<textarea id="evaluation-criteria" class="criteria-source" aria-label="评分标准" bind:value={criteriaText} rows="2" disabled={!canEdit || saving || confirming || acting} placeholder="必须指出文献 B 的预热条件"></textarea>
-				{#if criteria.length > 1}
-					<div class="criteria-list" aria-label="逐条评分标准">
-						{#each criteria.slice(1) as criterion, index}
-							<div class="criterion-row"><span class="criterion-index">{index + 2}</span><textarea aria-label={`评分标准 ${index + 2}`} value={criterion} rows="2" on:input={(event) => updateCriterion(index + 1, (event.currentTarget as HTMLTextAreaElement).value)} disabled={!canEdit || saving || confirming || acting}></textarea>{#if canEdit}<button class="criterion-remove" type="button" aria-label={`删除评分标准 ${index + 2}`} title={`删除评分标准 ${index + 2}`} on:click={() => removeCriterion(index + 1)} disabled={saving || confirming || acting}><Trash2 size={14} aria-hidden="true" /></button>{/if}</div>
-						{/each}
-					</div>
-				{/if}
+				<div class="criteria-heading"><label for="evaluation-criteria">{$t('taskDatasets.criteria')}</label>{#if canEdit}<button class="criteria-add" type="button" on:click={addCriterion} disabled={saving || confirming || acting}><Plus size={14} aria-hidden="true" />{$t('taskDatasets.addCriterion')}</button>{/if}</div>
+				<div class="criteria-list" aria-label={$t('taskDatasets.criteria')}>
+					{#each criterionValues as criterion, index}
+						<div class="criterion-row"><span class="criterion-index">{index + 1}</span><textarea id={index === 0 ? 'evaluation-criteria' : `evaluation-criteria-${index + 1}`} aria-label={index === 0 ? $t('taskDatasets.criteria') : $t('taskDatasets.criterion', { count: index + 1 })} value={criterion} rows="2" on:input={(event) => updateCriterion(index, (event.currentTarget as HTMLTextAreaElement).value)} disabled={!canEdit || saving || confirming || acting}></textarea>{#if canEdit}<button class="criterion-remove" type="button" aria-label={$t('taskDatasets.removeCriterion', { count: index + 1 })} title={$t('taskDatasets.removeCriterion', { count: index + 1 })} on:click={() => removeCriterion(index)} disabled={saving || confirming || acting}><Trash2 size={14} aria-hidden="true" /></button>{/if}</div>
+					{/each}
+				</div>
 			{:else}<p class="missing">当前还没有可判定的评测标准。请补充标准后重新构建。</p>{/if}
 			{#if canEdit}<div class="actions"><button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !complete}><Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}</button><button class:primary={!draftChanged} type="button" on:click={() => dispatch('confirm', { next: false })} disabled={!canConfirm}><Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}</button><button type="button" on:click={() => dispatch('confirm', { next: true })} disabled={!canConfirm}>确认并下一条</button></div>{/if}
 			{#if draftChanged}<p class="draft-note" role="status">有未保存的修改，保存后才能确认。</p>{/if}
@@ -181,7 +179,6 @@
 	.mode-toggle button:disabled { cursor: not-allowed; opacity: .55; }
 	.criteria-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 	.criteria-heading label { margin-bottom: 6px; }
-	.criteria-source { min-height: 52px; }
 	.criteria-add { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface-card); color: var(--text-secondary); padding: 5px 8px; font-size: 11px; cursor: pointer; }
 	.criteria-add:hover:not(:disabled) { border-color: var(--brand-primary); color: var(--brand-primary); }
 	.criteria-list { display: grid; gap: 8px; margin-top: 10px; }

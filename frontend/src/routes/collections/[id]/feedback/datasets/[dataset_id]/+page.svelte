@@ -4,9 +4,9 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import {
-		ArrowLeft,
 		CheckCircle2,
-		Clock3,
+		LayoutGrid,
+		MessageCircle,
 		Download,
 		FileJson,
 		FileText,
@@ -445,7 +445,10 @@
 	function openFullExport() {
 		chosenExports = samples.filter((item) => item.status === 'confirmed').map((item) => item.sample_id);
 		exportPreview = null;
-		if (exportPanel) exportPanel.open = true;
+		if (exportPanel) {
+			exportPanel.open = true;
+			exportPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
 	}
 
 	function previewRowSummary(row: DatasetExportPreview['sample_rows'][number]) {
@@ -466,24 +469,16 @@
 <main class="page-shell">
 	<header class="page-header">
 		<div>
-			<div class="header-line">
-				<a class="back-link" href={resolve('/collections/[id]/feedback', { id: collectionId })}>
-					<ArrowLeft size={16} aria-hidden="true" />返回任务工作台
-				</a>
-				<span class="header-context">反馈工作台</span>
-			</div>
 			<h1>{taskLabel(dataset?.task_type) || '加载工作台…'}</h1>
 			<p class="page-subtitle">逐条核对候选回答，确认后再交付训练文件</p>
 		</div>
 		<div class="header-actions">
-			<button class="toolbar-button" type="button" on:click={refresh} disabled={loading} title="刷新样本队列" aria-label="刷新样本队列">
+			<button class="toolbar-button toolbar-button--icon" type="button" on:click={refresh} disabled={loading} title="刷新样本队列" aria-label="刷新样本队列">
 				<span class:spin={loading}><RefreshCw size={17} aria-hidden="true" /></span>
-				<span>刷新队列</span>
 			</button>
 			<button class="toolbar-button" type="button" on:click={openFullExport} disabled={confirmedCount === 0} title="导出全部已确认样本">
 				<Download size={16} aria-hidden="true" /><span class="export-label">导出全部已确认</span><span class="toolbar-count">{confirmedCount}</span>
 			</button>
-			<a class="toolbar-button toolbar-button--quiet" href={resolve('/collections/[id]/feedback', { id: collectionId })}>切换任务</a>
 		</div>
 	</header>
 
@@ -496,8 +491,8 @@
 			<nav class="task-tabs" aria-label="反馈任务类型">
 				{#each taskTabs as tab (tab.taskType)}
 					<button class:active={tab.taskType === currentTaskType} class="task-tab" type="button" on:click={() => openTask(tab.taskType)} disabled={!tab.dataset || tab.taskType === currentTaskType} aria-current={tab.taskType === currentTaskType ? 'page' : undefined}>
+						{#if tab.taskType === 'sft'}<MessageCircle size={16} aria-hidden="true" />{:else if tab.taskType === 'preference'}<LayoutGrid size={16} aria-hidden="true" />{:else}<CheckCircle2 size={16} aria-hidden="true" />{/if}
 						<span>{tab.label}</span>
-						{#if tab.dataset && tab.taskType === currentTaskType}<span class="task-tab__count">当前</span>{/if}
 					</button>
 				{/each}
 			</nav>
@@ -514,14 +509,6 @@
 					<Search size={16} aria-hidden="true" />
 					<input type="search" bind:value={searchQuery} placeholder="搜索问题" />
 				</label>
-			</section>
-
-			<section class="summary-strip" aria-label="样本状态摘要">
-				<div><strong>{samples.length}</strong><span>全部样本</span></div>
-				<div class="summary--attention"><strong>{pendingCount}</strong><span>待确认</span></div>
-				<div class="summary--input"><strong>{inputCount}</strong><span>待补充</span></div>
-				<div class="summary--done"><strong>{confirmedCount}</strong><span>已确认</span></div>
-				<div class="summary--failed"><strong>{failedCount}</strong><span>构建失败</span></div>
 			</section>
 
 			<details class="export-panel" bind:this={exportPanel}>
@@ -631,9 +618,6 @@
 							<div class="queue-row">
 								{#if item.status === 'confirmed'}<input type="checkbox" aria-label={$t('taskDatasets.selectExport')} value={item.sample_id} bind:group={chosenExports} on:change={() => exportPreview = null} />{/if}
 							<button class:active={selectedSample?.sample_id === item.sample_id} class="queue-item" type="button" on:click={() => selectSample(item)}>
-								<span class="queue-icon">
-									{#if item.status === 'confirmed'}<CheckCircle2 size={16} aria-hidden="true" />{:else if item.status === 'pending' || item.status === 'building'}<Clock3 size={16} aria-hidden="true" />{:else}<FileText size={16} aria-hidden="true" />{/if}
-								</span>
 								<span class="queue-copy"><strong title={caseQuestions[item.source_case_id]}>{caseQuestions[item.source_case_id] || statusLabel(item.status)}</strong><small>更新于 {formatDate(item.updated_at)}</small></span>
 								<span class="queue-status queue-status--{item.status}">{statusLabel(item.status)}</span>
 							</button>
@@ -668,62 +652,46 @@
 	.queue-row > input { flex: 0 0 auto; margin-left: 12px; }
 	.queue-row .queue-item { flex: 1; min-width: 0; }
 	:global(button) { font: inherit; }
-	.page-shell { width: 100%; max-width: 1600px; box-sizing: border-box; margin: 0 auto; padding: 28px 32px 64px; background: var(--surface-card); color: var(--text-primary); }
-	.page-header { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 18px; }
-	.header-line { display: flex; align-items: center; gap: 14px; }
-	.header-context { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
-	.back-link { display: inline-flex; gap: 7px; align-items: center; color: var(--text-secondary); font-size: 13px; text-decoration: none; }
-	.back-link:hover { color: var(--brand-primary); }
+	.page-shell { display: flex; flex-direction: column; width: 100%; box-sizing: border-box; margin: 0; background: var(--bg-page); color: var(--text-primary); font-size: 13px; }
+	.page-header { display: flex; justify-content: space-between; gap: 24px; align-items: center; padding: 24px 32px 20px; }
 	.eyebrow { color: var(--brand-primary); font-size: 11px; font-weight: 800; letter-spacing: 0; text-transform: uppercase; }
-	h1 { margin: 18px 0 4px; font-size: 30px; line-height: 1.15; letter-spacing: 0; }
+	h1 { margin: 0 0 4px; font-size: 24px; line-height: 1.3; letter-spacing: 0; }
 	.page-subtitle { margin: 0; color: var(--text-secondary); font-size: 13px; }
-	.header-actions { display: flex; gap: 12px; align-items: center; }
-	.toolbar-button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; min-height: 36px; border: 1px solid var(--brand-primary); border-radius: 6px; background: var(--brand-primary); color: white; padding: 0 12px; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
-	.toolbar-button:hover:not(:disabled) { background: var(--brand-primary-hover); color: white; }
-	.toolbar-button--quiet { border-color: var(--border-strong); background: var(--surface-card); color: var(--text-secondary); }
-	.toolbar-button--quiet:hover { border-color: var(--brand-primary); background: var(--brand-soft); color: var(--brand-primary); }
+	.header-actions { display: flex; gap: 8px; align-items: center; }
+	.toolbar-button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; min-height: 36px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface-card); color: var(--text-primary); padding: 0 12px; font-size: 12px; font-weight: 500; text-decoration: none; cursor: pointer; }
+	.toolbar-button:hover:not(:disabled) { border-color: var(--brand-primary); color: var(--brand-primary); }
+	.toolbar-button--icon { width: 36px; padding: 0; }
 	.toolbar-button:disabled { cursor: not-allowed; opacity: .5; }
-	.toolbar-count { min-width: 18px; border-radius: 999px; background: rgb(255 255 255 / 18%); padding: 2px 5px; text-align: center; font-size: 10px; }
+	.toolbar-count { min-width: 20px; border-radius: 3px; background: var(--success-bg); color: var(--success-text); padding: 2px 5px; text-align: center; font-size: 10px; }
 	.spin { display: inline-flex; }
 	.spin :global(svg) { animation: spin 1s linear infinite; }
-	.task-tabs { display: flex; gap: 2px; margin: 0 -4px 16px; border-bottom: 1px solid var(--border-default); overflow-x: auto; }
-	.task-tab { display: inline-flex; gap: 8px; align-items: center; min-height: 44px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); padding: 0 16px; font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+	.task-tabs { display: flex; gap: 2px; margin: 0 32px; padding: 3px; border-radius: 6px; background: var(--border-default); overflow-x: auto; }
+	.task-tab { display: inline-flex; gap: 8px; align-items: center; min-height: 34px; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); padding: 0 16px; font-size: 12px; font-weight: 500; white-space: nowrap; cursor: pointer; }
 	.task-tab:hover:not(:disabled) { color: var(--brand-primary); }
-	.task-tab.active { border-bottom-color: var(--brand-primary); color: var(--brand-primary); }
+	.task-tab.active { background: var(--surface-card); color: var(--brand-primary); box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
 	.task-tab:disabled { cursor: default; }
-	.task-tab__count { border-radius: 999px; background: var(--brand-soft); padding: 3px 7px; color: var(--brand-primary); font-size: 10px; font-weight: 700; }
-	.workbench-toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 14px; }
+	.workbench-toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 0 32px 18px; }
 	.status-tabs { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
-	.status-tabs button { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text-secondary); padding: 0 9px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+	.status-tabs button { display: inline-flex; gap: 6px; align-items: center; min-height: 36px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--text-secondary); padding: 0 8px; font-size: 12px; white-space: nowrap; cursor: pointer; }
 	.status-tabs button:hover { background: var(--bg-subtle); color: var(--text-primary); }
-	.status-tabs button.active { border-color: var(--border-strong); background: var(--surface-card); color: var(--text-primary); box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
+	.status-tabs button.active { border-bottom-color: var(--brand-primary); color: var(--brand-primary); }
 	.status-tabs span { color: var(--text-tertiary, var(--text-secondary)); font-variant-numeric: tabular-nums; }
-	.search-field { display: flex; flex: 0 1 220px; gap: 8px; align-items: center; min-height: 34px; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-card); color: var(--text-secondary); padding: 0 10px; }
-	.search-field input { min-width: 0; border: 0; outline: 0; background: transparent; padding: 0; }
+	.search-field { display: flex; flex: 0 1 280px; gap: 8px; align-items: center; min-width: 0; min-height: 34px; box-sizing: border-box; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface-card); color: var(--text-secondary); padding: 0 10px; }
+	.search-field input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; padding: 0; }
 	.alert { display: flex; gap: 8px; align-items: center; margin-bottom: 18px; border: 1px solid var(--danger-border); border-radius: 7px; background: var(--danger-bg); color: var(--danger-text); padding: 11px 13px; font-size: 13px; }
-	.summary-strip { display: flex; flex-wrap: wrap; gap: 24px; padding: 12px 16px; margin-bottom: 18px; border: 1px solid var(--border-default); border-radius: 7px; background: var(--bg-subtle); }
-	.summary-strip > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
-	.summary-strip strong { font-size: 18px; line-height: 1; }
-	.summary-strip span { color: var(--text-secondary); font-size: 12px; }
-	.summary--attention strong { color: var(--warning-text); }
-	.summary--input strong { color: var(--warning-text); }
-	.summary--done strong { color: var(--success-text); }
-	.summary--failed strong { color: var(--danger-text); }
-	.workbench { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; gap: 18px; }
-	.queue { position: sticky; top: 18px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface-card); overflow: hidden; }
+	.workbench { display: grid; grid-template-columns: 255px minmax(0, 1fr); align-items: stretch; gap: 0; border-block: 1px solid var(--border-default); background: var(--surface-card); }
+	.queue { border-right: 1px solid var(--border-default); background: var(--bg-page); overflow: hidden; }
 	.queue-header { display: flex; justify-content: space-between; align-items: flex-start; padding: 18px 18px 15px; border-bottom: 1px solid var(--border-default); }
-	.queue-header h2 { margin: 5px 0 0; font-size: 19px; }
-	.queue-header > span { min-width: 25px; border-radius: 999px; background: var(--bg-subtle); color: var(--text-secondary); padding: 4px 8px; text-align: center; font-size: 12px; }
-	.queue-list { max-height: calc(100vh - 245px); overflow-y: auto; }
-	.queue-item { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 9px; width: 100%; align-items: center; border: 0; border-bottom: 1px solid var(--bg-subtle); background: var(--surface-card); color: var(--text-primary); padding: 13px 14px; text-align: left; cursor: pointer; }
+	.queue-header h2 { margin: 3px 0 0; font-size: 16px; }
+	.queue-header > span { color: var(--text-primary); font-size: 12px; }
+	.queue-list { max-height: max(580px, calc(100dvh - 415px)); overflow-y: auto; }
+	.queue-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; width: 100%; min-height: 106px; align-items: end; border: 0; border-bottom: 1px solid var(--border-default); background: transparent; color: var(--text-primary); padding: 18px 20px; text-align: left; cursor: pointer; }
 	.queue-item:hover { background: var(--bg-subtle); }
 	.queue-item.active { box-shadow: inset 3px 0 var(--brand-primary); background: var(--brand-soft); }
-	.queue-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 6px; background: var(--bg-subtle); color: var(--text-secondary); }
-	.queue-item.active .queue-icon { background: var(--brand-soft); color: var(--brand-primary); }
 	.queue-copy { display: grid; min-width: 0; gap: 4px; }
-	.queue-copy strong { overflow: hidden; color: var(--text-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+	.queue-copy strong { display: -webkit-box; line-clamp: 3; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-primary); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 	.queue-copy small { color: var(--text-secondary); font-size: 11px; }
-	.queue-status { border-radius: 999px; padding: 4px 7px; color: var(--text-secondary); background: var(--bg-subtle); font-size: 10px; white-space: nowrap; }
+	.queue-status { border-radius: 3px; padding: 3px 6px; color: var(--text-secondary); background: var(--bg-subtle); font-size: 10px; white-space: nowrap; }
 	.queue-status--needs_confirmation { color: var(--warning-text); background: var(--warning-bg); }
 	.queue-status--confirmed { color: var(--success-text); background: var(--success-bg); }
 	.queue-status--needs_input { color: var(--warning-text); background: var(--warning-bg); }
@@ -731,6 +699,27 @@
 	.queue-empty p { margin: 12px 0 4px; color: var(--text-primary); font-size: 14px; font-weight: 700; }
 	.queue-empty small { line-height: 1.55; }
 	.editor-area { min-width: 0; }
+	.editor-area :global(.annotation-grid) { grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: auto 1fr; gap: 0; min-height: 660px; border: 0; border-radius: 0; background: var(--surface-card); }
+	.editor-area :global(.question-column), .editor-area :global(.editor-column), .editor-area :global(.evidence-column) { background: var(--surface-card); padding: 24px; }
+	.editor-area :global(.evidence-column) { box-sizing: border-box; max-height: max(660px, calc(100dvh - 335px)); overflow-y: auto; }
+	.editor-area :global(.question-column) { border-bottom: 0; }
+	.editor-area :global(.editor-column) { padding-top: 0; }
+	.editor-area :global(.question) { font-size: 14px; line-height: 1.7; }
+	.editor-area :global(h2) { font-size: 16px; margin-bottom: 12px; }
+	.editor-area :global(textarea), .editor-area :global(input) { font-size: 13px; font-weight: 400; border-radius: 5px; }
+	.editor-area :global(.original-answer) { margin-top: 16px; padding-top: 14px; }
+	.editor-area :global(.original-answer > summary) { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 13px; cursor: pointer; }
+	.editor-area :global(.source-meta) { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; border-top: 0; padding-top: 0; color: var(--text-secondary); font-size: 12px; }
+	.editor-area :global(.section-heading) { align-items: center; margin-bottom: 12px; }
+	.editor-area :global(.section-heading .section-kicker) { display: none; }
+	.editor-area :global(.status) { border: 0; border-radius: 3px; background: var(--warning-bg); color: var(--warning-text); padding: 3px 7px; font-size: 11px; }
+	.editor-area :global(.status--confirmed) { background: var(--success-bg); color: var(--success-text); }
+	.editor-area :global(.response-grid textarea) { height: 214px; }
+	.editor-area :global(#sft-target), .editor-area :global(#evaluation-reference) { height: 214px; }
+	.editor-area :global(.evidence-card) { padding: 0 0 18px; border-left: 0; border-bottom: 1px solid var(--border-default); }
+	.editor-area :global(.evidence-card textarea) { height: 140px; font-size: 12px; }
+	.editor-area :global(.actions) { justify-content: flex-end; padding-top: 16px; border-top: 1px solid var(--border-default); }
+	.editor-area :global(.sample-options) { margin-top: 16px; padding-top: 0; border-top: 0; }
 	.detail-loading { display: grid; justify-items: center; gap: 11px; padding: 90px 24px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface-card); color: var(--text-secondary); }
 	.detail-loading span, .loading span { display: block; width: 72%; height: 10px; border-radius: 99px; background: var(--border-default); animation: pulse 1.2s ease-in-out infinite; }
 	.detail-loading span:nth-child(2), .loading span:nth-child(2) { width: 52%; animation-delay: .15s; }
@@ -740,7 +729,7 @@
 	.detail-error p { margin: 0; color: var(--danger-text); }
 	.detail-error button { border: 1px solid var(--danger-text); border-radius: 6px; background: var(--surface-card); color: var(--danger-text); padding: 8px 12px; cursor: pointer; }
 	.loading { display: grid; justify-items: center; gap: 12px; padding: 60px; border: 1px solid var(--border-default); border-radius: 8px; background: var(--surface-card); }
-	.export-panel { margin-bottom: 18px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-card); overflow: hidden; }
+	.export-panel { order: 1; border-top: 1px solid var(--border-default); background: var(--surface-card); overflow: hidden; }
 	.export-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; padding: 20px 22px 18px; border-bottom: 1px solid var(--border-default); background: var(--bg-subtle); }
 	.export-heading h2 { margin: 5px 0 5px; font-size: 19px; }
 	.export-heading p { max-width: 760px; margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
@@ -800,7 +789,9 @@
 	.download-button--quiet { border-color: var(--border-default); color: var(--text-secondary); }
 	@keyframes spin { to { transform: rotate(360deg); } }
 	@keyframes pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
-	@media (max-width: 900px) { .page-shell { padding: 22px 17px 56px; } .workbench { grid-template-columns: 1fr; } .queue { position: static; } .queue-list { display: flex; max-height: none; overflow-x: auto; } .queue-item { min-width: 245px; border-right: 1px solid var(--bg-subtle); border-bottom: 0; } }
+	@media (max-width: 1100px) and (min-width: 901px) { .workbench { grid-template-columns: 220px minmax(0, 1fr); } .editor-area :global(.annotation-grid) { grid-template-columns: minmax(0, 1fr) 260px; } .editor-area :global(.question-column), .editor-area :global(.editor-column), .editor-area :global(.evidence-column) { padding: 20px; } }
+	@media (max-width: 900px) { .workbench { grid-template-columns: 1fr; } .queue { border-right: 0; border-bottom: 1px solid var(--border-default); } .queue-header { padding: 12px 16px; } .queue-list { display: flex; max-height: none; overflow-x: auto; } .queue-row { flex: 0 0 245px; width: 245px; } .queue-item { min-width: 245px; border-right: 1px solid var(--bg-subtle); border-bottom: 0; } }
+	@media (max-width: 760px) { .editor-area :global(.annotation-grid) { display: block; min-height: 0; } .editor-area :global(.question-column), .editor-area :global(.editor-column), .editor-area :global(.evidence-column) { padding: 18px 16px; } .editor-area :global(.evidence-column) { max-height: none; overflow-y: visible; } .editor-area :global(.response-grid) { grid-template-columns: 1fr; } .editor-area :global(.choice-grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 	@media (max-width: 760px) { .export-heading { display: block; } .export-heading-meta { justify-content: space-between; margin-top: 14px; } .export-subheading { display: block; } .export-subheading span { display: block; margin-top: 3px; } .export-footer { align-items: flex-start; flex-direction: column; } .export-history-row { align-items: flex-start; flex-direction: column; } .download-actions { justify-content: flex-start; } }
-	@media (max-width: 560px) { .page-shell { padding: 18px 12px 44px; } .page-header { display: block; } .header-actions { justify-content: space-between; margin-top: 15px; } .header-actions .toolbar-button { flex: 1; min-width: 0; padding-inline: 8px; } .export-label { display: none; } .task-tabs { margin-inline: -2px; } .task-tab { padding-inline: 12px; } .workbench-toolbar { display: block; } .status-tabs { padding-bottom: 4px; } .search-field { max-width: none; margin-top: 8px; } .summary-strip { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; } .summary-strip > div { min-width: 0; } .queue-list { display: grid; } .queue-item { min-width: 0; border-right: 0; border-bottom: 1px solid var(--bg-subtle); } .export-heading, .export-preview { padding-left: 16px; padding-right: 16px; } .export-history { margin-left: 16px; margin-right: 16px; } .export-metrics strong { font-size: 18px; } .export-issue, .preview-row { align-items: flex-start; flex-direction: column; gap: 6px; } .preview-row > div { max-width: 100%; } }
+	@media (max-width: 560px) { .page-header { display: block; padding: 20px 16px 16px; } .header-actions { justify-content: space-between; margin-top: 15px; } .header-actions .toolbar-button { min-width: 0; padding-inline: 8px; } .header-actions .toolbar-button--icon { flex: 0 0 36px; } .task-tabs { margin-inline: 16px; } .task-tab { padding-inline: 10px; } .workbench-toolbar { display: block; padding: 0 16px 16px; } .status-tabs { padding-bottom: 4px; } .search-field { max-width: none; margin-top: 8px; } .queue-item { min-width: 230px; } .export-heading, .export-preview { padding-left: 16px; padding-right: 16px; } .export-history { margin-left: 16px; margin-right: 16px; } .export-metrics strong { font-size: 18px; } .export-issue, .preview-row { align-items: flex-start; flex-direction: column; gap: 6px; } .preview-row > div { max-width: 100%; } }
 </style>

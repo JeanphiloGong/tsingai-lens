@@ -129,6 +129,7 @@
 
   $: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);
   $: isCollectionRoute = Boolean(collectionRouteMatch);
+  $: isFeedbackRoute = /^\/collections\/[^/]+\/feedback(?:\/|$)/.test($page.url.pathname);
   $: headerCollectionId = collectionRouteMatch?.[1]
     ? decodeRoutePart(collectionRouteMatch[1])
     : '';
@@ -136,7 +137,7 @@
   $: headerCollectionName = headerCollection?.name || headerCollectionId;
 </script>
 
-<div class="app-shell">
+<div class="app-shell" class:app-shell--feedback={isFeedbackRoute}>
   <div class="bg-grid" aria-hidden="true"></div>
 
   <header class="site-header" class:site-header--collection={isCollectionRoute}>

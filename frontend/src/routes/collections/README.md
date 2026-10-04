@@ -151,8 +151,14 @@ This node owns the Collection route family.
   preflight flow.
   The entry and all three annotation editors use the application's shared
   brand, surface, text, and state tokens in both light and dark themes. The
-  entry uses a compact task selector; sample questions sit
-  above the answer and evidence columns. Rebuild, discard, restore, and retry
+  entry uses a compact task selector. Feedback routes use a flat, compact
+  application header and a contiguous queue, answer editor, and evidence
+  layout. Sample questions sit above the answer editor, while evidence remains
+  alongside it in an independently scrollable column on desktop; narrow screens stack the editor and evidence below
+  a horizontally scrollable queue. Evaluation criteria are independent editable
+  rows: adding a row requires completing it before saving, deleting a row
+  removes only that criterion, and reloading restores each saved criterion once.
+  Rebuild, discard, restore, and retry
   controls stay available in the expandable additional-actions section.
   Candidate analysis stays inside the workbench as an internal review signal;
   only a confirmed sample revision can be published as model-facing JSONL.
@@ -188,7 +194,7 @@ The former snapshot page and download endpoints are not product surfaces after
 D7; legacy snapshots are read only by the migration script and may remain
 only in an operations archive.
 
-The task page's collapsible export section is a separate delivery step after
+The task page's collapsible export section sits below sample review as a separate delivery step after
 confirmation. Users select confirmed samples individually or select the full
 confirmed queue. The request freezes that selection, shows the count of valid rows and each issue,
 and lets the user open an affected sample or explicitly publish only the valid

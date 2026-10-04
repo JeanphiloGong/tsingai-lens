@@ -25,6 +25,7 @@
 		collection?.documents.filter((document) => document.status === 'processing').length ?? 0;
 	$: currentPath = $page.url.pathname;
 	$: isFindingRoute = Boolean($page.params.objective_id);
+	$: isFeedbackRoute = currentPath.startsWith(`/collections/${collectionId}/feedback`);
 	$: statusTone = processingDocumentCount ? 'processing' : readyDocumentCount ? 'ready' : 'pending';
 	$: statusLabel = processingDocumentCount
 		? $t('overview.currentModel.status.processing')
@@ -75,7 +76,7 @@
 	}
 </script>
 
-{#if isFindingRoute}
+{#if isFindingRoute || isFeedbackRoute}
 	<div class="collection-context-bar">
 		<a
 			href={resolve('/collections/[id]', { id: collectionId })}

@@ -3145,6 +3145,10 @@ const translations: Record<Language, Translations> = {
 			reasonOther: 'Could not include this selection'
 		},
 		taskDatasets: {
+			criteria: 'Evaluation criteria',
+			criterion: 'Evaluation criterion {count}',
+			addCriterion: 'Add criterion',
+			removeCriterion: 'Remove criterion {count}',
 			addEvidence: 'Add evidence excerpt',
 			removeEvidence: 'Remove evidence excerpt',
 			questionContent: 'Question',
@@ -6177,6 +6181,10 @@ const translations: Record<Language, Translations> = {
 			reasonOther: '无法纳入此选择'
 		},
 		taskDatasets: {
+			criteria: '评分标准',
+			criterion: '评分标准 {count}',
+			addCriterion: '添加标准',
+			removeCriterion: '删除评分标准 {count}',
 			addEvidence: '添加证据片段',
 			removeEvidence: '删除证据片段',
 			questionContent: '问题内容',

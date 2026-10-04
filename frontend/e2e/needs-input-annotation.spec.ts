@@ -28,6 +28,7 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 				expect(payload.expected_revision_id).toBeNull();
 				expect(payload.expected_generation).toBe(1);
 				expect(payload.content.context).toEqual([{ document_title: '文献 B', text: '预热温度为 200 C。' }]);
+				if (taskType === 'evaluation') expect(payload.content.criteria).toEqual(['必须给出 200 C。', '不能外推到其他预热条件。']);
 				content = payload.content;
 				status = 'needs_confirmation';
 				body = sample();
@@ -56,12 +57,25 @@ for (const taskType of ['sft', 'preference', 'evaluation'] as const) {
 		}
 		if (taskType === 'evaluation') {
 			await page.getByRole('textbox', { name: '参考答案' }).fill('预热温度为 200 C。');
-			await page.getByRole('textbox', { name: '评分标准' }).fill('必须给出 200 C。');
+			await page.getByRole('textbox', { name: '评分标准', exact: true }).fill('待删除的标准。');
+			await page.getByRole('button', { name: '添加标准', exact: true }).click();
+			await expect(page.getByRole('button', { name: '保存修改', exact: true })).toBeDisabled();
+			await page.getByRole('textbox', { name: '评分标准 2', exact: true }).fill('必须给出 200 C。');
+			await page.getByRole('button', { name: '删除评分标准 1', exact: true }).click();
+			await expect(page.getByRole('textbox', { name: '评分标准', exact: true })).toHaveValue('必须给出 200 C。');
+			await page.getByRole('button', { name: '添加标准', exact: true }).click();
+			await page.getByRole('textbox', { name: '评分标准 2', exact: true }).fill('不能外推到其他预热条件。');
 		}
 		await page.getByRole('button', { name: '保存修改', exact: true }).click();
 		await expect(page.getByRole('status')).toContainText('修改已保存');
+		if (taskType === 'evaluation') {
+			await page.reload();
+			await expect(page.locator('.criterion-row textarea')).toHaveCount(2);
+			await expect(page.getByRole('textbox', { name: '评分标准', exact: true })).toHaveValue('必须给出 200 C。');
+			await expect(page.getByRole('textbox', { name: '评分标准 2', exact: true })).toHaveValue('不能外推到其他预热条件。');
+		}
 		await page.getByRole('button', { name: '确认样本', exact: true }).click();
-		await expect(page.getByText('已确认', { exact: true })).toBeVisible();
+		await expect(page.getByRole('region', { name: '样本编辑器' }).getByText('已确认', { exact: true })).toBeVisible();
 		const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
 		expect(overflow).toBe(false);
 		await page.screenshot({ path: testInfo.outputPath(`${taskType}-confirmed-${width}.png`), fullPage: true });

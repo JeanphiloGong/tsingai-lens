@@ -15,14 +15,21 @@ data.jsonl          task-specific model-facing rows
 provenance.jsonl    one trace record for each data row
 ```
 
-`data.jsonl` contains readable document titles and source text in `context` or
-`evidence`. It does not contain `case_id`, `session_id`, message IDs,
+New exports use `literature-sft.v2`, `literature-preference.v2`, or
+`literature-evaluation.v2`. SFT main rows contain only `messages`; preference
+rows contain message-array `prompt/chosen/rejected`; evaluation rows contain
+`messages/reference/criteria/evaluation_mode`. Reviewed source text is already
+in the last input user message using `literature-context.v1`. Preparation must
+not append it again or put reference answers and review evidence into inputs.
+Standalone `context/evidence` now remain in the provenance sidecar.
+The main file does not contain `case_id`, `session_id`, message IDs,
 `source_ref`, document IDs, locators, review identities, or database digests.
-Those fields remain in the provenance sidecar. The two JSONL files are aligned
-by `row_key`, and the manifest binds them with content, provenance, and
+Those fields remain in the provenance sidecar. The two JSONL files align by row
+order; each sidecar row supplies `row_key` and the main row's `row_digest`.
+The manifest binds them with content, provenance, and
 manifest digests.
 
-An old P5 snapshot JSON, an isolated JSONL file without its sidecars, or a
+An old P5 snapshot JSON, a v1 export bundle, an isolated JSONL file without its sidecars, or a
 bundle with mismatched digests is rejected. The Python function
 `prepare_snapshot()` remains only as an internal name for callers that have not
 renamed their import; it delegates to `prepare_export()` and does not accept a
@@ -39,8 +46,8 @@ python backend/scripts/evaluation/feedback_dataset/prepare.py \
 ```
 
 `prepare_export()` validates the manifest schema and task type, file names,
-row/provenance alignment, all three digests, task-specific fields, readable
-evidence, and the absence of internal identity fields from model rows. It also
+row/provenance alignment, all three digests, task-specific message shapes,
+and the absence of internal identity fields from model rows. It also
 checks an optional experiment plan for source grouping and `train`/`eval`
 isolation. A missing or uncertain source relationship is rejected instead of
 being guessed from a document ID.

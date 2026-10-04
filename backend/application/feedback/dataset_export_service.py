@@ -22,7 +22,6 @@ from application.repositories.feedback_dataset_sample_repository import (
     FeedbackDatasetSampleRepository,
 )
 from domain.feedback.dataset_export import (
-    EXPORT_SCHEMA_VERSION,
     DatasetExport,
     ExportFormat,
     ExportIssue,
@@ -146,7 +145,13 @@ class FeedbackDatasetExportService:
         created_at = datetime.now(timezone.utc).isoformat()
         manifest = {
             "manifest_schema_version": "feedback-dataset-export-manifest.v1",
-            "schema_version": _schema_for_task(dataset.task_type),
+            "schema_version": f"literature-{dataset.task_type}.v2",
+            "data_format": {
+                "sft": "messages-sft",
+                "preference": "trl-conversational-dpo",
+                "evaluation": "messages-evaluation",
+            }[dataset.task_type],
+            "input_template": "literature-context.v1",
             "dataset_type": dataset.task_type,
             "dataset_id": dataset_id,
             "dataset_name": dataset.name,
@@ -338,11 +343,9 @@ def _serialize_sft(member: ExportMember) -> tuple[dict[str, Any], dict[str, Any]
         raise DatasetExportError("unsupported_schema")
     row = {
         "messages": [
-            *[dict(message) for message in content.messages],
+            *_input_messages(content),
             {"role": "assistant", "content": content.target},
         ],
-        "context": [dict(item) for item in content.context],
-        "evidence": [dict(item) for item in content.evidence],
     }
     trace = _trace(member, row)
     return row, trace
@@ -358,11 +361,9 @@ def _serialize_preference(member: ExportMember) -> tuple[dict[str, Any], dict[st
         else (content.response_b, content.response_a)
     )
     row = {
-        "messages": [dict(message) for message in content.messages],
-        "context": [dict(item) for item in content.context],
-        "chosen": chosen,
-        "rejected": rejected,
-        "evidence": [dict(item) for item in content.evidence],
+        "prompt": _input_messages(content),
+        "chosen": [{"role": "assistant", "content": chosen}],
+        "rejected": [{"role": "assistant", "content": rejected}],
     }
     trace = _trace(member, row)
     trace.update(
@@ -380,16 +381,26 @@ def _serialize_evaluation(member: ExportMember) -> tuple[dict[str, Any], dict[st
     if not isinstance(content, EvaluationRevisionContent):
         raise DatasetExportError("unsupported_schema")
     row = {
-        "messages": [dict(message) for message in content.messages],
-        "context": [dict(item) for item in content.context],
+        "messages": _input_messages(content),
         "reference": content.reference,
         "criteria": list(content.criteria),
         "evaluation_mode": content.evaluation_mode,
-        "evidence": [dict(item) for item in content.evidence],
     }
     trace = _trace(member, row)
     trace.update({"task_type": "evaluation", "evaluation_mode": content.evaluation_mode})
     return row, trace
+
+
+def _input_messages(content: SftRevisionContent | PreferenceRevisionContent | EvaluationRevisionContent) -> list[dict[str, str]]:
+    """Attach the reviewed context to the last user turn, without review targets."""
+    messages = [dict(message) for message in content.messages]
+    snippets = dict.fromkeys((item["document_title"], item["text"]) for item in content.context)
+    material = "\n\n".join(f"文献：{title}\n原文：{text}" for title, text in snippets)
+    for message in reversed(messages):
+        if message["role"] == "user":
+            message["content"] = f"{material}\n\n问题：{message['content']}"
+            break
+    return messages
 
 
 def _trace(member: ExportMember, row: dict[str, Any]) -> dict[str, Any]:
@@ -417,6 +428,8 @@ def _trace(member: ExportMember, row: dict[str, Any]) -> dict[str, Any]:
         "document_ids": document_ids,
         "session_tree_id": member.provenance.get("session_tree_id"),
         "evidence_records": evidence_records,
+        "context": [dict(item) for item in member.content.context],
+        "evidence": [dict(item) for item in member.content.evidence],
     }
 
 

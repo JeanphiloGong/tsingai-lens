@@ -25,6 +25,7 @@ from domain.feedback.sample_revision import (
     SftRevisionContent,
     content_digest_for,
 )
+from scripts.evaluation.feedback_dataset.prepare import prepare_export, load_prepared
 
 pytestmark = pytest.mark.anyio
 
@@ -421,6 +422,12 @@ async def test_publish_is_idempotent_and_separates_model_file_from_provenance() 
     assert exports.publish_calls == 2
 
     model_row = first.rows[0]
+    assert set(model_row) == {"messages"}
+    assert first.schema_version == "literature-sft.v2"
+    assert first.manifest["data_format"] == "messages-sft"
+    assert model_row["messages"][0]["content"] == "文献：文献 1\n原文：图注记录了 200 C 的预热条件。\n\n问题：比较文献 1 的预热条件。"
+    assert model_row["messages"][-1] == {"role": "assistant", "content": _content().target}
+    assert first.provenance[0]["evidence"] == list(_content().evidence)
     serialized = json.dumps(model_row, ensure_ascii=False)
     for internal_id in ("sample-1", "case-1", "revision-1", "session-1", "source-ref-1"):
         assert internal_id not in serialized
@@ -464,13 +471,16 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
         allow_partial=False,
         idempotency_key="preference-1",
     )
-    assert exported.rows[0]["chosen"] == "回答 B"
-    assert exported.rows[0]["rejected"] == "回答 A"
+    assert exported.schema_version == "literature-preference.v2"
+    assert set(exported.rows[0]) == {"prompt", "chosen", "rejected"}
+    assert exported.rows[0]["chosen"] == [{"role": "assistant", "content": "回答 B"}]
+    assert exported.rows[0]["rejected"] == [{"role": "assistant", "content": "回答 A"}]
+    assert exported.rows[0]["prompt"] == [{"role": "user", "content": "文献：文献\n原文：原文\n\n问题：比较 A、B。"}]
     assert "suggested_preference" not in exported.rows[0]
 
 
 @pytest.mark.anyio
-async def test_evaluation_export_keeps_reference_criteria_and_evidence() -> None:
+async def test_evaluation_export_keeps_reference_and_criteria_outside_input() -> None:
     content = EvaluationRevisionContent.from_mapping(
         {
             "schema_version": "literature-evaluation.v1",
@@ -496,6 +506,54 @@ async def test_evaluation_export_keeps_reference_criteria_and_evidence() -> None
         allow_partial=False,
         idempotency_key="evaluation-1",
     )
-    assert exported.schema_version == "literature-evaluation.v1"
+    assert exported.schema_version == "literature-evaluation.v2"
+    assert set(exported.rows[0]) == {"messages", "reference", "criteria", "evaluation_mode"}
+    assert exported.rows[0]["messages"] == [{"role": "user", "content": "文献：文献\n原文：原文\n\n问题：比较 A、B。"}]
     assert exported.rows[0]["reference"] == "B 有预热。"
     assert exported.rows[0]["criteria"] == ["指出 B 的预热条件", "引用图注"]
+
+
+@pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
+async def test_published_files_load_offline_without_review_data_in_input(tmp_path, task_type) -> None:
+    question = "固定构建方向时，每个扫描策略条件做了几次拉伸测试？"
+    excerpt = "Three tests were conducted for each condition."
+    common = {
+        "schema_version": f"literature-{task_type}.v1",
+        "messages": [{"role": "system", "content": "依据原文回答。"}, {"role": "user", "content": question}],
+        "context": [{"document_title": "P006.pdf", "text": excerpt}] * 2,
+        "evidence": [{"document_title": "P006.pdf", "text": "Review-only evidence marker"}],
+    }
+    if task_type == "sft":
+        content = SftRevisionContent.from_mapping({**common, "target": "每个条件三次拉伸测试。"})
+    elif task_type == "preference":
+        content = PreferenceRevisionContent.from_mapping({**common, "response_a": "每个条件三次拉伸测试。",
+            "response_b": "每个条件一次。", "human_preference": "a", "rationale": "Private review rationale"})
+    else:
+        content = EvaluationRevisionContent.from_mapping({**common, "reference": "每个条件三次拉伸测试。",
+            "criteria": ["明确三次测试。"], "evaluation_mode": "reference"})
+    service = _service(_Samples(_content_member(content, sample_id="p006")), _Exports(), replace(_dataset(), task_type=task_type))
+    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    export = await service.publish_for_user(user_id="user-1", dataset_id="fdset_export_test",
+        preview_id=preview.preview_id, preview_digest=preview.preview_digest, allow_partial=False,
+        idempotency_key=f"p006-{task_type}")
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    for format in ("jsonl", "provenance", "manifest", "json"):
+        _, data, _, filename = await service.download_for_user(user_id="user-1", dataset_id="fdset_export_test",
+            export_id=export.export_id, format=format)
+        (bundle / filename).write_bytes(data)
+    row = json.loads((bundle / "data.jsonl").read_text())
+    assert json.loads((bundle / "data.json").read_text()) == [row]
+    inputs = row["prompt"] if task_type == "preference" else row["messages"][:-1] if task_type == "sft" else row["messages"]
+    assert inputs[0] == common["messages"][0]
+    assert inputs[-1]["content"].count(excerpt) == 1
+    assert inputs[-1]["content"].endswith(question)
+    assert "每个条件三次拉伸测试。" not in json.dumps(inputs, ensure_ascii=False)
+    assert "Review-only evidence marker" not in json.dumps(row)
+    assert "Private review rationale" not in json.dumps(row)
+    trace = json.loads((bundle / "provenance.jsonl").read_text())
+    assert trace["evidence"] == common["evidence"]
+    prepared_dir = tmp_path / "prepared"
+    prepare_export(export_path=bundle, output_dir=prepared_dir, revision="test")
+    prepared = load_prepared(prepared_dir)
+    assert prepared["counts"] == {"train": 0, "eval": 1}

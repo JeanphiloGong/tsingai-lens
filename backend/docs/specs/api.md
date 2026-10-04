@@ -500,14 +500,31 @@ the export. An empty export is rejected.
 
 Each published export is immutable and has its own `export_id` and sequential
 version. `format=jsonl` and `format=json` contain task-specific model-facing
-rows. SFT rows contain messages with the confirmed target as the final
-assistant message; Preference rows contain the fixed messages/context and the
-human-selected `chosen` and `rejected` answers; Evaluation rows contain the
-messages/context, reference or rubric criteria, and evaluation mode. All rows
-include readable document title/text context and evidence. They do not contain
+rows. New publications use `literature-sft.v2`, `literature-preference.v2`,
+or `literature-evaluation.v2` in the manifest. Internal annotation revisions
+remain `v1`; export schemas describe the downloaded file, not the editor payload.
+SFT rows contain only `messages`, with the confirmed target as the final
+assistant message. Preference rows contain `prompt`, `chosen`, and `rejected`,
+each a message array; `prompt` is the shared input, and each completion is one
+assistant message selected according to the saved human preference.
+Evaluation rows contain `messages`, `reference`, `criteria`, and `evaluation_mode`.
+There are no standalone `context` or `evidence` fields in v2 main files.
+The `literature-context.v1` input template inserts each distinct reviewed context
+snippet as `文献：{document_title}\n原文：{text}`, joins snippets with a blank line,
+and prepends them to the last user message followed by `\n\n问题：{original content}`.
+Earlier messages and roles remain unchanged. Evidence used only for review,
+targets, preferences, reference answers, and criteria never enter this input.
+The manifest includes `data_format` (`messages-sft`, `trl-conversational-dpo`,
+or `messages-evaluation`) and `input_template`. These are data shapes, not a
+claim that training or a target model's chat template has been executed.
+Published v1 files remain downloadable byte-for-byte as stored; publishing again
+creates a new v2 export. The current offline preparation requires a v2 bundle
+and rejects v1 task schemas rather than silently converting them.
+Main rows do not contain
 sample, case, session, message, source, or locator IDs. `format=provenance`
 downloads the separate trace sidecar
-with row keys, source/message identities, evidence records, and digests. The
+with row keys, source/message identities, evidence records, the original
+readable `context` and supporting `evidence`, and digests. The
 sidecar is for audit and later source lookup; it is not appended to the model
 prompt. `format=manifest` downloads the export manifest with the task schema,
 row count, member/content/provenance digests, and the names of the related

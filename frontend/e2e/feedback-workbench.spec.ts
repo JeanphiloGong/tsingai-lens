@@ -105,6 +105,8 @@ test('export history exposes the manifest download alongside training files', as
 	await page.goto(`/collections/${collectionId}/feedback/datasets/${datasetId}`);
 	await page.locator('.export-panel > summary').click();
 	await expect(page.getByText('已发布版本')).toBeVisible();
+	await expect(page.getByText('Messages SFT', { exact: true })).toBeVisible();
+	await expect(page.getByText(/Lens 中间格式 v1/)).toBeVisible();
 	await expect(page.getByRole('button', { name: '清单' })).toBeVisible();
 
 	const download = page.waitForEvent('download');

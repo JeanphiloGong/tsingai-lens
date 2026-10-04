@@ -473,6 +473,13 @@
 		}
 		return `回答：${row.target_preview || '无'} · 证据 ${row.evidence_count} 段`;
 	}
+
+	function exportFormatLabel(schema: string) {
+		if (schema === 'literature-sft.v2') return 'Messages SFT';
+		if (schema === 'literature-preference.v2') return 'TRL conversational DPO';
+		if (schema === 'literature-evaluation.v2') return $t('taskDatasets.evaluationFormat');
+		return $t('taskDatasets.legacyFormat');
+	}
 </script>
 
 <svelte:head>
@@ -529,7 +536,8 @@
 				<div class="export-heading">
 					<div>
 						<div class="eyebrow">交付训练文件</div>
-						<h2 id="export-title">导出已确认样本</h2>
+							<h2 id="export-title">导出已确认样本</h2>
+							<p>{exportFormatLabel(`literature-${currentTaskType}.v2`)}</p>
 						<p>{$t('taskDatasets.selected', { count: exportSelection.length })}</p>
 					</div>
 					<div class="export-heading-meta">
@@ -602,7 +610,7 @@
 						<div class="export-subheading"><strong>已发布版本</strong><span>已发布文件不会随当前样本修改而变化。</span></div>
 						{#each exportItems as item (item.export_id)}
 							<div class="export-history-row">
-								<div><strong>版本 {item.export_no}</strong><span>{item.row_count} 条 · {formatDate(item.created_at)}</span></div>
+								<div><strong>版本 {item.export_no}</strong><span>{item.row_count} 条 · {formatDate(item.created_at)} · {exportFormatLabel(item.schema_version)}</span></div>
 								<div class="download-actions">
 									<button class="download-button" type="button" on:click={() => downloadExport(item, 'jsonl')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />JSONL</button>
 									<button class="download-button" type="button" on:click={() => downloadExport(item, 'json')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />JSON</button>

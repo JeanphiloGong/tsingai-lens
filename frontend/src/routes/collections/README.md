@@ -207,8 +207,13 @@ confirmation. Users select confirmed samples individually or select the full
 confirmed queue. The request freezes that selection, shows the count of valid rows and each issue,
 and lets the user open an affected sample or explicitly publish only the valid
 rows. Publishing freezes the confirmed revision set; later edits create a new
-export rather than changing an earlier file. JSONL and JSON downloads contain
-model-readable messages and document text only. The provenance download keeps
+export rather than changing an earlier file. New v2 JSONL and JSON downloads use
+Messages SFT, conversational DPO (`prompt/chosen/rejected` message arrays), or
+evaluation messages with separate reference/criteria. Reviewed document text
+is embedded in the last user message; standalone context/evidence remain only
+in the provenance sidecar. The export history distinguishes v2 formats from
+immutable historical v1 files, which are downloaded as originally stored.
+The provenance download keeps
 the row-to-message/source mapping and evidence locators for audit, while the
 manifest download binds the task schema, file names, row count, and digests.
 These internal identifiers stay out of the training file.

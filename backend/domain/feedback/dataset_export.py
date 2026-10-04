@@ -19,9 +19,13 @@ from domain.feedback.sample_revision import (
 )
 
 
-EXPORT_SCHEMA_VERSION = "literature-sft.v1"
+EXPORT_SCHEMA_VERSION = "literature-sft.v2"
 EXPORT_SCHEMA_VERSIONS = frozenset(
-    {EXPORT_SCHEMA_VERSION, PREFERENCE_SCHEMA_VERSION, EVALUATION_SCHEMA_VERSION}
+    {
+        EXPORT_SCHEMA_VERSION, "literature-preference.v2", "literature-evaluation.v2",
+        # Published v1 files remain immutable and downloadable as stored.
+        "literature-sft.v1", PREFERENCE_SCHEMA_VERSION, EVALUATION_SCHEMA_VERSION,
+    }
 )
 ExportFormat = Literal["json", "jsonl", "provenance", "manifest"]
 

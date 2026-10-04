@@ -29,9 +29,9 @@ DATASET_TYPES = {"evaluation", "sft", "preference"}
 SPLITS = {"train", "eval"}
 TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 TASK_SCHEMA_TO_TYPE = {
-    "literature-sft.v1": "sft",
-    "literature-preference.v1": "preference",
-    "literature-evaluation.v1": "evaluation",
+    "literature-sft.v2": "sft",
+    "literature-preference.v2": "preference",
+    "literature-evaluation.v2": "evaluation",
 }
 
 # These identities belong in the provenance sidecar, never in model-facing
@@ -428,15 +428,22 @@ def _export_metadata(manifest: dict[str, Any]) -> dict[str, Any]:
 def _validate_row_shape(
     row: dict[str, Any], *, dataset_type: str, row_id: str, max_input_tokens: int
 ) -> None:
-    _validate_readable_items(row.get("context"), field="context", row_id=row_id)
-    _validate_evidence(row.get("evidence"), row_id=row_id)
+    expected = {
+        "sft": {"messages"},
+        "preference": {"prompt", "chosen", "rejected"},
+        "evaluation": {"messages", "reference", "criteria", "evaluation_mode"},
+    }[dataset_type]
+    if set(row) - {"split"} != expected:
+        raise SnapshotValidationError(f"row_fields_invalid:{row_id}")
     if dataset_type == "evaluation":
         messages = row.get("messages")
         if not isinstance(messages, list) or not messages:
             raise SnapshotValidationError(f"evaluation_messages_invalid:{row_id}")
         _messages_text(messages)
+        if not any(item["role"] == "user" for item in messages):
+            raise SnapshotValidationError(f"evaluation_user_message_missing:{row_id}")
         criteria = row.get("criteria")
-        if not isinstance(criteria, list) or not any(_text(item) for item in criteria):
+        if not isinstance(criteria, list) or not criteria or not all(isinstance(item, str) and item.strip() for item in criteria):
             raise SnapshotValidationError(f"evaluation_criteria_invalid:{row_id}")
         mode = str(row.get("evaluation_mode") or "")
         if mode not in {"reference", "rubric"}:
@@ -446,7 +453,7 @@ def _validate_row_shape(
         if len(tokenize(_input_text(row))) > max_input_tokens:
             raise SnapshotValidationError(f"context_overflow:{row_id}")
         return
-    messages = row.get("messages")
+    messages = row.get("prompt" if dataset_type == "preference" else "messages")
     if not isinstance(messages, list) or not messages:
         raise SnapshotValidationError(f"messages_invalid:{row_id}")
     if dataset_type == "sft":
@@ -456,11 +463,16 @@ def _validate_row_shape(
         if len(tokenize(_messages_text(prompt)) + tokenize(target)) > max_input_tokens:
             raise SnapshotValidationError(f"context_overflow:{row_id}")
         return
-    chosen = _text(row.get("chosen"))
-    rejected = _text(row.get("rejected"))
-    if not chosen or not rejected or chosen == rejected:
+    _messages_text(messages)
+    if not any(item["role"] == "user" for item in messages):
+        raise SnapshotValidationError(f"preference_user_message_missing:{row_id}")
+    chosen = row.get("chosen")
+    rejected = row.get("rejected")
+    if not isinstance(chosen, list) or not isinstance(rejected, list) or not chosen or not rejected or chosen == rejected:
         raise SnapshotValidationError(f"preference_fields_invalid:{row_id}")
-    if len(tokenize(_messages_text(messages)) + tokenize(chosen) + tokenize(rejected)) > max_input_tokens:
+    if any(item.get("role") != "assistant" for item in chosen + rejected if isinstance(item, dict)):
+        raise SnapshotValidationError(f"preference_fields_invalid:{row_id}")
+    if len(tokenize(_messages_text(messages))) + max(len(tokenize(_messages_text(chosen))), len(tokenize(_messages_text(rejected)))) > max_input_tokens:
         raise SnapshotValidationError(f"context_overflow:{row_id}")
 
 
@@ -480,9 +492,9 @@ def _prepare_row(
         prepared["loss_mask"] = [0] * (len(prompt_tokens) + 1) + [1] * len(target_tokens)
         prepared["token_count"] = len(prepared["tokens"])
     else:
-        prompt_tokens = tokenize(_messages_text(row["messages"]))
-        chosen_tokens = tokenize(_text(row["chosen"]))
-        rejected_tokens = tokenize(_text(row["rejected"]))
+        prompt_tokens = tokenize(_messages_text(row["prompt"]))
+        chosen_tokens = tokenize(_messages_text(row["chosen"]))
+        rejected_tokens = tokenize(_messages_text(row["rejected"]))
         prepared["prompt_tokens"] = prompt_tokens
         prepared["chosen_tokens"] = chosen_tokens
         prepared["rejected_tokens"] = rejected_tokens
@@ -517,23 +529,6 @@ def _assign_internal_row_ids(rows: Iterable[dict[str, Any]]) -> list[tuple[dict[
     return assignments
 
 
-def _validate_readable_items(value: Any, *, field: str, row_id: str) -> None:
-    if not isinstance(value, list) or not value:
-        raise SnapshotValidationError(f"{field}_invalid:{row_id}")
-    for item in value:
-        if not isinstance(item, dict):
-            raise SnapshotValidationError(f"{field}_item_invalid:{row_id}")
-        if not _text(item.get("document_title")) or not _text(item.get("text", item.get("quote"))):
-            raise SnapshotValidationError(f"{field}_content_missing:{row_id}")
-        forbidden = _first_internal_field(item)
-        if forbidden is not None:
-            raise SnapshotValidationError(f"{field}_internal_field:{forbidden}")
-
-
-def _validate_evidence(value: Any, *, row_id: str) -> None:
-    _validate_readable_items(value, field="evidence", row_id=row_id)
-
-
 def _first_internal_field(value: Any) -> str | None:
     if isinstance(value, dict):
         for key, child in value.items():
@@ -555,6 +550,7 @@ def _sft_prompt_target(row: dict[str, Any], *, row_id: str) -> tuple[list[dict[s
     if not isinstance(messages, list) or len(messages) < 2:
         raise SnapshotValidationError(f"sft_messages_invalid:{row_id}")
     parsed = []
+    _messages_text(messages)
     for item in messages:
         if not isinstance(item, dict) or not _text(item.get("role")) or not _text(item.get("content")):
             raise SnapshotValidationError(f"message_invalid:{row_id}")
@@ -565,54 +561,11 @@ def _sft_prompt_target(row: dict[str, Any], *, row_id: str) -> tuple[list[dict[s
     prompt = parsed[:-1]
     if not any(item.get("role") == "user" for item in prompt):
         raise SnapshotValidationError(f"sft_user_message_missing:{row_id}")
-    material = _model_input_material(row)
-    if material:
-        prompt.append({"role": "user", "content": material})
     return prompt, _text(final.get("content"))
 
 
-def _model_input_material(row: dict[str, Any]) -> str:
-    """Render readable source text into the actual SFT input prompt.
-
-    ``context`` and ``evidence`` are model-facing text fields. Provenance
-    identities are deliberately absent here and remain in the sidecar.
-    Duplicate snippets are included once so storing the same passage as both
-    context and supporting evidence does not double the training input.
-    """
-
-    sections: list[str] = []
-    seen: set[tuple[str, str]] = set()
-    for field, label in (("context", "Reference context"), ("evidence", "Supporting evidence")):
-        rendered: list[str] = []
-        for item in row.get(field) or ():
-            if not isinstance(item, dict):
-                continue
-            title = _text(item.get("document_title"))
-            text = _text(item.get("text", item.get("quote")))
-            key = (title, text)
-            if not title or not text or key in seen:
-                continue
-            seen.add(key)
-            rendered.append(f"{title}: {text}")
-        if rendered:
-            sections.append(f"{label}:\n" + "\n".join(rendered))
-    return "\n\n".join(sections)
-
-
 def _input_text(row: dict[str, Any]) -> str:
-    messages = row.get("messages")
-    message_text = _messages_text(messages) if isinstance(messages, list) else ""
-    context_text = "\n".join(
-        _text(item.get("text", item.get("quote")))
-        for item in (row.get("context") or [])
-        if isinstance(item, dict)
-    )
-    evidence_text = "\n".join(
-        _text(item.get("text", item.get("quote")))
-        for item in (row.get("evidence") or [])
-        if isinstance(item, dict)
-    )
-    return "\n".join(part for part in (message_text, context_text, evidence_text) if part)
+    return _messages_text(row["messages"])
 
 
 def _messages_text(messages: list[Any]) -> str:
@@ -622,7 +575,7 @@ def _messages_text(messages: list[Any]) -> str:
             raise SnapshotValidationError("message_invalid")
         role = _text(message.get("role"))
         content = _text(message.get("content"))
-        if not role or not content:
+        if role not in {"system", "user", "assistant"} or not content or set(message) != {"role", "content"}:
             raise SnapshotValidationError("message_invalid")
         parts.append(f"{role}: {content}")
     return "\n".join(parts)

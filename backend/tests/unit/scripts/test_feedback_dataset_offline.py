@@ -52,9 +52,7 @@ def _rows(dataset_type: str = "evaluation") -> list[dict]:
     result: list[dict] = []
     for title, quote, _tree in values:
         base = {
-            "messages": [{"role": "user", "content": "核对来源中的结论。"}],
-            "context": [{"document_title": title, "text": quote}],
-            "evidence": [{"document_title": title, "text": quote}],
+            "messages": [{"role": "user", "content": f"文献：{title}\n原文：{quote}\n\n问题：核对来源中的结论。"}],
         }
         if dataset_type == "sft":
             base["messages"] = [
@@ -62,7 +60,11 @@ def _rows(dataset_type: str = "evaluation") -> list[dict]:
                 {"role": "assistant", "content": quote},
             ]
         elif dataset_type == "preference":
-            base.update({"chosen": "基于来源的回答。", "rejected": "没有依据的回答。"})
+            base["prompt"] = base.pop("messages")
+            base.update({
+                "chosen": [{"role": "assistant", "content": "基于来源的回答。"}],
+                "rejected": [{"role": "assistant", "content": "没有依据的回答。"}],
+            })
         else:
             base.update(
                 {
@@ -96,9 +98,9 @@ def _bundle(tmp_path: Path, *, dataset_type: str = "evaluation") -> tuple[Path, 
     manifest = {
         "manifest_schema_version": "feedback-dataset-export-manifest.v1",
         "schema_version": {
-            "sft": "literature-sft.v1",
-            "preference": "literature-preference.v1",
-            "evaluation": "literature-evaluation.v1",
+            "sft": "literature-sft.v2",
+            "preference": "literature-preference.v2",
+            "evaluation": "literature-evaluation.v2",
         }[dataset_type],
         "dataset_type": dataset_type,
         "dataset_id": "dataset-1",
@@ -234,6 +236,30 @@ def test_sft_export_derives_target_and_loss_mask(tmp_path, prepare_module):
         token == "Source" and mask == 0
         for token, mask in zip(row["tokens"], row["loss_mask"], strict=True)
     )
+
+
+@pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
+def test_v2_rejects_legacy_main_fields(prepare_module, task_type):
+    row = {**_rows(task_type)[0], "context": [{"document_title": "Paper", "text": "excerpt"}]}
+    with pytest.raises(prepare_module.SnapshotValidationError, match="row_fields_invalid"):
+        prepare_module._validate_row_shape(row, dataset_type=task_type, row_id="row-1", max_input_tokens=4096)
+
+
+@pytest.mark.parametrize("completion", ["answer", [], [{"role": "user", "content": "answer"}], [{"role": "assistant", "content": ""}]])
+def test_preference_requires_assistant_completions(prepare_module, completion):
+    row = {**_rows("preference")[0], "chosen": completion}
+    with pytest.raises(prepare_module.SnapshotValidationError):
+        prepare_module._validate_row_shape(row, dataset_type="preference", row_id="row-1", max_input_tokens=4096)
+
+
+def test_v1_export_requires_republication_for_offline_preparation(tmp_path, prepare_module):
+    source, manifest = _bundle(tmp_path)
+    manifest["schema_version"] = "literature-evaluation.v1"
+    manifest.pop("manifest_digest")
+    manifest["manifest_digest"] = _digest(manifest)
+    (source / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(prepare_module.SnapshotValidationError, match="export_task_schema_invalid"):
+        prepare_module.prepare_export(export_path=source, output_dir=tmp_path / "prepared")
 
 
 def test_experiment_compares_predictions_against_same_export_eval_set(tmp_path, prepare_module, experiment_module):

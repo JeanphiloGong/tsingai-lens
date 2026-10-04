@@ -368,7 +368,9 @@ async def test_rebuild_discard_restore_and_late_worker_result(
             format="jsonl",
         ))[1].decode("utf-8")
     )
-    assert model_payload["context"][0]["document_title"] == "Paper B"
+    assert set(model_payload) == {"messages"}
+    assert "文献：Paper B\n原文：" in model_payload["messages"][0]["content"]
+    assert published.schema_version == "literature-sft.v2"
     assert model_payload["messages"][-1]["role"] == "assistant"
     assert "source-b-caption" not in json.dumps(model_payload, ensure_ascii=False)
     trace_payload = json.loads(

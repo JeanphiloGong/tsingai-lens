@@ -1096,6 +1096,8 @@ const translations: Record<Language, Translations> = {
 			documents: {
 				title: 'Documents',
 				profileLead: 'Open parsed papers and verify exact Source text used by published Findings.',
+				parsingComplete: 'Document profile ready',
+				parsingFailed: 'Profile extraction failed',
 				profileLoading: 'Loading parsed papers...',
 				profileErrorTitle: 'Parsed papers are unavailable',
 				profileEmptyTitle: 'No parsed papers yet',
@@ -4232,6 +4234,8 @@ const translations: Record<Language, Translations> = {
 			documents: {
 				title: '文档',
 				profileLead: '打开已解析论文，核对 Published Finding 使用的精确 Source 原文。',
+				parsingComplete: '文献画像已就绪',
+				parsingFailed: '文献画像提取失败',
 				profileLoading: '正在加载已解析论文...',
 				profileErrorTitle: '无法加载已解析论文',
 				profileEmptyTitle: '尚无已解析论文',

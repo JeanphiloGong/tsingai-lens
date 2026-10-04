@@ -64,8 +64,11 @@ This node owns the Collection route family.
   Objective-level coverage stays visible in either filter. Source return links
   retain the Objective and Finding selection.
 - `collections/[id]/documents/*`
-  Parsed-paper reading and exact Source verification. Papers can be selected
-  across list pages, and up to 12 stable Source blocks can be selected for a
+  Collection paper browsing, parsed-paper reading and exact Source verification.
+  Search updates after a short debounce; document-type changes apply immediately
+  before pagination. Each whole paper row links to its reader. The list has no
+  paper-selection toolbar, warning filter, apply/reset buttons or reader button.
+  Up to 12 stable Source blocks can be selected for a
   question. The Collection Agent opens alongside the list or reader and remains
   mounted when collapsed. New session starts a separate Collection-bound
   conversation. The handoff creates no Objective, Evidence, or Finding.
@@ -344,8 +347,8 @@ introduce a second conclusion identity. Experiment plans remain downstream
 consumers of published Findings.
 
 The Papers route reports the complete profiled collection size while rendering
-one bounded, compact page. Its title/filename search, document-type filter, and
-parsing-warning filter are collection-wide and run before pagination. Page,
+one bounded, compact page. Its title/filename search and document-type filter
+apply automatically across the collection before pagination. Page,
 search, or filter failures remain explicit instead of presenting one partial
 page as the whole collection. Routine internal Document IDs stay out of the
 paper list; exact Source navigation continues through the canonical paper

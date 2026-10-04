@@ -3096,8 +3096,7 @@ const translations: Record<Language, Translations> = {
 			selectToFreeze: 'Select at least one reviewed case to enable export.',
 			freeze: 'Freeze snapshot',
 			saving: 'Freezing…',
-			freezeNote:
-				'Only reviewed cases with valid evidence and approved data use are exported.',
+			freezeNote: 'Only reviewed cases with valid evidence and approved data use are exported.',
 			noExportableCases: 'No exportable cases. Review the exclusion reasons below.',
 			created: 'Snapshot created with {count} rows.',
 			createdWithExclusions:
@@ -3150,7 +3149,12 @@ const translations: Record<Language, Translations> = {
 			workerRecommendation: 'Worker recommendation',
 			noRecommendation: 'No recommendation yet',
 			acceptRecommendation: 'Accept recommendation',
-			preferenceChoices: { a: 'A is better', b: 'B is better', tie: 'Equal quality', unclear: 'Cannot determine' },
+			preferenceChoices: {
+				a: 'A is better',
+				b: 'B is better',
+				tie: 'Equal quality',
+				unclear: 'Cannot determine'
+			},
 			criteria: 'Evaluation criteria',
 			criterion: 'Evaluation criterion {count}',
 			addCriterion: 'Add criterion',

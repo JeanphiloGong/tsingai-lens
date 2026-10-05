@@ -15,7 +15,7 @@
 	import {
 		X,
 		ListX,
-		Library,
+		ArrowLeft,
 		Columns2,
 		PanelLeft,
 		MessageSquare,
@@ -70,12 +70,16 @@
 		showSelection = false;
 	}
 	$: routeKey = JSON.stringify([currentOwner, documentId, $page.url.search]);
-	$: if (userId && documentId && routeKey !== handledRoute) {
+	$: if (userId && routeKey !== handledRoute) {
 		handledRoute = routeKey;
-		openDocument(documentId, $page.url.search);
+		if (documentId) openDocument(documentId, $page.url.search);
+		else {
+			showSelection = false;
+			if ($agent.open) agent.update((state) => ({ ...state, open: false }));
+		}
 	}
 	$: dual = comparing && Boolean(secondaryId) && viewportWidth >= 1100 && Boolean(documentId);
-	$: expanded = tabs.length > 0 || $agent.open;
+	$: expanded = Boolean(documentId) || $agent.open;
 	$: activeTitle = tabs.find((tab) => tab.documentId === documentId)?.title;
 	$: conversationWidth = Math.min(agentWidth, Math.max(320, viewportWidth * 0.46));
 	$: minimumPaperRatio = Math.min(
@@ -253,13 +257,14 @@
 	bind:this={workspace}
 >
 	<div class="document-pane">
-		{#if tabs.length}
+		{#if tabs.length && documentId}
 			<div class="workspace-toolbar">
 				<a
 					class="library-link"
 					href={`/collections/${collectionId}/documents`}
 					aria-label={$t('collection.tabs.papers')}
-					title={$t('collection.tabs.papers')}><Library size={18} /></a
+					title={$t('collection.tabs.papers')}
+					><ArrowLeft size={18} /><span>{$t('collection.tabs.papers')}</span></a
 				>
 				<DocumentTabs
 					{tabs}
@@ -346,8 +351,8 @@
 							<a
 								href={source.resource_ref.href ||
 									`/collections/${collectionId}/documents/${source.document_id}?source_ref=${encodeURIComponent(source.source_ref)}`}
-									><strong>{source.document_title}</strong><span
-										>{source.heading_path || $t('researchAgent.progress.sourceKind.passage')}</span
+								><strong>{source.document_title}</strong><span
+									>{source.heading_path || $t('researchAgent.progress.sourceKind.passage')}</span
 								>
 								<p>{source.quote}</p></a
 							><IconButton
@@ -521,11 +526,18 @@
 	}
 	.library-link {
 		display: grid;
+		grid-auto-flow: column;
 		place-items: center;
-		width: 40px;
+		gap: 6px;
+		width: auto;
+		min-width: 40px;
 		height: 40px;
+		padding: 0 10px;
 		flex-shrink: 0;
 		color: var(--text-secondary);
+		font-size: 12px;
+		text-decoration: none;
+		white-space: nowrap;
 	}
 	.workspace-actions {
 		display: flex;
@@ -720,6 +732,15 @@
 		}
 		.expanded .paper-list {
 			padding: 16px;
+		}
+	}
+	@media (max-width: 640px) {
+		.library-link {
+			width: 40px;
+			padding: 0;
+		}
+		.library-link span {
+			display: none;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

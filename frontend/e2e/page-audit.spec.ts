@@ -602,6 +602,7 @@ test.describe('page interaction audit', () => {
 				.evaluate((node) => node.scrollTop);
 			expect(scrollA).toBeGreaterThan(500);
 			await page.locator('.library-link').click();
+			await expect(page.locator('.document-workspace.expanded')).toHaveCount(0);
 			await page.locator('.paper-row').filter({ hasText: papers[1].title }).click();
 			const tabs = page.getByRole('tablist', { name: 'Open papers' });
 			await expect(tabs.getByRole('tab')).toHaveCount(2);
@@ -967,6 +968,9 @@ test.describe('page interaction audit', () => {
 			});
 			await page.goto(`/collections/${collectionId}/documents`);
 			await expect(page.locator('.paper-row')).toHaveCount(25);
+			await expect(page.locator('.paper-list-head')).toContainText('Paper');
+			await expect(page.locator('.paper-list-head')).toContainText('Parsing status');
+			await expect(page.locator('.paper-list-head')).toContainText('Pages');
 			await expect(page.locator('.papers-page input[type=checkbox]')).toHaveCount(0);
 			await expect(page.getByRole('button', { name: 'Apply filters', exact: true })).toHaveCount(0);
 			await page.getByRole('button', { name: 'Next', exact: true }).click();
@@ -991,6 +995,15 @@ test.describe('page interaction audit', () => {
 			await page.keyboard.press('Enter');
 			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents/doc_1$`));
 			await expect(page.locator('.document-reader-root')).toBeVisible();
+			await page.locator('.library-link').click();
+			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			await expect(page.locator('.document-workspace.expanded')).toHaveCount(0);
+			await expect(page.locator('.site-header')).toBeVisible();
+			await page.locator('.agent-launcher').click();
+			await expect(page.locator('.agent-pane')).toBeVisible();
+			await page.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await expect(page.locator('.document-workspace.expanded')).toHaveCount(0);
+			await expect(page.locator('.paper-row')).toHaveCount(25);
 		});
 	}
 

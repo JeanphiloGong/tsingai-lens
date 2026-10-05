@@ -180,6 +180,11 @@
 			</span>
 		</div>
 		<div class="paper-list">
+			<div class="paper-list-head">
+				<span>{$t('research.documents.columnTitle')}</span>
+				<span>{$t('research.documents.columnStatus')}</span>
+				<span>{$t('research.documents.columnPages')}</span>
+			</div>
 			{#each profiles.items as profile, index (profile.document_id)}
 				<a
 					class="paper-row"
@@ -194,16 +199,20 @@
 						<span class="paper-type">{documentTypeLabel(profile)}</span>
 					</div>
 
-					<div class="paper-row__metadata">
-						{#if profile.page_count}
-							<span>{$t('research.documents.pageCount', { count: profile.page_count })}</span>
-						{/if}
+					<div class="paper-row__status">
 						<span
 							>{$t(
 								profile.profile_status === 'completed'
 									? 'research.documents.parsingComplete'
 									: 'research.documents.parsingFailed'
 							)}</span
+						>
+					</div>
+					<div class="paper-row__pages">
+						<span
+							>{profile.page_count
+								? $t('research.documents.pageCount', { count: profile.page_count })
+								: '-'}</span
 						>
 					</div>
 				</a>
@@ -321,9 +330,25 @@
 		display: grid;
 		border-top: 1px solid var(--border-default);
 	}
+	.paper-list-head {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(160px, auto) minmax(90px, 120px);
+		align-items: center;
+		gap: 24px;
+		min-height: 42px;
+		padding: 0 16px;
+		border-bottom: 1px solid var(--border-default);
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 600;
+	}
+	.paper-list-head span:last-child {
+		text-align: right;
+	}
 	.paper-row {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(160px, auto);
+		grid-template-columns: minmax(0, 1fr) minmax(160px, auto) minmax(90px, 120px);
 		align-items: center;
 		gap: 24px;
 		min-height: 92px;
@@ -359,11 +384,13 @@
 		color: var(--text-secondary);
 		font-size: 12px;
 	}
-	.paper-row__metadata {
-		display: flex;
-		gap: 32px;
+	.paper-row__status,
+	.paper-row__pages {
 		color: var(--text-secondary);
 		font-size: 13px;
+	}
+	.paper-row__pages {
+		text-align: right;
 	}
 	.paper-pagination {
 		display: flex;
@@ -380,9 +407,15 @@
 		.filter-field:first-child {
 			width: 100%;
 		}
+		.paper-list-head {
+			display: none;
+		}
 		.paper-row {
 			grid-template-columns: minmax(0, 1fr);
 			gap: 12px;
+		}
+		.paper-row__pages {
+			text-align: left;
 		}
 		.paper-pagination {
 			flex-wrap: wrap;

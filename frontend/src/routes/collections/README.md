@@ -71,6 +71,10 @@ This node owns the Collection route family.
   Search updates after a short debounce; document-type changes apply immediately
   before pagination. Each whole paper row links to its reader. The list has no
   paper-selection toolbar, warning filter, apply/reset buttons or reader button.
+  Wide layouts show paper, parsing status and page-count column headers; narrow
+  layouts collapse those headers into the paper cards. Returning to the list
+  restores the normal Collection chrome while keeping already opened paper tabs
+  available for the next reader visit.
   Up to 12 stable Source blocks can be selected for a
   question. The Collection Agent opens alongside the list or reader and remains
   mounted when collapsed. New session starts a separate Collection-bound

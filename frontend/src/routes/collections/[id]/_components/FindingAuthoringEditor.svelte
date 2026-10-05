@@ -38,7 +38,7 @@
 		if (!selectionIds.length) { formError = '至少选择一个实验结果。'; return; }
 		saving = true;
 		try {
-			const result = await createFindingVersion(collectionId, objectiveId, { source_analysis_version: analysisVersion, selection_ids: selectionIds, comparison_group_ids: comparisonGroupIds });
+			const result = await createFindingVersion(collectionId, objectiveId, { source_analysis_version: analysisVersion, selection_ids: selectionIds, comparison_group_ids: comparisonGroupIds, parent_finding_id: parentFinding?.finding_id ?? null });
 			await onSaved(result);
 		} catch (error) { formError = errorMessage(error); } finally { saving = false; }
 	}
@@ -55,7 +55,7 @@
 			{:else}<p class="state">当前版本没有可选实验结果。</p>{/each}
 			<h4>比较组（可选）</h4>
 			{#each projection.comparison_groups as group (group.group_id)}
-				<label class="option"><input type="checkbox" checked={comparisonGroupIds.includes(group.group_id)} on:change={() => (comparisonGroupIds = toggle(comparisonGroupIds, group.group_id))} /><span>{group.group_id}{group.label ? ` · ${group.label}` : ''}</span></label>
+				<label class="option"><input type="checkbox" checked={comparisonGroupIds.includes(group.group_id)} on:change={() => (comparisonGroupIds = toggle(comparisonGroupIds, group.group_id))} /><span>{group.group_id} · {group.outcome}</span></label>
 			{/each}
 		</div>
 	{:else}<p class="error">{formError}</p>{/if}

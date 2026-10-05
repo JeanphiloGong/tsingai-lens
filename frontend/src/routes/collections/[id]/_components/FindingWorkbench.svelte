@@ -847,6 +847,7 @@
 		/>
 	{/if}
 
+	<slot name="comparison">
 	<section aria-labelledby="evidence-comparison-title">
 		<div class="section-heading">
 			<h3 id="evidence-comparison-title">证据对比</h3>
@@ -888,6 +889,7 @@
 		{/if}
 	</section>
 
+	</slot>
 	<section>
 		<h3>适用条件</h3>
 		{#if contextGroups.length}

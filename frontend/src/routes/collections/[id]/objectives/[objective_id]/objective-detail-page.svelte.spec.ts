@@ -147,6 +147,8 @@ const finding = {
 	synthesis_status: 'insufficient_confirmation',
 	certainty: 0.88,
 	display_rank: 0,
+	selection_ids: ['selection-1'],
+	comparison_group_ids: [],
 	mechanisms: [
 		{
 			source_term: 'annealing',
@@ -279,6 +281,12 @@ function installPublishedResponses(
 		if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'GET') {
 			return jsonResponse(response);
 		}
+		if (current.path.endsWith('/objectives/obj_1/experiment-analysis')) {
+			return jsonResponse({
+				selections: [{ selection_id: 'selection-1', experiment_id: 'experiment-1', experiment_version: 1, outcome: 'tensile strength', measurement_keys: ['measurement-1'], comparison_keys: [], missing_context: [] }],
+				comparison_groups: [], experiments: [], findings: []
+			});
+		}
 		if (current.path.endsWith('/objectives/obj_1/findings')) {
 			return jsonResponse({
 				collection_id: 'col_123',
@@ -311,13 +319,27 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await browserPage.viewport(1280, 900);
 		setPage({
 			params: { id: 'col_123', objective_id: 'obj_1' },
-			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
+			url: new URL('http://localhost/collections/col_123/objectives/obj_1?finding_id=finding-1')
 		});
 		goto.mockReset();
 		fetchMock.mockReset();
 	});
 
-	it('creates a new Finding from current published Evidence and reloads its version', async () => {
+	it('opens the result overview without selecting the first Finding', async () => {
+		setPage({
+			params: { id: 'col_123', objective_id: 'obj_1' },
+			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
+		});
+		installPublishedResponses();
+
+		render(Page);
+
+		await expect.element(browserPage.getByRole('heading', { name: 'Research findings' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText(finding.statement)).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('region', { name: 'Finding details' })).not.toBeInTheDocument();
+	});
+
+	it('creates a new Finding from a fixed experiment selection and reloads its version', async () => {
 		let publishedVersion = 1;
 		let submitted: Record<string, unknown> | null = null;
 		const manualFinding = {
@@ -360,6 +382,12 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 					})
 				);
 			}
+			if (current.path.endsWith('/objectives/obj_1/experiment-analysis')) {
+				return jsonResponse({
+					selections: [{ selection_id: 'selection-1', experiment_id: 'experiment-1', experiment_version: 1, outcome: 'tensile strength', measurement_keys: ['measurement-1'], comparison_keys: [], missing_context: [] }],
+					comparison_groups: [], experiments: [], findings: []
+				});
+			}
 			if (current.path.endsWith('/objectives/obj_1/findings') && current.method === 'POST') {
 				submitted = JSON.parse(String(init?.body ?? '{}'));
 				publishedVersion = 2;
@@ -395,12 +423,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 		await browserPage.getByRole('button', { name: '新建 Finding' }).click();
-		await expect
-			.element(browserPage.getByRole('heading', { name: '创建 Finding' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('结论').fill(manualFinding.statement);
-		await browserPage.getByLabelText('陈述强度').selectOptions('associative');
-		await browserPage.getByLabelText('在 Finding 中的作用').selectOptions('supporting');
+		await expect.element(browserPage.getByRole('heading', { name: '从实验选择创建 Finding' })).toBeInTheDocument();
+		await browserPage.getByLabelText(/selection-1/).check();
 		await browserPage.getByRole('button', { name: '创建 Finding' }).click();
 
 		await expect
@@ -408,10 +432,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		expect(submitted).toMatchObject({
 			source_analysis_version: 1,
-			statement: manualFinding.statement,
-			assertion_strength: 'associative',
-			supporting_evidence_ids: ['evidence-1'],
-			parent_finding_id: null
+			selection_ids: ['selection-1'],
+			comparison_group_ids: []
 		});
 		expect(goto).toHaveBeenCalledWith(
 			expect.stringContaining('finding_id=finding-manual-1'),
@@ -570,15 +592,14 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		render(Page);
 		await browserPage.getByRole('button', { name: '基于此 Finding 创建新版本' }).click();
 		await expect
-			.element(browserPage.getByRole('heading', { name: '修订为新 Finding' }))
+			.element(browserPage.getByRole('heading', { name: '从实验选择创建 Finding' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('结论')).toHaveValue(finding.statement);
 		await browserPage.getByRole('button', { name: '创建 Finding' }).click();
 
 		expect(submitted).toMatchObject({
 			parent_finding_id: 'finding-1',
-			supporting_evidence_ids: ['evidence-1'],
-			context_evidence_ids: ['evidence-mechanism']
+			selection_ids: ['selection-1'],
+			comparison_group_ids: []
 		});
 	});
 

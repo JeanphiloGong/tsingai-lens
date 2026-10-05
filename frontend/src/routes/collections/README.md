@@ -30,7 +30,12 @@ This node owns the Collection route family.
   completion exposes Findings, while failure keeps its explanation and retry on
   the same row.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`
-  Published Finding list and one selected Finding detail. A researcher can
+  Research Objective review workspace. The default results view shows the
+  experiment comparison overview and the complete published Finding list;
+  analysis scope is a separate tab. Clicking a Finding opens its focused
+  detail view through the `finding_id` URL parameter, and the back action
+  returns to the results overview without selecting a Finding automatically.
+  A researcher can
   create a new Finding from all eligible Evidence in the current published
   version, or derive one from a selected system Finding. Evidence roles and
   exact Source links stay visible in the editor. Saving publishes a new
@@ -292,18 +297,17 @@ Published Finding metadata shows the model recorded for that published analysis,
 not the model attached to a newer active or failed retry. Historical analyses
 without model metadata are labeled explicitly instead of guessing a model.
 
-The Finding list returns the complete display shape. Selection reuses that item
-and loads only its paginated Evidence with the published `analysis_version`;
-stale rapid-selection responses are discarded.
-The Finding route uses a compact Collection link and single-row navigation in
+The Finding list returns the complete display shape. Clicking a row opens the
+focused Finding view and loads only its paginated Evidence with the published
+`analysis_version`; the back action returns to the results overview, and stale
+rapid-selection responses are discarded.
+The Objective route uses a compact Collection link and single-row navigation in
 place of the Collection overview header. Published results appear directly
 beneath the Objective question. Evidence
-coverage is a compact, initially collapsed sidebar disclosure with record and
-review-gap counts; expanding it preserves gap reasons, excerpts, status counts,
-and exact Source links. Research scope and export controls are also collapsed
-instead of introducing the results with explanatory panels. On narrow screens,
-multiple Findings use a select control so the full list does not precede the
-selected result. No-Finding outcomes remain explicit, and active or failed
+coverage is a compact, initially collapsed disclosure with record and review-gap
+counts; expanding it preserves gap reasons, excerpts, status counts, and exact
+Source links. Research scope is a separate tab, while export is available from
+the page header. No-Finding outcomes remain explicit, and active or failed
 analysis states remain visible alongside any previously published results.
 The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned

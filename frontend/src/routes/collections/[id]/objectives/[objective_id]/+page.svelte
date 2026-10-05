@@ -37,6 +37,7 @@
 	let loadSequence = 0;
 	let evidenceSequence = 0;
 	let projectionSequence = 0;
+	let navigationPending = false;
 	let disposed = false;
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let authoringOpen = false;
@@ -96,7 +97,7 @@
 			await Promise.all([loadFindings(), loadProjection()]);
 			if (disposed || sequence !== loadSequence || key !== loadedKey) return;
 			if (preferredFindingId !== undefined) await navigateFinding(preferredFindingId, true);
-			await selectFinding(preferredFindingId ?? requestedFindingId);
+			else await selectFinding(requestedFindingId);
 			schedulePoll();
 		} catch (err) {
 			if (disposed || sequence !== loadSequence) return;
@@ -148,10 +149,20 @@
 	}
 
 	function syncFinding(id: string) {
-		if (id === selectedFindingId) return;
+		if (navigationPending || id === selectedFindingId) return;
 		closeAuthoring();
 		view = 'results';
 		void selectFinding(id);
+	}
+
+	async function openScope() {
+		closeAuthoring();
+		view = 'scope';
+		await selectFinding('');
+		const url = new URL($page.url);
+		url.searchParams.delete('finding_id');
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route is resolved before preserving query state
+		await goto(resolve('/collections/[id]/objectives/[objective_id]', { id: collectionId, objective_id: objectiveId }) + url.search, { replaceState: true, noScroll: true });
 	}
 
 	async function navigateFinding(id: string, replaceState = false) {
@@ -160,7 +171,14 @@
 		const url = new URL($page.url);
 		if (id) url.searchParams.set('finding_id', id);
 		else url.searchParams.delete('finding_id');
-		await goto(resolve('/collections/[id]/objectives/[objective_id]', { id: collectionId, objective_id: objectiveId }) + url.search, { replaceState, noScroll: true });
+		navigationPending = true;
+		try {
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route is resolved before preserving query state
+			await goto(resolve('/collections/[id]/objectives/[objective_id]', { id: collectionId, objective_id: objectiveId }) + url.search, { replaceState, noScroll: true });
+		} finally {
+			navigationPending = false;
+		}
+		await selectFinding(id);
 	}
 
 	async function selectFinding(id: string) {
@@ -240,7 +258,7 @@
 					if (disposed || key !== loadedKey) return;
 					const id = findings.some(item => item.finding_id === requestedFindingId) ? requestedFindingId : '';
 					if (id !== requestedFindingId) await navigateFinding(id, true);
-					await selectFinding(id);
+					else await selectFinding(id);
 				}
 			}
 			schedulePoll();
@@ -282,14 +300,18 @@
 				<h1>{analysis.objective.question}</h1>
 				<p class="meta">{analysis.objective.material_scope.join(' · ')}{#if published} · {$t('objectiveWorkspace.publishedVersion', { version: published.analysis_version })}{/if}</p>
 			</div>
-			{#if published}<button class="btn btn--ghost btn--small" on:click={() => { exportError = ''; exportOpen = true; }}><Download size={16} />{$t('objectiveWorkspace.export')}</button>{/if}
+			<div class="header-actions">
+				{#if active?.status === 'failed'}<button class="btn btn--ghost btn--small" type="button" on:click={() => void openScope()}><RefreshCw size={16} />{$t('objectiveWorkspace.retryAnalysis')}</button>{/if}
+				{#if published && active?.status !== 'failed' && !isProcessing}<button class="btn btn--ghost btn--small" type="button" on:click={() => void openScope()}><RefreshCw size={16} />{$t('objectiveWorkspace.reanalyze')}</button>{/if}
+				{#if published}<button class="btn btn--ghost btn--small" on:click={() => { exportError = ''; exportOpen = true; }}><Download size={16} />{$t('objectiveWorkspace.export')}</button>{/if}
+			</div>
 		</header>
 		{#if active && active.status !== 'succeeded'}
 			<div class="analysis-state" class:failed={active.status === 'failed'} role="status">
 				<strong>{$t(isProcessing ? 'objectiveWorkspace.active' : 'objectiveWorkspace.failed')}</strong>
 				<span>{active.status === 'failed' ? $t('researchAgent.capability.analysisFailed') : active.progress_message || $t('objectiveWorkspace.runProgress', { processed: active.processed_document_count, total: active.total_document_count })}</span>
 				{#if published}<span>{$t('objectiveWorkspace.retained')}</span>{/if}
-				{#if active.status === 'failed'}<button class="btn btn--ghost btn--small" on:click={() => view = 'scope'}>{$t('objectiveWorkspace.scope')}</button>{/if}
+				{#if active.status === 'failed'}<button class="btn btn--ghost btn--small" on:click={() => void openScope()}>{$t('objectiveWorkspace.scope')}</button>{/if}
 			</div>
 		{/if}
 		{#if actionError}<div role="alert"><p>{actionError}</p><button class="btn btn--ghost" on:click={refreshAnalysis}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button></div>{/if}
@@ -323,10 +345,10 @@
 			</fieldset>
 			<details><summary>{$t('objectiveWorkspace.dataset')}</summary>
 				<div class="dataset-filters">
-					<label>{$t('objectiveWorkspace.labelStatus')}<select bind:value={datasetLabelStatus}><option value="">{$t('objectiveWorkspace.all')}</option>{#each ['candidate', 'silver', 'gold', 'rejected'] as status}<option value={status}>{$t('objectiveWorkspace.' + status)}</option>{/each}</select></label>
-					<label>{$t('objectiveWorkspace.useStatus')}<select bind:value={datasetUseStatus}><option value="">{$t('objectiveWorkspace.all')}</option>{#each ['training_ready', 'review_candidate', 'rejected'] as status}<option value={status}>{$t('objectiveWorkspace.' + status)}</option>{/each}</select></label>
+						<label>{$t('objectiveWorkspace.labelStatus')}<select bind:value={datasetLabelStatus}><option value="">{$t('objectiveWorkspace.all')}</option>{#each ['candidate', 'silver', 'gold', 'rejected'] as status (status)}<option value={status}>{$t('objectiveWorkspace.' + status)}</option>{/each}</select></label>
+						<label>{$t('objectiveWorkspace.useStatus')}<select bind:value={datasetUseStatus}><option value="">{$t('objectiveWorkspace.all')}</option>{#each ['training_ready', 'review_candidate', 'rejected'] as status (status)}<option value={status}>{$t('objectiveWorkspace.' + status)}</option>{/each}</select></label>
 				</div>
-				<div class="dataset-actions">{#each ['json', 'training_jsonl', 'llamafactory_alpaca'] as format}<button class="btn btn--ghost btn--small" disabled={exportLoading} on:click={() => downloadData(format as 'json' | 'training_jsonl' | 'llamafactory_alpaca', true)}><Download size={14} />{format === 'json' ? 'JSON' : format === 'training_jsonl' ? 'JSONL' : 'LlamaFactory JSONL'}</button>{/each}</div>
+					<div class="dataset-actions">{#each ['json', 'training_jsonl', 'llamafactory_alpaca'] as format (format)}<button class="btn btn--ghost btn--small" disabled={exportLoading} on:click={() => downloadData(format as 'json' | 'training_jsonl' | 'llamafactory_alpaca', true)}><Download size={14} />{format === 'json' ? 'JSON' : format === 'training_jsonl' ? 'JSONL' : 'LlamaFactory JSONL'}</button>{/each}</div>
 			</details>
 			{#if exportError}<p role="alert">{exportError}</p>{/if}
 			<footer><button class="btn btn--ghost" on:click={() => exportOpen = false}>{$t('objectiveWorkspace.cancel')}</button><button class="btn btn--primary" disabled={exportLoading} on:click={() => downloadData(exportFormat)}><Download size={16} />{$t(exportLoading ? 'objectiveWorkspace.downloading' : 'objectiveWorkspace.download')}</button></footer>
@@ -337,7 +359,7 @@
 <style>
 	.objective-page { width: min(1360px, 100%); margin: 0 auto; display: grid; gap: 20px; min-width: 0; }
 	.objective-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
-	.objective-header > div { min-width: 0; } .objective-header > button { flex-shrink: 0; }
+	.objective-header > div { min-width: 0; } .header-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
 	h1 { margin: 12px 0 8px; font-size: 22px; line-height: 1.4; overflow-wrap: anywhere; }
 	.back { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 13px; }
 	.meta { margin: 0; color: var(--text-secondary); font-size: 13px; }

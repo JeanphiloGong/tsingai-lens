@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { ArrowLeft, ChevronRight, Plus, RefreshCw } from '@lucide/svelte';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import ExperimentResults from './ExperimentResults.svelte';
 	import ObjectiveAnalysisScope from './ObjectiveAnalysisScope.svelte';
 	import { t } from '../../../_shared/i18n';
@@ -27,16 +28,16 @@
 	function directPaperCount(finding: ObjectiveFinding) {
 		return finding.paper_contributions.filter(item => item.supporting_evidence_ids.length || item.contradicting_evidence_ids.length).length;
 	}
-	function sourceHref(gap: ObjectiveAnalysis['evidence_review']['gaps'][number]) {
+	function sourceQuery(gap: ObjectiveAnalysis['evidence_review']['gaps'][number]) {
 		const returnTo = resolve('/collections/[id]/objectives/[objective_id]', { id: collectionId, objective_id: analysis.objective.objective_id });
-		const query = new URLSearchParams({ view: 'parsed-paper', evidence_id: gap.evidence_id, source_ref: gap.source_ref, quote: gap.source_excerpt, return_to: returnTo });
+		const query = new SvelteURLSearchParams({ view: 'parsed-paper', evidence_id: gap.evidence_id, source_ref: gap.source_ref, quote: gap.source_excerpt, return_to: returnTo });
 		if (gap.page_numbers[0]) query.set('page', String(gap.page_numbers[0]));
-		return resolve('/collections/[id]/documents/[document_id]', { id: collectionId, document_id: gap.document_id }) + '?' + query;
+		return String(query);
 	}
 </script>
 
 {#if selectedFindingId || authoringOpen}
-	<div class="selected-heading"><button class="back" type="button" on:click={() => onSelectFinding('')}><ArrowLeft size={16} />{$t('objectiveWorkspace.back')}</button><button class="new-finding" type="button" aria-label="新建 Finding" on:click={onNewFinding}><Plus size={16} />{$t('objectiveWorkspace.newFinding')}</button></div>
+	<div class="selected-heading"><button class="back" type="button" on:click={() => onSelectFinding('')}><ArrowLeft size={16} />{$t('objectiveWorkspace.back')}</button><button class="new-finding" type="button" aria-label={$t('objectiveWorkspace.newFinding')} on:click={onNewFinding}><Plus size={16} />{$t('objectiveWorkspace.newFinding')}</button></div>
 	<slot name="selected" />
 {:else}
 	<nav class="workspace-tabs" aria-label={$t('objectiveWorkspace.list')}>
@@ -58,7 +59,7 @@
 
 		{#if published}
 			<section class="finding-index" aria-labelledby="finding-index-title">
-				<header><div><h2 id="finding-index-title">{$t('objectiveWorkspace.findings')}</h2><span>{$t('objectiveWorkspace.findingCount', { count: findings.length })}</span></div><button class="new-finding" type="button" aria-label="新建 Finding" on:click={onNewFinding}><Plus size={16} />{$t('objectiveWorkspace.newFinding')}</button></header>
+				<header><div><h2 id="finding-index-title">{$t('objectiveWorkspace.findings')}</h2><span>{$t('objectiveWorkspace.findingCount', { count: findings.length })}</span></div><button class="new-finding" type="button" aria-label={$t('objectiveWorkspace.newFinding')} on:click={onNewFinding}><Plus size={16} />{$t('objectiveWorkspace.newFinding')}</button></header>
 				{#if findings.length}
 					<ul class="finding-list">
 						{#each findings as finding (finding.finding_id)}
@@ -77,9 +78,12 @@
 				<details class="coverage" aria-label={$t('research.findingReview.coverage')}>
 					<summary>{$t('research.findingReview.coverage')} · {$t('research.findingReview.coverageCount', { count: analysis.evidence_review.total_evidence_count })}</summary>
 					<p>{$t('research.findingReview.coverageTotal', { count: analysis.evidence_review.total_evidence_count, results: analysis.evidence_review.result_count })}</p>
-					<div class="counts">{#each Object.entries(analysis.evidence_review.status_counts) as [status, count]}<span>{count} · {$t('objectiveWorkspace.evidenceStatus.' + status)}</span>{/each}</div>
+					<div class="counts">{#each Object.entries(analysis.evidence_review.status_counts) as [status, count] (status)}<span>{count} · {$t('objectiveWorkspace.evidenceStatus.' + status)}</span>{/each}</div>
 					{#each analysis.evidence_review.gaps as gap (gap.evidence_id)}
-						<article><h3>{documentTitles[gap.document_id] || $t('research.findingReview.untitledPaper')}</h3><span>{$t('objectiveWorkspace.evidenceStatus.' + gap.evidence_status)}</span><p>{gap.reason}</p>{#if gap.outcome}<p>{$t('research.findingReview.outcome', { outcome: gap.outcome })}</p>{/if}{#if gap.source_excerpt}<blockquote>{gap.source_excerpt}</blockquote>{/if}<a href={sourceHref(gap)}>{$t('research.findingReview.openSource')}</a></article>
+						<article><h3>{documentTitles[gap.document_id] || $t('research.findingReview.untitledPaper')}</h3><span>{$t('objectiveWorkspace.evidenceStatus.' + gap.evidence_status)}</span><p>{gap.reason}</p>{#if gap.outcome}<p>{$t('research.findingReview.outcome', { outcome: gap.outcome })}</p>{/if}{#if gap.source_excerpt}<blockquote>{gap.source_excerpt}</blockquote>{/if}
+							<!-- eslint-disable svelte/no-navigation-without-resolve -->
+							<a href={resolve('/collections/[id]/documents/[document_id]', { id: collectionId, document_id: gap.document_id }) + '?' + sourceQuery(gap)}>{$t('research.findingReview.openSource')}</a></article>
+							<!-- eslint-enable svelte/no-navigation-without-resolve -->
 					{/each}
 					{#if analysis.evidence_review.omitted_gap_count}<p>{$t('research.findingReview.omittedGaps', { count: analysis.evidence_review.omitted_gap_count })}</p>{/if}
 				</details>

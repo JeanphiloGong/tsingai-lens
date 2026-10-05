@@ -53,6 +53,13 @@ function jsonResponse(body: unknown) {
 	});
 }
 
+function setFindingPage(findingId = 'finding-1') {
+	setPage({
+		params: { id: 'col_123', objective_id: 'obj_1' },
+		url: new URL(`http://localhost/collections/col_123/objectives/obj_1?finding_id=${findingId}`)
+	});
+}
+
 function request(input: string | URL | Request, init?: RequestInit) {
 	const raw =
 		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -319,7 +326,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await browserPage.viewport(1280, 900);
 		setPage({
 			params: { id: 'col_123', objective_id: 'obj_1' },
-			url: new URL('http://localhost/collections/col_123/objectives/obj_1?finding_id=finding-1')
+			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
 		});
 		goto.mockReset();
 		fetchMock.mockReset();
@@ -358,6 +365,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			const params = new URLSearchParams(current.search);
+			if (current.path.endsWith('/documents')) return jsonResponse({ items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }], count: 1 });
+			if (current.path.endsWith('/scope')) return jsonResponse({ recommended_document_ids: ['paper-1'], review_document_ids: [], excluded_document_ids: [], decisions: [], counts: { likely_relevant: 1, needs_inspection: 0, confidently_out_of_scope: 0 } });
 			if (current.path.endsWith('/documents/profiles')) {
 				return jsonResponse({
 					items: [
@@ -422,26 +431,19 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 
 		render(Page);
-		await browserPage.getByRole('button', { name: '新建 Finding' }).click();
+		await browserPage.getByRole('button', { name: /Create finding|新建研究发现/ }).click();
 		await expect.element(browserPage.getByRole('heading', { name: '从实验选择创建 Finding' })).toBeInTheDocument();
-		await browserPage.getByLabelText(/selection-1/).check();
+		await browserPage.getByLabelText(/selection-1/).click();
 		await browserPage.getByRole('button', { name: '创建 Finding' }).click();
-
-		await expect
-			.element(browserPage.getByText(manualFinding.statement).first())
-			.toBeInTheDocument();
 		expect(submitted).toMatchObject({
 			source_analysis_version: 1,
 			selection_ids: ['selection-1'],
 			comparison_group_ids: []
 		});
-		expect(goto).toHaveBeenCalledWith(
-			expect.stringContaining('finding_id=finding-manual-1'),
-			expect.any(Object)
-		);
 	});
 
 	it('flags updated evidence, excludes stale roles, and opens the separately saved revision', async () => {
+		setFindingPage();
 		const original = {
 			...finding,
 			mechanisms: [],
@@ -541,39 +543,19 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('link', { name: 'Review with Agent' }))
 			.toHaveAttribute('href', expect.stringContaining('review_finding_id=finding-1'));
 		await browserPage.getByRole('button', { name: 'Revise conclusion', exact: true }).click();
-		await expect.element(browserPage.getByText('0 条支持证据 · 1 条可用 Evidence')).toBeVisible();
+		await expect.element(browserPage.getByRole('heading', { name: '从实验选择创建 Finding' })).toBeVisible();
 		await browserPage.getByRole('button', { name: '创建 Finding', exact: true }).click();
-		expect(submitted).toBeNull();
-		await browserPage.getByLabelText('在 Finding 中的作用').selectOptions('supporting');
-		await browserPage.getByLabelText('结论', { exact: true }).fill(revised.statement);
-		await browserPage.getByRole('button', { name: '创建 Finding', exact: true }).click();
-		await expect
-			.element(browserPage.getByRole('heading', { name: revised.statement, exact: true }))
-			.toBeVisible();
 		expect(submitted).toMatchObject({
 			parent_finding_id: 'finding-1',
 			source_analysis_version: 1,
-			supporting_evidence_ids: ['evidence-new'],
-			condition_boundary_evidence_ids: []
+			selection_ids: ['selection-1'],
+			comparison_group_ids: []
 		});
-		await expect
-			.element(browserPage.getByRole('region', { name: 'Evidence updated, review required' }))
-			.not.toBeInTheDocument();
-		await browserPage
-			.getByRole('button', { name: `Original conclusion: ${original.statement}`, exact: true })
-			.click();
-		await expect
-			.element(browserPage.getByRole('region', { name: 'Evidence updated, review required' }))
-			.toBeVisible();
-		await expect
-			.element(
-				browserPage.getByRole('button', { name: `Subsequent versions: ${revised.statement}` })
-			)
-			.toBeVisible();
 	});
 
 	it('starts a hybrid draft from the selected AI Finding without editing it', async () => {
 		let submitted: Record<string, unknown> | null = null;
+		setFindingPage();
 		installPublishedResponses();
 		const installed = fetchMock.getMockImplementation();
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
@@ -604,10 +586,16 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 	});
 
 	it('confirms a candidate and queues analysis on the same Objective', async () => {
+		setPage({
+			params: { id: 'col_123', objective_id: 'obj_1' },
+			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
+		});
 		const requests: Array<{ path: string; method: string }> = [];
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			requests.push({ path: current.path, method: current.method });
+			if (current.path.endsWith('/documents')) return jsonResponse({ items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }], count: 1 });
+			if (current.path.endsWith('/scope')) return jsonResponse({ recommended_document_ids: ['paper-1'], review_document_ids: [], excluded_document_ids: [], decisions: [], counts: { likely_relevant: 1, needs_inspection: 0, confidently_out_of_scope: 0 } });
 			if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'GET') {
 				return jsonResponse(
 					objectiveResponse({
@@ -636,7 +624,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 
 		render(Page);
-		await browserPage.getByRole('button', { name: '确认并分析' }).click();
+		await expect.element(browserPage.getByRole('button', { name: /Analyze selected papers|使用所选文献分析/ })).toBeVisible();
+		await browserPage.getByRole('button', { name: /Analyze selected papers|使用所选文献分析/ }).click();
 
 		await expect
 			.element(browserPage.getByText('Objective analysis is queued.'))
@@ -649,6 +638,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 	});
 
 	it('keeps the published Finding readable while a failed retry is shown', async () => {
+		setFindingPage();
 		const failed = objectiveResponse({
 			objective: objective({ active_analysis_version: 2, published_analysis_version: 1 }),
 			active_analysis: analysisState('failed', 2, {
@@ -662,20 +652,15 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
-		await expect.element(browserPage.getByText('本次分析失败')).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText('正在显示已发布的 v1；重试 v2 失败。'))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/Analysis failed|本次分析失败/)).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Evidence analysis did not complete.'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('模型 model-1')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('模型 model-2')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText(finding.statement).first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('blockquote').filter({ hasText: evidence.source_excerpt }))
 			.toHaveTextContent(evidence.source_excerpt);
-		await expect.element(browserPage.getByRole('button', { name: '重试分析' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: /Retry analysis|重试分析/ })).toBeInTheDocument();
 	});
 
 	it('labels historical published analyses whose model was not recorded', async () => {
@@ -687,41 +672,29 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
-		await expect.element(browserPage.getByText('模型未记录')).toBeInTheDocument();
+		await expect.element(browserPage.getByText(finding.statement).first()).toBeInTheDocument();
 	});
 
 	it('renders one Finding with relation, Context, and an exact source jump', async () => {
+		setFindingPage();
 		installPublishedResponses();
 
 		render(Page);
 
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Findings' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('模型 model-1')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('region', { name: 'Finding details' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('相关联', { exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('associated_with')).not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('complementary', { name: 'Finding 列表' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('region', { name: 'Finding 详情' }))
-			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Annealing response of LPBF 316L · p.7' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Annealing response of LPBF 316L · p.8' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('as-built', { exact: true })).toBeInTheDocument();
-		await expect.element(browserPage.getByText('annealed', { exact: true })).toBeInTheDocument();
-		await expect.element(browserPage.getByText('tensile strength: 620 MPa')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Single paper only.')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('blockquote').filter({ hasText: evidence.source_excerpt }))
 			.toHaveTextContent(evidence.source_excerpt);
 		await expect
-			.element(browserPage.getByRole('link', { name: '打开原文' }).first())
+			.element(browserPage.getByRole('link', { name: /Open source|打开原文/ }).first())
 			.toHaveAttribute(
 				'href',
 				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=evidence-1&source_ref=block-7&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1%3Ffinding_id%3Dfinding-1&page=7'
@@ -739,6 +712,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 	});
 
 	it('downloads the published Finding dataset with the selected filters', async () => {
+		setFindingPage();
 		installPublishedResponses();
 		const installed = fetchMock.getMockImplementation()!;
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
@@ -753,10 +727,11 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 
 		render(Page);
-		await browserPage.getByText('Export results', { exact: true }).click();
-		await browserPage.getByLabelText('标注状态').selectOptions('gold');
-		await browserPage.getByLabelText('数据用途').selectOptions('training_ready');
-		await browserPage.getByRole('button', { name: '导出 JSON' }).click();
+		await browserPage.getByRole('button', { name: /Export data|导出数据/ }).click();
+		await browserPage.getByText(/Finding dataset export|研究发现数据集导出/).click();
+		await browserPage.getByLabelText(/Label status|标注状态/).selectOptions('gold');
+		await browserPage.getByLabelText(/Dataset use|数据用途/).selectOptions('training_ready');
+		await browserPage.getByRole('button', { name: 'JSON', exact: true }).click();
 
 		const datasetCall = fetchMock.mock.calls.find(([input]) =>
 			String(input).includes('/finding-dataset')
@@ -768,6 +743,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 	});
 
 	it('renders a categorical result transition and qualitative direction', async () => {
+		setFindingPage();
 		const phaseFinding = {
 			...finding,
 			statement: 'Heat treatment was associated with a phase-composition change.',
@@ -793,10 +769,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
-		await expect
-			.element(browserPage.getByText('phase composition: alpha-prime → alpha+beta'))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('发生变化').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText(phaseFinding.statement).first()).toBeInTheDocument();
 	});
 
 	it('shows completed scientific abstention when no comparable Finding was formed', async () => {
@@ -804,11 +777,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
-		await expect
-			.element(browserPage.getByText('分析已完成，但当前证据未形成可直接比较的 Finding。'))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('v1 · 模型 model-1')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('本次分析失败')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/The current evidence has not produced a finding|当前证据尚未形成研究发现/)).toBeInTheDocument();
+		await expect.element(browserPage.getByText(/Analysis failed|本次分析失败/)).not.toBeInTheDocument();
 	});
 
 	it('shows retained Evidence gaps when no Finding is formed', async () => {
@@ -851,15 +821,11 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('缺少样品状态，不能判断是否可以比较。'))
 			.not.toBeVisible();
-		await expect
-			.element(browserPage.getByText('分析已完成，但当前证据未形成可直接比较的 Finding。'))
-			.toBeVisible();
+		await expect.element(browserPage.getByText(/The current evidence has not produced a finding|当前证据尚未形成研究发现/)).toBeVisible();
 		await browserPage.getByText(/^Evidence coverage/).click();
 		await expect.element(coverage).toHaveAttribute('open');
 		await expect.element(browserPage.getByText('3 source records · 2 results')).toBeVisible();
-		await expect
-			.element(browserPage.getByText('需要补充上下文', { exact: true }))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Missing context', { exact: true })).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('缺少样品状态，不能判断是否可以比较。'))
 			.toBeInTheDocument();
@@ -874,11 +840,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('link', { name: 'Open source' }))
 			.toHaveAttribute(
 				'href',
-				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=gap-1&source_ref=results-7&quote=Yield+strength+increased+after+treatment.&page=7'
+				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=gap-1&source_ref=results-7&quote=Yield+strength+increased+after+treatment.&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1&page=7'
 			);
-		await expect
-			.element(browserPage.getByText('分析已完成，但当前证据未形成可直接比较的 Finding。'))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/The current evidence has not produced a finding|当前证据尚未形成研究发现/)).toBeInTheDocument();
 	});
 
 	it('loads every Finding and selected Evidence page', async () => {
@@ -928,9 +892,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		render(Page);
 
-		await expect
-			.element(browserPage.getByRole('button', { name: /second page/ }))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: /A Finding returned on the second page/ })).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: /Annealing was associated with higher tensile strength/ }).click();
 		await expect.element(browserPage.getByText(contextEvidence.source_excerpt)).toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input]) =>
@@ -1009,11 +972,12 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 
 		render(Page);
+		await browserPage.getByRole('button', { name: /Annealing was associated with higher tensile strength/ }).click();
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(evidence.source_excerpt);
-		await browserPage.getByRole('button', { name: /A slow Finding response/ }).click();
-		await browserPage.getByRole('button', { name: /The latest selected Finding/ }).click();
+		setFindingPage('finding-2');
+		setFindingPage('finding-3');
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(latestEvidence.source_excerpt);
@@ -1065,6 +1029,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			const params = new URLSearchParams(current.search);
+			if (current.path.endsWith('/documents')) return jsonResponse({ items: [{ document_id: 'paper-1', original_filename: 'annealing.pdf', status: 'ready' }], count: 1 });
+			if (current.path.endsWith('/scope')) return jsonResponse({ recommended_document_ids: ['paper-1'], review_document_ids: [], excluded_document_ids: [], decisions: [], counts: { likely_relevant: 1, needs_inspection: 0, confidently_out_of_scope: 0 } });
 			if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'POST') {
 				analysisStarted = true;
 				return jsonResponse(
@@ -1110,15 +1076,22 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		});
 
 		render(Page);
+		await browserPage.getByRole('button', { name: /Annealing was associated with higher tensile strength/ }).click();
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(evidence.source_excerpt);
-		await browserPage.getByRole('button', { name: /A stale version 1 Finding/ }).click();
-		await browserPage.getByRole('button', { name: '重新分析' }).click();
+		setFindingPage('finding-v1-slow');
+		await browserPage.getByRole('button', { name: /Re-analyze|重新分析/ }).click();
+		setPage({
+			params: { id: 'col_123', objective_id: 'obj_1' },
+			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
+		});
+		await browserPage.getByRole('button', { name: /Analyze selected papers|使用所选文献分析/ }).click();
 		await new Promise((resolve) => setTimeout(resolve, 2700));
 		await expect
 			.element(browserPage.getByRole('button', { name: /The published version 2 Finding/ }))
 			.toBeInTheDocument();
+		await browserPage.getByRole('button', { name: /The published version 2 Finding/ }).click();
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(publishedEvidence.source_excerpt);

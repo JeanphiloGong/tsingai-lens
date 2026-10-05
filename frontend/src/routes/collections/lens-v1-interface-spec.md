@@ -91,15 +91,22 @@ Actions are state-specific:
 When a retry fails but an older published version exists, the page keeps those
 published Findings accessible and shows the failed retry separately.
 
-## Finding Workspace
+## Objective Review Workspace
 
-The Objective detail page has two levels:
+The Objective detail page has three explicit views:
 
-1. a compact Finding list;
-2. one selected Finding detail.
+1. a results overview with the experiment comparison and complete Finding list;
+2. an analysis-scope tab for selecting ready papers and starting a new analysis;
+3. one focused Finding detail opened by clicking a Finding (or by a
+   `finding_id` URL parameter).
 
-The list shows the statement, synthesis status, qualitative certainty, and
-directly contributing paper count. It does not repeat the selected detail's
+The results overview is the default for a published analysis. It does not
+select the first Finding automatically. Returning from a focused Finding
+clears `finding_id` and returns to the overview, so the page does not show a
+second persistent detail panel beside the list.
+
+The list shows the statement, synthesis status, and directly contributing paper
+count. It does not repeat the selected detail's
 factor/outcome relation or expose internal IDs.
 
 The selected detail shows:
@@ -162,11 +169,10 @@ any underlying snapshot changes.
 
 ## Responsive Rules
 
-- On desktop, a sticky compact Finding list and the selected review detail form
-  a two-column master-detail workspace; feedback opens on demand near the end
-  of the evidence review.
-- On mobile, the Finding list precedes the selected detail as clearly separated
-  full-width regions.
+- On desktop, the results overview keeps the comparison table and Finding list
+  in one reading flow; a focused Finding replaces that overview until the user
+  returns.
+- On mobile, the overview and focused Finding remain separate full-width views.
 - On mobile, tables become scrollable or stacked without truncating statement
   meaning or source quotes.
 - Fixed controls keep stable dimensions; long scientific terms wrap.

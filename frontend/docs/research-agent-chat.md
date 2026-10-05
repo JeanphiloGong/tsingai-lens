@@ -40,9 +40,9 @@ and branches default to confirmation.
 The Research Agent helps a materials researcher inspect a collection, ask what
 the published analysis supports, formulate a focused candidate question,
 review an existing published conclusion, and propose a new conclusion from
-eligible published Evidence through the same controls as the Finding
-workbench. It does not replace the comparison workspace or become a second
-scientific fact store.
+fixed PaperExperiment selections and optional comparison groups through the
+same authoring service as the Objective results workspace. It does not replace
+the comparison workspace or become a second scientific fact store.
 
 - Chat owns sessions, ordered messages, capability activity, and approval
   decisions.
@@ -64,9 +64,10 @@ scientific fact store.
 - A Finding review begins from the complete published Finding, linked Evidence,
   and exact Sources. Feedback and curation reuse `FindingFeedbackService` after
   exact user approval.
-- Finding authoring begins from the current published analysis and its complete
-  role-eligible Evidence. The Agent may propose exact Evidence roles, a bounded
-  conclusion, or an explicit evidence abstention. After exact user approval,
+- Finding authoring begins from the current published analysis and its
+  PaperExperiment selection graph. The Agent may propose canonical selection
+  IDs and optional comparison-group IDs; it cannot hand-write a conclusion or
+  use Evidence IDs as Finding inputs. After exact user approval,
   `FindingAuthoringService` publishes a new immutable analysis version. The
   Agent cannot alter the source version, parent Finding, Evidence, or Source
   identities.
@@ -617,8 +618,8 @@ For `start_research_process`, `create_objective_candidate`,
 `revise_research_plan`, the page renders the exact persisted
 arguments and exposes explicit Reject and Approve actions. Finding feedback and curation are
 separate writes against an existing published Finding. Finding authoring is a
-separate Evidence-to-conclusion decision that publishes a new immutable
-analysis version. Agent-authored Objective analysis is also distinct from the
+separate experiment-selection decision that publishes a new immutable analysis
+version. Agent-authored Objective analysis is also distinct from the
 automatic analysis command: it publishes the Agent's reviewed Evidence first
 and creates no Finding. While approval is pending:
 
@@ -689,8 +690,8 @@ The focused browser suite covers:
 14. exact published Finding and linked Evidence inspection before review;
 15. distinct feedback and curation approvals, including rejection without a
     write;
-16. exact Evidence roles and statement before approval publishes a new Finding
-    version.
+16. exact experiment selection and comparison-group arguments before approval
+    publishes a new Finding version.
 17. Agent-authored paper analysis shown as a separate approval, rejection, and
     completed Evidence publication state without changing the automatic
     Objective-analysis presentation.

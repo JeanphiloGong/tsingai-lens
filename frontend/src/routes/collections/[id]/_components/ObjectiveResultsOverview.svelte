@@ -5,14 +5,13 @@
 	import ExperimentResults from './ExperimentResults.svelte';
 	import ObjectiveAnalysisScope from './ObjectiveAnalysisScope.svelte';
 	import { t } from '../../../_shared/i18n';
-	import type { ObjectiveAnalysis, ObjectiveFinding, FindingEvidenceReview, ExperimentAnalysisProjection } from '../../../_shared/researchView';
+	import type { ObjectiveAnalysis, ObjectiveFinding, ExperimentAnalysisProjection } from '../../../_shared/researchView';
 
 	export let analysis: ObjectiveAnalysis;
 	export let projection: ExperimentAnalysisProjection | null = null;
 	export let experimentLoading = false;
 	export let experimentError = '';
 	export let findings: ObjectiveFinding[] = [];
-	export let evidenceReviews: Record<string, FindingEvidenceReview> = {};
 	export let collectionId: string;
 	export let documentTitles: Record<string, string> = {};
 	export let selectedFindingId = '';
@@ -66,7 +65,6 @@
 							<li><button type="button" on:click={() => onSelectFinding(finding.finding_id)}>
 								<span class="card-title">{finding.statement}</span>
 								<span class="card-meta">{$t('objectiveWorkspace.' + finding.synthesis_status)} · {$t('objectiveWorkspace.directPapers', { count: directPaperCount(finding) })}
-									{#if evidenceReviews[finding.finding_id]?.needs_review}<strong class="needs-review">{$t('research.findingReview.basisUpdated')}</strong>{/if}
 								</span>
 								<span class="card-link">{$t('objectiveWorkspace.detail')}<ChevronRight size={16} /></span>
 							</button></li>
@@ -116,6 +114,6 @@
 	article { padding: 16px 0; border-bottom: 1px solid var(--border-default); overflow-wrap: anywhere; }
 	h3 { font-size: 14px; color: var(--text-primary); margin: 0 0 8px; }
 	blockquote { margin: 12px 0; padding-left: 12px; border-left: 2px solid var(--border-default); } a { color: var(--brand-primary); }
-	.error { color: var(--danger-text); } .needs-review { display: block; margin-top: 6px; color: var(--warning-text); font-weight: 500; }
+	.error { color: var(--danger-text); }
 	@media (max-width: 600px) { .card-link { grid-column: 1; grid-row: 3; } }
 </style>

@@ -119,18 +119,19 @@ The selected detail shows:
 - subordinate mechanisms with translated relation and assertion strength;
 - exact Evidence excerpts grouped by contribution role;
 - titled paper/page/source metadata and Open source action;
-- one Feedback action that expands the review form.
+- the fixed experiment selections and comparison groups that produced the
+  Finding, with no inline correction or feedback action.
 
-Feedback uses `analysis_version + finding_id`. The list response already
-contains the complete Finding display shape, so changing selection reuses that
-item and loads only its Evidence. Stale rapid-selection responses are
-discarded. Only contributions with matched Evidence receive full paper groups;
-empty contributions collapse into one aggregate status line. When every
-contribution is empty, the section shows one collection-level empty state
-instead of repeated paper placeholders. One Evidence comparison remains one
-row even when factors changed jointly; the row identifies support or
-contradiction and retains the reported direction. Empty context categories are
-omitted, and each mechanism links to its exact mechanism-context Evidence.
+The list response already contains the complete Finding display shape, so
+changing selection reuses that item and loads only its Evidence and experiment
+projection. Stale rapid-selection responses are discarded. Only contributions
+with matched Evidence receive full paper groups; empty contributions collapse
+into one aggregate status line. When every contribution is empty, the section
+shows one collection-level empty state instead of repeated paper placeholders.
+One Evidence comparison remains one row even when factors changed jointly; the
+row identifies support or contradiction and retains the reported direction.
+Empty context categories are omitted, and each mechanism links to its exact
+mechanism-context Evidence.
 
 ## Document Verification
 

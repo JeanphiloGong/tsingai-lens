@@ -35,25 +35,15 @@ This node owns the Collection route family.
   analysis scope is a separate tab. Clicking a Finding opens its focused
   detail view through the `finding_id` URL parameter, and the back action
   returns to the results overview without selecting a Finding automatically.
-  A researcher can
-  create a new Finding from all eligible Evidence in the current published
-  version, or derive one from a selected system Finding. Evidence roles and
-  exact Source links stay visible in the editor. Saving publishes a new
-  immutable analysis snapshot, reloads that version, and selects the authored
-  Finding; the prior Finding remains unchanged. The same editor can record an
-  explicit evidence abstention without creating a placeholder Finding. The
-  workspace marks Findings whose cited Evidence was replaced as needing review,
-  links original and subsequent Finding versions, and opens an editable Agent
-  review request without submitting it. The authoring editor excludes replaced
-  Evidence from all roles and does not preassign its replacement. An affected
-  historical Finding keeps its original evidence and does not offer a fresh AI
-  summary until the researcher selects a conclusion based on current evidence.
-  Selecting a Finding automatically loads its saved feedback and latest curation
-  for the exact Collection, Objective, analysis version, and Finding identity.
-  The workbench keeps the original conclusion visible beside the saved correction,
-  its reason, reviewer, time, scope, and Source links. Loading failures expose a
-  retry; switching identity ignores stale responses. Opening the feedback editor
-  remains an explicit action and refreshes its latest saved decision.
+  A researcher can create a new Finding from fixed PaperExperiment selections
+  and optional comparison groups in the current published analysis. Saving
+  publishes a new immutable analysis snapshot, reloads that version, and keeps
+  the previous Finding unchanged. The selected Finding detail is read-only: it
+  explains the experiment-backed result, comparison, applicability, and exact
+  Source links. Scientific corrections return to the experiment data and
+  selection flow; the detail page has no inline feedback, curation, or Evidence
+  replacement workflow. Feedback and curation APIs remain available to the
+  separate evaluation and Research Agent workbenches.
   The sidebar can export the published Finding dataset as JSON or training JSONL
   with label and dataset-use filters. The collection workspace also exposes
   collection-level Finding JSON/JSONL and expert gold-draft downloads beside
@@ -112,12 +102,13 @@ This node owns the Collection route family.
   shown by the Objective workspace.
   For a published Finding, the Agent reads the complete Finding, linked
   Evidence, and exact Sources before proposing feedback or curation. Both
-  writes require exact user approval and reuse the Finding workbench's existing
-  review service. From the current published analysis, the Agent may also
-  propose a new Finding with exact eligible Evidence roles or an explicit
-  evidence abstention. Approval calls the same authoring service as the human
-  editor and publishes a new immutable analysis version; Chat does not create
-  another Finding, Evidence, or review identity.
+  writes require exact user approval and remain separate from the read-only
+  Finding detail. From the current published analysis, the Agent may also
+  propose a new Finding by selecting canonical PaperExperiment results and
+  optional comparison groups. Approval calls the same experiment-selection
+  authoring service as the Objective results workspace and publishes a new
+  immutable analysis version; Chat does not create another Finding, Evidence,
+  or review identity.
   It can also inspect one exact prepared Source and propose a structured
   Source-grounded Evidence record. That write requires the same exact
   approval, Source digest, and immutable-version publication as the human
@@ -246,16 +237,16 @@ Research Objective
      -> typed scientific context, deterministic analysis boundaries, and mechanisms
      -> PaperContribution bindings
      -> exact Evidence excerpts and Source links
-     -> researcher-authored Finding or explicit evidence abstention
-     -> feedback action
+     -> fixed PaperExperiment selections and comparison groups
 ```
 
-Finding authoring exposes only decisions the researcher actually makes:
-statement strength, limitations, and Evidence roles. It never asks for
-internal IDs as visible labels or for derived factors, outcome, direction,
-certainty, attribution, synthesis, paper coverage, creator identity, or target
-version. Blank creation and parent-derived revision call the same backend
-command; neither edits a published result in place.
+Finding authoring exposes the fixed PaperExperiment selections and optional
+comparison groups that the researcher chooses. It never asks for internal IDs
+as visible labels or for derived factors, outcome, direction, certainty,
+attribution, synthesis, paper coverage, creator identity, or target version.
+The results overview creates a new immutable analysis version; the selected
+Finding detail does not provide a revision or feedback control and never edits
+a published result in place.
 
 Objective confirmation state and analysis execution state remain separate
 domain states, but one analysis command owns the approval-and-queue transition.
@@ -337,18 +328,19 @@ mechanisms link to their exact supporting Evidence.
 
 Published Findings are reviewed within their owning research Objective. The
 standalone collection comparison route and navigation entry have been removed;
-cross-paper comparison remains part of Finding evidence review. The interface
-does not rebuild conclusions from legacy comparison rows, Evidence cards,
-material projections, or collection-wide graph projections.
+cross-paper comparison remains part of the experiment-backed Finding view. The
+interface does not rebuild conclusions from legacy comparison rows, Evidence
+cards, material projections, or collection-wide graph projections.
 The Objective Evidence Map is a read-only view of those same
 published records, not another aggregate or analysis path. The Objective page
-owns the single confirmation-and-analysis command; the Finding page owns expert
-authorship and review; the document reader owns Source verification. Current
-Finding authoring reuses already published Evidence. The Agent and HTTP
-Evidence command can record a verified Source decision; selecting arbitrary
-raw document text, tables, or figures directly inside the document reader
-remains the later #191 workflow, and
-Objective-local paper-scope review remains #340.
+owns the confirmation-and-analysis command and experiment-selection authoring;
+the Finding page owns read-only interpretation and Source verification; the
+document reader owns exact Source review. Feedback and curation remain
+available through the separate Agent and evaluation workbenches. The Agent and
+HTTP Evidence command can record a verified Source decision; selecting
+arbitrary raw document text, tables, or figures directly inside the document
+reader remains the later #191 workflow, and Objective-local paper-scope review
+remains #340.
 The Research Agent may consume published Findings and propose a new
 researcher-approved version through the same authoring service. It does not
 introduce a second conclusion identity. Experiment plans remain downstream

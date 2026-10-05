@@ -18,12 +18,11 @@
 		objectiveFindingDatasetUrl,
 		type FindingDatasetLabelStatus, type FindingDatasetUseStatus, type ObjectiveAnalysis,
 		type ObjectiveEvidence, type ObjectiveFinding, type FindingAuthoringResult,
-		type FindingEvidenceReview, type ExperimentAnalysisProjection
+		type ExperimentAnalysisProjection
 	} from '../../../../_shared/researchView';
 
 	let analysis: ObjectiveAnalysis | null = null;
 	let findings: ObjectiveFinding[] = [];
-	let evidenceReviews: Record<string, FindingEvidenceReview> = {};
 	let evidence: ObjectiveEvidence[] = [];
 	let documentTitles: Record<string, string> = {};
 	let selectedFinding: ObjectiveFinding | null = null;
@@ -41,7 +40,6 @@
 	let disposed = false;
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let authoringOpen = false;
-	let authoringParent: ObjectiveFinding | null = null;
 	let projection: ExperimentAnalysisProjection | null = null;
 	let experimentLoading = false;
 	let experimentError = '';
@@ -133,19 +131,16 @@
 		const version = analysis?.objective.published_analysis_version;
 		const key = loadedKey;
 		const items: ObjectiveFinding[] = [];
-		const reviews: Record<string, FindingEvidenceReview> = {};
 		if (version) {
 			while (true) {
 				const result = await fetchObjectiveFindings(collectionId, objectiveId, version, items.length, 200);
 				if (disposed || key !== loadedKey || version !== analysis?.objective.published_analysis_version) return;
 				items.push(...result.items);
-				Object.assign(reviews, result.evidence_reviews);
 				if (items.length >= result.total) break;
 				if (!result.items.length) throw new Error($t('objectiveWorkspace.incomplete'));
 			}
 		}
 		findings = items;
-		evidenceReviews = reviews;
 	}
 
 	function syncFinding(id: string) {
@@ -209,11 +204,8 @@
 		}
 	}
 
-	function openAuthoring(parent: ObjectiveFinding | null = null) {
-		authoringParent = parent;
-		authoringOpen = true;
-	}
-	function closeAuthoring() { authoringOpen = false; authoringParent = null; }
+	function openAuthoring() { authoringOpen = true; }
+	function closeAuthoring() { authoringOpen = false; }
 	async function handleFindingSaved(result: FindingAuthoringResult) {
 		closeAuthoring();
 		await loadObjective(result.finding?.finding_id ?? '');
@@ -316,16 +308,16 @@
 		{/if}
 		{#if actionError}<div role="alert"><p>{actionError}</p><button class="btn btn--ghost" on:click={refreshAnalysis}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button></div>{/if}
 		{#if published?.abstention_reason}<p class="analysis-state">{published.abstention_note || $t('objectiveWorkspace.emptyFindings')}</p>{/if}
-		<ObjectiveResultsOverview {analysis} {projection} {experimentLoading} {experimentError} {findings} {evidenceReviews} {collectionId} {documentTitles} bind:view {selectedFindingId} {authoringOpen} onSelectFinding={navigateFinding} onScopeStarted={handleScopeStarted} onRetryProjection={loadProjection} onNewFinding={() => openAuthoring()}>
+		<ObjectiveResultsOverview {analysis} {projection} {experimentLoading} {experimentError} {findings} {collectionId} {documentTitles} bind:view {selectedFindingId} {authoringOpen} onSelectFinding={navigateFinding} onScopeStarted={handleScopeStarted} onRetryProjection={loadProjection} onNewFinding={() => openAuthoring()}>
 			<section slot="selected" class="finding-workspace" aria-label={$t('objectiveWorkspace.findingDetail')} aria-busy={findingLoading}>
 				{#if authoringOpen && published}
-					{#key published.analysis_version + ':' + (authoringParent?.finding_id ?? '')}
-						<FindingAuthoringEditor {collectionId} {objectiveId} analysisVersion={published.analysis_version} parentFinding={authoringParent} onSaved={handleFindingSaved} onCancel={closeAuthoring} />
+					{#key published.analysis_version}
+						<FindingAuthoringEditor {collectionId} {objectiveId} analysisVersion={published.analysis_version} onSaved={handleFindingSaved} onCancel={closeAuthoring} />
 					{/key}
 				{:else if findingLoading}<p class="page-state">{$t('objectiveWorkspace.loading')}</p>
 				{:else if findingError}<div role="alert"><p>{findingError}</p>{#if selectedFinding}<button class="btn btn--ghost" on:click={() => selectFinding(selectedFindingId)}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button>{/if}</div>
 				{:else if selectedFinding}
-					<FindingWorkbench finding={selectedFinding} evidenceReview={evidenceReviews[selectedFinding.finding_id] ?? null} derivedFindings={findings.filter(item => item.parent_finding_id === selectedFinding?.finding_id)} parentFinding={findings.find(item => item.finding_id === selectedFinding?.parent_finding_id) ?? null} onSelectFinding={finding => navigateFinding(finding.finding_id)} {evidence} {collectionId} {documentTitles} onDerive={openAuthoring}>
+					<FindingWorkbench finding={selectedFinding} {evidence} {collectionId} {documentTitles}>
 						<div slot="comparison">
 							{#if projection}<ExperimentResults {projection} {collectionId} {objectiveId} {documentTitles} findingId={selectedFinding.finding_id} selectionIds={selectedFinding.selection_ids ?? []} />
 							{:else}<p role="alert">{experimentError || $t('objectiveWorkspace.unavailable')}</p><button class="btn btn--ghost" on:click={loadProjection}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button>{/if}

@@ -1,38 +1,19 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
-	import { Bot, PencilLine, AlertCircle, RefreshCw } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import FindingEvidenceSummary from './FindingEvidenceSummary.svelte';
-	import { errorMessage } from '../../../_shared/api';
 	import {
-		createFindingFeedback,
-		fetchFindingFeedback,
-		fetchFindingCurations,
-		type FindingCuration,
-		type FindingFeedback,
-		type FindingFeedbackIssueType,
-		type FindingFeedbackStatus,
 		type ObjectiveEvidence,
 		type ObjectiveFinding,
 		type ObjectiveFindingPaperContribution,
-		type ObjectiveScientificAttribute,
-		type FindingEvidenceReview
+		type ObjectiveScientificAttribute
 	} from '../../../_shared/researchView';
 
 	export let finding: ObjectiveFinding;
-	export let evidenceReview: FindingEvidenceReview | null = null;
-	export let derivedFindings: ObjectiveFinding[] = [];
-	export let parentFinding: ObjectiveFinding | null = null;
-	export let onSelectFinding: (finding: ObjectiveFinding) => void = () => {};
 	export let evidence: ObjectiveEvidence[] = [];
 	export let collectionId = '';
 	export let documentTitles: Record<string, string> = {};
-	export let onDerive: (finding: ObjectiveFinding) => void = () => {};
-	export let onAuthorEvidence: (
-		item: ObjectiveEvidence,
-		mode: 'create' | 'revise'
-	) => void = () => {};
 
 	type SharedComparisonRow = {
 		evidence: ObjectiveEvidence;
@@ -60,61 +41,6 @@
 		matrix: SharedComparisonMatrix | null;
 	};
 
-	let feedbackOpen = false;
-	let feedbackStatus: FindingFeedbackStatus = 'correct';
-	let feedbackIssue: FindingFeedbackIssueType = 'none';
-	let feedbackNote = '';
-	let feedbackSaving = false;
-	let feedbackLoading = false;
-	let feedbackMessage = '';
-	let feedbackError = '';
-	let feedbackFindingKey = '';
-	let feedbackRequestSequence = 0;
-	let reviewRequestSequence = 0;
-	let reviewLoading = false;
-	let reviewError = '';
-	let savedFeedback: FindingFeedback | null = null;
-	let savedCuration: FindingCuration | null = null;
-
-	const feedbackStatuses: Array<{ value: FindingFeedbackStatus; label: string }> = [
-		{ value: 'correct', label: '正确' },
-		{ value: 'partial', label: '部分正确' },
-		{ value: 'incorrect', label: '不正确' },
-		{ value: 'unclear', label: '暂不确定' }
-	];
-	const feedbackIssues: Array<{ value: FindingFeedbackIssueType; label: string }> = [
-		{ value: 'none', label: '无问题' },
-		{ value: 'wrong_factor', label: '影响因素错误' },
-		{ value: 'wrong_outcome', label: '结果错误' },
-		{ value: 'wrong_direction', label: '方向错误' },
-		{ value: 'wrong_context', label: '适用条件错误' },
-		{ value: 'wrong_mechanism', label: '机制错误' },
-		{ value: 'wrong_attribution', label: '归因错误' },
-		{ value: 'wrong_synthesis', label: '跨文献综合错误' },
-		{ value: 'evidence_not_grounded', label: '证据不支持' },
-		{ value: 'missing_evidence', label: '缺少证据' },
-		{ value: 'insufficient_evidence', label: '证据不足' },
-		{ value: 'overclaim', label: '结论过度推广' },
-		{ value: 'unclear_statement', label: '表述不清' },
-		{ value: 'other', label: '其他' }
-	];
-
-	$: if (feedbackStatus === 'correct') feedbackIssue = 'none';
-	$: if (
-		(feedbackStatus === 'partial' || feedbackStatus === 'incorrect') &&
-		feedbackIssue === 'none'
-	)
-		feedbackIssue = 'other';
-	$: findingKey = `${collectionId}:${finding.objective_id}:${finding.analysis_version}:${finding.finding_id}`;
-	$: reviewHref =
-		`/collections/${encodeURIComponent(collectionId)}/assistant?${new SvelteURLSearchParams({ objective_id: finding.objective_id, review_finding_id: finding.finding_id })}` as `/collections/${string}/assistant`;
-	$: if (findingKey !== feedbackFindingKey) {
-		feedbackFindingKey = findingKey;
-		feedbackRequestSequence += 1;
-		feedbackOpen = false;
-		resetFeedback();
-		void loadReviews();
-	}
 	$: directPaperCount = finding.paper_contributions.filter(
 		(item) => item.supporting_evidence_ids.length || item.contradicting_evidence_ids.length
 	).length;
@@ -571,249 +497,15 @@
 		return origin;
 	}
 
-	function resetFeedback() {
-		feedbackStatus = 'correct';
-		feedbackIssue = 'none';
-		feedbackNote = '';
-		feedbackLoading = false;
-		feedbackMessage = '';
-		feedbackError = '';
-	}
-
-	function applyFeedback(item: FindingFeedback) {
-		savedFeedback = item;
-		feedbackStatus = item.review_status;
-		feedbackIssue = item.issue_type;
-		feedbackNote = item.note ?? '';
-	}
-
-	async function loadReviews() {
-		const sequence = ++reviewRequestSequence;
-		savedFeedback = null;
-		savedCuration = null;
-		reviewLoading = true;
-		reviewError = '';
-		const results = await Promise.allSettled([
-			fetchFindingFeedback(
-				collectionId,
-				finding.objective_id,
-				finding.analysis_version,
-				finding.finding_id
-			),
-			fetchFindingCurations(
-				collectionId,
-				finding.objective_id,
-				finding.analysis_version,
-				finding.finding_id
-			)
-		]);
-		if (sequence !== reviewRequestSequence) return;
-		const [feedback, curations] = results;
-		if (feedback.status === 'fulfilled') {
-			savedFeedback =
-				[...feedback.value].sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null;
-		}
-		if (curations.status === 'fulfilled') {
-			savedCuration =
-				[...curations.value].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0] ?? null;
-		}
-		reviewError = results
-			.filter((item) => item.status === 'rejected')
-			.map((item) => errorMessage(item.reason))
-			.join(' ');
-		reviewLoading = false;
-	}
-
-	async function toggleFeedback() {
-		if (feedbackOpen) {
-			feedbackOpen = false;
-			return;
-		}
-		feedbackOpen = true;
-		const requestSequence = ++feedbackRequestSequence;
-		feedbackLoading = true;
-		feedbackError = '';
-		try {
-			const items = await fetchFindingFeedback(
-				collectionId,
-				finding.objective_id,
-				finding.analysis_version,
-				finding.finding_id
-			);
-			if (requestSequence !== feedbackRequestSequence) return;
-			const latest = [...items].sort((left, right) =>
-				right.created_at.localeCompare(left.created_at)
-			)[0];
-			if (latest) applyFeedback(latest);
-		} catch (err) {
-			if (requestSequence === feedbackRequestSequence) feedbackError = errorMessage(err);
-		} finally {
-			if (requestSequence === feedbackRequestSequence) feedbackLoading = false;
-		}
-	}
-
-	async function submitFeedback() {
-		feedbackSaving = true;
-		feedbackError = '';
-		feedbackMessage = '';
-		try {
-			const saved = await createFindingFeedback(
-				collectionId,
-				finding.objective_id,
-				finding.finding_id,
-				{
-					analysis_version: finding.analysis_version,
-					review_status: feedbackStatus,
-					issue_type: feedbackIssue,
-					note: feedbackNote.trim() || null
-				}
-			);
-			applyFeedback(saved);
-			feedbackMessage = '反馈已记录。';
-		} catch (err) {
-			feedbackError = errorMessage(err);
-		} finally {
-			feedbackSaving = false;
-		}
-	}
 </script>
 
 <article class="finding-detail">
 	<header>
 		<div>
-			{#if savedCuration}<p class="review-meta">
-					{$t('research.findingReview.publishedOriginal')}
-				</p>{/if}
-			<span
-				>{originLabel(finding.origin)} · {directPaperCount >= 2
-					? '跨文献研究发现'
-					: '单篇直接证据'}</span
-			>
+			<span>{originLabel(finding.origin)} · 实验选择聚合</span>
 			<h2>{finding.statement}</h2>
 		</div>
-		<button class="btn btn--ghost btn--small" type="button" on:click={() => onDerive(finding)}>
-			基于此 Finding 创建新版本
-		</button>
 	</header>
-
-	<section
-		class="saved-review"
-		aria-label={$t('research.findingReview.savedReview')}
-		aria-busy={reviewLoading}
-	>
-		{#if reviewLoading}<p role="status">{$t('research.findingReview.loadingReview')}</p>{/if}
-		{#if reviewError}
-			<p role="alert">{$t('research.findingReview.reviewLoadFailed')}: {reviewError}</p>
-			<button
-				type="button"
-				class="btn btn--ghost btn--small"
-				on:click={loadReviews}
-				disabled={reviewLoading}
-			>
-				<RefreshCw size={14} aria-hidden="true" />{$t('research.findingReview.retryReview')}
-			</button>
-		{/if}
-		{#if savedFeedback}
-			<div class="saved-feedback">
-				<strong
-					>{$t('research.findingReview.savedFeedback')}: {$t(
-						`research.findingReview.feedbackStatus.${savedFeedback.review_status}`
-					)}</strong
-				>
-				{#if savedFeedback.note}<p>{savedFeedback.note}</p>{/if}
-				<p class="review-meta">
-					{$t('research.findingReview.reviewer')}: {savedFeedback.reviewer ??
-						$t('research.findingReview.unrecorded')} ·
-					<time datetime={savedFeedback.created_at}
-						>{new Date(savedFeedback.created_at).toLocaleString()}</time
-					>
-				</p>
-			</div>
-		{/if}
-		{#if savedCuration}
-			<div class="saved-curation">
-				<h3>
-					{$t('research.findingReview.savedCuration')} · {$t(
-						`research.findingReview.curationStatus.${savedCuration.curated_status}`
-					)}
-				</h3>
-				<p class="curated-statement">{savedCuration.curated_finding.statement}</p>
-				{#if savedCuration.note}<p>
-						{$t('research.findingReview.correctionReason')}: {savedCuration.note}
-					</p>{/if}
-				<p class="review-meta">
-					{$t('research.findingReview.reviewer')}: {savedCuration.reviewer ??
-						$t('research.findingReview.unrecorded')} ·
-					<time datetime={savedCuration.updated_at}
-						>{new Date(savedCuration.updated_at).toLocaleString()}</time
-					>
-				</p>
-				<details>
-					<summary>{$t('research.findingReview.curationScope')}</summary>
-					<p>
-						{savedCuration.curated_finding.factors.join(' + ')} → {savedCuration.curated_finding
-							.outcome} · {directionLabel(savedCuration.curated_finding.direction)}
-					</p>
-					<p>
-						{assertionLabel(savedCuration.curated_finding.assertion_strength)} · {attributionLabel(
-							savedCuration.curated_finding.attribution_scope
-						)} · {synthesisLabel(savedCuration.curated_finding.synthesis_status)}
-					</p>
-					<ul>
-						{#each savedCuration.curated_finding.limitations as limitation, index (index)}<li>
-								{limitation}
-							</li>{/each}
-					</ul>
-					{#each savedCuration.curated_finding.paper_contributions as contribution (contribution.document_id)}
-						{#each evidence.filter( (item) => [...contribution.supporting_evidence_ids, ...contribution.contradicting_evidence_ids, ...contribution.context_evidence_ids, ...contribution.condition_boundary_evidence_ids].includes(item.evidence_id) ) as item (item.evidence_id)}
-							<a href={resolve(sourceHref(item))}
-								>{paperTitle(item.document_id)} · {evidenceSourceLabel(item)}</a
-							>
-						{/each}
-					{/each}
-				</details>
-			</div>
-		{/if}
-		{#if !reviewLoading && !reviewError && !savedFeedback && !savedCuration}
-			<p class="review-meta">{$t('research.findingReview.noSavedReview')}</p>
-		{/if}
-	</section>
-
-	{#if evidenceReview?.needs_review}
-		<section class="basis-review" aria-label={$t('research.findingReview.basisUpdated')}>
-			<strong
-				><AlertCircle size={16} aria-hidden="true" />{$t(
-					'research.findingReview.basisUpdated'
-				)}</strong
-			>
-			<p>{$t('research.findingReview.basisUpdatedDetail')}</p>
-			<div class="review-actions">
-				<a class="btn btn--primary btn--small" href={resolve(reviewHref)}
-					><Bot size={16} aria-hidden="true" />{$t('research.findingReview.reviewWithAgent')}</a
-				>
-				<button class="btn btn--ghost btn--small" type="button" on:click={() => onDerive(finding)}
-					><PencilLine size={16} aria-hidden="true" />{$t(
-						'research.findingReview.reviseFinding'
-					)}</button
-				>
-			</div>
-		</section>
-	{/if}
-	{#if parentFinding || derivedFindings.length}
-		<nav class="finding-lineage" aria-label={$t('research.findingReview.derivedFindings')}>
-			{#if parentFinding}
-				<button type="button" on:click={() => onSelectFinding(parentFinding!)}
-					>{$t('research.findingReview.parentFinding')}: {parentFinding.statement}</button
-				>
-			{/if}
-			{#each derivedFindings as item (item.finding_id)}
-				<button type="button" on:click={() => onSelectFinding(item)}
-					>{$t('research.findingReview.derivedFindings')}: {item.statement}</button
-				>
-			{/each}
-		</nav>
-	{/if}
-
 	<section class="result-line" aria-label="Finding 核心结果">
 		<div>
 			<span>影响因素</span>
@@ -838,14 +530,12 @@
 		<div><span>直接文献</span><strong>{directPaperCount} 篇</strong></div>
 	</div>
 
-	{#if !evidenceReview?.needs_review}
-		<FindingEvidenceSummary
-			{collectionId}
-			objectiveId={finding.objective_id}
-			findingId={finding.finding_id}
-			analysisVersion={finding.analysis_version}
-		/>
-	{/if}
+	<FindingEvidenceSummary
+		{collectionId}
+		objectiveId={finding.objective_id}
+		findingId={finding.finding_id}
+		analysisVersion={finding.analysis_version}
+	/>
 
 	<slot name="comparison">
 	<section aria-labelledby="evidence-comparison-title">
@@ -1038,29 +728,11 @@
 																		<strong>{binding}</strong>
 																	{/each}
 																	<a href={resolve(sourceHref(row.evidence))}>打开原文</a>
-																	<details class="matrix-excerpt">
-																		<summary>查看摘录</summary>
-																		<blockquote>{row.evidence.source_excerpt}</blockquote>
-																	</details>
-																	<div class="evidence-author-actions">
-																		{#if row.evidence.superseded_by_evidence_id}
-																			<span class="evidence-revision-status">已有更新版本</span>
-																		{:else}
-																			<button
-																				class="btn btn--ghost btn--small"
-																				type="button"
-																				on:click={() => onAuthorEvidence(row.evidence, 'revise')}
-																				>修订 Evidence</button
-																			>
-																		{/if}
-																		<button
-																			class="btn btn--ghost btn--small"
-																			type="button"
-																			on:click={() => onAuthorEvidence(row.evidence, 'create')}
-																			>从此来源新建</button
-																		>
-																	</div>
-																</div>
+														<details class="matrix-excerpt">
+															<summary>查看摘录</summary>
+															<blockquote>{row.evidence.source_excerpt}</blockquote>
+														</details>
+													</div>
 															</td>
 														</tr>
 													{/each}
@@ -1081,27 +753,9 @@
 															>{/if}
 														<span>{evidenceRoleLabel(item.evidence_role)}</span>
 														<span>{evidenceAttributionLabel(item.attribution_scope)}</span>
-														<span>{evidenceOriginLabel(item)}</span>
-														<a href={resolve(sourceHref(item))}>打开原文</a>
-														<div class="evidence-author-actions">
-															{#if item.superseded_by_evidence_id}
-																<span class="evidence-revision-status">已有更新版本</span>
-															{:else}
-																<button
-																	class="btn btn--ghost btn--small"
-																	type="button"
-																	on:click={() => onAuthorEvidence(item, 'revise')}
-																	>修订 Evidence</button
-																>
-															{/if}
-															<button
-																class="btn btn--ghost btn--small"
-																type="button"
-																on:click={() => onAuthorEvidence(item, 'create')}
-																>从此来源新建</button
-															>
-														</div>
-													</div>
+																<span>{evidenceOriginLabel(item)}</span>
+																<a href={resolve(sourceHref(item))}>打开原文</a>
+															</div>
 													<blockquote>{item.source_excerpt}</blockquote>
 												</article>
 											{/each}
@@ -1121,142 +775,9 @@
 		{/if}
 	</section>
 
-	<section class="review-section" aria-labelledby="finding-review-title">
-		<div class="section-heading">
-			<div>
-				<h3 id="finding-review-title">专家审阅</h3>
-				<p>记录这条 Finding 的科学准确性和证据问题。</p>
-			</div>
-			<button
-				class="btn btn--ghost btn--small"
-				type="button"
-				aria-expanded={feedbackOpen}
-				aria-controls="finding-feedback-form"
-				on:click={toggleFeedback}
-			>
-				{feedbackOpen ? '关闭反馈' : '反馈'}
-			</button>
-		</div>
-		{#if feedbackOpen}
-			<form
-				id="finding-feedback-form"
-				class="feedback"
-				aria-busy={feedbackLoading}
-				on:submit|preventDefault={submitFeedback}
-			>
-				<div>
-					<label for="feedback-status">判断</label>
-					<select id="feedback-status" bind:value={feedbackStatus}>
-						{#each feedbackStatuses as option (option.value)}
-							<option value={option.value}>{option.label}</option>
-						{/each}
-					</select>
-				</div>
-				<div>
-					<label for="feedback-issue">问题类型</label>
-					<select
-						id="feedback-issue"
-						bind:value={feedbackIssue}
-						disabled={feedbackStatus === 'correct'}
-					>
-						{#each feedbackIssues as option (option.value)}
-							<option
-								value={option.value}
-								disabled={option.value === 'none' &&
-									(feedbackStatus === 'partial' || feedbackStatus === 'incorrect')}
-								>{option.label}</option
-							>
-						{/each}
-					</select>
-				</div>
-				<label class="feedback-note" for="feedback-note">
-					<span>说明</span>
-					<textarea id="feedback-note" rows="3" bind:value={feedbackNote}></textarea>
-				</label>
-				<button
-					class="btn btn--primary btn--small"
-					type="submit"
-					disabled={feedbackSaving || feedbackLoading}
-				>
-					{feedbackSaving ? '提交中...' : '提交反馈'}
-				</button>
-				{#if feedbackMessage}<p class="success" role="status">{feedbackMessage}</p>{/if}
-				{#if feedbackError}<p class="error" role="alert">{feedbackError}</p>{/if}
-			</form>
-		{/if}
-	</section>
 </article>
 
 <style>
-	.saved-review {
-		border-block: 1px solid var(--border-color, #dce3eb);
-		padding-block: 12px;
-	}
-	.saved-feedback,
-	.saved-curation {
-		overflow-wrap: anywhere;
-	}
-	.saved-curation {
-		border-left: 3px solid #27836b;
-		padding-left: 12px;
-		margin-top: 12px;
-	}
-	.saved-review h3 {
-		font-size: 14px;
-		margin: 0 0 8px;
-	}
-	.saved-review p {
-		margin: 6px 0;
-		overflow-wrap: anywhere;
-	}
-	.saved-review .curated-statement {
-		font-size: 16px;
-		font-weight: 500;
-	}
-	.saved-review .review-meta {
-		font-size: 12px;
-		color: var(--text-muted, #64748b);
-	}
-	.saved-review details {
-		margin-top: 10px;
-		font-size: 13px;
-	}
-	.saved-review details a {
-		display: block;
-	}
-	.basis-review {
-		border-block: 1px solid var(--border-default);
-		border-left: 3px solid var(--text-secondary);
-		padding: 14px 16px;
-		margin-block: 12px;
-		background: var(--surface-subtle);
-	}
-	.basis-review strong,
-	.review-actions {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-	.basis-review p {
-		margin: 8px 0 12px;
-		color: var(--text-secondary);
-	}
-	.finding-lineage {
-		display: grid;
-		gap: 6px;
-		padding-block: 8px;
-	}
-	.finding-lineage button {
-		background: none;
-		border: 0;
-		text-align: left;
-		padding: 4px 0;
-		color: var(--text-secondary);
-		text-decoration: underline;
-		overflow-wrap: anywhere;
-		cursor: pointer;
-	}
 	.finding-detail {
 		display: grid;
 		gap: 24px;
@@ -1364,47 +885,6 @@
 	}
 	.condition-values {
 		white-space: pre-line;
-	}
-	.feedback {
-		display: grid;
-		grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 0.9fr) minmax(240px, 1.4fr);
-		align-items: end;
-		gap: 12px;
-		margin-top: 12px;
-		padding: 16px;
-		border: 1px solid var(--border-default);
-		background: var(--surface-subtle);
-	}
-	.feedback label,
-	.feedback > div {
-		display: grid;
-		gap: 5px;
-		font-size: 12px;
-	}
-	.feedback select,
-	.feedback textarea {
-		width: 100%;
-		border: 1px solid var(--border-default);
-		background: var(--surface-primary);
-		color: var(--text-primary);
-		padding: 8px;
-	}
-	.feedback-note {
-		min-width: 220px;
-	}
-	.feedback .success,
-	.feedback .error {
-		grid-column: 1 / -1;
-	}
-	.feedback > button {
-		grid-column: 3;
-		justify-self: end;
-	}
-	.success {
-		color: #256346;
-	}
-	.error {
-		color: var(--danger, #b42318);
 	}
 	.mechanisms {
 		margin: 0;
@@ -1587,12 +1067,6 @@
 		max-width: 520px;
 		color: var(--text-primary);
 	}
-	.evidence-author-actions {
-		display: flex;
-		gap: 6px;
-		flex-wrap: wrap;
-		margin-top: 6px;
-	}
 	.evidence-list {
 		display: grid;
 		gap: 10px;
@@ -1620,13 +1094,6 @@
 		margin-left: auto;
 		color: var(--accent);
 	}
-	.evidence-meta .evidence-author-actions {
-		width: 100%;
-	}
-	.evidence-revision-status {
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
 	blockquote {
 		margin: 10px 0 0;
 		padding: 0;
@@ -1643,15 +1110,6 @@
 		border-top: 1px solid var(--border-default);
 		color: var(--text-secondary);
 		font-size: 12px;
-	}
-	.review-section {
-		padding-top: 18px;
-		border-top: 1px solid var(--border-default);
-	}
-	.review-section .section-heading p {
-		margin-top: 4px;
-		color: var(--text-secondary);
-		font-size: 13px;
 	}
 	@media (max-width: 820px) {
 		.finding-detail > header {
@@ -1676,14 +1134,6 @@
 		.metrics,
 		.context-grid {
 			grid-template-columns: 1fr 1fr;
-		}
-		.feedback {
-			grid-template-columns: 1fr;
-			align-items: stretch;
-		}
-		.feedback > button {
-			grid-column: auto;
-			justify-self: start;
 		}
 		.mechanisms li {
 			grid-template-columns: 1fr;

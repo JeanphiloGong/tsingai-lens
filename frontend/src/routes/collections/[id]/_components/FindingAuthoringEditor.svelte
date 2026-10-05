@@ -1,12 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { errorMessage } from '../../../_shared/api';
-	import { createFindingVersion, fetchExperimentAnalysis, type ExperimentAnalysisProjection, type FindingAuthoringResult, type ObjectiveFinding } from '../../../_shared/researchView';
+	import { createFindingVersion, fetchExperimentAnalysis, type ExperimentAnalysisProjection, type FindingAuthoringResult } from '../../../_shared/researchView';
 
 	export let collectionId: string;
 	export let objectiveId: string;
 	export let analysisVersion: number;
-	export let parentFinding: ObjectiveFinding | null = null;
 	export let onSaved: (result: FindingAuthoringResult) => void | Promise<void> = () => {};
 	export let onCancel: () => void = () => {};
 
@@ -20,8 +19,6 @@
 	onMount(async () => {
 		try {
 			projection = await fetchExperimentAnalysis(collectionId, objectiveId, analysisVersion);
-			selectionIds = parentFinding?.selection_ids ?? [];
-			comparisonGroupIds = parentFinding?.comparison_group_ids ?? [];
 		} catch (error) {
 			formError = errorMessage(error);
 		} finally {
@@ -38,7 +35,7 @@
 		if (!selectionIds.length) { formError = '至少选择一个实验结果。'; return; }
 		saving = true;
 		try {
-			const result = await createFindingVersion(collectionId, objectiveId, { source_analysis_version: analysisVersion, selection_ids: selectionIds, comparison_group_ids: comparisonGroupIds, parent_finding_id: parentFinding?.finding_id ?? null });
+			const result = await createFindingVersion(collectionId, objectiveId, { source_analysis_version: analysisVersion, selection_ids: selectionIds, comparison_group_ids: comparisonGroupIds });
 			await onSaved(result);
 		} catch (error) { formError = errorMessage(error); } finally { saving = false; }
 	}

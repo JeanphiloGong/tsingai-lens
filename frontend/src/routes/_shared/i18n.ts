@@ -222,7 +222,6 @@ const translations: Record<Language, Translations> = {
 			tabs: {
 				overview: 'Overview',
 				comparison: 'Comparison',
-				comparisons: 'Comparisons',
 				graph: 'Evidence Map',
 				results: 'Extracted Results',
 				extractedFacts: 'Extracted Facts',
@@ -1127,30 +1126,7 @@ const translations: Record<Language, Translations> = {
 				nextPage: 'Next'
 			},
 			comparison: {
-				eyebrow: 'Published analysis',
-				title: 'Cross-paper findings',
-				directBody:
-					'Review conclusions synthesized from published Objective analyses, then open the exact Evidence and Sources behind each Finding.',
-				loading: 'Loading published findings...',
-				errorTitle: 'Published findings are unavailable',
 				retry: 'Retry',
-				emptyTitle: 'No published findings yet',
-				emptyBody:
-					'Confirm and analyze a research objective first. Only published Findings with traceable Evidence appear here.',
-				openObjectives: 'Open research objectives',
-				summaryLabel: 'Published finding summary',
-				findingsCount: 'published findings',
-				publishedObjectiveCount: 'Across {count} analyzed objective(s)',
-				partialError:
-					'{count} published objective(s) could not be loaded. Available Findings remain visible.',
-				objectiveLabel: 'Research objective',
-				materialScope: 'Material scope',
-				factors: 'Factors',
-				outcome: 'Outcome',
-				limitations: 'Limitations',
-				certainty: '{value}% certainty',
-				supportingPapers: '{count} supporting papers',
-				reviewEvidence: 'Review finding evidence',
 				synthesis: {
 					agreement: 'Agreement',
 					conflict: 'Conflict',
@@ -3406,7 +3382,6 @@ const translations: Record<Language, Translations> = {
 			tabs: {
 				overview: '概览',
 				comparison: '比较',
-				comparisons: '比较',
 				graph: '证据关系图',
 				results: '抽取结果',
 				extractedFacts: '抽取事实',
@@ -4269,27 +4244,7 @@ const translations: Record<Language, Translations> = {
 				nextPage: '下一页'
 			},
 			comparison: {
-				eyebrow: '已发布分析',
-				title: '跨文献 Findings',
-				directBody: '审阅已发布 Objective 分析形成的结论，并进入每条 Finding 的原文证据与 Source。',
-				loading: '正在加载已发布 Findings...',
-				errorTitle: '无法加载已发布 Findings',
 				retry: '重试',
-				emptyTitle: '尚无已发布 Finding',
-				emptyBody: '请先确认并分析研究目标。这里只展示具有可追溯 Evidence 的已发布 Finding。',
-				openObjectives: '打开研究目标',
-				summaryLabel: '已发布 Finding 概览',
-				findingsCount: '条已发布 Findings',
-				publishedObjectiveCount: '来自 {count} 个已分析目标',
-				partialError: '有 {count} 个已发布目标加载失败；其余可用 Findings 仍保留显示。',
-				objectiveLabel: '研究目标',
-				materialScope: '材料范围',
-				factors: '影响因素',
-				outcome: '结果指标',
-				limitations: '限制',
-				certainty: '确定性 {value}%',
-				supportingPapers: '{count} 篇支持文献',
-				reviewEvidence: '审阅 Finding 证据',
 				synthesis: {
 					agreement: '多文献一致',
 					conflict: '文献冲突',

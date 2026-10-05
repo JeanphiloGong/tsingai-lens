@@ -138,12 +138,6 @@
 		{$t('collection.tabs.objectives')}
 	</a>
 	<a
-		href={resolve('/collections/[id]/comparisons', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/comparisons`)}
-	>
-		{$t('collection.tabs.comparisons')}
-	</a>
-	<a
 		href={resolve('/collections/[id]/graph', { id: collectionId })}
 		class={tabClass(`/collections/${collectionId}/graph`)}
 	>

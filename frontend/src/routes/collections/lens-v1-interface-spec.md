@@ -19,16 +19,14 @@ collection workspace
   -> reviewed downstream assistant or experiment plan
 ```
 
-Objective analysis owns scientific synthesis. Comparisons is the collection
-overview of published Findings, not a second conclusion system. Documents own
-Source verification.
+Objective analysis owns scientific synthesis. Published Findings and their
+cross-paper evidence are reviewed within their owning Objective. Documents
+own Source verification.
 
 ## Collection Navigation
 
 - `/collections/[id]`
   Workspace, files, task progress, warnings, and next action.
-- `/collections/[id]/comparisons`
-  Published cross-paper Findings grouped by Objective.
 - `/collections/[id]/documents`
   Paper inventory and source reading entry.
 - `/collections/[id]/objectives`
@@ -62,20 +60,17 @@ Primary action order:
 2. monitor when a build is queued/running;
 3. retry when the latest build failed;
 4. open Objectives when candidate discovery is complete;
-5. open comparisons when a published Finding exists;
+5. open the owning Objective to review published Findings;
 6. open documents to inspect Source content.
 
 The workspace does not expose retired internal pipeline stages as product
 concepts.
 
-## Comparisons
+## Finding Comparison
 
-The comparisons page reads confirmed Objectives and their published analysis
-versions. It displays only persisted Findings, grouped under the Objective that
-owns them. A Finding link opens the Objective review workspace, where the
-researcher can inspect its exact ObjectiveEvidence and Source. If no published
-Finding exists, the page directs the researcher to Objectives instead of
-offering a synthetic comparison build.
+The Objective review workspace owns published Finding review, cross-paper
+evidence comparison, and exact ObjectiveEvidence and Source inspection. There
+is no standalone collection comparison page or duplicate Finding summary.
 
 ## Research Objectives
 

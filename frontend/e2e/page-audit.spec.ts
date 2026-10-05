@@ -26,7 +26,6 @@ const routes = [
 		`/collections/${collectionId}/objectives/${objectiveId}`,
 		'How does heat treatment affect LPBF 316L tensile strength?'
 	],
-	[`/collections/${collectionId}/comparisons`, 'Cross-paper findings'],
 	[`/collections/${collectionId}/graph`, 'Objective evidence map'],
 	[`/collections/${collectionId}/assistant`, 'Research Agent']
 ] as const;
@@ -2477,16 +2476,21 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('tab', { name: 'PDF Preview' })).toBeVisible();
 	});
 
-	test('published Finding comparison remains readable on mobile', async ({ page }) => {
+	test('collection navigation opens Finding review through research objectives', async ({
+		page
+	}) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto(`/collections/${collectionId}/comparisons`);
-
-		await expect(page.getByRole('heading', { name: 'Cross-paper findings' })).toBeVisible();
-		await expect(
-			page.getByText('Annealing was associated with higher tensile strength.')
-		).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Review finding evidence' })).toBeVisible();
-		expect(await visibleElementsFitViewport(page, '.finding-item')).toBe(true);
+		await page.goto(`/collections/${collectionId}/documents`);
+		await expect(page.locator(`a[href="/collections/${collectionId}/comparisons"]`)).toHaveCount(0);
+		await page.locator(`a[href="/collections/${collectionId}/objectives"]`).first().click();
+		await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/objectives$`));
+		await page
+			.locator(`a[href="/collections/${collectionId}/objectives/${objectiveId}"]`)
+			.first()
+			.click();
+		await expect(page.locator('.finding-list')).toContainText(
+			'Annealing was associated with higher tensile strength.'
+		);
 	});
 
 	test('shows aggregate preparation progress for active paper runs', async ({ page }) => {

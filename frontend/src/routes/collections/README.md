@@ -53,8 +53,6 @@ This node owns the Collection route family.
   with label and dataset-use filters. The collection workspace also exposes
   collection-level Finding JSON/JSONL and expert gold-draft downloads beside
   the original paper archive.
-- `collections/[id]/comparisons/+page.svelte`
-  Published cross-paper Finding overview grouped by Objective.
 - `collections/[id]/graph/+page.svelte`
   Secondary Objective Evidence Map. It selects one published Objective and
   shows deterministic Finding, Evidence, exact Source, paper, and coverage
@@ -329,10 +327,12 @@ mechanisms link to their exact supporting Evidence.
 
 ## Product Boundary
 
-The collection comparison page is a read-only overview of published
-Objective Findings. It does not rebuild conclusions from legacy comparison
-rows, Evidence cards, material projections, or collection-wide graph
-projections. The Objective Evidence Map is a read-only view of those same
+Published Findings are reviewed within their owning research Objective. The
+standalone collection comparison route and navigation entry have been removed;
+cross-paper comparison remains part of Finding evidence review. The interface
+does not rebuild conclusions from legacy comparison rows, Evidence cards,
+material projections, or collection-wide graph projections.
+The Objective Evidence Map is a read-only view of those same
 published records, not another aggregate or analysis path. The Objective page
 owns the single confirmation-and-analysis command; the Finding page owns expert
 authorship and review; the document reader owns Source verification. Current

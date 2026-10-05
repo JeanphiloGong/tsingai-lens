@@ -74,9 +74,9 @@
   收尾；Core 写入停在持久化的精确参数审批点。
   Chat 是会话、消息、capability 轨迹和审批的唯一运行时权威，但不拥有 Objective、
   Evidence、Finding 或 Analysis 真值。Objective 链接仅指向 Core 的规范记录。
-- `/collections/{collection_id}/comparisons` 只读取已发布 Objective analysis
-  的 Findings；它不读取或重建旧 comparison row、Evidence Card、Materials
-  或 Graph 投影
+- 独立的 `/collections/{collection_id}/comparisons` 页面及导航入口已移除。
+  已发布 Findings 及跨论文证据比较统一在所属研究目标中审阅；不读取或重建旧
+  comparison row、Evidence Card、Materials 或 Graph 投影
 - `/collections/{collection_id}/graph` 是次级的 Objective Evidence Map：用户先选择
   一个已有已发布 analysis 的 Objective，再按 `Objective -> Finding -> Evidence ->
 Source -> Document` 回溯关系。页面只调用 Objective 的 `evidence-map` 接口；失败

@@ -44,7 +44,11 @@
 	import ConversationTree from './ConversationTree.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
-	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
+	import {
+		getChatSessionActivity,
+		getModelServiceErrorKey,
+		type ChatSessionActivity
+	} from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
 	import type { ResearchAgentSlashCommandName } from '../../../_shared/researchAgentSlashCommands';
@@ -550,9 +554,14 @@
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
 		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
 		else if (snapshot.status === 'failed')
-			error = $t('researchAgent.turnFailed', { code: snapshot.error_code ?? 'failed' });
+			error = turnErrorMessage(snapshot.error_code);
 		else if (snapshot.status === 'completed' && snapshot.warnings.length)
 			notice = $t('researchAgent.turnLimited');
+	}
+
+	function turnErrorMessage(errorCode: string | null | undefined) {
+		const key = getModelServiceErrorKey(errorCode);
+		return key ? $t(key) : $t('researchAgent.turnFailed');
 	}
 
 	function acceptTrajectory(trajectory: ChatTrajectory) {
@@ -1125,7 +1134,7 @@
 			notice = $t(rejectionNoticeKey(decidedToolName));
 		}
 		if (turn.status === 'failed') {
-			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
+			error = turnErrorMessage(turn.error_code);
 		}
 		if (turn.status === 'completed' && turn.warnings?.length) {
 			notice = $t('researchAgent.turnLimited');

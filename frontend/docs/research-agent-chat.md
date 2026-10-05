@@ -641,7 +641,13 @@ inspected Sources, unread scope, technical failures, and scientific uncertainty.
 
 Provider, capability, and finalization failures remain visible and distinct from
 scientific absence. A successful capability that finds no published Evidence
-is not rendered as a technical error.
+is not rendered as a technical error. Model-service failures such as
+`model_unavailable`, `provider_timeout`, and `model_response_invalid` are shown
+as a service status message that directs the researcher to contact an
+administrator or try again later; retrieved research results remain available.
+Unknown internal failure codes are kept out of the browser message, while
+capability and Source read failures remain attached to their individual
+operations.
 
 ## Responsive And Accessibility Contract
 

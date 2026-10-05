@@ -1,5 +1,26 @@
 import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
 
+/** Map backend model failures to stable, user-facing translation keys. */
+export function getModelServiceErrorKey(errorCode: string | null | undefined): string | null {
+	switch (errorCode) {
+		case 'provider_timeout':
+			return 'researchAgent.modelServiceTimeout';
+		case 'model_response_invalid':
+			return 'researchAgent.modelServiceInvalidResponse';
+		case 'model_unavailable':
+		case 'final_answer_unavailable':
+		case 'provider_error':
+		case 'provider_connection_error':
+		case 'provider_rate_limited':
+		case 'transient_provider_error':
+		case 'unclassified_provider_error':
+		case 'quota_exhausted':
+			return 'researchAgent.modelServiceUnavailable';
+		default:
+			return null;
+	}
+}
+
 const completeCitationMarker = /\[\[cite:[^\]\r\n]+\]\]/g;
 const completeInternalSourceId =
 	/(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+(?![A-Za-z0-9_-])/g;

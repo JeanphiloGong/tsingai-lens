@@ -95,6 +95,9 @@ curl "$LLM_BASE_URL/models"
 
 If the configured Research Agent model is unavailable, the turn returns
 `model_unavailable` and no capability executes for that turn.
+Unexpected SDK or model-adapter exceptions are sanitized to the same stable
+`model_unavailable` turn error; the exception text is retained only in
+structured server logs and is never returned to the browser.
 If the provider returns an empty, reasoning-only, or structurally invalid
 streamed response, the runner retries up to five times when no user-visible
 text was received. A sixth invalid response returns `model_response_invalid`;

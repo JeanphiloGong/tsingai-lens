@@ -3906,9 +3906,14 @@ async def test_repeated_invalid_model_response_is_distinguished_from_unavailable
     assert "技术中断" in result.messages[-1].content
 
 
-async def test_unexpected_model_failure_remains_model_unavailable(caplog) -> None:
+@pytest.mark.parametrize(
+    "exception",
+    [RuntimeError("provider connection failed"), AttributeError("malformed provider response")],
+    ids=["runtime-error", "attribute-error"],
+)
+async def test_unexpected_model_failure_remains_model_unavailable(exception: Exception, caplog) -> None:
     runner = ResearchAgentRunner(
-        model=_Model(RuntimeError("provider connection failed")),
+        model=_Model(exception),
         capabilities=CapabilityRegistry(
             (_Capability("get_collection_context", ToolRisk.READ),)
         ),
@@ -3922,9 +3927,9 @@ async def test_unexpected_model_failure_remains_model_unavailable(caplog) -> Non
 
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "model_unavailable"
-    assert "provider connection failed" not in caplog.text
+    assert str(exception) not in caplog.text
     record = next(record for record in caplog.records if "Research Agent model call failed" in record.message)
     assert json.loads(record.message.split("details=", 1)[1]) == {
-        "exception_type": "RuntimeError", "http_status": None,
+        "exception_type": type(exception).__name__, "http_status": None,
         "retryable": False, "reason": "unclassified_provider_error",
     }

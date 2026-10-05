@@ -3,10 +3,27 @@ import type { ChatMessage, ChatToolResult } from '../../../_shared/chatSessions'
 import {
 	buildChatPresentation,
 	getChatSessionActivity,
+	getModelServiceErrorKey,
 	getRecoveredChatProgress,
 	getCurrentReadings,
 	sanitizeStreamingCitationText
 } from './conversationPresentation';
+
+describe('getModelServiceErrorKey', () => {
+	it('maps model failures to stable service messages', () => {
+		expect(getModelServiceErrorKey('model_unavailable')).toBe(
+			'researchAgent.modelServiceUnavailable'
+		);
+		expect(getModelServiceErrorKey('provider_timeout')).toBe('researchAgent.modelServiceTimeout');
+		expect(getModelServiceErrorKey('model_response_invalid')).toBe(
+			'researchAgent.modelServiceInvalidResponse'
+		);
+		expect(getModelServiceErrorKey('provider_error')).toBe(
+			'researchAgent.modelServiceUnavailable'
+		);
+		expect(getModelServiceErrorKey('invalid_tool_batch')).toBeNull();
+	});
+});
 
 describe('sanitizeStreamingCitationText', () => {
 	it('hides complete and split citation markers until the persisted answer arrives', () => {

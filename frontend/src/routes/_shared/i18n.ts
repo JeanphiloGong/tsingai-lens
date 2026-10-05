@@ -717,7 +717,13 @@ const translations: Record<Language, Translations> = {
 			paperExperimentRevisionRejected: 'The PaperExperiment revision was not saved.',
 			researchPlanRejected: 'The proposed research plan was not saved.',
 			agentObjectiveAnalysisRejected: 'The proposed Agent analysis was not published.',
-			turnFailed: 'The Agent turn stopped with error: {code}',
+			turnFailed: 'The Agent could not complete this turn. Try again later.',
+			modelServiceUnavailable:
+				'The model service is temporarily unavailable. Contact an administrator or try again later. Any retrieved research results were kept.',
+			modelServiceTimeout:
+				'The model service timed out. Try again later. Any retrieved research results were kept.',
+			modelServiceInvalidResponse:
+				'The model service returned an invalid response. Contact an administrator or try again later. Any retrieved research results were kept.',
 			responseInterrupted: 'Generation was interrupted. The text shown is incomplete.',
 			responseDisconnected: 'Connection lost. Reconnecting to the response...',
 			turnLimited:
@@ -3864,7 +3870,10 @@ const translations: Record<Language, Translations> = {
 			paperExperimentRevisionRejected: '已取消保存 PaperExperiment 修订。',
 			researchPlanRejected: '已取消保存拟议的研究方案。',
 			agentObjectiveAnalysisRejected: '已取消发布 Agent 拟议的分析。',
-			turnFailed: 'Agent 本轮执行停止，错误：{code}',
+			turnFailed: 'Agent 未能完成本轮研究，请稍后重试。',
+			modelServiceUnavailable: '模型服务暂时不可用，请联系管理员或稍后重试。已取得的研究结果已保留。',
+			modelServiceTimeout: '模型服务响应超时，请稍后重试。已取得的研究结果已保留。',
+			modelServiceInvalidResponse: '模型服务返回了无效响应，请联系管理员或稍后重试。已取得的研究结果已保留。',
 			responseInterrupted: '回复生成已中断，当前显示的文字尚未完成。',
 			responseDisconnected: '连接已断开，正在重新连接回复...',
 			turnLimited: 'Agent 已达到本轮阅读上限；上面的回答仅基于已经完成的检查。'

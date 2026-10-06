@@ -2,12 +2,18 @@
 	import { goto } from '$app/navigation';
 	import { authState, login } from '../_shared/auth';
 	import { errorMessage } from '../_shared/api';
-	import { t } from '../_shared/i18n';
+	import { language, t } from '../_shared/i18n';
+	import { ChevronDown, Globe2 } from '@lucide/svelte';
 
 	let email = '';
 	let password = '';
 	let loading = false;
 	let error = '';
+
+	function changeLanguage(event: Event) {
+		const value = (event.currentTarget as HTMLSelectElement).value;
+		if (value === 'en' || value === 'zh') language.set(value);
+	}
 
 	$: if ($authState.status === 'authenticated') {
 		void goto('/', { replaceState: true });
@@ -38,11 +44,10 @@
 	<title>{$t('auth.pageTitle')}</title>
 </svelte:head>
 
-<section class="login-shell">
+<section class="login-shell" aria-labelledby="login-title">
 	<div class="login-panel">
-		<p class="eyebrow">{$t('auth.eyebrow')}</p>
-		<h1>{$t('auth.title')}</h1>
-		<p class="lead">{$t('auth.lead')}</p>
+		<img class="login-mark" src="/lens-mark-a2.svg" alt="" />
+		<h1 id="login-title">{$t('auth.title')}</h1>
 
 		<form class="login-form" on:submit={submitLogin}>
 			<label class="field" for="auth-email">
@@ -77,5 +82,15 @@
 				{loading ? $t('auth.signingIn') : $t('auth.signIn')}
 			</button>
 		</form>
+	</div>
+
+	<div class="login-language">
+		<Globe2 size={16} strokeWidth={1.8} aria-hidden="true" />
+		<label class="sr-only" for="login-language">{$t('header.languageLabel')}</label>
+		<select id="login-language" value={$language} on:change={changeLanguage}>
+			<option value="en">English</option>
+			<option value="zh">简体中文</option>
+		</select>
+		<ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
 	</div>
 </section>

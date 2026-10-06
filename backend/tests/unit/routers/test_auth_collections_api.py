@@ -147,6 +147,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
     collection_service,
 ) -> None:
     from application.pipeline import PipelineRunService
+    from application.core.objectives.analysis.experiment_analysis_writer import ExperimentAnalysisWriter
     from infra.persistence.memory import MemoryPipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -158,6 +159,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+            experiment_analysis_writer=Mock(spec=ExperimentAnalysisWriter),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:

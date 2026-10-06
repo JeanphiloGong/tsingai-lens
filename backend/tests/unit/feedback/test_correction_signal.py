@@ -229,7 +229,17 @@ async def test_challenge_collects_corrected_answer_and_its_real_source_reads():
                                    source_digest="a" * 64, active_job_id="job-1", now=now.isoformat())
     case = FeedbackCase("case-1", "collection-1", "session-1", "answer-1", (), (), snapshot,
                         "needs_annotation", now.isoformat(), now.isoformat())
-    built = await PreferenceSampleBuilder().build(dataset=dataset, sample=sample, case=case, annotation=None)
+    class Generator:
+        model_name = "preference-judge"
+
+        async def generate(self, **inputs):
+            assert inputs["snapshot"]["response_b"] == snapshot["corrected_answer"]
+            assert inputs["context"][0]["text"] == "The exact passage."
+            return {"suggested_preference": "unclear", "rationale": "The passage does not establish a preferred answer."}
+
+    built = await PreferenceSampleBuilder(generator=Generator()).build(
+        dataset=dataset, sample=sample, case=case, annotation=None,
+    )
     assert isinstance(built, PreferenceBuildCandidate)
     assert built.content.response_b == snapshot["corrected_answer"]
     assert built.content.human_preference is None

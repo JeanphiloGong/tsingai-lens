@@ -330,6 +330,8 @@ async def test_empty_provider_response_retains_exact_read_and_unread_papers():
     read = _Capability("read_source", ToolRisk.READ, result_data={
         "document_id": "p1", "source_kind": "text_window", "source_ref": "methods",
         "source_digest": "canonical-digest", "content_truncated": False,
+        "document_title": "Preheating study", "heading_path": "Methods",
+        "content": "Specimens were preheated at 200 C.",
     })
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(name="browse_collection_papers"),)),
@@ -341,7 +343,11 @@ async def test_empty_provider_response_retains_exact_read_and_unread_papers():
     )
     assert result.error_code == "model_response_invalid"
     answer = result.messages[-1].content
-    assert "Exact paper Sources read (1): p1:methods" in answer
+    assert "Exact paper Sources read (1): Preheating study" in answer
+    assert "Methods" in answer
+    assert "p1:methods" not in answer
+    assert any(item.data.get("source_ref") == "methods" and item.data.get("document_id") == "p1"
+               for item in result.tool_results)
     assert "Known papers without an exact read (1): p2" in answer
     assert "private-provider-content" not in answer
     assert "does not establish an absence" in answer

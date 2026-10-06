@@ -78,8 +78,6 @@ def test_new_user_request_starts_fresh_discovery(discovered_messages):
 
 @pytest.mark.anyio
 async def test_discovery_then_read_produces_identifiable_domain_result():
-    from tests.integration.test_deep_path_research_flow import _tool_result
-
     read = _Capability("read_source", ToolRisk.READ, result_data={
         "document_id": "p1", "source_kind": "text_window", "source_ref": "results",
         "source_digest": "a" * 64, "content_truncated": False,
@@ -98,5 +96,9 @@ async def test_discovery_then_read_produces_identifiable_domain_result():
     assert result.status == "completed"
     discovery = next(message.tool_result for message in result.messages if message.tool_result is not None)
     assert "catalog_version" not in discovery.data
-    assert _tool_result({"messages": result.messages}).data["content"] == "Measured elongation: 8%."
+    read_call = next(call for call in result.tool_calls if call.name == "read_source")
+    read_result = next(item for item in result.tool_results if item.tool_call_id == read_call.tool_call_id)
+    assert read_result.data["document_id"] == "p1"
+    assert read_result.data["source_ref"] == "results"
+    assert read_result.data["content"] == "Measured elongation: 8%."
     assert read.executed_arguments == [{}]

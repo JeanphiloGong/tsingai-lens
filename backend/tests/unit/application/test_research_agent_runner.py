@@ -1235,20 +1235,23 @@ async def test_literature_based_opinion_completion_does_not_certify_source_suppo
     assert all(call.name == "discover_research_tools" for call in result.tool_calls)
 
 
-async def test_evidence_write_requires_a_complete_matching_source_read() -> None:
+@pytest.mark.parametrize(("read_document_id", "truncated"), [("paper-1", True), ("paper-2", False)])
+async def test_experiment_draft_requires_a_complete_matching_source_read(read_document_id, truncated) -> None:
+    from application.chat.capabilities.paper_experiment_authoring import PaperExperimentDraftToolRequest
+
     read = _Capability(
         "read_source",
         ToolRisk.READ,
         _NoArguments,
         result_data={
-            "document_id": "paper-1",
+            "document_id": read_document_id,
             "source_kind": "text_window",
             "source_ref": "results-1",
-            "content_truncated": True,
+            "content_truncated": truncated,
             "source_digest": "a" * 64,
         },
     )
-    write = _Capability("create_evidence_version", ToolRisk.WRITE, _NoArguments)
+    draft = _Capability("propose_paper_experiment_draft", ToolRisk.DRAFT, PaperExperimentDraftToolRequest)
     model = _Model(
         ModelTurn(
             tool_calls=(
@@ -1261,26 +1264,26 @@ async def test_evidence_write_requires_a_complete_matching_source_read() -> None
         ModelTurn(
             tool_calls=(
                 ModelToolCall(
-                    name="create_evidence_version",
-                    arguments={},
+                    name="propose_paper_experiment_draft",
+                    arguments={"objective_id": "obj-1", "document_id": "paper-1"},
                 ),
             )
         ),
-        ModelTurn(content="The source must be read completely before recording Evidence."),
+        ModelTurn(content="The source must be read completely before drafting the experiment."),
     )
     runner = ResearchAgentRunner(
         model=model,
-        capabilities=CapabilityRegistry((read, write)),
+        capabilities=CapabilityRegistry((read, draft)),
     )
 
     result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
-        user_message="Read the source and save the Evidence.",
+        user_message="Read the source and draft the paper experiment.",
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert write.executed_arguments == []
+    assert draft.executed_arguments == []
     assert result.tool_results[-1].error_code == "source_read_incomplete"
 
 
@@ -2173,16 +2176,14 @@ async def test_invalid_arguments_do_not_execute_capability() -> None:
     assert capability.executed_arguments == []
 
 
-async def test_finding_draft_repair_receives_actionable_evidence_role_error() -> None:
+async def test_finding_draft_repair_receives_actionable_selection_error() -> None:
     from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability
 
     arguments = {
         "draft_id": "correction", "objective_id": "obj-1", "source_analysis_version": 6,
-        "statement": "The inspected paper reports a condition-dependent trend.",
-        "assertion_strength": "descriptive", "parent_finding_id": "finding-1",
-        "supporting_evidence_ids": [], "contradicting_evidence_ids": ["evidence-1"],
+        "parent_finding_id": "finding-1", "selection_ids": [],
     }
-    corrected = {**arguments, "supporting_evidence_ids": ["evidence-1"], "contradicting_evidence_ids": []}
+    corrected = {**arguments, "selection_ids": ["selection-1"]}
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(name="create_finding_draft", arguments=arguments),)),
         ModelTurn(tool_calls=(ModelToolCall(name="create_finding_draft", arguments=corrected),)),
@@ -2192,14 +2193,11 @@ async def test_finding_draft_repair_receives_actionable_evidence_role_error() ->
         context=_context(), previous_messages=(), user_message="请给 Finding 修订草案，先不要保存或发布。",
     )
     failed = next(item for item in result.tool_results if item.error_code == "invalid_tool_arguments")
-    assert "finding_supporting_evidence_required" in failed.error_message
-    assert arguments["statement"] not in failed.error_message
+    assert "Finding requires experiment selections" in failed.error_message
     assert any(message.tool_result == failed for message in model.contexts[1])
-    assert "finding_supporting_evidence_required" in failed.error_message
     assert "invalid_tool_arguments" in model.contexts[1][-1].content
     assert result.status is AgentRunStatus.COMPLETED
-    assert any(item.data.get("draft") == {**corrected, "context_evidence_ids": [], "condition_boundary_evidence_ids": [],
-        "limitations": [], "abstention_reason": None} for item in result.tool_results)
+    assert any(item.data.get("draft") == {**corrected, "comparison_group_ids": []} for item in result.tool_results)
 
 
 async def test_finding_draft_normalizes_conservative_strength_and_duplicate_evidence() -> None:
@@ -2909,55 +2907,65 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
     assert any(event["executed_tool_count"] > 0 for event in events)
 
 
-@pytest.mark.parametrize("write_before_read", [False, True])
-async def test_evidence_save_request_requires_real_approval_after_complete_read(write_before_read) -> None:
+@pytest.mark.parametrize("draft_before_read", [False, True])
+async def test_experiment_save_requires_real_approval_after_source_read_and_draft(draft_before_read) -> None:
     from application.chat.capabilities.document_sources import ReadSourceToolRequest
-
-    class EvidenceWriteToolRequest(ReadSourceToolRequest):
-        source_digest: str
+    from application.chat.capabilities.paper_experiment_authoring import (
+        PaperExperimentDraftToolRequest,
+        PaperExperimentRevisionToolRequest,
+    )
 
     source = {"document_id": "paper-1", "source_kind": "text_window", "source_ref": "results-7"}
     read = _Capability("read_source", ToolRisk.READ, ReadSourceToolRequest, result_data={
         **source, "content_truncated": False, "source_digest": "a" * 64,
         "content": "Elongation increased and then decreased as annealing temperature increased.",
     })
-    write = _Capability("create_evidence_version", ToolRisk.WRITE, EvidenceWriteToolRequest)
+    draft_arguments = {"objective_id": "obj-1", "document_id": "paper-1"}
+    revision_arguments = {"draft_id": "reviewed-1", "draft_digest": "b" * 64}
+    draft = _Capability("propose_paper_experiment_draft", ToolRisk.DRAFT, PaperExperimentDraftToolRequest,
+                        result_data={**revision_arguments, "status": "pending_approval"})
+    write = _Capability("create_paper_experiment_revision", ToolRisk.WRITE, PaperExperimentRevisionToolRequest)
     model = _Model(
         *(
             [ModelTurn(tool_calls=(ModelToolCall(
-                "create_evidence_version", {**source, "source_digest": "a" * 64},
+                "propose_paper_experiment_draft", draft_arguments,
             ),))]
-            if write_before_read else []
+            if draft_before_read else []
         ),
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
+        ModelTurn(tool_calls=(ModelToolCall("propose_paper_experiment_draft", draft_arguments),)),
         ModelTurn(tool_calls=(ModelToolCall(
-            "create_evidence_version", {**source, "source_digest": "a" * 64},
+            "create_paper_experiment_revision", revision_arguments,
         ),)),
     )
-    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read, write))).run_turn(
-        context=_context(), previous_messages=(), user_message="Read the Source and save the corrected Evidence as a new version.",
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read, draft, write))).run_turn(
+        context=_context(), previous_messages=(), user_message="Read the Source and save the corrected paper experiment as a new revision.",
     )
     assert result.status is AgentRunStatus.APPROVAL_REQUIRED
-    assert result.pending_approval.name == "create_evidence_version"
+    assert result.pending_approval.name == "create_paper_experiment_revision"
+    assert result.pending_approval.arguments == revision_arguments
+    assert len(draft.executed_arguments) == 1
     assert not write.executed_arguments
-    if write_before_read:
-        assert result.tool_results[0].error_code == "source_read_incomplete"
-        assert "read_source" in model.tool_spec_names[1]
+    if draft_before_read:
+        assert any(item.error_code == "source_read_incomplete" for item in result.tool_results)
 
 
-@pytest.mark.parametrize("kind", ["evidence", "finding"])
-def test_publication_hint_retains_actual_draft_instead_of_restarting_review(kind) -> None:
+@pytest.mark.parametrize(("draft_name", "write_name"), [
+    ("propose_paper_experiment_draft", "create_paper_experiment_revision"),
+    ("create_finding_draft", "create_finding_version"),
+])
+def test_publication_hint_retains_actual_draft_instead_of_restarting_review(draft_name, write_name) -> None:
     draft = {"draft_id": "reviewed-1", "source_analysis_version": 7,
-             "supporting_evidence_ids": ["corrected-evidence-1"], "statement": "Condition-dependent elongation."}
+             "selection_ids": ["selection-1"]}
     instruction = capability_policy.stage_instruction(
-        ("read_source", "inspect_published_finding", f"create_{kind}_draft", f"create_{kind}_version"),
+        ("read_source", "inspect_published_finding", draft_name, write_name),
         [], successful_results={
             "inspect_published_finding": [{"finding": {"finding_id": "parent-1"}}],
-            f"create_{kind}_draft": [{"draft": draft, "persistence": "transient_chat_result"}],
+            draft_name: [{"draft": draft, "persistence": "transient_chat_result"}],
         },
     )
     retained = json.loads(instruction.split("\n", 1)[1])
-    assert retained["latest_transient_results"][f"create_{kind}_draft"]["draft"] == draft
+    assert retained["latest_transient_results"][draft_name]["draft"] == draft
     assert "not a prescribed next step" in instruction
     assert "call create_finding_draft" not in instruction
 
@@ -3507,11 +3515,11 @@ def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None
     ("请把这个 Finding 标为错误，保存错误反馈；不保存修订结论，也不发布新分析。", {"record_finding_feedback"}),
     ("保存 Finding 人工修订，保留原始结果和现有 Evidence；不创建独立新 Finding，不发布新的分析版本。", {"curate_finding"}),
     ("Save feedback for this Finding, but do not save the curation or publish a new analysis.", {"record_finding_feedback"}),
-    ("Check the complete table and save the corrected Evidence as a new version.", {"create_evidence_version"}),
+    ("Check the complete table and save the corrected paper experiment as a new revision.", {"create_paper_experiment_revision"}),
     ("Save the human revision of this Finding; do not publish a new Finding.", {"curate_finding"}),
     ("请保存这个 Finding 的修订。", {"create_finding_version"}),
     ("Save the revision of this Finding.", {"create_finding_version"}),
-    ("请保存证据修订，保留旧记录。", {"create_evidence_version"}),
+    ("请保存实验记录修订，保留旧记录。", {"create_paper_experiment_revision"}),
     ("保存这个 Finding 的反馈，先不要保存任何内容。", set()),
     ("只读查看 Finding 已保存的错误反馈和人工修订，不要写入。", set()),
     ("Read-only: inspect the saved Finding revision.", set()),
@@ -3520,7 +3528,7 @@ def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None
     ("请复核这个 Finding，先不要发布。", set()),
     ("请保存反馈但不保存修订，Finding 原始发布结果保留。", {"record_finding_feedback"}),
 ])
-def test_finding_writes_respect_each_requested_action(request_text, writes) -> None:
+def test_research_writes_respect_each_requested_action(request_text, writes) -> None:
     names = intent_policy.capability_names_for_intent(request_text, has_source_context=False, prior_tool_names=set())
     assert names.intersection(intent_policy.WRITE_CAPABILITIES) == writes
 
@@ -3540,9 +3548,9 @@ def test_failed_curation_retains_failure_observation() -> None:
 
 
 def test_curation_call_preserves_inspected_identity_and_provenance() -> None:
-    from tests.unit.application.test_chat_research_capabilities import _canonical_finding_record
+    from tests.unit.application.test_finding_review_import_service import _finding
 
-    canonical = _canonical_finding_record()
+    canonical = _finding()
     inspect_request = ChatToolCall.requested(
         tool_call_id="inspect-1", session_id="chat-1", assistant_message_id="inspect-call",
         name="inspect_published_finding", arguments={}, risk=ToolRisk.READ,

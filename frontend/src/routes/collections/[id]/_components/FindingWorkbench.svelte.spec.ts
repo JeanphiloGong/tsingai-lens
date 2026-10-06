@@ -136,7 +136,7 @@ describe('single Finding workbench', () => {
 		await expect.element(browserPage.getByText(finding.statement)).toBeInTheDocument();
 		await expect.element(browserPage.getByText('associated_with')).not.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: '证据对比' }))
+			.element(browserPage.getByRole('heading', { name: /Supporting data|支持数据/ }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('columnheader', { name: '参照条件' }))
@@ -149,11 +149,16 @@ describe('single Finding workbench', () => {
 		await expect.element(browserPage.getByRole('cell', { name: '支持结果' })).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('cell', { name: '增加' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('strength: 620 MPa')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('1 条结构化 Evidence')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/1 structured Evidence records|1 条结构化 Evidence/))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('样品状态')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('工艺条件')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText('测试条件')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('分析边界')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/Conclusion limits|结论边界/))
+			.toBeInTheDocument();
+		await browserPage.getByText(/Source evidence and paper contributions|原文证据与文献贡献/).click();
 		await expect.element(browserPage.getByText('上下文')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('条件边界')).toBeInTheDocument();
 		await expect
@@ -302,6 +307,7 @@ describe('single Finding workbench', () => {
 			documentTitles: { 'paper-1': 'HIP treatment of Ti-6Al-4V' }
 		});
 
+		await browserPage.getByText(/Source evidence and paper contributions|原文证据与文献贡献/).click();
 		const evidenceScope = browserPage.getByRole('group', { name: '证据范围' });
 		await expect.element(evidenceScope).toHaveTextContent('1篇直接文献');
 		await expect.element(evidenceScope).toHaveTextContent('1个原文来源');
@@ -383,6 +389,7 @@ describe('single Finding workbench', () => {
 			collectionId: 'col-1'
 		});
 
+		await browserPage.getByText(/Source evidence and paper contributions|原文证据与文献贡献/).click();
 		const tableSource = browserPage.getByRole('group', { name: '表格来源 · p.20' });
 		await expect.element(tableSource).not.toHaveTextContent('共享参照');
 		await browserPage.getByText('表格来源 · p.20', { exact: true }).click();
@@ -440,12 +447,14 @@ describe('single Finding workbench', () => {
 		});
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: '作用机制' }))
+			.element(browserPage.getByRole('heading', { name: /Mechanism evidence|机制证据/ }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('未报告可由原文证据支持的作用机制。'))
+			.element(browserPage.getByText(/No source-supported mechanism reported\.|未报告可由原文证据支持的机制。/))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('未识别额外分析边界。')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/No additional conclusion limits identified\.|未识别额外结论边界。/))
+			.toBeInTheDocument();
 	});
 
 	it('hides paper groups without Evidence and summarizes their analysis states', async () => {
@@ -490,6 +499,7 @@ describe('single Finding workbench', () => {
 			}
 		});
 
+		await browserPage.getByText(/Source evidence and paper contributions|原文证据与文献贡献/).click();
 		const evidenceScope = browserPage.getByRole('group', { name: '证据范围' });
 		await expect.element(evidenceScope).toHaveTextContent('1篇直接文献');
 		await expect.element(evidenceScope).toHaveTextContent('1个原文来源');
@@ -522,11 +532,12 @@ describe('single Finding workbench', () => {
 		};
 		render(Workbench, {
 			finding: { ...finding, paper_contributions: [emptyContribution] },
-			evidence: [],
+		evidence: [],
 			collectionId: 'col-1',
 			documentTitles: { 'paper-failed': 'Failed paper' }
 		});
 
+		await browserPage.getByText(/Source evidence and paper contributions|原文证据与文献贡献/).click();
 		await expect
 			.element(browserPage.getByText('当前 Finding 没有可审计的原文 Evidence。'))
 			.toBeInTheDocument();

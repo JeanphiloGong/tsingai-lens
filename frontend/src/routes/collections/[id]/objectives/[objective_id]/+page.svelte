@@ -57,6 +57,15 @@
 	$: published = analysis?.published_analysis ?? null;
 	$: active = analysis?.active_analysis ?? null;
 	$: isProcessing = active?.status === 'queued' || active?.status === 'running';
+	$: selectedExperimentVersions = projection && selectedFinding
+		? [
+				...new Set(
+					(selectedFinding.selection_ids ?? [])
+						.map((selectionId) => projection?.selections.find((item) => item.selection_id === selectionId)?.experiment_version)
+						.filter((version): version is number => version !== undefined)
+				)
+			]
+		: [];
 	$: if (browser && collectionId && objectiveId && loadedKey !== collectionId + ':' + objectiveId) {
 		loadedKey = collectionId + ':' + objectiveId;
 		closeAuthoring();
@@ -317,7 +326,7 @@
 				{:else if findingLoading}<p class="page-state">{$t('objectiveWorkspace.loading')}</p>
 				{:else if findingError}<div role="alert"><p>{findingError}</p>{#if selectedFinding}<button class="btn btn--ghost" on:click={() => selectFinding(selectedFindingId)}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button>{/if}</div>
 				{:else if selectedFinding}
-					<FindingWorkbench finding={selectedFinding} {evidence} {collectionId} {documentTitles}>
+					<FindingWorkbench finding={selectedFinding} {evidence} {collectionId} {documentTitles} experimentVersions={selectedExperimentVersions}>
 						<div slot="comparison">
 							{#if projection}<ExperimentResults {projection} {collectionId} {objectiveId} {documentTitles} findingId={selectedFinding.finding_id} selectionIds={selectedFinding.selection_ids ?? []} />
 							{:else}<p role="alert">{experimentError || $t('objectiveWorkspace.unavailable')}</p><button class="btn btn--ghost" on:click={loadProjection}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button>{/if}

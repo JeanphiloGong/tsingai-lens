@@ -111,16 +111,20 @@ factor/outcome relation or expose internal IDs.
 
 The selected detail shows:
 
-- the Finding statement, factors, outcome, direction, and attribution scope;
-- baseline, target, reported result, and comparability from structured Evidence;
-- typed material, sample, process, and test scientific context;
-- deterministic analysis boundaries and aggregate status counts for PaperContributions
-  without Evidence;
-- subordinate mechanisms with translated relation and assertion strength;
-- exact Evidence excerpts grouped by contribution role;
-- titled paper/page/source metadata and Open source action;
-- the fixed experiment selections and comparison groups that produced the
-  Finding, with no inline correction or feedback action.
+- the Finding statement and its origin;
+- the fixed experiment comparisons that support or contradict the Finding, with
+  table/chart switching, outcome selection, source links, and explicit missing
+  context;
+- typed material, sample, process, and test conditions that describe where the
+  Finding applies;
+- conclusion limits shown separately from the applicable conditions;
+- subordinate mechanism relationships with translated relation and assertion
+  strength, linked to their exact Evidence Sources;
+- collapsed analysis/experiment version metadata, including the fixed
+  selections and comparison groups that produced the Finding;
+- collapsed paper contributions and exact Source excerpts grouped by paper and
+  source location; and
+- no inline correction, feedback, or revision action on the published Finding.
 
 The list response already contains the complete Finding display shape, so
 changing selection reuses that item and loads only its Evidence and experiment

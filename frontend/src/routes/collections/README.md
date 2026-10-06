@@ -43,7 +43,10 @@ This node owns the Collection route family.
   Source links. Scientific corrections return to the experiment data and
   selection flow; the detail page has no inline feedback, curation, or Evidence
   replacement workflow. Feedback and curation APIs remain available to the
-  separate evaluation and Research Agent workbenches.
+  separate evaluation and Research Agent workbenches. The detail view leads
+  with the selected experiment data, then separates applicability, conclusion
+  boundaries, and mechanism evidence. Source contributions and analysis/
+  experiment version metadata stay collapsed until audit is needed.
   The sidebar can export the published Finding dataset as JSON or training JSONL
   with label and dataset-use filters. The collection workspace also exposes
   collection-level Finding JSON/JSONL and expert gold-draft downloads beside

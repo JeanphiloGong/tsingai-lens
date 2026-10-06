@@ -14,6 +14,7 @@
 	export let evidence: ObjectiveEvidence[] = [];
 	export let collectionId = '';
 	export let documentTitles: Record<string, string> = {};
+	export let experimentVersions: number[] = [];
 
 	type SharedComparisonRow = {
 		evidence: ObjectiveEvidence;
@@ -96,6 +97,11 @@
 		.filter((group) => group.paperEvidence.length === 0)
 		.map((group) => group.contribution);
 	$: emptyContributionSummary = summarizeEmptyContributions(emptyContributions);
+	$: selectionCount = finding.selection_ids?.length ?? 0;
+	$: comparisonGroupCount = finding.comparison_group_ids?.length ?? 0;
+	$: experimentVersionLabel = experimentVersions.length
+		? experimentVersions.map((version) => `v${version}`).join('、')
+		: $t('objectiveWorkspace.unbound');
 
 	function sourceHref(item: ObjectiveEvidence): `/collections/${string}/documents/${string}` {
 		const base: `/collections/${string}/documents/${string}` = `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(item.document_id)}`;
@@ -440,27 +446,12 @@
 		);
 	}
 
-	function certaintyLabel(value: number) {
-		if (value >= 0.8) return '较高';
-		if (value >= 0.6) return '中等';
-		return '较低';
-	}
-
 	function attributionLabel(value: ObjectiveFinding['attribution_scope']) {
 		return {
 			isolated_effect: '单变量归因',
 			joint_effect: '联合变化',
 			association_only: '仅关联',
 			descriptive_only: '仅描述'
-		}[value];
-	}
-
-	function synthesisLabel(value: ObjectiveFinding['synthesis_status']) {
-		return {
-			agreement: '多文献一致',
-			conflict: '文献冲突',
-			condition_dependent: '条件依赖',
-			insufficient_confirmation: '证据待确认'
 		}[value];
 	}
 
@@ -496,39 +487,17 @@
 		if (item.superseded_by_evidence_id) return `${origin} · 已有更新版本`;
 		return origin;
 	}
-
 </script>
 
 <article class="finding-detail">
-	<header>
+	<header class="finding-header">
 		<div>
-			<span>{originLabel(finding.origin)} · 实验选择聚合</span>
+			<span class="eyebrow"
+				>{$t('objectiveWorkspace.singleFinding')} · {originLabel(finding.origin)}</span
+			>
 			<h2>{finding.statement}</h2>
 		</div>
 	</header>
-	<section class="result-line" aria-label="Finding 核心结果">
-		<div>
-			<span>影响因素</span>
-			<strong>{finding.factors.join(' + ')}</strong>
-		</div>
-		<b aria-hidden="true">→</b>
-		<div>
-			<span>结果</span>
-			<strong>{finding.outcome}</strong>
-		</div>
-		<div class="direction">
-			<span>方向</span>
-			<strong>{directionLabel(finding.direction)}</strong>
-		</div>
-	</section>
-
-	<div class="metrics" aria-label="Finding 科学判断">
-		<div><span>表述强度</span><strong>{assertionLabel(finding.assertion_strength)}</strong></div>
-		<div><span>归因范围</span><strong>{attributionLabel(finding.attribution_scope)}</strong></div>
-		<div><span>综合状态</span><strong>{synthesisLabel(finding.synthesis_status)}</strong></div>
-		<div><span>证据确定性</span><strong>{certaintyLabel(finding.certainty)}</strong></div>
-		<div><span>直接文献</span><strong>{directPaperCount} 篇</strong></div>
-	</div>
 
 	<FindingEvidenceSummary
 		{collectionId}
@@ -537,51 +506,55 @@
 		analysisVersion={finding.analysis_version}
 	/>
 
-	<slot name="comparison">
-	<section aria-labelledby="evidence-comparison-title">
-		<div class="section-heading">
-			<h3 id="evidence-comparison-title">证据对比</h3>
-			<span>{comparisonRows.length} 条结构化 Evidence</span>
-		</div>
-		{#if comparisonRows.length}
-			<div class="comparison-table-wrap">
-				<table class="comparison-table">
-					<thead>
-						<tr>
-							<th scope="col">文献</th>
-							<th scope="col">证据关系</th>
-							<th scope="col">变量</th>
-							<th scope="col">参照条件</th>
-							<th scope="col">比较条件</th>
-							<th scope="col">报告结果</th>
-							<th scope="col">方向</th>
-							<th scope="col">可比性</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each comparisonRows as row, rowIndex (`${row.evidence.evidence_id}:${rowIndex}`)}
-							<tr>
-								<td>{paperTitle(row.evidence.document_id)}</td>
-								<td>{row.binding}</td>
-								<td><span class="condition-values">{row.variables.join('\n')}</span></td>
-								<td><span class="condition-values">{row.baselines.join('\n')}</span></td>
-								<td><span class="condition-values">{row.targets.join('\n')}</span></td>
-								<td>{row.result}</td>
-								<td>{row.direction}</td>
-								<td>{row.comparability}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
-		{:else}
-			<p class="empty">当前证据没有可展示的基线、目标或测量结果。</p>
-		{/if}
+	<section class="support-data" aria-label={$t('objectiveWorkspace.supporting')}>
+		<slot name="comparison">
+			<section class="support-fallback" aria-labelledby="evidence-comparison-title">
+				<div class="section-heading">
+					<h3 id="evidence-comparison-title">{$t('objectiveWorkspace.supporting')}</h3>
+					<span
+						>{$t('objectiveWorkspace.structuredEvidence', { count: comparisonRows.length })}</span
+					>
+				</div>
+				{#if comparisonRows.length}
+					<div class="comparison-table-wrap">
+						<table class="comparison-table">
+							<thead>
+								<tr>
+									<th scope="col">文献</th>
+									<th scope="col">证据关系</th>
+									<th scope="col">变量</th>
+									<th scope="col">参照条件</th>
+									<th scope="col">比较条件</th>
+									<th scope="col">报告结果</th>
+									<th scope="col">方向</th>
+									<th scope="col">可比性</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each comparisonRows as row, rowIndex (`${row.evidence.evidence_id}:${rowIndex}`)}
+									<tr>
+										<td>{paperTitle(row.evidence.document_id)}</td>
+										<td>{row.binding}</td>
+										<td><span class="condition-values">{row.variables.join('\n')}</span></td>
+										<td><span class="condition-values">{row.baselines.join('\n')}</span></td>
+										<td><span class="condition-values">{row.targets.join('\n')}</span></td>
+										<td>{row.result}</td>
+										<td>{row.direction}</td>
+										<td>{row.comparability}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{:else}
+					<p class="empty">当前证据没有可展示的基线、目标或测量结果。</p>
+				{/if}
+			</section>
+		</slot>
 	</section>
 
-	</slot>
-	<section>
-		<h3>适用条件</h3>
+	<section class="detail-section" aria-labelledby="finding-applicability-title">
+		<h3 id="finding-applicability-title">{$t('objectiveWorkspace.applicableConditions')}</h3>
 		{#if contextGroups.length}
 			<div class="context-grid">
 				{#each contextGroups as group (group.label)}
@@ -597,26 +570,27 @@
 				{/each}
 			</div>
 		{:else}
-			<p class="empty">未报告共同适用条件。</p>
+			<p class="empty">{$t('objectiveWorkspace.noApplicableConditions')}</p>
 		{/if}
-		<div class="limitations">
-			<strong>分析边界</strong>
-			{#if finding.limitations.length}
-				<ul>
-					{#each finding.limitations as limitation, limitationIndex (limitationIndex)}<li>
-							{limitation}
-						</li>{/each}
-				</ul>
-			{:else}
-				<p>未识别额外分析边界。</p>
-			{/if}
-		</div>
 	</section>
 
-	<section>
-		<h3>作用机制</h3>
+	<section class="detail-section boundary-section" aria-labelledby="finding-boundary-title">
+		<h3 id="finding-boundary-title">{$t('objectiveWorkspace.conclusionLimits')}</h3>
+		{#if finding.limitations.length}
+			<ul>
+				{#each finding.limitations as limitation, limitationIndex (limitationIndex)}<li>
+						{limitation}
+					</li>{/each}
+			</ul>
+		{:else}
+			<p class="empty">{$t('objectiveWorkspace.noConclusionLimits')}</p>
+		{/if}
+	</section>
+
+	<section class="detail-section" aria-labelledby="finding-mechanism-title">
+		<h3 id="finding-mechanism-title">{$t('objectiveWorkspace.mechanismEvidence')}</h3>
 		{#if finding.mechanisms.length}
-			<ol class="mechanisms" aria-label="作用机制关系">
+			<ol class="mechanisms" aria-label={$t('objectiveWorkspace.mechanismRelations')}>
 				{#each finding.mechanisms as mechanism, mechanismIndex (`${mechanism.source_term}:${mechanism.target_term}:${mechanismIndex}`)}
 					{@const mechanismEvidence = evidenceByIds(mechanism.supporting_evidence_ids)}
 					<li>
@@ -629,7 +603,7 @@
 								: ''}</small
 						>
 						{#if mechanismEvidence.length}
-							<div class="mechanism-sources" aria-label="机制支撑证据">
+							<div class="mechanism-sources" aria-label={$t('objectiveWorkspace.mechanismSources')}>
 								{#each mechanismEvidence as item (item.evidence_id)}
 									<a href={resolve(sourceHref(item))}>{evidenceSourceLabel(item)}</a>
 								{/each}
@@ -639,152 +613,208 @@
 				{/each}
 			</ol>
 		{:else}
-			<p class="empty">未报告可由原文证据支持的作用机制。</p>
+			<p class="empty">{$t('objectiveWorkspace.noMechanismEvidence')}</p>
 		{/if}
 	</section>
 
-	<section>
-		<div class="section-heading">
-			<h3>文献贡献与原文证据</h3>
-		</div>
-		<div class="evidence-scope" role="group" aria-label="证据范围">
-			<div><strong>{directPaperCount}</strong><span>篇直接文献</span></div>
-			<div><strong>{evidenceSourceCount}</strong><span>个原文来源</span></div>
-			{#if resultComparisonCount}
-				<div><strong>{resultComparisonCount}</strong><span>个结果比较</span></div>
-			{/if}
-			{#if otherResultRecordCount}
-				<div><strong>{otherResultRecordCount}</strong><span>条结果记录</span></div>
-			{/if}
-		</div>
-		{#if evidencedContributionGroups.length}
-			<div class="paper-groups">
-				{#each evidencedContributionGroups as group, index (group.contribution.document_id)}
-					{@const contribution = group.contribution}
-					{@const paperEvidence = group.paperEvidence}
-					{@const sourceGroups = group.sourceGroups}
-					<section class="paper-group">
-						<header>
-							<a href={resolve(sourceHref(paperEvidence[0]))}
-								>{paperLabel(contribution, index, paperEvidence)}</a
-							>
-							<span
-								>{contributionStatus(contribution.analysis_status)} · {paperSourceSummary(
-									sourceGroups
-								)}</span
-							>
-						</header>
-						<div class="source-groups">
-							{#each sourceGroups as sourceGroup (sourceGroup.key)}
-								{@const detailedEvidence = sourceGroup.matrix
-									? sourceGroup.otherEvidence
-									: sourceGroup.evidence}
-								<details
-									class="source-group"
-									open={sourceGroup.evidence.length === 1}
-									aria-label={sourceGroupLabel(sourceGroup)}
-								>
-									<summary>
-										<strong>{sourceGroupLabel(sourceGroup)}</strong>
-										<span>
-											{sourceGroup.matrix
-												? `共享参照 ${sourceGroup.matrix.referenceLabel} · `
-												: ''}{evidenceRecordSummary(
-												sourceGroup.comparisonCount,
-												sourceGroup.otherRecordCount
-											)}
-										</span>
-									</summary>
-									{#if sourceGroup.matrix}
-										<div class="shared-reference" role="group" aria-label="共享参照">
-											<span>共享参照</span>
-											<strong>{sourceGroup.matrix.referenceLabel}</strong>
-											<div>
-												<span>{sourceGroup.matrix.outcome}</span>
-												<strong>{sourceGroup.matrix.referenceResult}</strong>
-											</div>
-										</div>
-										<div class="source-matrix-wrap">
-											<table class="source-matrix" aria-label="共享参照比较">
-												<thead>
-													<tr>
-														<th scope="col">比较条件</th>
-														<th scope="col">报告结果</th>
-														<th scope="col">相对基准</th>
-														<th scope="col">方向</th>
-														<th scope="col">证据</th>
-													</tr>
-												</thead>
-												<tbody>
-													{#each sourceGroup.matrix.rows as row (row.evidence.evidence_id)}
-														<tr>
-															<td data-label="比较条件"><strong>{row.targetLabel}</strong></td>
-															<td data-label="报告结果">{row.targetResult}</td>
-															<td data-label="相对基准">{row.delta}</td>
-															<td data-label="方向">{row.direction}</td>
-															<td data-label="证据">
-																<div class="matrix-evidence-actions">
-																	{#each evidenceBindings(contribution, row.evidence.evidence_id) as binding (binding)}
-																		<strong>{binding}</strong>
-																	{/each}
-																	<a href={resolve(sourceHref(row.evidence))}>打开原文</a>
-														<details class="matrix-excerpt">
-															<summary>查看摘录</summary>
-															<blockquote>{row.evidence.source_excerpt}</blockquote>
-														</details>
-													</div>
-															</td>
-														</tr>
-													{/each}
-												</tbody>
-											</table>
-										</div>
-									{/if}
-									{#if detailedEvidence.length}
-										<div class="evidence-list">
-											{#each detailedEvidence as item (item.evidence_id)}
-												<article class="evidence-item">
-													<div class="evidence-meta">
-														{#each evidenceBindings(contribution, item.evidence_id) as binding (binding)}
-															<strong>{binding}</strong>
-														{/each}
-														{#if evidenceComparisonLabel(item)}<span class="comparison-label"
-																>{evidenceComparisonLabel(item)}</span
-															>{/if}
-														<span>{evidenceRoleLabel(item.evidence_role)}</span>
-														<span>{evidenceAttributionLabel(item.attribution_scope)}</span>
-																<span>{evidenceOriginLabel(item)}</span>
-																<a href={resolve(sourceHref(item))}>打开原文</a>
-															</div>
-													<blockquote>{item.source_excerpt}</blockquote>
-												</article>
-											{/each}
-										</div>
-									{/if}
-								</details>
-							{/each}
-						</div>
-					</section>
-				{/each}
+	<details class="version-details">
+		<summary>
+			<strong>{$t('objectiveWorkspace.versions')}</strong>
+			<span
+				>{$t('objectiveWorkspace.analysisVersionLabel', {
+					version: finding.analysis_version
+				})}</span
+			>
+		</summary>
+		<div class="version-grid">
+			<div>
+				<span>{$t('objectiveWorkspace.publishedAnalysisVersion')}</span><strong
+					>v{finding.analysis_version}</strong
+				>
 			</div>
-		{:else}
-			<p class="empty">当前 Finding 没有可审计的原文 Evidence。</p>
-		{/if}
-		{#if emptyContributionSummary}
-			<p class="empty-contribution-summary">{emptyContributionSummary}</p>
-		{/if}
-	</section>
+			<div>
+				<span>{$t('objectiveWorkspace.sourceAnalysisVersion')}</span><strong
+					>{finding.source_analysis_version
+						? `v${finding.source_analysis_version}`
+						: $t('objectiveWorkspace.currentVersion')}</strong
+				>
+			</div>
+			<div>
+				<span>{$t('objectiveWorkspace.experimentVersion')}</span><strong
+					>{experimentVersionLabel}</strong
+				>
+			</div>
+			<div>
+				<span>{$t('objectiveWorkspace.experimentSelections')}</span><strong
+					>{$t('objectiveWorkspace.selectionCount', { count: selectionCount })}</strong
+				>
+			</div>
+			<div>
+				<span>{$t('objectiveWorkspace.comparisonGroups')}</span><strong
+					>{$t('objectiveWorkspace.groupCount', { count: comparisonGroupCount })}</strong
+				>
+			</div>
+		</div>
+	</details>
 
+	<details class="audit-trail">
+		<summary>
+			<strong>{$t('objectiveWorkspace.auditTrail')}</strong>
+			<span
+				>{$t('objectiveWorkspace.auditSummary', {
+					papers: directPaperCount,
+					sources: evidenceSourceCount
+				})}</span
+			>
+		</summary>
+		<div class="audit-body">
+			<div class="evidence-scope" role="group" aria-label="证据范围">
+				<div><strong>{directPaperCount}</strong><span>篇直接文献</span></div>
+				<div><strong>{evidenceSourceCount}</strong><span>个原文来源</span></div>
+				{#if resultComparisonCount}
+					<div><strong>{resultComparisonCount}</strong><span>个结果比较</span></div>
+				{/if}
+				{#if otherResultRecordCount}
+					<div><strong>{otherResultRecordCount}</strong><span>条结果记录</span></div>
+				{/if}
+			</div>
+			{#if evidencedContributionGroups.length}
+				<div class="paper-groups">
+					{#each evidencedContributionGroups as group, index (group.contribution.document_id)}
+						{@const contribution = group.contribution}
+						{@const paperEvidence = group.paperEvidence}
+						{@const sourceGroups = group.sourceGroups}
+						<section class="paper-group">
+							<header>
+								<a href={resolve(sourceHref(paperEvidence[0]))}
+									>{paperLabel(contribution, index, paperEvidence)}</a
+								>
+								<span
+									>{contributionStatus(contribution.analysis_status)} · {paperSourceSummary(
+										sourceGroups
+									)}</span
+								>
+							</header>
+							<div class="source-groups">
+								{#each sourceGroups as sourceGroup (sourceGroup.key)}
+									{@const detailedEvidence = sourceGroup.matrix
+										? sourceGroup.otherEvidence
+										: sourceGroup.evidence}
+									<details
+										class="source-group"
+										open={sourceGroup.evidence.length === 1}
+										aria-label={sourceGroupLabel(sourceGroup)}
+									>
+										<summary>
+											<strong>{sourceGroupLabel(sourceGroup)}</strong>
+											<span>
+												{sourceGroup.matrix
+													? `共享参照 ${sourceGroup.matrix.referenceLabel} · `
+													: ''}{evidenceRecordSummary(
+													sourceGroup.comparisonCount,
+													sourceGroup.otherRecordCount
+												)}
+											</span>
+										</summary>
+										{#if sourceGroup.matrix}
+											<div class="shared-reference" role="group" aria-label="共享参照">
+												<span>共享参照</span>
+												<strong>{sourceGroup.matrix.referenceLabel}</strong>
+												<div>
+													<span>{sourceGroup.matrix.outcome}</span>
+													<strong>{sourceGroup.matrix.referenceResult}</strong>
+												</div>
+											</div>
+											<div class="source-matrix-wrap">
+												<table class="source-matrix" aria-label="共享参照比较">
+													<thead>
+														<tr>
+															<th scope="col">比较条件</th>
+															<th scope="col">报告结果</th>
+															<th scope="col">相对基准</th>
+															<th scope="col">方向</th>
+															<th scope="col">证据</th>
+														</tr>
+													</thead>
+													<tbody>
+														{#each sourceGroup.matrix.rows as row (row.evidence.evidence_id)}
+															<tr>
+																<td data-label="比较条件"><strong>{row.targetLabel}</strong></td>
+																<td data-label="报告结果">{row.targetResult}</td>
+																<td data-label="相对基准">{row.delta}</td>
+																<td data-label="方向">{row.direction}</td>
+																<td data-label="证据">
+																	<div class="matrix-evidence-actions">
+																		{#each evidenceBindings(contribution, row.evidence.evidence_id) as binding (binding)}
+																			<strong>{binding}</strong>
+																		{/each}
+																		<a href={resolve(sourceHref(row.evidence))}>打开原文</a>
+																		<details class="matrix-excerpt">
+																			<summary>查看摘录</summary>
+																			<blockquote>{row.evidence.source_excerpt}</blockquote>
+																		</details>
+																	</div>
+																</td>
+															</tr>
+														{/each}
+													</tbody>
+												</table>
+											</div>
+										{/if}
+										{#if detailedEvidence.length}
+											<div class="evidence-list">
+												{#each detailedEvidence as item (item.evidence_id)}
+													<article class="evidence-item">
+														<div class="evidence-meta">
+															{#each evidenceBindings(contribution, item.evidence_id) as binding (binding)}
+																<strong>{binding}</strong>
+															{/each}
+															{#if evidenceComparisonLabel(item)}<span class="comparison-label"
+																	>{evidenceComparisonLabel(item)}</span
+																>{/if}
+															<span>{evidenceRoleLabel(item.evidence_role)}</span>
+															<span>{evidenceAttributionLabel(item.attribution_scope)}</span>
+															<span>{evidenceOriginLabel(item)}</span>
+															<a href={resolve(sourceHref(item))}>打开原文</a>
+														</div>
+														<blockquote>{item.source_excerpt}</blockquote>
+													</article>
+												{/each}
+											</div>
+										{/if}
+									</details>
+								{/each}
+							</div>
+						</section>
+					{/each}
+				</div>
+			{:else}
+				<p class="empty">当前 Finding 没有可审计的原文 Evidence。</p>
+			{/if}
+			{#if emptyContributionSummary}
+				<p class="empty-contribution-summary">{emptyContributionSummary}</p>
+			{/if}
+		</div>
+	</details>
 </article>
 
 <style>
 	.finding-detail {
 		display: grid;
-		gap: 24px;
+		gap: 28px;
 		min-width: 0;
 	}
-	.finding-detail > section {
+	.finding-detail > section,
+	.finding-detail > details {
 		min-width: 0;
+	}
+	.finding-header {
+		display: block;
+		padding-bottom: 4px;
+	}
+	.eyebrow {
+		color: var(--text-secondary);
+		font-size: 12px;
 	}
 	header,
 	.section-heading,
@@ -796,10 +826,10 @@
 	}
 	header span,
 	.section-heading span,
-	.metrics span,
-	.result-line span,
 	.context-grid > div > span,
-	.evidence-meta {
+	.evidence-meta,
+	.version-details summary span,
+	.audit-trail summary span {
 		color: var(--text-secondary);
 		font-size: 12px;
 	}
@@ -818,42 +848,69 @@
 		font-size: 15px;
 		margin-bottom: 12px;
 	}
-	.result-line {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) minmax(120px, auto);
-		align-items: center;
-		gap: 18px;
-		padding: 16px 0;
-		border-block: 1px solid var(--border-default);
-	}
-	.result-line div {
-		display: grid;
-		gap: 4px;
+	.support-data,
+	.support-fallback,
+	.detail-section {
 		min-width: 0;
 	}
-	.result-line strong {
+	.detail-section {
+		display: grid;
+		gap: 12px;
+	}
+	.detail-section h3 {
+		margin-bottom: 0;
+	}
+	.boundary-section {
+		padding-left: 16px;
+		border-left: 3px solid var(--warning-text);
+	}
+	.boundary-section ul {
+		margin: 0;
+		padding-left: 20px;
+	}
+	.boundary-section li + li {
+		margin-top: 8px;
+	}
+	.version-details,
+	.audit-trail {
+		border-block: 1px solid var(--border-default);
+	}
+	.version-details > summary,
+	.audit-trail > summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 14px 0;
+		cursor: pointer;
+	}
+	.version-details > summary strong,
+	.audit-trail > summary strong {
+		font-size: 14px;
+	}
+	.version-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 1px;
+		padding-bottom: 14px;
+		background: var(--border-default);
+	}
+	.version-grid > div {
+		display: grid;
+		gap: 4px;
+		padding: 12px;
+		background: var(--surface-primary);
+		min-width: 0;
+	}
+	.version-grid span {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+	.version-grid strong {
 		overflow-wrap: anywhere;
 	}
-	.result-line b {
-		color: var(--text-secondary);
-		font-size: 20px;
-	}
-	.metrics {
-		display: grid;
-		grid-template-columns: repeat(5, minmax(0, 1fr));
-		border-bottom: 1px solid var(--border-default);
-	}
-	.metrics div {
-		padding: 0 14px 12px;
-		display: grid;
-		gap: 3px;
-		border-right: 1px solid var(--border-default);
-	}
-	.metrics div:first-child {
-		padding-left: 0;
-	}
-	.metrics div:last-child {
-		border-right: 0;
+	.audit-body {
+		padding-bottom: 14px;
 	}
 	.comparison-table-wrap {
 		min-width: 0;
@@ -923,19 +980,9 @@
 		padding: 12px;
 		min-width: 0;
 	}
-	.context-grid ul,
-	.limitations ul {
+	.context-grid ul {
 		margin: 6px 0 0;
 		padding-left: 18px;
-	}
-	.limitations {
-		margin-top: 12px;
-		padding-left: 12px;
-		border-left: 3px solid #a97022;
-	}
-	.limitations p {
-		margin-top: 6px;
-		color: var(--text-secondary);
 	}
 	.paper-groups {
 		border-top: 1px solid var(--border-default);
@@ -1112,10 +1159,7 @@
 		font-size: 12px;
 	}
 	@media (max-width: 820px) {
-		.finding-detail > header {
-			flex-direction: column;
-		}
-		.finding-detail > header > div {
+		.finding-header > div {
 			min-width: 0;
 			width: 100%;
 		}
@@ -1124,16 +1168,17 @@
 			line-height: 1.4;
 			overflow-wrap: anywhere;
 		}
-		.result-line {
-			grid-template-columns: 1fr;
-			gap: 12px;
-		}
-		.result-line b {
-			display: none;
-		}
-		.metrics,
 		.context-grid {
 			grid-template-columns: 1fr 1fr;
+		}
+		.version-grid {
+			grid-template-columns: 1fr 1fr;
+		}
+		.version-details > summary,
+		.audit-trail > summary {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 4px;
 		}
 		.mechanisms li {
 			grid-template-columns: 1fr;

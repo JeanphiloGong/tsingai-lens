@@ -1,0 +1,141 @@
+{
+  "schema_version": "paper_experiment_relations.v1",
+  "paper_id": "P004",
+  "relations": [
+    {
+      "relationship_id": "P004:X01:R01",
+      "series_id": "P004:X01",
+      "relation_type": "factor_outcome",
+      "factor_names": ["laser power", "scan speed", "derived laser energy density"],
+      "factor_ids": ["F_LASER_POWER", "F_SCAN_SPEED", "F_ENERGY_DENSITY"],
+      "baseline_sample_ids": ["S002", "S008"],
+      "target_sample_ids": ["S020"],
+      "outcome_ids": ["O001", "O002"],
+      "result_ids": ["M001", "M002", "M006"],
+      "attribution_scope": "joint_effect",
+      "status": "resolved",
+      "unknown_fields": ["independent contribution of power versus speed"],
+      "source_refs": [
+        {"source_id": "E006", "supports": ["factor", "fixed_context"]},
+        {"source_id": "E008", "supports": ["sample", "outcome", "parameter_value"]},
+        {"source_id": "E012", "supports": ["direction", "pore_context"]}
+      ],
+      "note": "The compact archive binds three representative matrix rows (100/100, 100/280 and 140/100). The paper varies power and speed together across the matrix; this relation must not be promoted to an isolated energy-density causal Finding. Other Table 2 rows remain unmaterialized in this compact archive."
+    },
+    {
+      "relationship_id": "P004:X02:R01",
+      "series_id": "P004:X02",
+      "relation_type": "post_treatment_effect",
+      "factor_names": ["furnace heat treatment", "HIP"],
+      "factor_ids": ["F_POST_PROCESS"],
+      "baseline_sample_ids": ["S011"],
+      "target_sample_ids": ["S012", "S013"],
+      "outcome_ids": ["O001"],
+      "result_ids": ["M003", "M004", "M005"],
+      "attribution_scope": "isolated_effect",
+      "status": "resolved",
+      "unknown_fields": [],
+      "source_refs": [
+        {"source_id": "E001", "supports": ["factor", "treatment_parameters"]},
+        {"source_id": "E008", "supports": ["baseline", "target", "outcome", "matched_process_context"]}
+      ]
+    },
+    {
+      "relationship_id": "P004:X02:R02",
+      "series_id": "P004:X02",
+      "relation_type": "post_treatment_effect",
+      "factor_names": ["furnace heat treatment", "HIP"],
+      "factor_ids": ["F_POST_PROCESS"],
+      "baseline_sample_ids": ["S011"],
+      "target_sample_ids": ["S012", "S013"],
+      "outcome_ids": ["O006", "O007", "O008", "O009"],
+      "result_ids": ["M007", "M008", "M009", "M010", "M011", "M012", "M013", "M014", "M015", "M016", "M017", "M018"],
+      "attribution_scope": "isolated_effect",
+      "status": "resolved",
+      "unknown_fields": ["whether ± values are SD or SE", "specimen-level replicate identity", "Table 3 versus prose elongation values require source-priority review"],
+      "source_refs": [
+        {"source_id": "E009", "supports": ["test_context", "replication_count"]},
+        {"source_id": "E014", "supports": ["outcome", "baseline", "target", "reported_value"]},
+        {"source_id": "E015", "supports": ["direction", "mechanistic_context"]}
+      ],
+      "note": "The four outcomes share the same selected process stratum and tensile/hardness context; they are not four unrelated paper-wide experiments."
+    },
+    {
+      "relationship_id": "P004:X02:R03",
+      "series_id": "P004:X02",
+      "relation_type": "post_treatment_effect",
+      "factor_names": ["furnace heat treatment", "HIP"],
+      "factor_ids": ["F_POST_PROCESS"],
+      "baseline_sample_ids": ["S011"],
+      "target_sample_ids": ["S012", "S013"],
+      "outcome_ids": ["O005"],
+      "result_ids": ["M019", "M020", "M021"],
+      "observation_ids": ["OBS001", "OBS002", "OBS003"],
+      "attribution_scope": "isolated_effect",
+      "status": "partial",
+      "unknown_fields": ["phase details require Supplementary Information", "microstructure sampling representativeness"],
+      "source_refs": [
+        {"source_id": "E011", "supports": ["baseline", "target", "residual_stress", "selected_condition"]},
+        {"source_id": "E013", "supports": ["grain_size", "cellular_microstructure", "supplementary_dependency"]}
+      ]
+    },
+    {
+      "relationship_id": "P004:X03:R01",
+      "series_id": "P004:X03",
+      "relation_type": "selected_condition_comparison",
+      "factor_names": ["scan speed"],
+      "factor_ids": ["F_SCAN_SPEED"],
+      "baseline_sample_ids": ["S011"],
+      "target_sample_ids": ["S017"],
+      "outcome_ids": ["O011"],
+      "result_ids": ["M026", "M027"],
+      "attribution_scope": "association_only",
+      "status": "partial",
+      "unknown_fields": ["wear outcomes for unlisted process/heat-treatment combinations"],
+      "source_refs": [
+        {"source_id": "E010", "supports": ["test_context", "selected_scope"]},
+        {"source_id": "E017", "supports": ["baseline", "target", "outcome", "direction"]}
+      ],
+      "note": "This is a selected-condition association, not a universal scan-speed law."
+    },
+    {
+      "relationship_id": "P004:X03:R02",
+      "series_id": "P004:X03",
+      "relation_type": "post_treatment_effect",
+      "factor_names": ["furnace heat treatment", "HIP"],
+      "factor_ids": ["F_POST_PROCESS"],
+      "baseline_sample_ids": ["S011"],
+      "target_sample_ids": ["S012", "S013"],
+      "outcome_ids": ["O010", "O011"],
+      "result_ids": ["M022", "M023", "M024", "M026"],
+      "attribution_scope": "isolated_effect",
+      "status": "partial",
+      "unknown_fields": ["wear loss values for HT/HIP are reported primarily as trends in the reviewed excerpt"],
+      "source_refs": [
+        {"source_id": "E010", "supports": ["test_context", "replication_count"]},
+        {"source_id": "E016", "supports": ["coefficient_of_friction", "baseline", "target"]},
+        {"source_id": "E017", "supports": ["wear_loss", "direction", "scope"]}
+      ]
+    },
+    {
+      "relationship_id": "P004:X02:R04",
+      "series_id": "P004:X02",
+      "relation_type": "route_context_comparison",
+      "factor_names": ["manufacturing route"],
+      "factor_ids": ["F_MANUFACTURING_ROUTE"],
+      "baseline_sample_ids": ["S001"],
+      "target_sample_ids": ["S011", "S012", "S013"],
+      "outcome_ids": ["O006", "O007", "O008", "O009"],
+      "result_ids": ["M007", "M010", "M013", "M016"],
+      "attribution_scope": "descriptive_only",
+      "status": "not_comparable",
+      "reason": "CR and SLM differ in manufacturing route and are not a matched SLM post-treatment counterfactual.",
+      "unknown_fields": ["matched feedstock/process history between CR and SLM"],
+      "source_refs": [
+        {"source_id": "E014", "supports": ["baseline", "target", "outcome"]},
+        {"source_id": "E019", "supports": ["paper_level_context"]}
+      ],
+      "note": "CR is useful as a context control but is not an SLM post-treatment counterfactual."
+    }
+  ]
+}

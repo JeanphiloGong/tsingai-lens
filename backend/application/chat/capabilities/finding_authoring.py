@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from pydantic_core import PydanticCustomError
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -17,75 +14,26 @@ from application.core.objectives.finding_authoring_service import (
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-FindingAssertionStrength = Literal["causal", "associative", "descriptive"]
-FindingAbstentionReason = Literal[
-    "no_comparable_evidence",
-    "no_grounded_evidence",
-    "insufficient_evidence",
-]
-
-
-class CreateFindingVersionArguments(BaseModel):
+class CreateFindingVersionToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
-    source_analysis_version: int = Field(ge=1, description="Inspected published analysis version supplying the Evidence; do not add analysis_version.")
-    statement: str | None = Field(default=None, max_length=3_000, description="Concise proposed conclusion, not the quoted erroneous parent. Put the correction rationale and unread scope in limitations.")
-    assertion_strength: FindingAssertionStrength | None = Field(
-        default=None,
-        description=(
-            "Required for every non-abstention Finding. Choose exactly one of "
-            "causal, associative, or descriptive. Omit only when abstention_reason "
-            "is provided."
-        ),
-    )
-    supporting_evidence_ids: list[str] = Field(default_factory=list, max_length=100, description="Evidence supporting the proposed statement, required unless abstaining. Evidence that disproves the old parent can support its corrected statement; roles are relative to the new statement.")
-    contradicting_evidence_ids: list[str] = Field(
-        default_factory=list, max_length=100, description="Evidence contradicting the proposed statement, not the old disputed parent."
-    )
-    context_evidence_ids: list[str] = Field(default_factory=list, max_length=100)
-    condition_boundary_evidence_ids: list[str] = Field(
-        default_factory=list, max_length=100
-    )
-    limitations: list[str] = Field(default_factory=list, max_length=20)
+    source_analysis_version: int = Field(ge=1)
+    selection_ids: list[str] = Field(default_factory=list, max_length=100)
+    comparison_group_ids: list[str] = Field(default_factory=list, max_length=20)
     parent_finding_id: str | None = Field(default=None, max_length=128)
-    abstention_reason: FindingAbstentionReason | None = None
 
     @model_validator(mode="after")
-    def validate_authoring_mode(self) -> "CreateFindingVersionArguments":
-        if any(len(value.strip()) > 1_000 for value in self.limitations):
-            raise ValueError("Finding limitations cannot exceed 1000 characters")
-        selected = (
-            self.supporting_evidence_ids
-            + self.contradicting_evidence_ids
-            + self.context_evidence_ids
-            + self.condition_boundary_evidence_ids
-        )
+    def validate_authoring_mode(self) -> "CreateFindingVersionToolRequest":
+        selected = self.selection_ids + self.comparison_group_ids
         if any(not value.strip() or len(value) > 128 for value in selected):
-            raise ValueError("Evidence IDs must be non-empty and at most 128 characters")
-        if self.abstention_reason is not None:
-            if (
-                (self.statement or "").strip()
-                or self.assertion_strength is not None
-                or selected
-                or self.parent_finding_id is not None
-            ):
-                raise ValueError(
-                    "abstention cannot contain a Finding statement or Evidence roles"
-                )
-            if not any(value.strip() for value in self.limitations):
-                raise ValueError("abstention requires an explanation")
-            return self
-        if not (self.statement or "").strip():
-            raise ValueError("Finding statement is required")
-        if self.assertion_strength is None:
-            raise ValueError("Finding assertion strength is required")
-        if not self.supporting_evidence_ids:
-            raise PydanticCustomError("finding_supporting_evidence_required", "Finding requires supporting Evidence")
+            raise ValueError("experiment reference IDs must be non-empty and at most 128 characters")
+        if not self.selection_ids:
+            raise ValueError("Finding requires experiment selections")
         return self
 
 
-class CreateFindingDraftArguments(CreateFindingVersionArguments):
+class CreateFindingDraftToolRequest(CreateFindingVersionToolRequest):
     draft_id: str = Field(min_length=1, max_length=128)
 
 
@@ -93,34 +41,33 @@ class CreateFindingDraftCapability:
     spec = ToolSpec(
         name="create_finding_draft",
         description=(
-            "Record one transient research-conclusion draft for researcher review. "
-            "The draft names Evidence from one published Objective version but does "
-            "not validate those bindings, publish a Finding, or change any existing "
-            "record. Use the separate approved Finding write only after inspecting "
-            "and validating the exact Evidence. If the disputed Finding relies on "
-            "incorrectly extracted facts, draft their Evidence correction first; "
-            "rebuild this Finding from the subsequently published Evidence."
+            "Record one transient Finding draft that selects experiment results and "
+            "optional ComparisonGroups for researcher review. selection_ids must be "
+            "canonical ObjectiveExperimentSelection IDs returned by the experiment "
+            "graph; never use Evidence projection IDs, evidence-* IDs, or document IDs."
         ),
         risk=ToolRisk.DRAFT,
-        input_model=CreateFindingDraftArguments,
+        input_model=CreateFindingDraftToolRequest,
     )
+
+    def __init__(self, *, finding_authoring_service: FindingAuthoringService | None = None) -> None:
+        self.finding_authoring_service = finding_authoring_service
 
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreateFindingDraftArguments,
+        arguments: CreateFindingDraftToolRequest,
     ) -> ChatToolResult:
-        draft = arguments.model_dump()
-        evidence_ids = tuple(
-            dict.fromkeys(
-                (
-                    *arguments.supporting_evidence_ids,
-                    *arguments.contradicting_evidence_ids,
-                    *arguments.context_evidence_ids,
-                    *arguments.condition_boundary_evidence_ids,
-                )
+        if self.finding_authoring_service is not None:
+            await self.finding_authoring_service.validate_selection_references(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                source_analysis_version=arguments.source_analysis_version,
+                selection_ids=tuple(arguments.selection_ids),
+                comparison_group_ids=tuple(arguments.comparison_group_ids),
+                user_id=context.user_id,
             )
-        )
+        draft = arguments.model_dump()
         refs = [
             ChatResourceRef(
                 resource_type="research_objective",
@@ -133,17 +80,29 @@ class CreateFindingDraftCapability:
         ]
         refs.extend(
             ChatResourceRef(
-                resource_type="evidence",
+                resource_type="objective_selection",
                 resource_id=(
-                    f"{arguments.objective_id}:"
-                    f"{arguments.source_analysis_version}:{evidence_id}"
+                    f"{arguments.objective_id}:{arguments.source_analysis_version}:{selection_id}"
                 ),
                 href=(
                     f"/collections/{context.collection_id}/objectives/"
-                    f"{arguments.objective_id}?evidence_id={evidence_id}"
+                    f"{arguments.objective_id}?selection_id={selection_id}"
                 ),
             )
-            for evidence_id in evidence_ids
+            for selection_id in arguments.selection_ids
+        )
+        refs.extend(
+            ChatResourceRef(
+                resource_type="comparison_group",
+                resource_id=(
+                    f"{arguments.objective_id}:{arguments.source_analysis_version}:{group_id}"
+                ),
+                href=(
+                    f"/collections/{context.collection_id}/objectives/"
+                    f"{arguments.objective_id}?comparison_group_id={group_id}"
+                ),
+            )
+            for group_id in arguments.comparison_group_ids
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
@@ -153,7 +112,7 @@ class CreateFindingDraftCapability:
                 "persistence": "transient_chat_result",
                 "published": False,
                 "requires_user_approval": True,
-                "requires_evidence_validation": True,
+                "requires_experiment_selection_validation": True,
             },
             resource_refs=tuple(refs),
         )
@@ -163,16 +122,12 @@ class CreateFindingVersionCapability:
     spec = ToolSpec(
         name="create_finding_version",
         description=(
-            "Propose one new researcher-authored Finding, a hybrid Finding derived "
-            "from a named parent, or an explicit evidence abstention from the current "
-            "published Objective analysis. Use only Evidence IDs returned from that "
-            "exact published version and only after inspecting the relevant complete "
-            "Finding, Evidence, and Sources. This write requires explicit user approval "
-            "and publishes a new immutable analysis version without changing the source "
-            "version or parent Finding."
+            "Return the Finding aggregated from fixed experiment Selection IDs and "
+            "optional ComparisonGroup IDs in the published analysis. This write "
+            "requires explicit approval and never accepts Evidence IDs or a hand-written conclusion."
         ),
         risk=ToolRisk.WRITE,
-        input_model=CreateFindingVersionArguments,
+        input_model=CreateFindingVersionToolRequest,
     )
 
     def __init__(
@@ -185,25 +140,16 @@ class CreateFindingVersionCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreateFindingVersionArguments,
+        arguments: CreateFindingVersionToolRequest,
     ) -> ChatToolResult:
-        result = await self.finding_authoring_service.create_version(
+        result = await self.finding_authoring_service.create_selection_version(
             collection_id=context.collection_id,
             objective_id=arguments.objective_id,
             source_analysis_version=arguments.source_analysis_version,
-            statement=arguments.statement,
-            assertion_strength=arguments.assertion_strength,
-            supporting_evidence_ids=tuple(arguments.supporting_evidence_ids),
-            contradicting_evidence_ids=tuple(arguments.contradicting_evidence_ids),
-            context_evidence_ids=tuple(arguments.context_evidence_ids),
-            condition_boundary_evidence_ids=tuple(
-                arguments.condition_boundary_evidence_ids
-            ),
-            limitations=tuple(arguments.limitations),
-            parent_finding_id=arguments.parent_finding_id,
-            abstention_reason=arguments.abstention_reason,
             created_by_user_id=context.user_id,
-            created_by_tool_call_id=context.tool_call_id,
+            selection_ids=tuple(arguments.selection_ids),
+            comparison_group_ids=tuple(arguments.comparison_group_ids),
+            parent_finding_id=arguments.parent_finding_id,
         )
         finding = result.finding
         refs = [
@@ -246,8 +192,8 @@ class CreateFindingVersionCapability:
 
 
 __all__ = [
-    "CreateFindingDraftArguments",
+    "CreateFindingDraftToolRequest",
     "CreateFindingDraftCapability",
-    "CreateFindingVersionArguments",
+    "CreateFindingVersionToolRequest",
     "CreateFindingVersionCapability",
 ]

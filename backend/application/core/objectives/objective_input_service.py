@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from asyncio import Semaphore, gather, to_thread
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
-import json
 from typing import Any, TypedDict
 
 from application.core.document_profiles.service import (
@@ -24,11 +24,11 @@ from application.core.objectives.llm.structured_response import (
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
+from application.repositories.paper_map_repository import PaperMapRepository
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.source.collection_service import CollectionService
 from domain.core import PaperResearchMap, PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
-from application.repositories.paper_map_repository import PaperMapRepository
-from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import (
     SourceBlock,
     SourceDocument,
@@ -115,10 +115,11 @@ class ObjectiveInputService:
 
         inputs: list[PreparedDocumentInput] = []
         for document_id in document_ids:
-            document = await self.collection_service.get_document(
+            record = await self.collection_service.get_document(
                 collection_id,
                 document_id,
             )
+            document = record.document
             if document.status != "ready" or not document.preparation_fingerprint:
                 raise ResearchObjectivesNotReadyError(collection_id)
             inputs.append(

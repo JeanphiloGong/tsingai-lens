@@ -18,7 +18,6 @@ from domain.shared.enums import (
     TRACEABILITY_STATUS_MISSING,
     TRACEABILITY_STATUS_PARTIAL,
 )
-from domain.shared.record_normalization import normalize_record_value
 
 __all__ = [
     "COMPARABILITY_STATUS_COMPARABLE",
@@ -37,5 +36,4 @@ __all__ = [
     "TRACEABILITY_STATUS_DIRECT",
     "TRACEABILITY_STATUS_MISSING",
     "TRACEABILITY_STATUS_PARTIAL",
-    "normalize_record_value",
 ]

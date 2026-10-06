@@ -5,11 +5,11 @@ from dataclasses import replace
 import pytest
 from sqlalchemy import select
 
+from application.pipeline import PipelineRunService
 from application.source.collection_service import CollectionService
 from application.source.document_preparation_service import (
     DocumentPreparationService,
 )
-from application.pipeline import PipelineRunService
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
 from domain.core import DocumentProfile, PaperResearchMap
 from infra.persistence.file import FileCollectionWorkspace
@@ -17,17 +17,23 @@ from infra.persistence.memory import (
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
 )
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 from infra.persistence.postgres.document_profile_repository import (
     PostgresDocumentProfileRepository,
 )
+from infra.persistence.postgres.models.document_preparation import (
+    DocumentPreparationRow,
+)
 from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
-from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 from infra.persistence.postgres.pipeline_run_repository import (
     PostgresPipelineRunRepository,
 )
-from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID, _source
-
+from tests.integration.persistence.test_postgres_source_artifacts import (
+    COLLECTION_ID,
+    _source,
+)
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
@@ -111,7 +117,10 @@ async def test_profile_replacement_does_not_relabel_current_source(source_reposi
     await profiles.replace(COLLECTION_ID, stale_profile)
     collection_repository = PostgresCollectionRepository(source_repository.session_factory)
     collection = await collection_repository.read_collection(COLLECTION_ID)
-    await collection_repository.update_document(replace(collection.documents[0], status="processing"))
+    document = collection.documents[0]
+    await collection_repository.update_document(
+        replace(document, document=replace(document.document, status="processing"))
+    )
     async with source_repository.session_factory() as session:
         row = await session.get(DocumentPreparationRow, "doc_a")
         assert row.source_fingerprint == current_fingerprint
@@ -175,7 +184,7 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
     assert recovered_run["status"] == "failed"
     assert recovered_run["current_node"] == "interrupted"
     assert PipelineRunResponse(**recovered_run).status == "failed"
-    assert (await collection_service.get_document(COLLECTION_ID, "doc_a")).status == (
+    assert (await collection_service.get_document(COLLECTION_ID, "doc_a")).document.status == (
         "stored"
     )
 

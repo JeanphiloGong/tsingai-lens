@@ -16,14 +16,14 @@ from application.chat import (
     ResearchAgentRunner,
     AgentRunLimits,
 )
+from application.chat.session_service import RepositoryModelCallObserver
 from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
     BrowseCollectionPapersCapability,
     ConfirmObjectiveCapability,
-    CreateEvidenceDraftCapability,
     CreateFindingDraftCapability,
     CreateFindingVersionCapability,
-    CreateEvidenceVersionCapability,
+    CreatePaperExperimentRevisionCapability,
     CreateObjectiveCandidateCapability,
     CreateResearchPlanCapability,
     CurateFindingCapability,
@@ -39,7 +39,7 @@ from application.chat.capabilities import (
     PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
     ProposeResearchPlanCapability,
-    PublishAgentObjectiveAnalysisCapability,
+    ProposePaperExperimentDraftCapability,
     QueryPublishedFindingsCapability,
     ReviseResearchPlanCapability,
     RecordFindingFeedbackCapability,
@@ -51,16 +51,16 @@ from application.chat.model import RESEARCH_AGENT_PROMPT_VERSION
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingSynthesisService,
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriter,
+)
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
+)
+from application.core.objectives.analysis.experiment_query_service import (
+    ExperimentQueryService,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
-from application.core.objectives.agent_analysis_service import (
-    AgentObjectiveAnalysisService,
-)
-from application.core.objectives.evidence_authoring_service import (
-    EvidenceAuthoringService,
-)
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
@@ -75,13 +75,31 @@ from application.core.objectives.objective_authoring_service import (
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import PaperResearchMapService
+from application.core.objectives.paper_experiment_authoring_service import (
+    PaperExperimentAuthoringService,
+)
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisService,
 )
 from application.pipeline import PipelineRunService
 from application.evaluation import (
     FindingFeedbackService,
 )
+from application.feedback import (
+    CorrectionSignalAnalysisHandler,
+    CorrectionSignalAnalysisWorker,
+    FeedbackAnalysisHandler,
+    FeedbackAnalysisWorker,
+    DatasetSampleBuildWorker,
+    EvaluationSampleBuilder,
+    PreferenceSampleBuilder,
+    SftSampleBuilder,
+    ToolFailureAnalysisHandler,
+    ToolFailureAnalysisWorker,
+)
+from application.feedback.dataset_service import FeedbackDatasetService
+from application.feedback.dataset_export_service import FeedbackDatasetExportService
+from application.feedback.feedback_case_service import FeedbackCaseService
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.source.collection_service import CollectionService
@@ -93,9 +111,12 @@ from application.source.source_import_service import SourceImportService
 from config import DATA_DIR
 from controllers import auth
 from controllers.chat import sessions as chat_sessions
+from controllers import feedback_cases
+from controllers.feedback import task_datasets
 from controllers.core import (
     documents,
     finding_review,
+    paper_experiments,
     research_objectives,
 )
 from controllers.goal import experiment_plans
@@ -109,8 +130,26 @@ from application.repositories.document_profile_repository import (
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.experiment_plan_repository import ExperimentPlanRepository
 from application.repositories.chat_repository import ChatRepository
+from application.repositories.analysis_job_repository import AnalysisJobRepository
+from application.repositories.feedback_case_repository import FeedbackCaseRepository
+from application.repositories.feedback_dataset_repository import FeedbackDatasetRepository
+from application.repositories.feedback_dataset_sample_repository import (
+    FeedbackDatasetSampleRepository,
+)
+from application.repositories.feedback_dataset_export_repository import (
+    FeedbackDatasetExportRepository,
+)
 from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.paper_experiment_repository import PaperExperimentRepository
+from application.repositories.objective_experiment_selection_repository import (
+    ObjectiveExperimentSelectionRepository,
+)
+from application.repositories.comparison_group_repository import ComparisonGroupRepository
+from application.repositories.experiment_finding_repository import ExperimentFindingRepository
+from application.repositories.transaction import RepositoryTransactionFactory
 from infra.llm.chat_model import OpenAIChatModel
+from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
+from infra.llm.correction_signal_analysis import OpenAICorrectionSignalAnalysisEngine
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -119,6 +158,21 @@ from infra.persistence.database import (
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
+from infra.persistence.postgres.analysis_job_repository import (
+    PostgresAnalysisJobRepository,
+)
+from infra.persistence.postgres.feedback_case_repository import (
+    PostgresFeedbackCaseRepository,
+)
+from infra.persistence.postgres.feedback_dataset_repository import (
+    PostgresFeedbackDatasetRepository,
+)
+from infra.persistence.postgres.feedback_dataset_sample_repository import (
+    PostgresFeedbackDatasetSampleRepository,
+)
+from infra.persistence.postgres.feedback_dataset_export_repository import (
+    PostgresFeedbackDatasetExportRepository,
+)
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
@@ -135,6 +189,24 @@ from infra.persistence.postgres.experiment_plan_repository import (
     PostgresExperimentPlanRepository,
 )
 from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
+from infra.persistence.postgres.paper_experiment_repository import (
+    PostgresPaperExperimentRepository,
+)
+from infra.persistence.postgres.objective_experiment_selection_repository import (
+    PostgresObjectiveExperimentSelectionRepository,
+)
+from infra.persistence.postgres.comparison_group_repository import (
+    PostgresComparisonGroupRepository,
+)
+from infra.persistence.postgres.experiment_finding_repository import (
+    PostgresExperimentFindingRepository,
+)
+from infra.persistence.postgres.experiment_analysis_repository import (
+    PostgresExperimentAnalysisRepository,
+)
+from infra.persistence.postgres.experiment_analysis_transaction import (
+    PostgresExperimentAnalysisTransactionFactory,
+)
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
@@ -221,6 +293,27 @@ class ApplicationOverrides:
     experiment_plan_repository: ExperimentPlanRepository | None = None
     chat_repository: ChatRepository | None = None
     chat_session_service: ChatSessionService | None = None
+    analysis_job_repository: AnalysisJobRepository | None = None
+    feedback_case_repository: FeedbackCaseRepository | None = None
+    feedback_case_service: FeedbackCaseService | None = None
+    feedback_analysis_worker: FeedbackAnalysisWorker | None = None
+    correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None
+    tool_failure_analysis_worker: ToolFailureAnalysisWorker | None = None
+    feedback_dataset_repository: FeedbackDatasetRepository | None = None
+    feedback_dataset_sample_repository: FeedbackDatasetSampleRepository | None = None
+    feedback_dataset_service: FeedbackDatasetService | None = None
+    feedback_dataset_export_repository: FeedbackDatasetExportRepository | None = None
+    feedback_dataset_export_service: FeedbackDatasetExportService | None = None
+    dataset_sample_build_worker: DatasetSampleBuildWorker | None = None
+    paper_experiment_repository: PaperExperimentRepository | None = None
+    objective_experiment_selection_repository: (
+        ObjectiveExperimentSelectionRepository | None
+    ) = None
+    comparison_group_repository: ComparisonGroupRepository | None = None
+    experiment_finding_repository: ExperimentFindingRepository | None = None
+    experiment_analysis_writer: ExperimentAnalysisWriter | None = None
+    experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None
+    experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None
 
     def requires_database(self) -> bool:
         required_dependencies = (
@@ -255,18 +348,33 @@ class ApplicationRuntime:
     finding_review_repository: FindingReviewRepository
     finding_feedback_service: FindingFeedbackService
     finding_authoring_service: FindingAuthoringService
-    evidence_authoring_service: EvidenceAuthoringService
     document_profile_service: DocumentProfileService
     document_preparation_service: DocumentPreparationService
     document_markdown_service: DocumentMarkdownService
     reference_workflow_service: SourceReferenceWorkflowService
-    evidence_analysis_service: ObjectiveEvidenceAnalysisService
+    experiment_analysis_service: ObjectiveExperimentAnalysisService
     objective_discovery_service: ObjectiveDiscoveryService
     objective_authoring_service: ObjectiveAuthoringService
     goal_service: GoalService
     chat_session_service: ChatSessionService
+    analysis_job_repository: AnalysisJobRepository | None
+    feedback_case_repository: FeedbackCaseRepository | None
+    feedback_case_service: FeedbackCaseService | None
+    feedback_analysis_worker: FeedbackAnalysisWorker | None
+    correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None
+    tool_failure_analysis_worker: ToolFailureAnalysisWorker | None
+    feedback_dataset_repository: FeedbackDatasetRepository | None
+    feedback_dataset_sample_repository: FeedbackDatasetSampleRepository | None
+    feedback_dataset_service: FeedbackDatasetService | None
+    feedback_dataset_export_repository: FeedbackDatasetExportRepository | None
+    feedback_dataset_export_service: FeedbackDatasetExportService | None
+    dataset_sample_build_worker: DatasetSampleBuildWorker | None
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
+    experiment_analysis_writer: ExperimentAnalysisWriter | None
+    experiment_analysis_transaction_factory: RepositoryTransactionFactory | None
+    experiment_compatibility_projection: ExperimentCompatibilityProjection | None
+    experiment_query_service: ExperimentQueryService | None
 
     async def close(self) -> None:
         if self.database_engine is not None:
@@ -325,6 +433,83 @@ async def build_application_runtime(
             overrides.objective_repository
             or PostgresObjectiveRepository(session_factory)
         )
+        paper_experiment_repository = overrides.paper_experiment_repository
+        objective_experiment_selection_repository = (
+            overrides.objective_experiment_selection_repository
+        )
+        comparison_group_repository = overrides.comparison_group_repository
+        experiment_finding_repository = overrides.experiment_finding_repository
+        experiment_analysis_repository = None
+        if session_factory is not None:
+            paper_experiment_repository = (
+                paper_experiment_repository
+                or PostgresPaperExperimentRepository(session_factory)
+            )
+            objective_experiment_selection_repository = (
+                objective_experiment_selection_repository
+                or PostgresObjectiveExperimentSelectionRepository(session_factory)
+            )
+            comparison_group_repository = (
+                comparison_group_repository
+                or PostgresComparisonGroupRepository(session_factory)
+            )
+            experiment_finding_repository = (
+                experiment_finding_repository
+                or PostgresExperimentFindingRepository(session_factory)
+            )
+            experiment_analysis_repository = PostgresExperimentAnalysisRepository(
+                session_factory
+            )
+
+        experiment_analysis_writer = overrides.experiment_analysis_writer
+        experiment_analysis_transaction_factory = (
+            overrides.experiment_analysis_transaction_factory
+        )
+        if experiment_analysis_transaction_factory is None and session_factory is not None:
+            experiment_analysis_transaction_factory = (
+                PostgresExperimentAnalysisTransactionFactory(session_factory)
+            )
+        if (
+            experiment_analysis_writer is None
+            and paper_experiment_repository is not None
+            and experiment_analysis_repository is not None
+        ):
+            experiment_analysis_writer = ExperimentAnalysisWriter(
+                paper_experiment_repository=paper_experiment_repository,
+                experiment_analysis_repository=experiment_analysis_repository,
+            )
+        paper_experiment_authoring_service = None
+        if experiment_analysis_writer is not None:
+            paper_experiment_authoring_service = PaperExperimentAuthoringService(
+                collection_service=collection_service,
+                source_artifact_repository=source_artifact_repository,
+                objective_repository=objective_repository,
+                experiment_analysis_writer=experiment_analysis_writer,
+                experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
+            )
+        experiment_compatibility_projection = overrides.experiment_compatibility_projection
+        if (
+            experiment_compatibility_projection is None
+            and paper_experiment_repository is not None
+            and objective_experiment_selection_repository is not None
+            and comparison_group_repository is not None
+            and experiment_finding_repository is not None
+        ):
+            experiment_compatibility_projection = ExperimentCompatibilityProjection(
+                paper_experiment_repository=paper_experiment_repository,
+                selection_repository=objective_experiment_selection_repository,
+                group_repository=comparison_group_repository,
+                finding_repository=experiment_finding_repository,
+                objective_repository=objective_repository,
+            )
+        if session_factory is not None and (
+            experiment_analysis_writer is None
+            or experiment_compatibility_projection is None
+        ):
+            raise RuntimeError(
+                "database-backed runtime requires the PaperExperiment writer "
+                "and query projection"
+            )
         finding_review_repository = (
             overrides.finding_review_repository
             or PostgresFindingReviewRepository(session_factory)
@@ -338,6 +523,129 @@ async def build_application_runtime(
             if overrides.chat_session_service is None
             else None
         )
+        analysis_job_repository = overrides.analysis_job_repository
+        feedback_case_repository = overrides.feedback_case_repository
+        feedback_dataset_repository = overrides.feedback_dataset_repository
+        feedback_dataset_sample_repository = overrides.feedback_dataset_sample_repository
+        feedback_dataset_export_repository = overrides.feedback_dataset_export_repository
+        if session_factory is not None:
+            analysis_job_repository = (
+                analysis_job_repository
+                or PostgresAnalysisJobRepository(session_factory)
+            )
+            feedback_case_repository = (
+                feedback_case_repository
+                or PostgresFeedbackCaseRepository(session_factory)
+            )
+            feedback_dataset_repository = (
+                feedback_dataset_repository
+                or PostgresFeedbackDatasetRepository(session_factory)
+            )
+            feedback_dataset_sample_repository = (
+                feedback_dataset_sample_repository
+                or PostgresFeedbackDatasetSampleRepository(session_factory)
+            )
+            feedback_dataset_export_repository = (
+                feedback_dataset_export_repository
+                or PostgresFeedbackDatasetExportRepository(session_factory)
+            )
+
+        feedback_analysis_worker = overrides.feedback_analysis_worker
+        if (
+            feedback_analysis_worker is None
+            and analysis_job_repository is not None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            feedback_analysis_worker = FeedbackAnalysisWorker(
+                job_repository=analysis_job_repository,
+                case_repository=feedback_case_repository,
+                handler=FeedbackAnalysisHandler(chat_repository=chat_repository),
+            )
+
+        correction_signal_analysis_worker = overrides.correction_signal_analysis_worker
+        if (
+            correction_signal_analysis_worker is None
+            and analysis_job_repository is not None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            correction_engine = OpenAICorrectionSignalAnalysisEngine()
+            correction_signal_analysis_worker = CorrectionSignalAnalysisWorker(
+                job_repository=analysis_job_repository,
+                case_repository=feedback_case_repository,
+                handler=CorrectionSignalAnalysisHandler(
+                    chat_repository=chat_repository, engine=correction_engine,
+                    model_name=correction_engine.model_name,
+                ),
+            )
+
+        tool_failure_analysis_worker = overrides.tool_failure_analysis_worker
+        if (
+            tool_failure_analysis_worker is None
+            and analysis_job_repository is not None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            tool_failure_analysis_worker = ToolFailureAnalysisWorker(
+                job_repository=analysis_job_repository,
+                case_repository=feedback_case_repository,
+                handler=ToolFailureAnalysisHandler(chat_repository=chat_repository),
+            )
+
+        feedback_case_service = overrides.feedback_case_service
+        if (
+            feedback_case_service is None
+            and feedback_case_repository is not None
+            and chat_repository is not None
+        ):
+            feedback_case_service = FeedbackCaseService(
+                case_repository=feedback_case_repository,
+                chat_repository=chat_repository,
+                collection_service=collection_service,
+            )
+
+        feedback_dataset_service = overrides.feedback_dataset_service
+        if feedback_dataset_service is None and feedback_dataset_repository is not None:
+            feedback_dataset_service = FeedbackDatasetService(
+                repository=feedback_dataset_repository,
+                collection_service=collection_service,
+                sample_repository=feedback_dataset_sample_repository,
+                case_repository=feedback_case_repository,
+            )
+        feedback_dataset_export_service = overrides.feedback_dataset_export_service
+        if (
+            feedback_dataset_export_service is None
+            and feedback_dataset_service is not None
+            and feedback_dataset_sample_repository is not None
+            and feedback_dataset_export_repository is not None
+        ):
+            feedback_dataset_export_service = FeedbackDatasetExportService(
+                dataset_service=feedback_dataset_service,
+                sample_repository=feedback_dataset_sample_repository,
+                repository=feedback_dataset_export_repository,
+            )
+
+        dataset_sample_build_worker = overrides.dataset_sample_build_worker
+        if (
+            dataset_sample_build_worker is None
+            and analysis_job_repository is not None
+            and feedback_dataset_repository is not None
+            and feedback_dataset_sample_repository is not None
+            and feedback_case_repository is not None
+        ):
+            sample_generator = OpenAIFeedbackSampleGenerator()
+            dataset_sample_build_worker = DatasetSampleBuildWorker(
+                job_repository=analysis_job_repository,
+                dataset_repository=feedback_dataset_repository,
+                sample_repository=feedback_dataset_sample_repository,
+                case_repository=feedback_case_repository,
+                builders={
+                    "sft": SftSampleBuilder(generator=sample_generator),
+                    "preference": PreferenceSampleBuilder(generator=sample_generator),
+                    "evaluation": EvaluationSampleBuilder(generator=sample_generator),
+                },
+            )
 
         # Services share the resolved objects above; no service locator is used.
         document_profile_service = DocumentProfileService(
@@ -363,6 +671,7 @@ async def build_application_runtime(
         objective_authoring_service = ObjectiveAuthoringService(
             collection_service=collection_service,
             objective_repository=objective_repository,
+            experiment_projection=experiment_compatibility_projection,
         )
         document_preparation_service = DocumentPreparationService(
             collection_service=collection_service,
@@ -370,34 +679,19 @@ async def build_application_runtime(
             source_artifact_repository=source_artifact_repository,
             document_profile_service=document_profile_service,
         )
-        finding_synthesis_service = FindingSynthesisService()
         finding_feedback_service = FindingFeedbackService(
             review_repository=finding_review_repository,
             objective_repository=objective_repository,
+            experiment_projection=experiment_compatibility_projection,
         )
         experiment_plan_service = ExperimentPlanService(
             repository=experiment_plan_repository,
             finding_feedback_service=finding_feedback_service,
         )
-        finding_authoring_service = FindingAuthoringService(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-        )
-        evidence_authoring_service = EvidenceAuthoringService(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-            source_artifact_repository=source_artifact_repository,
-        )
-        agent_analysis_service = AgentObjectiveAnalysisService(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-            source_artifact_repository=source_artifact_repository,
-        )
-        evidence_analysis_service = ObjectiveEvidenceAnalysisService(
+        experiment_analysis_service = ObjectiveExperimentAnalysisService(
             collection_service=collection_service,
             paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
-            finding_synthesis_service=finding_synthesis_service,
             objective_input_service=objective_input_service,
         )
         document_markdown_service = DocumentMarkdownService(
@@ -410,9 +704,35 @@ async def build_application_runtime(
         goal_service = GoalService(collection_service)
         objective_analysis_service = ObjectiveAnalysisService(
             objective_repository=objective_repository,
-            evidence_analysis_service=evidence_analysis_service,
+            experiment_analysis_service=experiment_analysis_service,
             objective_input_service=objective_input_service,
             document_profile_service=document_profile_service,
+            experiment_analysis_writer=experiment_analysis_writer,
+            experiment_analysis_transaction_factory=(
+                experiment_analysis_transaction_factory
+            ),
+            experiment_compatibility_projection=experiment_compatibility_projection,
+        )
+        experiment_query_service = None
+        if (
+            paper_experiment_repository is not None
+            and objective_experiment_selection_repository is not None
+            and comparison_group_repository is not None
+            and experiment_finding_repository is not None
+        ):
+            experiment_query_service = ExperimentQueryService(
+                paper_experiment_repository=paper_experiment_repository,
+                selection_repository=objective_experiment_selection_repository,
+                group_repository=comparison_group_repository,
+                finding_repository=experiment_finding_repository,
+                objective_repository=objective_repository,
+            )
+        finding_authoring_service = FindingAuthoringService(
+            collection_service=collection_service,
+            objective_repository=objective_repository,
+            experiment_query_service=experiment_query_service,
+            experiment_analysis_writer=experiment_analysis_writer,
+            experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
         )
 
         if overrides.chat_session_service is None:
@@ -421,6 +741,12 @@ async def build_application_runtime(
                 collection_service=collection_service,
                 source_artifact_repository=source_artifact_repository,
                 repository=chat_repository,
+                analysis_job_repository=analysis_job_repository,
+                model_call_observer=(
+                    RepositoryModelCallObserver(chat_repository)
+                    if chat_repository is not None
+                    else None
+                ),
                 runner=ResearchAgentRunner(
                     model=chat_model,
                     limits=_parse_agent_run_limits(),
@@ -480,21 +806,25 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 finding_feedback_service=finding_feedback_service,
                             ),
-                            CreateFindingDraftCapability(),
+                            CreateFindingDraftCapability(
+                                finding_authoring_service=finding_authoring_service,
+                            ),
                             CreateFindingVersionCapability(
                                 finding_authoring_service=finding_authoring_service,
                             ),
-                            CreateEvidenceDraftCapability(
-                                collection_service=collection_service,
-                                source_artifact_repository=source_artifact_repository,
-                            ),
-                            CreateEvidenceVersionCapability(
-                                evidence_authoring_service=evidence_authoring_service,
-                            ),
-                            PublishAgentObjectiveAnalysisCapability(
-                                agent_analysis_service=agent_analysis_service,
-                                model_name=chat_model.model,
-                                prompt_version=RESEARCH_AGENT_PROMPT_VERSION,
+                            *(
+                                (
+                                    ProposePaperExperimentDraftCapability(
+                                        authoring_service=paper_experiment_authoring_service,
+                                        chat_repository=chat_repository,
+                                    ),
+                                    CreatePaperExperimentRevisionCapability(
+                                        authoring_service=paper_experiment_authoring_service,
+                                        chat_repository=chat_repository,
+                                    ),
+                                )
+                                if paper_experiment_authoring_service is not None
+                                else ()
                             ),
                             ProposeObjectiveDraftsCapability(
                                 collection_service=collection_service,
@@ -566,18 +896,35 @@ async def build_application_runtime(
             finding_review_repository=finding_review_repository,
             finding_feedback_service=finding_feedback_service,
             finding_authoring_service=finding_authoring_service,
-            evidence_authoring_service=evidence_authoring_service,
             document_profile_service=document_profile_service,
             document_preparation_service=document_preparation_service,
             document_markdown_service=document_markdown_service,
             reference_workflow_service=reference_workflow_service,
-            evidence_analysis_service=evidence_analysis_service,
+            experiment_analysis_service=experiment_analysis_service,
             objective_discovery_service=objective_discovery_service,
             objective_authoring_service=objective_authoring_service,
             goal_service=goal_service,
             chat_session_service=chat_session_service,
+            analysis_job_repository=analysis_job_repository,
+            feedback_case_repository=feedback_case_repository,
+            feedback_case_service=feedback_case_service,
+            feedback_analysis_worker=feedback_analysis_worker,
+            correction_signal_analysis_worker=correction_signal_analysis_worker,
+            tool_failure_analysis_worker=tool_failure_analysis_worker,
+            feedback_dataset_repository=feedback_dataset_repository,
+            feedback_dataset_sample_repository=feedback_dataset_sample_repository,
+            feedback_dataset_service=feedback_dataset_service,
+            feedback_dataset_export_repository=feedback_dataset_export_repository,
+            feedback_dataset_export_service=feedback_dataset_export_service,
+            dataset_sample_build_worker=dataset_sample_build_worker,
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
+            experiment_analysis_writer=experiment_analysis_writer,
+            experiment_analysis_transaction_factory=(
+                experiment_analysis_transaction_factory
+            ),
+            experiment_compatibility_projection=experiment_compatibility_projection,
+            experiment_query_service=experiment_query_service,
         )
     except BaseException:
         if database_engine is not None:
@@ -602,18 +949,40 @@ def install_application_runtime(
     application.state.finding_review_repository = runtime.finding_review_repository
     application.state.finding_feedback_service = runtime.finding_feedback_service
     application.state.finding_authoring_service = runtime.finding_authoring_service
-    application.state.evidence_authoring_service = runtime.evidence_authoring_service
     application.state.document_profile_service = runtime.document_profile_service
     application.state.document_preparation_service = runtime.document_preparation_service
     application.state.document_markdown_service = runtime.document_markdown_service
     application.state.reference_workflow_service = runtime.reference_workflow_service
-    application.state.evidence_analysis_service = runtime.evidence_analysis_service
+    application.state.experiment_analysis_service = runtime.experiment_analysis_service
     application.state.objective_discovery_service = runtime.objective_discovery_service
     application.state.objective_authoring_service = runtime.objective_authoring_service
     application.state.goal_service = runtime.goal_service
     application.state.chat_session_service = runtime.chat_session_service
+    application.state.analysis_job_repository = runtime.analysis_job_repository
+    application.state.feedback_case_repository = runtime.feedback_case_repository
+    application.state.feedback_case_service = runtime.feedback_case_service
+    application.state.feedback_analysis_worker = runtime.feedback_analysis_worker
+    application.state.correction_signal_analysis_worker = (
+        runtime.correction_signal_analysis_worker
+    )
+    application.state.tool_failure_analysis_worker = runtime.tool_failure_analysis_worker
+    application.state.feedback_dataset_repository = runtime.feedback_dataset_repository
+    application.state.feedback_dataset_sample_repository = (
+        runtime.feedback_dataset_sample_repository
+    )
+    application.state.feedback_dataset_service = runtime.feedback_dataset_service
+    application.state.feedback_dataset_export_repository = (
+        runtime.feedback_dataset_export_repository
+    )
+    application.state.feedback_dataset_export_service = runtime.feedback_dataset_export_service
+    application.state.dataset_sample_build_worker = runtime.dataset_sample_build_worker
     application.state.experiment_plan_service = runtime.experiment_plan_service
     application.state.objective_analysis_service = runtime.objective_analysis_service
+    application.state.experiment_analysis_writer = runtime.experiment_analysis_writer
+    application.state.experiment_compatibility_projection = (
+        runtime.experiment_compatibility_projection
+    )
+    application.state.experiment_query_service = runtime.experiment_query_service
 
 
 def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
@@ -745,10 +1114,13 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(chat_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(feedback_cases.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(task_datasets.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(pipeline_runs.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(finding_review.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(paper_experiments.router, prefix=PUBLIC_API_V1_PREFIX)
 
 
 def create_app(
@@ -764,6 +1136,25 @@ def create_app(
     experiment_plan_repository: ExperimentPlanRepository | None = None,
     chat_repository: ChatRepository | None = None,
     chat_session_service: ChatSessionService | None = None,
+    analysis_job_repository: AnalysisJobRepository | None = None,
+    feedback_case_repository: FeedbackCaseRepository | None = None,
+    feedback_case_service: FeedbackCaseService | None = None,
+    feedback_analysis_worker: FeedbackAnalysisWorker | None = None,
+    correction_signal_analysis_worker: CorrectionSignalAnalysisWorker | None = None,
+    tool_failure_analysis_worker: ToolFailureAnalysisWorker | None = None,
+    feedback_dataset_repository: FeedbackDatasetRepository | None = None,
+    feedback_dataset_export_repository: FeedbackDatasetExportRepository | None = None,
+    feedback_dataset_export_service: FeedbackDatasetExportService | None = None,
+    feedback_dataset_service: FeedbackDatasetService | None = None,
+    paper_experiment_repository: PaperExperimentRepository | None = None,
+    objective_experiment_selection_repository: (
+        ObjectiveExperimentSelectionRepository | None
+    ) = None,
+    comparison_group_repository: ComparisonGroupRepository | None = None,
+    experiment_finding_repository: ExperimentFindingRepository | None = None,
+    experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
+    experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None,
+    experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None,
 ) -> FastAPI:
     overrides = ApplicationOverrides(
         auth_session_service=auth_session_service,
@@ -777,10 +1168,27 @@ def create_app(
         experiment_plan_repository=experiment_plan_repository,
         chat_repository=chat_repository,
         chat_session_service=chat_session_service,
+        analysis_job_repository=analysis_job_repository,
+        feedback_case_repository=feedback_case_repository,
+        feedback_case_service=feedback_case_service,
+        feedback_analysis_worker=feedback_analysis_worker,
+        correction_signal_analysis_worker=correction_signal_analysis_worker,
+        tool_failure_analysis_worker=tool_failure_analysis_worker,
+        feedback_dataset_repository=feedback_dataset_repository,
+        feedback_dataset_export_repository=feedback_dataset_export_repository,
+        feedback_dataset_export_service=feedback_dataset_export_service,
+        feedback_dataset_service=feedback_dataset_service,
+        paper_experiment_repository=paper_experiment_repository,
+        objective_experiment_selection_repository=objective_experiment_selection_repository,
+        comparison_group_repository=comparison_group_repository,
+        experiment_finding_repository=experiment_finding_repository,
+        experiment_analysis_writer=experiment_analysis_writer,
+        experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
+        experiment_compatibility_projection=experiment_compatibility_projection,
     )
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.12.24",
+        version="0.13.1",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

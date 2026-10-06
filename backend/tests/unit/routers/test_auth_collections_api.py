@@ -147,6 +147,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
     collection_service,
 ) -> None:
     from application.pipeline import PipelineRunService
+    from application.core.objectives.analysis.experiment_analysis_writer import ExperimentAnalysisWriter
     from infra.persistence.memory import MemoryPipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -158,6 +159,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+            experiment_analysis_writer=Mock(spec=ExperimentAnalysisWriter),
             **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
@@ -169,8 +171,8 @@ def test_app_lifespan_composes_one_shared_collection_service(
             state.document_profile_service,
             state.goal_service,
             state.chat_session_service,
-            state.evidence_analysis_service,
-            state.objective_analysis_service.evidence_analysis_service,
+            state.experiment_analysis_service,
+            state.objective_analysis_service.experiment_analysis_service,
         )
 
         assert all(
@@ -195,9 +197,8 @@ def test_app_lifespan_composes_one_shared_collection_service(
             "curate_finding",
             "create_finding_draft",
             "create_finding_version",
-            "create_evidence_draft",
-            "create_evidence_version",
-            "publish_agent_objective_analysis",
+            "propose_paper_experiment_draft",
+            "create_paper_experiment_revision",
             "propose_objective_drafts",
             "preview_research_scope",
             "create_objective_candidate",

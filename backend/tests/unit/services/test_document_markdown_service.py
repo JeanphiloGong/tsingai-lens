@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import base64
 from hashlib import sha256
+from io import BytesIO
 
 import pytest
+from pypdf import PdfWriter
 
 from tests.support.collection_service import (
     build_test_collection_service,
@@ -16,11 +17,6 @@ from application.source.document_markdown_service import (
 )
 from domain.source import source_documents_from_records
 from infra.persistence.memory import MemorySourceArtifactRepository
-from infra.source.ingestion.normalized_import import (
-    NormalizedImportBatch,
-    NormalizedImportDocument,
-    NormalizedImportSourceMetadata,
-)
 
 pytestmark = pytest.mark.anyio
 
@@ -513,26 +509,12 @@ async def test_document_markdown_service_uses_original_filename_for_display(tmp_
         "Stored Filename Collection"
     )
     collection_id = collection["collection_id"]
-    await build_test_source_import_service(collection_service).import_normalized_batch(
-        collection_id,
-        NormalizedImportBatch(
-            documents=(
-                NormalizedImportDocument(
-                    source_document_id="srcdoc_p001",
-                    origin_channel="upload",
-                    original_filename="P001-Readable Paper.pdf",
-                    stored_filename="abc123_P001-Readable Paper.pdf",
-                    media_type="application/pdf",
-                    storage_payload_base64=base64.b64encode(b"fixture").decode("ascii"),
-                ),
-            ),
-            text_units=(),
-            source_metadata=NormalizedImportSourceMetadata(
-                channel="upload",
-                adapter_name="upload",
-                ingested_at="2026-07-19T00:00:00+00:00",
-            ),
-        ),
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    pdf = BytesIO()
+    writer.write(pdf)
+    uploaded = await build_test_source_import_service(collection_service).add_document(
+        collection_id, "P001-Readable Paper.pdf", pdf.getvalue(), "application/pdf",
     )
     await _store_source_documents(
         markdown_service.source_artifact_repository,
@@ -540,18 +522,18 @@ async def test_document_markdown_service_uses_original_filename_for_display(tmp_
         source_documents_from_records(
             documents=[
                 {
-                    "id": "paper-1",
-                    "title": "abc123_P001-Readable Paper.pdf",
+                    "id": uploaded["document_id"],
+                    "title": uploaded["stored_filename"],
                     "text": "ignored when block structure is available",
                     "metadata": {
-                        "source_path": "abc123_P001-Readable Paper.pdf",
+                        "source_path": uploaded["stored_filename"],
                         "source_parser": "docling",
                     },
                 }
             ],
             blocks=[
                 {
-                    "document_id": "paper-1",
+                    "document_id": uploaded["document_id"],
                     "block_id": "blk-good",
                     "block_type": "paragraph",
                     "block_order": 1,
@@ -562,12 +544,14 @@ async def test_document_markdown_service_uses_original_filename_for_display(tmp_
         ),
     )
 
-    payload = await markdown_service.get_document_markdown(collection_id, "paper-1")
+    payload = await markdown_service.get_document_markdown(
+        collection_id, uploaded["document_id"]
+    )
 
     assert payload["title"] == "P001-Readable Paper.pdf"
     assert payload["source_filename"] == "P001-Readable Paper.pdf"
     assert payload["markdown"].startswith("# P001-Readable Paper.pdf")
-    assert "abc123_P001" not in payload["markdown"]
+    assert uploaded["stored_filename"] not in payload["markdown"]
 
 
 async def test_document_markdown_service_reports_not_ready(tmp_path):

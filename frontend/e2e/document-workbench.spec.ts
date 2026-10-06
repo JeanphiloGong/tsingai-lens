@@ -55,6 +55,12 @@ async function mockPaperReaderApis(
 			return route.fulfill(json(session));
 		}
 		if (
+			path === '/api/v1/chat-sessions/chat_source/permissions' &&
+			route.request().method() === 'GET'
+		) {
+			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
+		}
+		if (
 			path === '/api/v1/chat-sessions/chat_source/messages' &&
 			route.request().method() === 'GET'
 		) {

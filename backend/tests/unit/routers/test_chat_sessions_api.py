@@ -18,20 +18,24 @@ from application.chat.session_service import (
 )
 from application.pipeline import PipelineRunService
 from controllers.chat import sessions as sessions_controller
-from controllers.schemas.chat.session import (
+from controllers.chat.schemas import (
     ChatSessionCreateRequest,
+    ChatSessionListResponse,
     ChatToolDecisionRequest,
     ChatTurnRequest,
 )
 from domain.chat import (
     ChatMessage,
-    ChatResourceRef,
     ChatSession,
     ChatSourceContext,
     ChatToolCall,
+    ToolPermissionMode,
     ToolRisk,
 )
-from infra.persistence.memory import MemoryObjectiveRepository, MemoryPipelineRunRepository
+from infra.persistence.memory import (
+    MemoryObjectiveRepository,
+    MemoryPipelineRunRepository,
+)
 from main import create_app
 
 
@@ -85,6 +89,18 @@ class _Service:
             raise ChatSessionNotFoundError(session_id)
         return self.session
 
+    async def list_sessions_for_user(
+        self,
+        *,
+        collection_id: str,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ):
+        assert collection_id == "col-1"
+        assert user_id == "user-1"
+        return (self.session,)
+
     async def list_messages_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
         return self.messages
@@ -105,8 +121,10 @@ class _Service:
         *,
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM,
     ) -> dict:
         await self.get_session_for_user(session_id, user_id)
+        self.permission_mode = permission_mode
         if message == "blocked":
             raise ChatApprovalPendingError(self.pending.tool_call_id)
         if message == "forged source":
@@ -141,12 +159,14 @@ class _Service:
         *,
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM,
     ):
         turn = await self.post_message_for_user(
             session_id,
             user_id,
             message=message,
             source_contexts=source_contexts,
+            permission_mode=permission_mode,
         )
 
         async def events():
@@ -215,6 +235,32 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     assert messages.pending_approval.tool_call_id == "call-1"
 
 
+def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
+    response = asyncio.run(
+        sessions_controller.list_chat_sessions(
+            _request(_Service()), collection_id="col-1", limit=12, offset=0
+        )
+    )
+
+    assert isinstance(response, ChatSessionListResponse)
+    assert response.limit == 12
+    assert [item.session_id for item in response.items] == ["chat-1"]
+
+
+def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:
+    service = _Service()
+
+    asyncio.run(
+        sessions_controller.post_chat_message(
+            "chat-1",
+            ChatTurnRequest(message="你好", permission_mode="none"),
+            _request(service),
+        )
+    )
+
+    assert service.permission_mode is ToolPermissionMode.NONE
+
+
 @pytest.mark.parametrize("count", [1, 3, 12])
 def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None:
     service = _Service()
@@ -255,14 +301,14 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
             ChatTurnRequest(message="Explain these blocks", source_contexts=[source_context] * 13)
     assert turn.messages[0].source_contexts[0].document_id == "doc-1"
     assert turn.messages[0].source_contexts[0].resource_ref.model_dump() == (
-        ChatResourceRef(
-            resource_type="source",
-            resource_id="doc-1:results",
-            href=(
+        {
+            "resource_type": "source",
+            "resource_id": "doc-1:results",
+            "href": (
                 "/collections/col-1/documents/doc-1"
                 "?view=parsed-paper&source_ref=results&page=3"
             ),
-        ).to_record()
+        }
     )
 
 

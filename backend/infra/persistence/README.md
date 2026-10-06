@@ -28,8 +28,9 @@ operation creates a short task-local `AsyncSession`.
 - `PostgresPaperMapRepository`: reads and writes the embedded Paper Map fields
   on `document_preparations`, after a profile exists.
 - `PostgresObjectiveRepository`: Collection discovery fields, Objective records,
-  versioned analyses (including private checkpoints and contributions), Evidence,
-  and Findings.
+  and analysis lifecycle metadata. Automatic scientific facts belong to the
+  PaperExperiment, ObjectiveExperimentSelection, ComparisonGroup, and Finding
+  repositories; authored snapshots remain in the analysis payload.
 - `PostgresChatRepository`: Agent sessions, messages, tool calls, embedded
   results, and approval decisions.
 - `PostgresFindingReviewRepository`, `PostgresExperimentPlanRepository`, and
@@ -41,9 +42,11 @@ operation creates a short task-local `AsyncSession`.
 collections.discovery_*
 research_objectives
   -> objective_analyses
-     -> payload.paper_contributions / payload.document_evidence_checkpoints
-     -> payload.evidence_records
-     -> payload.findings
+     -> execution metadata and authored snapshots
+  -> paper_experiment revisions
+  -> objective_experiment_selections
+  -> optional comparison_groups
+  -> findings
 ```
 
 Discovery and each analysis store exact `document_inputs`, where every item is

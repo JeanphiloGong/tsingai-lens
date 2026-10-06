@@ -3,10 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.finding_synthesis import (
-    StructuredFindingSynthesis,
-    StructuredFindingSynthesisItem,
-)
 from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionModelOutput,
     EvidenceExtractionsModelOutput,
@@ -65,7 +61,6 @@ class FakeObjectiveExtractor:
         self.canonicalization_payloads: list[dict[str, Any]] = []
         self.frame_payloads: list[dict[str, Any]] = []
         self.unit_payloads: list[dict[str, Any]] = []
-        self.finding_payloads: list[dict[str, Any]] = []
 
     def estimate_prompt_tokens(
         self,
@@ -309,31 +304,5 @@ class FakeObjectiveExtractor:
                 ]
             )
         return EvidenceExtractionsModelOutput()
-
-    def judge_result_set(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredFindingSynthesis:
-        self.finding_payloads.append(payload)
-        result_set = payload.get("result_set", {})
-        factors = [
-            str(value).strip()
-            for value in result_set.get("factors", [])
-            if str(value).strip()
-        ]
-        outcome = str(result_set.get("outcome") or "").strip()
-        result_evidence = result_set.get("result_evidence", [])
-        if not factors or not outcome or not result_evidence:
-            return StructuredFindingSynthesis()
-        return StructuredFindingSynthesis(
-            findings=[
-                StructuredFindingSynthesisItem(
-                    assertion_strength="associative",
-                    context_evidence_ids=[],
-                    mechanisms=[],
-                )
-            ]
-        )
-
 
 __all__ = ["FakeObjectiveExtractor"]

@@ -1,5 +1,46 @@
 import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
 
+/** Map backend model failures to stable, user-facing translation keys. */
+export function getModelServiceErrorKey(errorCode: string | null | undefined): string | null {
+	switch (errorCode) {
+		case 'provider_timeout':
+			return 'researchAgent.modelServiceTimeout';
+		case 'model_response_invalid':
+			return 'researchAgent.modelServiceInvalidResponse';
+		case 'model_unavailable':
+		case 'final_answer_unavailable':
+		case 'provider_error':
+		case 'provider_connection_error':
+		case 'provider_rate_limited':
+		case 'transient_provider_error':
+		case 'unclassified_provider_error':
+		case 'quota_exhausted':
+			return 'researchAgent.modelServiceUnavailable';
+		default:
+			return null;
+	}
+}
+
+const completeCitationMarker = /\[\[cite:[^\]\r\n]+\]\]/g;
+const completeInternalSourceId =
+	/(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+(?![A-Za-z0-9_-])/g;
+const quotedInternalSourceId =
+	/`(?:blk|tbl|fig)_doc_[A-Za-z0-9]+(?:[_-][A-Za-z0-9.-]+)+`/g;
+const partialCitationMarker = /\[\[cite:[^\]\r\n]*$/;
+const partialInternalSourceId =
+	/(?<![A-Za-z0-9_-])(?:blk|tbl|fig)_doc_[A-Za-z0-9_-]*$/;
+
+/** Keep transient model markers and source identities out of the live answer. */
+export function sanitizeStreamingCitationText(content: string): string {
+	const text = String(content ?? '')
+		.replace(completeCitationMarker, '')
+		.replace(quotedInternalSourceId, '')
+		.replace(completeInternalSourceId, '')
+		.replace(partialCitationMarker, '')
+		.replace(partialInternalSourceId, '');
+	return text;
+}
+
 export type ChatSessionActivity = 'running' | 'approval' | 'recovering' | 'idle' | 'unavailable';
 
 export function getChatSessionActivity(
@@ -36,6 +77,7 @@ export type CurrentReading = {
 	kind: 'passage' | 'table' | 'search' | 'outline';
 	status: 'reading' | 'received' | 'failed';
 	title: string;
+	href: string;
 	page: string;
 	heading: string;
 	excerpt: string;
@@ -90,6 +132,10 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 			? records.filter((item) => item.document_id === documentId)
 			: [];
 		const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+		const internalHref = (value: unknown) => {
+			const href = text(value);
+			return href.startsWith('/collections/') ? href : '';
+		};
 		const sectionSources = Array.isArray(data.sources)
 			? data.sources.filter(
 					(item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object'
@@ -115,12 +161,23 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 					)
 					.find(Boolean)) ??
 			'';
+		const context = messages
+			.slice(questionIndex)
+			.flatMap((message) => message.source_contexts)
+			.find(
+				(item) => item.document_id === documentId && (!sourceRef || item.source_ref === sourceRef)
+			);
+		const resultHref = result?.resource_refs
+			.map((resource) => internalHref(resource.href))
+			.find(Boolean);
+		const href = resultHref || internalHref(context?.resource_ref.href);
 		const page = data.page ?? source?.page ?? request.page;
 		return {
 			toolCallId: operation.toolCallId,
 			kind: kinds[operation.toolName as keyof typeof kinds],
 			status: !result ? 'reading' : result.status === 'failed' ? 'failed' : 'received',
 			title,
+			href,
 			page: typeof page === 'number' || typeof page === 'string' ? String(page) : '',
 			heading: text(data.heading_path ?? source?.heading_path ?? request.heading_path),
 			excerpt:
@@ -139,8 +196,8 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 }
 
 const reviewableResultTools = new Set([
-	'create_evidence_draft',
-	'create_evidence_version',
+	'propose_paper_experiment_draft',
+	'create_paper_experiment_revision',
 	'create_finding_draft',
 	'create_finding_version',
 	'create_objective_candidate',
@@ -155,12 +212,15 @@ const reviewableResultTools = new Set([
 	'preview_research_scope',
 	'propose_objective_drafts',
 	'propose_research_plan',
-	'publish_agent_objective_analysis',
 	'read_source',
 	'search_sources',
 	'start_objective_analysis',
 	'start_research_process'
 ]);
+
+// Capability discovery is an implementation detail of the agent loop. It is
+// useful for execution, but it is not a research action the user performed.
+const hiddenPresentationTools = new Set(['discover_research_tools']);
 
 export type ToolActivityOperation = {
 	toolCallId: string;
@@ -242,7 +302,9 @@ export function buildChatPresentation(
 	const flushActivity = () => {
 		if (!activityMessages.length) return;
 		const operations = operationsFrom(activityMessages).filter(
-			(operation) => operation.toolCallId !== pendingApprovalToolCallId
+			(operation) =>
+				operation.toolCallId !== pendingApprovalToolCallId &&
+				!hiddenPresentationTools.has(operation.toolName ?? '')
 		);
 		if (!operations.length) {
 			activityMessages = [];

@@ -16,7 +16,7 @@ from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 _PREVIEW_CATEGORY_LIMIT = 24
 
 
-class PreviewResearchScopeArguments(ObjectiveDraftInput):
+class PreviewResearchScopeToolRequest(ObjectiveDraftInput):
     """One focused question whose likely paper scope should be reviewed."""
 
 
@@ -31,7 +31,7 @@ class PreviewResearchScopeCapability:
             "excluded, and review-paper citation leads are navigation only."
         ),
         risk=ToolRisk.READ,
-        input_model=PreviewResearchScopeArguments,
+        input_model=PreviewResearchScopeToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, paper_map_repository: Any) -> None:
@@ -41,7 +41,7 @@ class PreviewResearchScopeCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: PreviewResearchScopeArguments,
+        arguments: PreviewResearchScopeToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -138,4 +138,4 @@ class PreviewResearchScopeCapability:
         )
 
 
-__all__ = ["PreviewResearchScopeArguments", "PreviewResearchScopeCapability"]
+__all__ = ["PreviewResearchScopeToolRequest", "PreviewResearchScopeCapability"]

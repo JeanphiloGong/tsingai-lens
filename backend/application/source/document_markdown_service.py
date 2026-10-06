@@ -16,7 +16,7 @@ from domain.source import (
     render_markdown_table,
 )
 from application.source.artifact_input_service import load_document_tree
-from infra.source.runtime.mapping.text_quality import (
+from infra.source.mapping.text_quality import (
     is_garbled_pdf_text,
     normalize_display_text,
 )

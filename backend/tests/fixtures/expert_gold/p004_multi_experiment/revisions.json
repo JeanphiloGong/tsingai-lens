@@ -1,0 +1,39 @@
+{
+  "schema_version": "multi_experiment_gold.v1",
+  "paper_id": "P004",
+  "revisions": [
+    {
+      "revision_id": "P004:REV01",
+      "paper_id": "P004",
+      "entity_type": "paper_experiment_archive",
+      "entity_id": "P004:archive",
+      "revision_label": "initial_overmerged_draft",
+      "source_ids": ["E001", "E004", "E005", "E006", "E007", "E008", "E009", "E010", "E011", "E012", "E013", "E014", "E015", "E016", "E017", "E018", "E019", "E020", "E021"],
+      "source_hashes": ["b9a872c792dd7a441d69efdce0b0316427717e6615547d56aa771695928a52e7"],
+      "before": {
+        "series_ids": ["P004:X00"],
+        "problem": "All density, selected residual-stress, mechanical and wear observations were attached to one paper-wide experiment."
+      },
+      "change_reason": "A paper is not one experiment merely because all samples use SS316L. The test scope and process strata require separate series."
+    },
+    {
+      "revision_id": "P004:REV02",
+      "paper_id": "P004",
+      "entity_type": "paper_experiment_archive",
+      "entity_id": "P004:archive",
+      "supersedes": "P004:REV01",
+      "revision_label": "source_preserving_series_split",
+      "source_ids": ["E001", "E004", "E005", "E006", "E007", "E008", "E009", "E010", "E011", "E012", "E013", "E014", "E015", "E016", "E017", "E018", "E019", "E020", "E021"],
+      "source_hashes": ["b9a872c792dd7a441d69efdce0b0316427717e6615547d56aa771695928a52e7"],
+      "after": {
+        "series_ids": ["P004:X01", "P004:X02", "P004:X03"],
+        "changes": [
+          "separate the process matrix from the matched 120 W / 100 mm/s heat-treatment series",
+          "keep selected wear tests in their own limited-scope series",
+          "retain all source IDs and mark uninspected combinations instead of filling them"
+        ]
+      },
+      "change_reason": "Human/Agent binding correction; no new scientific value was invented and provenance was preserved."
+    }
+  ]
+}

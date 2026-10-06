@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage, isHttpStatusError } from '../../../_shared/api';
 	import { authState } from '../../../_shared/auth';
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
+		listChatSessions,
 		branchChatMessage,
 		clearPendingChatSourceContexts,
 		decideChatToolCall,
@@ -37,12 +40,18 @@
 	import { t } from '../../../_shared/i18n';
 	import MessageTimeline from './MessageTimeline.svelte';
 	import ConversationHeader from './ConversationHeader.svelte';
+	import OperationPermissions from './OperationPermissions.svelte';
 	import ConversationTree from './ConversationTree.svelte';
 	import MessageComposer from './MessageComposer.svelte';
 	import ResearchSidebar from './ResearchSidebar.svelte';
-	import { getChatSessionActivity, type ChatSessionActivity } from './conversationPresentation';
+	import {
+		getChatSessionActivity,
+		getModelServiceErrorKey,
+		type ChatSessionActivity
+	} from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import type { DocumentProfile } from '../../../_shared/documents';
+	import type { ResearchAgentSlashCommandName } from '../../../_shared/researchAgentSlashCommands';
 	import {
 		Plus,
 		History,
@@ -98,6 +107,7 @@
 	let revisionRequest: { key: string; id: string } | null = null;
 	let feedbackByMessage: Record<string, ChatFeedbackState> = {};
 	let pendingApproval: ChatToolCall | null = null;
+	let permissionsPanel: { openPanel: () => void } | null = null;
 	let history: StoredChatSession[] = [];
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
 	let historyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -187,10 +197,9 @@
 	}
 	$: activeSessionId = session?.session_id ?? '';
 	$: if (browser && (collectionId !== loadedCollectionId || userId !== loadedUserId)) {
-		sessionActivities = {};
 		loadedCollectionId = collectionId;
 		loadedUserId = userId;
-		void loadSession();
+		loadCollectionSession();
 	}
 	$: if (session && !loading) {
 		sessionActivities = {
@@ -203,6 +212,11 @@
 						pendingApproval?.tool_call_id ?? null
 					)
 		};
+	}
+
+	function loadCollectionSession() {
+		sessionActivities = {};
+		void loadSession();
 	}
 
 	function sessionStorageKey() {
@@ -302,6 +316,47 @@
 		]);
 	}
 
+	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
+		try {
+			const response = await listChatSessions(ownerCollectionId, {
+				limit: 12,
+				signal: sessionController?.signal
+			});
+			const stored = readHistory();
+			const serverHistory = await Promise.all(
+				response.items.map(async (item) => {
+					let items: ChatMessage[] = [];
+					if (item.session_id === session?.session_id) {
+						items = messages;
+					} else {
+						try {
+							items = (await fetchChatTrajectory(item.session_id, sessionController?.signal)).items;
+						} catch {
+							// Keep a server session visible even when its activity check is temporarily unavailable.
+						}
+					}
+					const previous = stored.find((entry) => entry.session_id === item.session_id);
+					return {
+						session_id: item.session_id,
+						title: items.length
+							? titleFromMessages(items)
+							: previous?.title || $t('researchAgent.untitledSession'),
+						created_at: item.created_at,
+						updated_at: item.updated_at
+					};
+				})
+			);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			const serverIds = new Set(serverHistory.map((entry) => entry.session_id));
+			writeHistory([
+				...serverHistory,
+				...stored.filter((entry) => !serverIds.has(entry.session_id))
+			]);
+		} catch {
+			// The existing local history remains usable when the list request is unavailable.
+		}
+	}
+
 	async function refreshHistoryActivities(all = false) {
 		if (!session || loading || historyLoading || destroyed) return;
 		const generation = sessionGeneration;
@@ -324,7 +379,7 @@
 					const trajectory = await fetchChatTrajectory(item.session_id, sessionController?.signal);
 					activity = getChatSessionActivity(
 						trajectory.items,
-						trajectory.running ?? false,
+						Boolean(trajectory.running || trajectory.response?.status === 'running'),
 						trajectory.pending_approval?.tool_call_id ?? null
 					);
 				} catch {
@@ -443,6 +498,7 @@
 			onSourcesChanged();
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
+			await refreshServerHistory(generation, activeCollectionId);
 			scheduleRecovery();
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;
@@ -469,7 +525,13 @@
 					(call) =>
 						call.tool_call_id !== pendingApproval?.tool_call_id && !completed.has(call.tool_call_id)
 				)?.tool_call_id ?? null;
-		if (running && responseSnapshot?.status === 'running' && !sending && !recoveryError) {
+		if (
+			running &&
+			responseSnapshot?.status === 'running' &&
+			!pendingApproval &&
+			!sending &&
+			!recoveryError
+		) {
 			void resumeResponse();
 			return;
 		}
@@ -492,16 +554,23 @@
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
 		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
 		else if (snapshot.status === 'failed')
-			error = $t('researchAgent.turnFailed', { code: snapshot.error_code ?? 'failed' });
+			error = turnErrorMessage(snapshot.error_code);
 		else if (snapshot.status === 'completed' && snapshot.warnings.length)
 			notice = $t('researchAgent.turnLimited');
+	}
+
+	function turnErrorMessage(errorCode: string | null | undefined) {
+		const key = getModelServiceErrorKey(errorCode);
+		return key ? $t(key) : $t('researchAgent.turnFailed');
 	}
 
 	function acceptTrajectory(trajectory: ChatTrajectory) {
 		messages = trajectory.items;
 		branches = trajectory.branches ?? [];
 		branchDraft = trajectory.branch_draft ?? null;
-		running = trajectory.running ?? false;
+		// A persisted running response is authoritative when the trajectory flag
+		// was written by an earlier polling pass.
+		running = Boolean(trajectory.running || trajectory.response?.status === 'running');
 		loadFeedback(trajectory.feedback);
 		pendingApproval = trajectory.pending_approval;
 		if (trajectory.response) acceptSnapshot(trajectory.response);
@@ -976,11 +1045,12 @@
 				if (isRevision) {
 					try {
 						const trajectory = await fetchChatTrajectory(activeSession.session_id, signal);
-						if (!isCurrentSession(generation, activeCollectionId)) return;
-						branches = trajectory.branches ?? [];
-						branchDraft = trajectory.branch_draft ?? null;
-						running = trajectory.running ?? false;
-						scheduleRecovery();
+						if (isCurrentSession(generation, activeCollectionId)) {
+							branches = trajectory.branches ?? [];
+							branchDraft = trajectory.branch_draft ?? null;
+							running = Boolean(trajectory.running || trajectory.response?.status === 'running');
+							scheduleRecovery();
+						}
 					} catch (err) {
 						if (isCurrentSession(generation, activeCollectionId)) error = errorMessage(err);
 					}
@@ -991,6 +1061,48 @@
 
 	function handleComposerInput(value: string) {
 		input = value;
+	}
+
+	function handleSlashCommand(command: ResearchAgentSlashCommandName) {
+		switch (command) {
+			case 'permissions':
+				permissionsPanel?.openPanel();
+				return;
+			case 'settings':
+				void goto(resolve('/collections/[id]/settings', { id: collectionId }));
+				return;
+			case 'new':
+				void startNewSession();
+				return;
+			case 'history':
+				if (embedded) {
+					showHistory = !showHistory;
+					if (showHistory) void refreshHistoryActivities(true);
+				} else {
+					notice = $t('researchAgent.commands.historySidebar');
+				}
+				return;
+			case 'tree':
+				void openTree();
+				return;
+			case 'status': {
+				const status = pendingApproval
+					? $t('researchAgent.sessionState.approval')
+					: running || sending || recoveringCallId
+						? $t('researchAgent.sessionState.running')
+						: $t('researchAgent.commands.idleStatus');
+				notice = $t('researchAgent.commands.statusNotice', { status });
+				return;
+			}
+			case 'help':
+				notice = $t('researchAgent.commands.helpNotice');
+				return;
+		}
+	}
+
+	function handleUnknownSlashCommand(command: string) {
+		error = $t('researchAgent.commands.unknown', { command: `/${command}` });
+		notice = '';
 	}
 
 	function removePendingSourceContexts(index: number) {
@@ -1022,7 +1134,7 @@
 			notice = $t(rejectionNoticeKey(decidedToolName));
 		}
 		if (turn.status === 'failed') {
-			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
+			error = turnErrorMessage(turn.error_code);
 		}
 		if (turn.status === 'completed' && turn.warnings?.length) {
 			notice = $t('researchAgent.turnLimited');
@@ -1093,11 +1205,8 @@
 		if (toolName === 'record_finding_feedback') return 'researchAgent.findingFeedbackRejected';
 		if (toolName === 'curate_finding') return 'researchAgent.findingCurationRejected';
 		if (toolName === 'create_finding_version') return 'researchAgent.findingAuthoringRejected';
-		if (toolName === 'create_evidence_version') return 'researchAgent.evidenceAuthoringRejected';
+		if (toolName === 'create_paper_experiment_revision') return 'researchAgent.paperExperimentRevisionRejected';
 		if (toolName === 'create_research_plan') return 'researchAgent.researchPlanRejected';
-		if (toolName === 'publish_agent_objective_analysis') {
-			return 'researchAgent.agentObjectiveAnalysisRejected';
-		}
 		return 'researchAgent.rejected';
 	}
 
@@ -1197,6 +1306,12 @@
 			/>
 		{/if}
 
+		{#if session}
+			{#key session.session_id}<OperationPermissions
+					bind:this={permissionsPanel}
+					sessionId={session.session_id}
+				/>{/key}
+		{/if}
 		{#if error}
 			<div class="status status-error" role="alert">
 				<span>{error}</span>
@@ -1211,6 +1326,7 @@
 			<div class="status status-notice" role="status">{notice}</div>
 		{/if}
 		<MessageTimeline
+			{collectionId}
 			sessionId={activeSessionId}
 			messages={visibleMessages}
 			{branches}
@@ -1287,6 +1403,8 @@
 				hasExtraContext={!checkpointId && selectedPapers.length > 0}
 				onInput={handleComposerInput}
 				onSend={sendMessage}
+				onCommand={handleSlashCommand}
+				onUnknownCommand={handleUnknownSlashCommand}
 				onRemovePendingSourceContexts={removePendingSourceContexts}
 				onClearPendingSourceContexts={clearPendingSources}
 			>
@@ -1308,7 +1426,10 @@
 							{#each selectedPapers as paper (paper.document_id)}
 								<li>
 									<a
-										href={`/collections/${collectionId}/documents/${paper.document_id}`}
+										href={resolve('/collections/[id]/documents/[document_id]', {
+											id: collectionId,
+											document_id: paper.document_id
+										})}
 										title={paper.title ?? ''}>{paper.title}</a
 									>
 									<IconButton

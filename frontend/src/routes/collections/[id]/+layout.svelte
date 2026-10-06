@@ -25,6 +25,7 @@
 		collection?.documents.filter((document) => document.status === 'processing').length ?? 0;
 	$: currentPath = $page.url.pathname;
 	$: isFindingRoute = Boolean($page.params.objective_id);
+	$: isFeedbackRoute = currentPath.startsWith(`/collections/${collectionId}/feedback`);
 	$: statusTone = processingDocumentCount ? 'processing' : readyDocumentCount ? 'ready' : 'pending';
 	$: statusLabel = processingDocumentCount
 		? $t('overview.currentModel.status.processing')
@@ -75,7 +76,7 @@
 	}
 </script>
 
-{#if isFindingRoute}
+{#if isFindingRoute || isFeedbackRoute}
 	<div class="collection-context-bar">
 		<a
 			href={resolve('/collections/[id]', { id: collectionId })}
@@ -137,12 +138,6 @@
 		{$t('collection.tabs.objectives')}
 	</a>
 	<a
-		href={resolve('/collections/[id]/comparisons', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/comparisons`)}
-	>
-		{$t('collection.tabs.comparisons')}
-	</a>
-	<a
 		href={resolve('/collections/[id]/graph', { id: collectionId })}
 		class={tabClass(`/collections/${collectionId}/graph`)}
 	>
@@ -159,6 +154,18 @@
 		class={tabClass(`/collections/${collectionId}/assistant`)}
 	>
 		{$t('collection.tabs.assistant')}
+	</a>
+	<a
+		href={resolve('/collections/[id]/feedback', { id: collectionId })}
+		class={tabClass(`/collections/${collectionId}/feedback`)}
+	>
+		{$t('collection.tabs.feedback')}
+	</a>
+	<a
+		href={resolve('/collections/[id]/settings', { id: collectionId })}
+		class={tabClass(`/collections/${collectionId}/settings`)}
+	>
+		{$t('collection.tabs.settings')}
 	</a>
 </nav>
 

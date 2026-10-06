@@ -5,22 +5,16 @@ from hashlib import sha256
 from typing import Any
 
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingSynthesisService,
+from application.core.objectives.objective_analysis_service import (
+    ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
-from application.core.objectives.objective_analysis_service import (
-    ObjectiveEvidenceAnalysisService,
-)
-from domain.core import (
-    DocumentProfile,
-    ObjectiveAnalysis,
-    PreparedDocumentInput,
-    ResearchObjective,
-)
+from application.repositories.collection_repository import StoredDocument
+from application.repositories.objective_repository import ObjectiveAnalysis
+from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
 from domain.source import Document
 from infra.persistence.memory import (
     MemoryDocumentProfileRepository,
@@ -46,10 +40,9 @@ def build_research_objective_service(
     *,
     collection_service,
     **kwargs,
-) -> ObjectiveEvidenceAnalysisService:
+) -> ObjectiveExperimentAnalysisService:
     objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
-        kwargs.setdefault("objective_source_extractor", objective_judgments)
         kwargs.setdefault("objective_source_screener", objective_judgments)
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
@@ -77,12 +70,6 @@ def build_research_objective_service(
             source_artifact_repository=source_repository,
             document_profile_repository=document_profile_repository,
         )
-    finding_synthesis_service = kwargs.pop(
-        "finding_synthesis_service",
-        FindingSynthesisService(
-            assertion_judge=objective_judgments,
-        ),
-    )
     objective_input_service = kwargs.pop(
         "objective_input_service",
         ObjectiveInputService(
@@ -94,18 +81,17 @@ def build_research_objective_service(
             response_client=objective_judgments,
         ),
     )
-    return ObjectiveEvidenceAnalysisService(
+    return ObjectiveExperimentAnalysisService(
         collection_service=collection_service,
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
-        finding_synthesis_service=finding_synthesis_service,
         objective_input_service=objective_input_service,
         **kwargs,
     )
 
 
 async def seed_document_profiles(
-    service: ObjectiveEvidenceAnalysisService,
+    service: ObjectiveExperimentAnalysisService,
     collection_id: str,
 ) -> None:
     documents = await service.objective_input_service.source_artifact_repository.read_collection_documents(
@@ -116,28 +102,32 @@ async def seed_document_profiles(
     )
     assert current_collection is not None
     existing_document_ids = {
-        document.document_id for document in current_collection.documents
+        document.document.document_id for document in current_collection.documents
     }
     now = datetime.now(timezone.utc).isoformat()
     new_documents = tuple(
-        Document(
-            document_id=document.document_id,
-            original_filename=str(
-                document.metadata.get("source_filename") or f"{document.document_id}.pdf"
+        StoredDocument(
+            document=Document(
+                document_id=document.document_id,
+                original_filename=str(
+                    document.metadata.get("source_filename")
+                    or f"{document.document_id}.pdf"
+                ),
+                sha256=sha256(document.document_id.encode("utf-8")).hexdigest(),
+                media_type="application/pdf",
+                status="ready",
+                size_bytes=max(len(document.text.encode("utf-8")), 1),
+                parser_version="test-parser.v1",
+                document_analysis_version="test-analysis.v1",
+                preparation_fingerprint=f"fingerprint-{document.document_id}",
             ),
             stored_filename=str(
-                document.metadata.get("source_filename") or f"{document.document_id}.pdf"
+                document.metadata.get("source_filename")
+                or f"{document.document_id}.pdf"
             ),
             storage_key=f"{collection_id}/input/{document.document_id}.pdf",
-            sha256=sha256(document.document_id.encode("utf-8")).hexdigest(),
-            media_type="application/pdf",
-            status="ready",
-            size_bytes=max(len(document.text.encode("utf-8")), 1),
             created_at=now,
             updated_at=now,
-            parser_version="test-parser.v1",
-            document_analysis_version="test-analysis.v1",
-            preparation_fingerprint=f"fingerprint-{document.document_id}",
         )
         for document in documents
         if document.document_id not in existing_document_ids
@@ -170,7 +160,7 @@ async def seed_document_profiles(
 
 
 async def queue_running_analysis(
-    service: ObjectiveEvidenceAnalysisService,
+    service: ObjectiveExperimentAnalysisService,
     collection_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:

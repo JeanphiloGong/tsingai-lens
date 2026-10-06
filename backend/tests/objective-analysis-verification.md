@@ -1,94 +1,127 @@
 # Objective Analysis Verification
 
-These checks exercise the scientific responsibilities described in the [analysis module](../application/core/objectives/analysis/README.md).
+These checks exercise the scientific responsibilities described in the
+[analysis module](../application/core/objectives/analysis/README.md). The
+acceptance target is a real research chain, not a model-only JSON check.
 
-## Repeatable Scenarios
+## Focused commands
 
-Run from `backend/`:
+Run from backend:
 
-```bash
-.venv/bin/python -m pytest -q tests/integration/test_four_paper_research_flow.py
-.venv/bin/python -m pytest -q tests/integration/test_deep_path_research_flow.py
-.venv/bin/python -m pytest -q tests/unit/application/test_objective_evidence_extraction.py -k 'p004 or table_repair'
-```
+    .venv/bin/python -m pytest -q tests/unit/application/test_paper_experiment_extraction.py
+    .venv/bin/python -m pytest -q tests/unit/application/test_paper_experiment_authoring_contract.py
+    .venv/bin/python -m pytest -q tests/unit/application/test_experiment_analysis_writer.py
+    .venv/bin/python -m pytest -q tests/unit/application/test_objective_analysis_service.py
+    .venv/bin/python -m pytest -q tests/integration/test_four_paper_research_flow.py
+    .venv/bin/python -m pytest -q tests/integration/test_deep_path_research_flow.py
 
-The four-paper HTTP case covers uploads, preparation, candidate discovery,
-confirmation, analysis, publication, and exact Evidence inspection. It separates
-as-built and stress-relieved specimens and a review paper. Its controlled model
-responses make software regression repeatable; they do not prove live-provider
-extraction quality.
+The two integration scenarios require their documented fixture and database
+prerequisites. If they cannot run in the current environment, report that
+explicitly; a passing focused unit test is not evidence that the complete
+research chain works.
 
-The deep-path case uses the real P002 Source fixture under `fixtures/agent_p002/`
-and PostgreSQL repositories. It follows non-preheated versus 150 C preheated
-steel, including elongation values of 72% and 82%, through exact Source reads,
-approved Objective and Evidence authoring, a published Finding, expert review,
-a derived Objective, and a research plan. It reloads immutable lineage from the
-database. The model is scripted, not a live model-quality evaluation. See
-[database prerequisites](README.md#run-a-focused-check) before running it.
+## What the tests must cover
 
-The P004 table regressions cover the retained Table 3/4 values and structural
-repair, including rejection of invented labels, reordered values, and lost
-uncertainties. These fixed matrices isolate the recovery contract; they do not
-replace replaying the original PDF parser when parsing itself changes.
+The runtime sequence is:
 
-For a structural refactor, compare serialized records and request payloads
-against the same pre-refactor inputs and recorded model responses. Keep random
-IDs, timestamps, and run IDs fixed or explicitly separate them from the
-scientific comparison. Also check OpenAPI, failure responses, and repository
-round trips. A passing unit suite alone does not prove the complete chain.
+1. Source screening preserves recall for paper-local objective signals.
+2. Routing selects bounded Source reads and records technical omissions.
+3. Draft extraction returns only content, local keys, Source labels, and
+   unresolved issues.
+4. Preparation rejects formal IDs and invalid local references while retaining
+   reportable values.
+5. Reconciliation treats model boundary proposals as advisory. A physical
+   split needs positive Source evidence; an overlapping scope needs a matching
+   parent and selector.
+6. Binding resolves Source labels and computes exact/partial/ambiguous result
+   edges. Generic sample or test categories cannot self-certify as exact.
+7. The writer persists immutable revisions. A partial revision is retained for
+   audit but does not create an Objective selection.
+8. A ready selection may feed single-paper synthesis. A cross-paper group is
+   optional and must not repair an unresolved binding.
+9. The compatibility projection is read-only and does not create a second fact
+   ledger.
 
-The extraction suite tests a single reading batch through
-`_extract_source_round()` and the complete adaptive reading loop through
-`extract_and_validate_source_facts()`. Keep both gates: a single batch cannot
-prove that subsequent context reads stop correctly or preserve result anchors.
-Analysis lifecycle tests separately cover safe historical failure messages,
-internal failure locations, retry versions, and retained published results.
+## Failure-focused regression cases
 
-## Researcher-Parity Acceptance
+The focused suite should keep these cases explicit:
 
-Repository ownership is also checked by
-`tests/unit/repositories/test_repository_contracts.py`. Collection and Pipeline
-PostgreSQL tests verify bounded summary queries independently of their unchanged
-detail and write paths. Objective tests keep persistence timestamps outside the
-scientific payload, and Evidence/Plan tests ensure state changes do not serialize
-existing objects. Run these checks together with the two complete scenarios above
-when changing repository result types or domain transitions.
+- a broad sample or test label preserves its value and Source but yields a
+  partial or uncertain binding;
+- a missing result-level sample/test edge blocks strict selection;
+- a model-provided exact/completed flag cannot promote a generic label;
+- a conflicting report is retained as a separate measurement and blocks
+  comparison direction until resolved;
+- an unknown or section-derived boundary cannot receive an identity merely
+  because it appeared first;
+- a selected stratum must hit a concrete parent fact;
+- independent scopes require Source-backed split evidence;
+- multiple complementary reads merge only through the same local key and
+  compatible Source lineage;
+- a provider or parser failure remains technical/retryable and is not reported
+  as scientific absence.
 
-The acceptance question is not whether the model produced fluent prose or
-valid JSON. Given the same papers and the same confirmed Objective, a researcher
-must be able to reach a conclusion in the same scientific direction and scope
-from the published Lens result. The run is acceptable only when all of these
-conditions hold:
+## Researcher-parity acceptance
 
-1. **Recall:** every paper-local Source that explicitly reports an Objective
-   variable, condition, or outcome is inspected, even when framing relevance is
-   wrong or only medium. A Source with no such signal is recorded as out of
-   scope; it is not silently lost.
-2. **Fact completeness:** each reported result keeps its exact Source excerpt,
-   locator, values, units, condition labels, and any jointly varied factors.
-   Missing material, sample, method, or control context is represented as
-   `needs_context`, `descriptive`, or `association_only`, never filled from
-   general knowledge.
-3. **Within-paper binding:** Methods, Results, tables, figures, and captions
-   may complete one another only inside the same document and only through
-   explicit sample or condition identities. A paper-level map is navigation,
-   not experimental proof.
-4. **Comparison discipline:** Findings compare only context-compatible
-   Evidence. Different material states, processes, test conditions, or outcomes
-   remain separate or `non_comparable`; coupled factors remain visible as an
-   `association_only` stratum and never become a convenient pooled causal
-   average.
-5. **Calibrated conclusion:** a Finding cannot be stronger than its Evidence.
-   Controlled one-factor comparisons may support an isolated effect; otherwise
-   the result remains associative or descriptive. An empty Finding means
-   grounded scientific abstention only when the Evidence and paper dispositions
-   explain the gap.
-6. **Failure visibility:** provider, parsing, and technical failures remain
-   `extraction_failed` with trace and contribution warning. They cannot be
-   presented as scientific absence or as a positive/negative result.
+Use a fixture reviewed by an expert, not only a synthetic model response. The
+fixture should include at least one result table whose sample definitions and
+test protocol occur in different Sources, one repeated or conflicting report,
+and two candidate experiment series that share an outcome but are not the same
+physical population.
 
-Verification uses an expert-reviewed paper bundle, not a synthetic model-only
-fixture. The bundle must check Source recall, measurement and comparison recall,
-source-locator correctness, context compatibility, and conclusion direction;
-the four-paper integration fixture is the minimum regression gate for review
-paper separation and sample-state stratification.
+The acceptance question is whether a researcher can reach the same defensible
+decision from the Lens result. Check all of the following:
+
+1. **Source recall:** every Source with an explicit objective variable, condition,
+   or outcome is inspected or recorded as a bounded omission.
+2. **Fact completeness:** each retained report has its value/text, unit or
+   unknown unit, local condition labels, report scope, and Source labels.
+3. **Binding honesty:** exact status requires both result-level binding edges and
+   a concrete applicable protocol. Broad facts remain visible but are not
+   treated as exact.
+4. **Boundary honesty:** tables, sections, outcomes, and response ordering do not
+   define physical experiments without positive evidence. Independent
+   populations are not merged for convenience.
+5. **Conflict preservation:** different source reports are visible as different
+   observations with reasons; no first-value wins rule is allowed.
+6. **Comparison discipline:** coupled factors, incompatible context, and
+   unresolved protocol details remain associative, descriptive, or
+   non-comparable.
+7. **Calibrated publication:** only a ready selection can support a Finding, and
+   the Finding cannot be stronger than its selected revisions.
+8. **Failure visibility:** technical failures remain technical failures with
+   traces and contribution warnings.
+
+## Live-provider evaluation
+
+Live runs are evidence about one model, endpoint, prompt version, Source bundle,
+and budget. Preserve the raw provider response and the post-service candidate
+separately. Do not count deterministic fixture canonicalization as model recall.
+
+At minimum, record:
+
+- boundary precision and recall;
+- measurement and comparison recall;
+- exact result-binding count and non-exact count;
+- Source traceability and conflict recall;
+- omitted Source references and technical failures;
+- whether the result is partial-revision, selection-ready, or Finding-ready.
+
+A partial revision means that auditable content was retained. It is not a
+published conclusion and must not be used to claim that boundary-first,
+fact-first, hybrid, or any other strategy has solved whole-paper extraction.
+
+## Chain-level evidence
+
+For a completed run, retain:
+
+- the confirmed Objective and fixed analysis version;
+- Source IDs/fingerprint and route dispositions;
+- raw Draft attempts and service audit issues;
+- immutable revision IDs and binding statuses;
+- selection/group/Finding lineage, if any; and
+- the final scientific abstention reason when no Finding is produced.
+
+This evidence lets a reviewer distinguish a model omission, an intentional
+partial archive, a binding blocker, a non-comparable study, and a technical
+failure without re-running the provider.

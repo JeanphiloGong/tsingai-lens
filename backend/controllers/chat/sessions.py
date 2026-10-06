@@ -2,42 +2,91 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Mapping
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
+from application.chat.inline_citations import format_message_citations
 from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatBranchAlreadyStartedError,
+    ChatFeedbackAnalysisEnqueueError,
     ChatMessageNotFoundError,
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
 from application.repositories.chat_repository import ChatSessionBusyError
-from controllers.dependencies.auth import current_user_id
-from controllers.schemas.chat.session import (
-    ChatMessageFeedbackRequest,
+from controllers.chat.schemas import (
     ChatBranchRequest,
+    ChatMessageFeedbackRequest,
     ChatMessageFeedbackResponse,
     ChatMessageListResponse,
     ChatMessageResponse,
+    ChatModelCallResponse,
+    ChatModelCallSummaryResponse,
+    ChatPermissionRequest,
+    ChatPermissionResponse,
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
+    ChatSessionListResponse,
     ChatSessionResponse,
     ChatToolCallResponse,
     ChatToolDecisionRequest,
+    ChatTreeNodeResponse,
+    ChatTreeResponse,
     ChatTurnRequest,
     ChatTurnResponse,
-    ChatTreeResponse,
-    ChatTreeNodeResponse,
 )
-from domain.chat import ChatSourceContext
-
+from controllers.dependencies.auth import current_user_id
+from domain.chat import ChatSourceContext, ToolPermissionMode
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
+
+
+def _model_call_summary(call: Any) -> ChatModelCallSummaryResponse:
+    return ChatModelCallSummaryResponse.model_validate({
+        key: getattr(call, key)
+        for key in (
+            "call_id", "session_id", "trigger_message_id", "response_message_id",
+            "purpose", "model", "request_digest", "status", "started_at", "finished_at",
+            "error_code", "provider_confirmed", "prompt_tokens", "completion_tokens",
+            "total_tokens",
+        )
+    })
+
+
+def _model_call_detail(call: Any) -> ChatModelCallResponse:
+    return ChatModelCallResponse.model_validate({
+        **_model_call_summary(call).model_dump(),
+        "request": dict(call.request),
+    })
+
+
+@router.get("/{session_id}/permissions", response_model=ChatPermissionResponse)
+async def get_chat_permission(session_id: str, request: Request):
+    service = request.app.state.chat_session_service
+    user_id = await current_user_id(request)
+    try:
+        await service.get_session_for_user(session_id, user_id)
+        return await service.repository.read_permission(session_id, user_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/{session_id}/permissions", response_model=ChatPermissionResponse)
+async def set_chat_permission(session_id: str, payload: ChatPermissionRequest, request: Request):
+    service = request.app.state.chat_session_service
+    user_id = await current_user_id(request)
+    try:
+        await service.get_session_for_user(session_id, user_id)
+        return await service.repository.set_permission(session_id, user_id, **payload.model_dump())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": str(exc)}) from exc
 
 
 def _session_not_found(exc: ChatSessionNotFoundError) -> dict[str, str]:
@@ -46,6 +95,32 @@ def _session_not_found(exc: ChatSessionNotFoundError) -> dict[str, str]:
         "message": str(exc),
         "session_id": exc.session_id,
     }
+
+
+@router.get("", response_model=ChatSessionListResponse, summary="List owned Chat sessions")
+async def list_chat_sessions(
+    request: Request,
+    collection_id: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> ChatSessionListResponse:
+    try:
+        sessions = await request.app.state.chat_session_service.list_sessions_for_user(
+            collection_id=collection_id,
+            user_id=await current_user_id(request),
+            limit=limit,
+            offset=offset,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ChatSessionListResponse(
+        items=[
+            ChatSessionResponse.model_validate(item, from_attributes=True)
+            for item in sessions
+        ],
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post(
@@ -65,7 +140,7 @@ async def create_chat_session(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ChatSessionResponse.model_validate(session.to_record())
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
 @router.get(
@@ -84,7 +159,7 @@ async def get_chat_session(
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
-    return ChatSessionResponse.model_validate(session.to_record())
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
 @router.post("/{session_id}/branches", response_model=ChatSessionResponse, status_code=201)
@@ -103,7 +178,7 @@ async def branch_chat_message(
         raise HTTPException(status_code=409, detail={"code": "chat_session_busy", "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"code": "chat_branch_invalid", "message": str(exc)}) from exc
-    return ChatSessionResponse.model_validate(session.to_record())
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
 @router.get("/{session_id}/tree", response_model=ChatTreeResponse)
@@ -140,6 +215,53 @@ async def list_chat_messages(
     return _trajectory_response(trajectory)
 
 
+@router.get(
+    "/{session_id}/model-calls",
+    response_model=dict,
+    summary="List exact provider calls for an owned Chat session",
+)
+async def list_chat_model_calls(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    try:
+        calls = await request.app.state.chat_session_service.list_model_calls_for_user(
+            session_id, await current_user_id(request), limit=limit, offset=offset,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "items": [_model_call_summary(call).model_dump() for call in calls],
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/{session_id}/model-calls/{call_id}",
+    response_model=ChatModelCallResponse,
+    summary="Read one exact provider call for an owned Chat session",
+)
+async def get_chat_model_call(
+    session_id: str, call_id: str, request: Request,
+) -> ChatModelCallResponse:
+    try:
+        call = await request.app.state.chat_session_service.get_model_call_for_user(
+            session_id, call_id, await current_user_id(request),
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if call is None:
+        raise HTTPException(status_code=404, detail="chat model call not found")
+    return _model_call_detail(call)
+
+
 @router.get("/{session_id}/events", summary="Resume updates for one owned Research Agent response")
 async def stream_chat_updates(
     session_id: str, request: Request, response_id: str = Query(min_length=1, max_length=128),
@@ -163,15 +285,23 @@ def _snapshot_response(snapshot: Any) -> ChatResponseSnapshotResponse:
 def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListResponse:
     pending = trajectory["pending_approval"]
     response = trajectory.get("response")
+    visible_messages = format_message_citations(trajectory["messages"])
     return ChatMessageListResponse(
-        items=[_message_response(item) for item in trajectory["messages"]],
-        feedback=[ChatMessageFeedbackResponse.model_validate(item) for item in trajectory["feedback"]],
+        items=[_message_response(item) for item in visible_messages],
+        feedback=[
+            ChatMessageFeedbackResponse.model_validate(item)
+            for item in trajectory["feedback"]
+        ],
         branches=trajectory["branches"],
-        branch_draft=_message_response(trajectory["branch_draft"]) if trajectory["branch_draft"] else None,
+        branch_draft=(
+            _message_response(trajectory["branch_draft"])
+            if trajectory["branch_draft"]
+            else None
+        ),
         running=trajectory["running"],
         response=_snapshot_response(response) if response is not None else None,
         pending_approval=(
-            ChatToolCallResponse.model_validate(pending.to_record())
+            ChatToolCallResponse.model_validate(pending, from_attributes=True)
             if pending is not None
             else None
         ),
@@ -200,6 +330,12 @@ async def set_chat_message_feedback(
         raise HTTPException(status_code=404, detail={
             "code": "chat_message_not_found", "message": str(exc),
         }) from exc
+    except ChatFeedbackAnalysisEnqueueError as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "feedback_analysis_enqueue_failed",
+            "message": str(exc),
+            "feedback_id": exc.feedback_id,
+        }) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -222,11 +358,17 @@ async def post_chat_message(
     try:
         user_id = await current_user_id(request)
         if "text/event-stream" in request.headers.get("accept", ""):
+            permission_kwargs = (
+                {"permission_mode": payload.permission_mode}
+                if payload.permission_mode is not ToolPermissionMode.CONFIRM
+                else {}
+            )
             events = await request.app.state.chat_session_service.stream_message_for_user(
                 session_id,
                 user_id,
                 message=payload.message,
                 source_contexts=_source_contexts(payload),
+                **permission_kwargs,
                 **({"branch_revision": True} if payload.branch_revision else {}),
             )
             return StreamingResponse(
@@ -237,11 +379,17 @@ async def post_chat_message(
                     "X-Accel-Buffering": "no",
                 },
             )
+        permission_kwargs = (
+            {"permission_mode": payload.permission_mode}
+            if payload.permission_mode is not ToolPermissionMode.CONFIRM
+            else {}
+        )
         turn = await request.app.state.chat_session_service.post_message_for_user(
             session_id,
             user_id,
             message=payload.message,
             source_contexts=_source_contexts(payload),
+            **permission_kwargs,
             **({"branch_revision": True} if payload.branch_revision else {}),
         )
     except ChatSessionNotFoundError as exc:
@@ -357,7 +505,7 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
         warnings=list(turn.get("warnings") or ()),
         messages=[_message_response(item) for item in turn.get("messages") or ()],
         pending_approval=(
-            ChatToolCallResponse.model_validate(pending.to_record())
+            ChatToolCallResponse.model_validate(pending, from_attributes=True)
             if pending is not None
             else None
         ),
@@ -368,7 +516,7 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
 
 
 def _message_response(message: Any) -> ChatMessageResponse:
-    return ChatMessageResponse.model_validate(message.to_record())
+    return ChatMessageResponse.model_validate(message, from_attributes=True)
 
 
 __all__ = ["router"]

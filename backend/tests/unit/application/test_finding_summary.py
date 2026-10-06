@@ -185,7 +185,7 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
                 )
             )
         ),
-        evidence_analysis_service=None,
+        experiment_analysis_service=None,
         objective_input_service=None,
         document_profile_service=None,
     )

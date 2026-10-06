@@ -55,7 +55,7 @@ describe('current collection layout', () => {
 		render(Layout);
 		const navigation = browserPage.getByRole('navigation', { name: 'Collection navigation' });
 
-		for (const name of ['Objectives', 'Comparisons', 'Evidence Map', 'Papers', 'AI Copilot']) {
+		for (const name of ['Objectives', 'Evidence Map', 'Papers', 'AI Copilot']) {
 			await expect
 				.element(navigation.getByRole('link', { name }))
 				.not.toHaveAttribute('aria-disabled');

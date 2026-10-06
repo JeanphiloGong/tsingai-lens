@@ -4,6 +4,12 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
+)
+from application.core.objectives.analysis.analysis_record_source import (
+    should_read_experiment_projection,
+)
 from application.source.collection_service import CollectionService
 from domain.core import ResearchObjective, is_question_shaped_objective
 from application.repositories.objective_repository import ObjectiveRepository
@@ -17,9 +23,11 @@ class ObjectiveAuthoringService:
         *,
         collection_service: CollectionService,
         objective_repository: ObjectiveRepository,
+        experiment_projection: ExperimentCompatibilityProjection | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
+        self.experiment_projection = experiment_projection
 
     async def create_chat_assisted_candidate(
         self,
@@ -151,12 +159,22 @@ class ObjectiveAuthoringService:
                 )
 
             if kind == "finding":
-                record = await self.objective_repository.read_finding(
-                    collection_id,
-                    parent_objective_id,
-                    parent_analysis_version,
-                    reference_id,
-                )
+                if await self._should_use_experiment_projection(
+                    collection_id, parent_objective_id, parent_analysis_version
+                ):
+                    record = await self.experiment_projection.read_finding(
+                        collection_id,
+                        parent_objective_id,
+                        parent_analysis_version,
+                        reference_id,
+                    )
+                else:
+                    record = await self.objective_repository.read_finding(
+                        collection_id,
+                        parent_objective_id,
+                        parent_analysis_version,
+                        reference_id,
+                    )
                 if record is None:
                     raise ValueError("Finding is not part of the published parent analysis")
                 snapshot = {
@@ -238,13 +256,24 @@ class ObjectiveAuthoringService:
     ) -> Any | None:
         offset = 0
         while True:
-            records, total = await self.objective_repository.list_evidence(
-                collection_id,
-                objective_id,
-                analysis_version,
-                offset=offset,
-                limit=500,
-            )
+            if await self._should_use_experiment_projection(
+                collection_id, objective_id, analysis_version
+            ):
+                records, total = await self.experiment_projection.list_evidence(
+                    collection_id,
+                    objective_id,
+                    analysis_version,
+                    offset=offset,
+                    limit=500,
+                )
+            else:
+                records, total = await self.objective_repository.list_evidence(
+                    collection_id,
+                    objective_id,
+                    analysis_version,
+                    offset=offset,
+                    limit=500,
+                )
             for record in records:
                 if _text(_record_field(record, "evidence_id")) == evidence_id:
                     return record
@@ -259,11 +288,20 @@ class ObjectiveAuthoringService:
         analysis_version: int,
         document_id: str,
     ) -> Any | None:
-        records = await self.objective_repository.list_contributions(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
+            records = await self.experiment_projection.list_contributions(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+        else:
+            records = await self.objective_repository.list_contributions(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
         return next(
             (
                 record
@@ -271,6 +309,20 @@ class ObjectiveAuthoringService:
                 if _text(_record_field(record, "document_id")) == document_id
             ),
             None,
+        )
+
+    async def _should_use_experiment_projection(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> bool:
+        return await should_read_experiment_projection(
+            objective_repository=self.objective_repository,
+            experiment_projection=self.experiment_projection,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
         )
 
 

@@ -76,7 +76,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		fetchMock.mockReset();
 	});
 
-	it('keeps profile identity, warnings, and Source navigation visible', async () => {
+	it('keeps profile identity and Source navigation visible', async () => {
 		fetchMock.mockResolvedValue(
 			jsonResponse({
 				collection_id: 'col_123',
@@ -113,9 +113,9 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		await expect.element(browserPage.getByRole('heading', { name: 'Papers' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A')).toBeInTheDocument();
 		expect(document.querySelector('.paper-type')?.textContent).toBe('Experimental');
-		await expect.element(browserPage.getByText('Missing publication year')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Paper 2')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Open paper' }).first())
+			.element(browserPage.getByRole('link').first())
 			.toHaveAttribute('href', '/collections/col_123/documents/doc_1');
 		expect(requestPath(fetchMock.mock.calls[0]?.[0] as string | URL | Request)).toBe(
 			'/api/v1/collections/col_123/documents/profiles'
@@ -211,7 +211,6 @@ describe('collections/[id]/documents/+page.svelte', () => {
 
 		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await browserPage.getByLabelText('Search papers').fill('  laser porosity  ');
-		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
 
 		await vi.waitFor(() => {
 			expect(
@@ -224,12 +223,10 @@ describe('collections/[id]/documents/+page.svelte', () => {
 		await expect.element(browserPage.getByText('1 matching paper(s)')).toBeInTheDocument();
 	});
 
-	it('combines paper type and warning filters across the collection', async () => {
+	it('filters the collection by paper type', async () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const url = new URL(String(input), 'http://localhost');
-			const filtered =
-				url.searchParams.get('doc_type') === 'review' &&
-				url.searchParams.get('has_warnings') === 'true';
+			const filtered = url.searchParams.get('doc_type') === 'review';
 			return jsonResponse({
 				collection_id: 'col_123',
 				total: filtered ? 1 : 131,
@@ -254,34 +251,25 @@ describe('collections/[id]/documents/+page.svelte', () => {
 
 		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await browserPage.getByLabelText('Paper type').selectOptions('review');
-		await browserPage.getByLabelText('Has parsing warnings').click();
-		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
-
 		await vi.waitFor(() => {
 			expect(
 				fetchMock.mock.calls.some(([input]) => {
 					const url = new URL(String(input), 'http://localhost');
 					return (
 						url.searchParams.get('offset') === '0' &&
-						url.searchParams.get('doc_type') === 'review' &&
-						url.searchParams.get('has_warnings') === 'true'
+						url.searchParams.get('doc_type') === 'review'
 					);
 				})
 			).toBe(true);
 		});
 		await expect.element(browserPage.getByText('Review needing inspection')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('1 matching paper(s)')).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Clear filters' }))
-			.toBeInTheDocument();
 	});
 
 	it('keeps all active filters when changing paper pages', async () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const url = new URL(String(input), 'http://localhost');
-			const isFiltered =
-				url.searchParams.get('doc_type') === 'review' &&
-				url.searchParams.get('has_warnings') === 'true';
+			const isFiltered = url.searchParams.get('doc_type') === 'review';
 			const offset = Number(url.searchParams.get('offset') ?? 0);
 			return jsonResponse({
 				collection_id: 'col_123',
@@ -299,8 +287,6 @@ describe('collections/[id]/documents/+page.svelte', () => {
 
 		render(Page, { target: document.body.appendChild(document.createElement('div')), context: new Map([[DOCUMENT_AGENT, agent]]) });
 		await browserPage.getByLabelText('Paper type').selectOptions('review');
-		await browserPage.getByLabelText('Has parsing warnings').click();
-		await browserPage.getByRole('button', { name: 'Apply filters' }).click();
 		await vi.waitFor(() => {
 			expect(
 				fetchMock.mock.calls.some(([input]) => {
@@ -324,7 +310,6 @@ describe('collections/[id]/documents/+page.svelte', () => {
 			expect(nextRequest).toBeDefined();
 			const url = new URL(String(nextRequest?.[0]), 'http://localhost');
 			expect(url.searchParams.get('doc_type')).toBe('review');
-			expect(url.searchParams.get('has_warnings')).toBe('true');
 		});
 		await expect.element(browserPage.getByText('Filtered paper 26')).toBeInTheDocument();
 	});

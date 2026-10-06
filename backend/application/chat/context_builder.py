@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 from math import ceil, inf
 from typing import Any
@@ -24,6 +24,11 @@ class ChatModelContext:
     compacting: bool = False
     max_context_tokens: int = 65_536
     prior_reading_summary: str = ""
+    # Runtime-only audit metadata. These fields never enter provider_messages.
+    model_call_observer: Any | None = None
+    model_call_purpose: str = "decision"
+    model_call_response_message_id: str | None = None
+    model_call_session_id: str | None = None
 
     def provider_messages(self, system_prompt: str) -> list[dict[str, Any]]:
         messages = [{"role": "system", "content": system_prompt}]
@@ -196,8 +201,11 @@ class ChatContextBuilder:
         omitted = tuple(
             message for message in messages if message.message_id not in selected_ids
         )
+        summary_messages = omitted + tuple(
+            message for message in selected_messages if message.source_contexts
+        )
         summary = self._rollover_summary(
-            omitted, min(self.max_summary_chars, self.max_chars - char_count)
+            summary_messages, min(self.max_summary_chars, self.max_chars - char_count)
         )
         if token_count + self.estimate_tokens(summary) > max_input_tokens:
             summary = ""
@@ -261,13 +269,21 @@ class ChatContextBuilder:
                     "position": request.position, "arguments": project(request.arguments),
                 })
             for source in message.source_contexts:
-                entries.append({
-                    "document_id": source.document_id, "source_ref": source.source_ref,
-                    "source_digest": source.source_digest,
-                    "resource": source.resource_ref.to_record(),
-                })
+                entries.append(
+                    {
+                        "source_context": True,
+                        "document_id": source.document_id,
+                        "source_ref": source.source_ref,
+                        "source_digest": source.source_digest,
+                        "resource": asdict(source.resource_ref),
+                    }
+                )
         if not entries:
             return ""
+        # User-selected Sources are the durable context needed to resume a
+        # pending authoring decision; retain them before lower-priority tool
+        # arguments when the bounded rollover budget is tight.
+        entries.sort(key=lambda entry: 0 if entry.get("source_context") else 1)
         kept = []
         summary = ""
         for entry in entries:

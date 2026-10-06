@@ -1,47 +1,25 @@
 from __future__ import annotations
 
-import json
 import logging
 from asyncio import Semaphore, gather, to_thread
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from hashlib import sha256
-from typing import Any, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Literal, Mapping, Sequence
 
 from application.core.objectives.analysis.diagnostics import record_analysis_failure
-from application.core.objectives.analysis.evidence_materialization import (
-    OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION,
-    materialize_evidence,
-    rebind_persisted_contribution,
-    rebind_persisted_evidence,
+from application.core.objectives.analysis.evidence_routing import route_sources
+from application.core.objectives.analysis.paper_experiment_contract import (
+    ReconciledPaperExperimentOutput,
 )
-from application.core.objectives.analysis.evidence_routing import (
-    OBJECTIVE_EVIDENCE_ROUTING_VERSION,
-    route_sources,
-)
-from application.core.objectives.analysis.finding_synthesis import (
-    FindingSynthesisService,
-)
-from application.core.objectives.analysis.paper_experiment import (
-    PAPER_EXPERIMENT_RECONSTRUCTION_VERSION,
-    assemble_paper_experiments,
-    reconstruct_paper_experiments,
-)
-from application.core.objectives.analysis.source_extraction import (
-    OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION,
-    ObjectiveSourceExtractor,
-    SourceReadAudit,
-    extract_and_validate_source_facts,
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentExtractionResult,
+    PaperExperimentExtractor,
+    build_bundle_from_routes,
 )
 from application.core.objectives.analysis.source_screening import (
-    OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
     ObjectiveSourceScreener,
+    PaperAnalysisFrame,
     screen_sources,
 )
-from application.core.objectives.analysis.source_validation import (
-    OBJECTIVE_SOURCE_GROUNDING_VERSION,
-)
-from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.objective_input_service import (
     ObjectiveInputService,
     ObjectiveSourceInputs,
@@ -51,27 +29,18 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopePreview,
     screen_objective_scope,
 )
-from application.core.paper_facts.extraction import PaperFactsExtractor
-from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveRepository,
+)
 from application.repositories.paper_map_repository import PaperMapRepository
 from application.source.collection_service import CollectionService
 from domain.core import (
-    Finding,
-    ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
-    ObjectiveEvidence,
+    InspectedObjectiveSourceRef,
     PaperContribution,
-    PaperExperiment,
     PaperResearchMap,
     PreparedDocumentInput,
     ResearchObjective,
-)
-from domain.source import (
-    SourceBlock,
-    SourceFigure,
-    SourceTable,
-    render_markdown_table,
-    render_plain_table_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,38 +54,317 @@ class ObjectiveAnalysisInputs(ObjectiveSourceInputs):
     paper_maps: tuple[PaperResearchMap, ...]
 
 
-_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION = "objective-document-evidence.v2"
-OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS = (
-    ("paper_framing", OBJECTIVE_PAPER_FRAME_PROMPT_VERSION),
-    ("evidence_routing", OBJECTIVE_EVIDENCE_ROUTING_VERSION),
-    ("source_extraction", OBJECTIVE_SOURCE_EXTRACTION_PROMPT_VERSION),
-    ("source_grounding", OBJECTIVE_SOURCE_GROUNDING_VERSION),
-    ("paper_experiment", PAPER_EXPERIMENT_RECONSTRUCTION_VERSION),
-    ("evidence_materialization", OBJECTIVE_EVIDENCE_MATERIALIZATION_VERSION),
-)
 _OBJECTIVE_DOCUMENT_MAX_CONCURRENCY = 4
-# Paper reconstruction needs title/abstract/materials context, not a second
-# copy of the entire document.  Keep this bounded so context recovery cannot
-# inflate every result's lineage or analysis prompt.
-_OBJECTIVE_DOCUMENT_CONTEXT_LIMIT = 96
+# Keep concurrent document extraction bounded so one Objective run cannot
+# overwhelm the provider or the worker process.
+
+
+_SOURCE_KIND_ALIASES = {
+    "block": "text_window",
+    "paragraph": "text_window",
+    "text": "text_window",
+    "text_window": "text_window",
+    "table": "table",
+    "table_row": "table",
+    "table_cell": "table",
+    "figure": "figure",
+    "figure_caption": "figure",
+}
+
+
+def _source_ref(value: Mapping[str, Any]) -> InspectedObjectiveSourceRef:
+    kind = str(value.get("source_kind") or "").strip().casefold()
+    return InspectedObjectiveSourceRef(
+        source_kind=_SOURCE_KIND_ALIASES.get(kind, kind),
+        source_ref=str(value.get("source_ref") or "").strip(),
+        source_digest=(
+            str(value.get("source_digest") or "").strip().lower() or None
+        ),
+    )
+
+
+def _unique_source_refs(
+    values: Sequence[Mapping[str, Any]],
+) -> tuple[InspectedObjectiveSourceRef, ...]:
+    result: list[InspectedObjectiveSourceRef] = []
+    seen: set[tuple[str, str]] = set()
+    for value in values:
+        ref = _source_ref(value)
+        identity = (ref.source_kind, ref.source_ref)
+        if not ref.source_ref or identity in seen:
+            continue
+        seen.add(identity)
+        result.append(ref)
+    return tuple(result)
+
+
+def _used_draft_source_labels(output: ReconciledPaperExperimentOutput) -> set[str]:
+    labels: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                if key in {"unresolved_issues", "audit_issues"}:
+                    continue
+                if key == "source_label" and isinstance(nested, str):
+                    labels.add(nested.strip())
+                    continue
+                if key in {
+                    "source_labels",
+                    "binding_source_labels",
+                    "variant_binding_source_labels",
+                    "test_binding_source_labels",
+                    "interpretation_source_labels",
+                }:
+                    # Most source fields are lists of local labels.  Keep
+                    # accepting nested mappings here because Draft-only
+                    # boundary evidence may carry ``source_label`` objects
+                    # alongside an explanation.  Treating a mapping as a
+                    # string would produce ``{"source_label": "S001"}``
+                    # and under-count extracted Source coverage.
+                    if isinstance(nested, (list, tuple, set)):
+                        for item in nested:
+                            if isinstance(item, str):
+                                labels.add(item.strip())
+                            else:
+                                visit(item)
+                    else:
+                        visit(nested)
+                    continue
+                if key == "split_evidence":
+                    # Boundary evidence is a nested Draft shape rather than
+                    # a flat list of labels; recurse so its source_label(s)
+                    # participate in Source accounting.
+                    visit(nested)
+                    continue
+                visit(nested)
+        elif isinstance(value, (list, tuple)):
+            for nested in value:
+                visit(nested)
+
+    for draft in output.output.experiments:
+        labels.update(draft.source_labels)
+        visit(draft.payload)
+    return labels
+
+
+def _draft_measurements(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
+    values = payload.get("measurements") or ()
+    return tuple(item for item in values if isinstance(item, Mapping))
+
+
+def _build_contribution_for_extraction(
+    *,
+    collection_id: str,
+    analysis: ObjectiveAnalysis,
+    objective: ResearchObjective,
+    frame: PaperAnalysisFrame | None,
+    extraction: PaperExperimentExtractionResult,
+    routed_source_refs: Sequence[Mapping[str, Any]],
+    inspected_source_refs: Sequence[Mapping[str, Any]],
+    failed_source_refs: Sequence[Mapping[str, Any]],
+    omitted_source_refs: Sequence[str],
+    comparable_evidence_count: int = 0,
+) -> PaperContribution:
+    """Build contribution accounting from Source identities, not call counts."""
+
+    routed = _unique_source_refs(routed_source_refs)
+    inspected = _unique_source_refs(inspected_source_refs)
+    failed = _unique_source_refs(failed_source_refs)
+    routed_ids = {(item.source_kind, item.source_ref) for item in routed}
+    inspected_ids = {(item.source_kind, item.source_ref) for item in inspected}
+    failed_ids = {(item.source_kind, item.source_ref) for item in failed}
+    if not inspected_ids <= routed_ids or not failed_ids <= routed_ids:
+        raise ValueError("Source accounting contains a ref that was not routed")
+    if inspected_ids & failed_ids:
+        raise ValueError("a Source cannot be both inspected and failed")
+
+    omitted = tuple(
+        dict.fromkeys(
+            str(item).strip() for item in omitted_source_refs if str(item).strip()
+        )
+    )
+    uninspected_ids = routed_ids - inspected_ids - failed_ids
+    omitted_routed_ids = {
+        identity for identity in routed_ids if identity[1] in omitted
+    }
+    omitted_outside_routes = {
+        source_ref
+        for source_ref in omitted
+        if not any(identity[1] == source_ref for identity in routed_ids)
+    }
+    uninspected_count = len(uninspected_ids | omitted_routed_ids) + len(
+        omitted_outside_routes
+    )
+
+    output = extraction.output
+    used_labels = _used_draft_source_labels(output) if output is not None else set()
+    extracted_ids: set[tuple[str, str]] = set()
+    if output is not None:
+        for label in used_labels:
+            raw = output.output.source_labels.get(label)
+            if isinstance(raw, Mapping):
+                ref = _source_ref(raw)
+                extracted_ids.add((ref.source_kind, ref.source_ref))
+    extracted_count = len(extracted_ids & routed_ids)
+
+    excluded_by_screening = bool(
+        frame is not None
+        and not routed
+        and (
+            frame.relevance == "irrelevant"
+            or frame.paper_role in {"review", "irrelevant"}
+        )
+    )
+    if excluded_by_screening:
+        disposition = "excluded"
+        analysis_status = "excluded"
+    elif not routed:
+        disposition = "no_routable_evidence"
+        analysis_status = "analyzed"
+    elif failed and extracted_count == 0 and comparable_evidence_count == 0:
+        disposition = "extraction_failed"
+        analysis_status = "failed"
+    elif uninspected_count:
+        disposition = "coverage_incomplete"
+        analysis_status = "analyzed"
+    elif comparable_evidence_count > 0:
+        disposition = "comparable_evidence"
+        analysis_status = "analyzed"
+    elif extracted_count == 0:
+        disposition = "no_grounded_evidence"
+        analysis_status = "analyzed"
+    else:
+        disposition = "no_comparable_evidence"
+        analysis_status = "analyzed"
+
+    if extraction.status == "technical_failure" and not failed:
+        raise RuntimeError(
+            "technical extraction failure has no Source-level failed audit"
+        )
+    if disposition == "no_grounded_evidence" and inspected_ids != routed_ids:
+        raise ValueError(
+            "no_grounded_evidence requires every routed Source to be inspected"
+        )
+
+    diagnostics = tuple(
+        dict.fromkeys(
+            str(item).strip()
+            for item in extraction.diagnostics
+            if str(item).strip()
+        )
+    )
+    warnings = diagnostics
+    if uninspected_count:
+        warnings = (*warnings, f"{uninspected_count} routed Source(s) remain uninspected.")
+    reason = {
+        "excluded": (
+            "The paper was screened out for this Objective and was not routed "
+            "for experiment extraction."
+        ),
+        "no_routable_evidence": "No Source was routed for this Objective.",
+        "no_grounded_evidence": "Routed Sources were inspected but no source-grounded experiment fact was recovered.",
+        "no_comparable_evidence": "Experiment facts were recovered, but no bound comparable result is available.",
+        "coverage_incomplete": "Some routed Source context was omitted or not inspected.",
+        "extraction_failed": "One or more routed Sources failed during Source-level extraction.",
+        "comparable_evidence": None,
+    }[disposition]
+    measured_scope = tuple(
+        dict.fromkeys(
+            str(item.get("outcome") or "").strip()
+            for draft in (output.output.experiments if output is not None else ())
+            for item in _draft_measurements(draft.payload)
+            if str(item.get("outcome") or "").strip()
+        )
+    )
+    document_id = (
+        output.output.document_id
+        if output is not None
+        else (frame.document_id if frame is not None else "")
+    )
+    return PaperContribution(
+        collection_id=collection_id,
+        objective_id=objective.objective_id,
+        analysis_version=analysis.analysis_version,
+        document_id=document_id,
+        analysis_status=analysis_status,
+        relevance=frame.relevance if frame is not None else "uncertain",
+        paper_role=frame.paper_role if frame is not None else "uncertain",
+        contribution_summary=(
+            f"Recovered {len(output.output.experiments)} PaperExperiment Draft series."
+            if output is not None
+            else None
+        ),
+        material_match=frame.material_match if frame is not None else (),
+        changed_variables=frame.changed_variables if frame is not None else (),
+        measured_property_scope=measured_scope
+        or (frame.measured_property_scope if frame is not None else ()),
+        test_environment_scope=frame.test_environment_scope if frame is not None else (),
+        exclusion_reason=reason if disposition == "excluded" else None,
+        warnings=warnings,
+        confidence=0.9 if extracted_count else 0.0,
+        evidence_disposition=disposition,
+        routed_source_count=len(routed),
+        extracted_source_count=(0 if disposition == "extraction_failed" else extracted_count),
+        comparable_evidence_count=(
+            0 if disposition == "extraction_failed" else comparable_evidence_count
+        ),
+        failed_source_count=len(failed),
+        uninspected_source_count=uninspected_count,
+        evidence_disposition_reason=reason,
+        inspected_source_refs=inspected,
+    )
+
+
+def _failed_document_contribution(
+    *,
+    collection_id: str,
+    objective_id: str,
+    analysis_version: int,
+    document_id: str,
+) -> PaperContribution:
+    return PaperContribution(
+        collection_id=collection_id,
+        objective_id=objective_id,
+        analysis_version=analysis_version,
+        document_id=document_id,
+        analysis_status="failed",
+        relevance="uncertain",
+        paper_role="uncertain",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=("PaperExperiment extraction failed for this paper; retry the analysis.",),
+        confidence=0,
+    )
+
+
 @dataclass(frozen=True)
-class ObjectiveAnalysisArtifacts:
-    """Canonical values produced by one versioned Objective analysis run."""
+class ObjectiveExperimentAnalysisArtifacts:
+    """Experiment inputs and coverage produced by one Objective analysis run."""
 
     contributions: tuple[PaperContribution, ...]
-    evidence_records: tuple[ObjectiveEvidence, ...]
-    findings: tuple[Finding, ...]
+    experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+    partial_experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+    extraction_statuses: Mapping[str, str] = field(default_factory=dict)
+    extraction_diagnostics: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     model_name: str | None = None
-    experiments: tuple[PaperExperiment, ...] = ()
 
 
 @dataclass(frozen=True)
-class ObjectiveDocumentEvidenceArtifacts:
-    """Scientific inspection result for one Objective and one document."""
+class DocumentExperimentArtifacts:
+    """Source inspection result for one Objective and one document."""
 
     contribution: PaperContribution
-    evidence_records: tuple[ObjectiveEvidence, ...]
-    experiments: tuple[PaperExperiment, ...] = ()
+    experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+    partial_experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+    extraction_status: Literal[
+        "ready", "partial_archive", "abstained", "technical_failure"
+    ] = "abstained"
+    extraction_diagnostics: tuple[str, ...] = ()
 
 
 class ResearchObjectiveNotFoundError(FileNotFoundError):
@@ -136,27 +384,23 @@ class ObjectiveScopeNotReadyError(RuntimeError):
         super().__init__(f"objective paper scope not ready: {collection_id}")
 
 
-class ObjectiveEvidenceAnalysisService:
-    """Generate source-grounded artifacts for one confirmed Objective."""
+class ObjectiveExperimentAnalysisService:
+    """Reconstruct source-grounded experiments for one confirmed Objective."""
 
     def __init__(
         self,
         collection_service: CollectionService,
         paper_map_repository: PaperMapRepository,
         objective_repository: ObjectiveRepository,
-        finding_synthesis_service: FindingSynthesisService,
         objective_input_service: ObjectiveInputService,
         objective_source_screener: ObjectiveSourceScreener | None = None,
-        objective_source_extractor: ObjectiveSourceExtractor | None = None,
-        paper_facts_extractor: PaperFactsExtractor | None = None,
+        paper_experiment_extractor: PaperExperimentExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._objective_source_screener = objective_source_screener
-        self._objective_source_extractor = objective_source_extractor
-        self._paper_facts_extractor = paper_facts_extractor
+        self._paper_experiment_extractor = paper_experiment_extractor
         self.paper_map_repository = paper_map_repository
         self.objective_repository = objective_repository
-        self.finding_synthesis_service = finding_synthesis_service
         self.objective_input_service = objective_input_service
 
     async def preview_objective_scope(
@@ -178,12 +422,12 @@ class ObjectiveEvidenceAnalysisService:
             raise ObjectiveScopeNotReadyError(collection_id)
         return screen_objective_scope(paper_maps, objective=objective)
 
-    async def generate_objective_analysis_artifacts(
+    async def generate_experiment_analysis_artifacts(
         self,
         collection_id: str,
         analysis: ObjectiveAnalysis,
         progress_callback: ProgressCallback | None = None,
-    ) -> ObjectiveAnalysisArtifacts:
+    ) -> ObjectiveExperimentAnalysisArtifacts:
         if analysis.collection_id != collection_id:
             raise ValueError("analysis belongs to another collection")
         active_objective = await self.objective_repository.read_objective(
@@ -200,8 +444,8 @@ class ObjectiveEvidenceAnalysisService:
         response_client = self.objective_input_service.response_client
         if self._objective_source_screener is None:
             self._objective_source_screener = ObjectiveSourceScreener(response_client)
-        if self._objective_source_extractor is None:
-            self._objective_source_extractor = ObjectiveSourceExtractor(response_client)
+        if self._paper_experiment_extractor is None:
+            self._paper_experiment_extractor = PaperExperimentExtractor(response_client)
         model_name = str(
             getattr(response_client, "model", None) or analysis.model_name or ""
         ).strip()
@@ -230,40 +474,7 @@ class ObjectiveEvidenceAnalysisService:
 
         async def inspect_document(
             document_input: PreparedDocumentInput,
-        ) -> ObjectiveDocumentEvidenceArtifacts:
-            input_fingerprint = self._document_evidence_input_fingerprint(
-                objective=active_objective,
-                document_input=document_input,
-                model_name=model_name,
-                extraction_version=_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION,
-            )
-            checkpoint = await self.objective_repository.read_document_evidence(
-                collection_id,
-                active_objective.objective_id,
-                document_input.document_id,
-                input_fingerprint,
-            )
-            if checkpoint is not None and checkpoint.status == "succeeded":
-                artifacts = self._rebind_document_evidence(
-                    checkpoint,
-                    analysis,
-                    objective=active_objective,
-                    objective_inputs=objective_inputs,
-                )
-                await report_document_completed(document_input.document_id)
-                return artifacts
-
-            running = ObjectiveDocumentEvidence.start(
-                collection_id=collection_id,
-                objective_id=active_objective.objective_id,
-                document_id=document_input.document_id,
-                input_fingerprint=input_fingerprint,
-                analysis_version=analysis.analysis_version,
-                extraction_version=_OBJECTIVE_DOCUMENT_EVIDENCE_VERSION,
-                model_name=model_name,
-                started_at=datetime.now(timezone.utc),
-            )
-            await self.objective_repository.write_document_evidence(running)
+        ) -> DocumentExperimentArtifacts:
             document_objective_inputs = self._objective_inputs_for_document(
                 collection_id,
                 objective_inputs,
@@ -286,54 +497,39 @@ class ObjectiveEvidenceAnalysisService:
             try:
                 async with extraction_limit:
                     artifacts = await to_thread(
-                        self._generate_document_evidence,
+                        self._reconstruct_document_experiments,
                         collection_id=collection_id,
                         analysis=analysis,
                         objective=active_objective,
                         objective_inputs=document_objective_inputs,
                         progress_callback=document_progress_callback,
                     )
-                checkpoint = running.succeed(
-                    contribution=artifacts.contribution,
-                    evidence_records=artifacts.evidence_records,
-                    completed_at=datetime.now(timezone.utc),
-                )
             except Exception as exc:  # noqa: BLE001
                 record_analysis_failure(
                     exc,
                     collection_id=collection_id,
                     objective_id=active_objective.objective_id,
                     document_id=document_input.document_id,
-                    stage="document_evidence_extraction",
+                    stage="document_experiment_extraction",
                 )
                 logger.error(
-                    "Objective document Evidence extraction failed "
+                    "Objective document experiment extraction failed "
                     "collection_id=%s objective_id=%s document_id=%s error_type=%s",
                     collection_id,
                     active_objective.objective_id,
                     document_input.document_id,
                     type(exc).__name__,
                 )
-                checkpoint = running.fail(
-                    contribution=self._failed_document_contribution(
+                artifacts = DocumentExperimentArtifacts(
+                    contribution=_failed_document_contribution(
                         collection_id=collection_id,
                         objective_id=active_objective.objective_id,
                         analysis_version=analysis.analysis_version,
                         document_id=document_input.document_id,
                     ),
-                    error_code="document_evidence_extraction_failed",
-                    error_message=analysis_error_message(
-                        "document_evidence_extraction_failed"
-                    ),
-                    completed_at=datetime.now(timezone.utc),
+                    extraction_status="technical_failure",
+                    extraction_diagnostics=(type(exc).__name__,),
                 )
-            await self.objective_repository.write_document_evidence(checkpoint)
-            artifacts = self._rebind_document_evidence(
-                checkpoint,
-                analysis,
-                objective=active_objective,
-                objective_inputs=document_objective_inputs,
-            )
             await report_document_completed(document_input.document_id)
             return artifacts
 
@@ -344,32 +540,35 @@ class ObjectiveEvidenceAnalysisService:
             )
         )
         contributions = tuple(item.contribution for item in document_artifacts)
-        evidence_records = tuple(
-            evidence
-            for item in document_artifacts
-            for evidence in item.evidence_records
-        )
-        findings = await to_thread(
-            self.finding_synthesis_service.synthesize,
-            collection_id=collection_id,
-            objective=active_objective,
-            analysis=analysis,
+        # Findings are synthesized only after immutable experiment revisions
+        # and Objective selections have been written.  Keeping this stage
+        # focused on Source reading prevents a second, legacy fact ledger from
+        # becoming the source of the published conclusion.
+        return ObjectiveExperimentAnalysisArtifacts(
             contributions=contributions,
-            evidence_records=evidence_records,
-        )
-        return ObjectiveAnalysisArtifacts(
-            contributions=contributions,
-            evidence_records=evidence_records,
-            findings=findings,
-            model_name=model_name,
-            experiments=tuple(
-                experiment
+            experiment_outputs=tuple(
+                output
                 for item in document_artifacts
-                for experiment in item.experiments
+                for output in item.experiment_outputs
             ),
+            partial_experiment_outputs=tuple(
+                output
+                for item in document_artifacts
+                for output in item.partial_experiment_outputs
+            ),
+            extraction_statuses={
+                item.contribution.document_id: item.extraction_status
+                for item in document_artifacts
+            },
+            extraction_diagnostics={
+                item.contribution.document_id: item.extraction_diagnostics
+                for item in document_artifacts
+                if item.extraction_diagnostics
+            },
+            model_name=model_name,
         )
 
-    def _generate_document_evidence(
+    def _reconstruct_document_experiments(
         self,
         *,
         collection_id: str,
@@ -377,7 +576,7 @@ class ObjectiveEvidenceAnalysisService:
         objective: ResearchObjective,
         objective_inputs: ObjectiveAnalysisInputs,
         progress_callback: ProgressCallback | None,
-    ) -> ObjectiveDocumentEvidenceArtifacts:
+    ) -> DocumentExperimentArtifacts:
         screened_sources = screen_sources(
             collection_id=collection_id,
             source_screener=self._objective_source_screener,
@@ -403,301 +602,92 @@ class ObjectiveEvidenceAnalysisService:
             ],
             progress_callback=progress_callback,
         )
-        read_audits: list[SourceReadAudit] = []
-        validated_source_facts = extract_and_validate_source_facts(
-            collection_id=collection_id,
-            read_audits=read_audits,
-            source_extractor=self._objective_source_extractor,
-            paper_facts_extractor=self._paper_facts_extractor,
-            objectives=(objective,),
-            objective_paper_frames=screened_sources,
-            objective_evidence_routes=source_inspection_routes,
-            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-            tables_by_document_id=objective_inputs["tables_by_document_id"],
-            document_trees_by_document_id=objective_inputs[
-                "document_trees_by_document_id"
-            ],
-            table_cells_by_document_id=objective_inputs["table_cells_by_document_id"],
-            progress_callback=progress_callback,
+        document_id = objective_inputs["documents"][0].document_id
+        document_input = next(
+            item
+            for item in analysis.document_inputs
+            if item.document_id == document_id
         )
-        paper_evidence_drafts = reconstruct_paper_experiments(
-            collection_id=collection_id,
-            source_facts=validated_source_facts,
-            objectives=(objective,),
-            document_contexts=self._document_contexts_for_evidence(
-                blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-                tables_by_document_id=objective_inputs["tables_by_document_id"],
-                figures_by_document_id=objective_inputs["figures_by_document_id"],
+        if self._paper_experiment_extractor is None:
+            raise RuntimeError("PaperExperiment Draft extractor is not configured")
+        bundle = build_bundle_from_routes(
+            document_id=document_id,
+            source_fingerprint=document_input.preparation_fingerprint,
+            routes=source_inspection_routes,
+            blocks=list(objective_inputs["blocks_by_document_id"].get(document_id, ())),
+            tables=list(objective_inputs["tables_by_document_id"].get(document_id, ())),
+            figures=list(objective_inputs["figures_by_document_id"].get(document_id, ())),
+            document_tree=objective_inputs["document_trees_by_document_id"].get(document_id),
+            table_cells=list(
+                objective_inputs["table_cells_by_document_id"].get(document_id, ())
             ),
         )
-        experiments = assemble_paper_experiments(
-            collection_id=collection_id,
-            document_id=objective_inputs["documents"][0].document_id,
-            source_facts=paper_evidence_drafts,
+        extraction = self._paper_experiment_extractor.extract(
+            objective=objective,
+            bundle=bundle,
         )
-        evidence_records, contributions = materialize_evidence(
+        frame = next(
+            (
+                item
+                for item in screened_sources
+                if item.document_id == document_id
+            ),
+            None,
+        )
+        routed_refs = tuple(
+            {
+                "source_kind": item.source_kind,
+                "source_ref": item.source_ref,
+            }
+            for item in source_inspection_routes
+            if item.extractable
+        )
+        # ``prompt_sources`` deliberately strips service identifiers before it
+        # is sent to the model.  The server-side catalog is the authoritative
+        # accounting source for what entered the read bundle.
+        bundle_source_refs = tuple(bundle.source_catalog.values())
+        inspected_refs = (
+            bundle_source_refs
+            if extraction.status != "technical_failure"
+            else ()
+        )
+        failed_refs = (
+            bundle_source_refs
+            if extraction.status == "technical_failure"
+            else ()
+        )
+        ready_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+        partial_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+        if extraction.output is not None:
+            if extraction.status == "ready":
+                ready_outputs = (extraction.output,)
+            elif extraction.status == "partial_archive":
+                partial_outputs = (extraction.output,)
+        comparable_count = (
+            len(extraction.readiness.selected_comparison_keys)
+            if extraction.status == "ready" and extraction.readiness is not None
+            else 0
+        )
+        contribution = _build_contribution_for_extraction(
             collection_id=collection_id,
             analysis=analysis,
             objective=objective,
-            observations=paper_evidence_drafts,
-            technical_audits=tuple(read_audits),
-            paper_maps=objective_inputs["paper_maps"],
-            frames=screened_sources,
-            routes=source_inspection_routes,
-            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-            tables_by_document_id=objective_inputs["tables_by_document_id"],
-            figures_by_document_id=objective_inputs["figures_by_document_id"],
-            document_trees_by_document_id=objective_inputs[
-                "document_trees_by_document_id"
-            ],
-            experiments=experiments,
+            frame=frame,
+            extraction=extraction,
+            routed_source_refs=routed_refs,
+            inspected_source_refs=inspected_refs,
+            failed_source_refs=failed_refs,
+            omitted_source_refs=bundle.omitted_source_refs,
+            comparable_evidence_count=comparable_count,
         )
-        if len(contributions) != 1:
-            raise RuntimeError(
-                "document Evidence extraction requires one paper contribution"
-            )
-        return ObjectiveDocumentEvidenceArtifacts(
-            contribution=contributions[0],
-            evidence_records=evidence_records,
-            experiments=experiments,
+        return DocumentExperimentArtifacts(
+            contribution=contribution,
+            experiment_outputs=ready_outputs,
+            partial_experiment_outputs=partial_outputs,
+            extraction_status=extraction.status,
+            extraction_diagnostics=extraction.diagnostics,
         )
 
-    @staticmethod
-    def _document_contexts_for_evidence(
-        *,
-        blocks_by_document_id: Mapping[str, Sequence[SourceBlock]],
-        tables_by_document_id: Mapping[str, Sequence[SourceTable]],
-        figures_by_document_id: Mapping[str, Sequence[SourceFigure]],
-    ) -> dict[str, tuple[dict[str, Any], ...]]:
-        """Expose bounded, resolvable same-paper context to reconstruction.
-
-        A result is often separated from its material or condition by a table
-        or figure caption.  Keep those artifacts in the same context stream as
-        text blocks so reconstruction has the information a researcher would
-        have while reading the paper.  Source identity remains explicit and
-        no context is imported from another document.
-        """
-
-        contexts: dict[str, tuple[dict[str, Any], ...]] = {}
-        document_ids = tuple(
-            dict.fromkeys(
-                (
-                    *blocks_by_document_id.keys(),
-                    *tables_by_document_id.keys(),
-                    *figures_by_document_id.keys(),
-                )
-            )
-        )
-        for document_id in document_ids:
-            ranked: list[tuple[int, int, dict[str, Any]]] = []
-            blocks = blocks_by_document_id.get(document_id, ())
-            for position, block in enumerate(blocks):
-                text = str(getattr(block, "text", "") or "").strip()
-                source_ref = str(getattr(block, "block_id", "") or "").strip()
-                if not text or not source_ref:
-                    continue
-                block_type = str(getattr(block, "block_type", "") or "").casefold()
-                heading = str(getattr(block, "heading_path", "") or "").casefold()
-                priority = (
-                    0
-                    if block_type == "title"
-                    else 1
-                    if "abstract" in heading
-                    else 2
-                    if any(
-                        marker in heading
-                        for marker in ("method", "material", "experimental")
-                    )
-                    else 3
-                )
-                ranked.append(
-                    (
-                        priority,
-                        position,
-                        {
-                            "source_kind": "text_window",
-                            "source_ref": source_ref,
-                            "page": getattr(block, "page", None),
-                            "heading_path": getattr(block, "heading_path", None),
-                            "text": text,
-                        },
-                    )
-                )
-            for position, table in enumerate(
-                tables_by_document_id.get(document_id, ())
-            ):
-                table_id = str(getattr(table, "table_id", "") or "").strip()
-                if not table_id:
-                    continue
-                caption_text = str(getattr(table, "caption_text", "") or "").strip()
-                heading_path = getattr(table, "heading_path", None)
-                column_headers = tuple(
-                    str(value).strip()
-                    for value in (getattr(table, "column_headers", ()) or ())
-                    if str(value).strip()
-                )
-                matrix = tuple(
-                    tuple(str(cell).strip() for cell in row)
-                    for row in (getattr(table, "table_matrix", ()) or ())
-                    if isinstance(row, (list, tuple))
-                )
-                table_markdown = ""
-                table_text = ""
-                table_visual_text = ""
-                to_record = getattr(table, "to_record", None)
-                if callable(to_record):
-                    record = to_record()
-                    table_markdown = str(record.get("table_markdown") or "").strip()
-                    table_text = str(record.get("table_text") or "").strip()
-                    metadata = record.get("metadata")
-                    if isinstance(metadata, dict):
-                        table_visual_text = str(
-                            metadata.get("visual_text") or ""
-                        ).strip()
-                if not table_markdown:
-                    table_markdown = str(
-                        render_markdown_table(
-                            [list(row) for row in matrix],
-                            list(column_headers),
-                            header_row_count=int(
-                                getattr(table, "header_row_count", 1) or 0
-                            ),
-                        )
-                        or ""
-                    ).strip()
-                if not table_text:
-                    table_text = str(
-                        render_plain_table_text([list(row) for row in matrix]) or ""
-                    ).strip()
-                text = "\n".join(
-                    part
-                    for part in (
-                        caption_text,
-                        table_markdown or table_text,
-                        table_visual_text,
-                    )
-                    if part
-                ).strip()
-                if not text:
-                    continue
-                heading = str(heading_path or "").casefold()
-                caption = caption_text.casefold()
-                priority = (
-                    2
-                    if any(
-                        marker in heading or marker in caption
-                        for marker in (
-                            "result",
-                            "mechanical",
-                            "microstructure",
-                            "material",
-                            "method",
-                            "experimental",
-                        )
-                    )
-                    else 3
-                )
-                ranked.append(
-                    (
-                        priority,
-                        len(blocks) + position,
-                        {
-                            "source_kind": "table",
-                            "source_ref": table_id,
-                            "page": getattr(table, "page", None),
-                            "heading_path": heading_path,
-                            "caption_text": caption_text or None,
-                            "column_headers": list(column_headers),
-                            "table_matrix": [list(row) for row in matrix],
-                            "table_markdown": table_markdown or None,
-                            "table_visual_text": table_visual_text or None,
-                            "table_text": table_text or None,
-                            "text": text,
-                        },
-                    )
-                )
-            for position, figure in enumerate(
-                figures_by_document_id.get(document_id, ())
-            ):
-                figure_id = str(getattr(figure, "figure_id", "") or "").strip()
-                caption_text = str(getattr(figure, "caption_text", "") or "").strip()
-                if not figure_id or not caption_text:
-                    continue
-                heading_path = getattr(figure, "heading_path", None)
-                heading = str(heading_path or "").casefold()
-                caption = caption_text.casefold()
-                priority = (
-                    2
-                    if any(
-                        marker in heading or marker in caption
-                        for marker in (
-                            "result",
-                            "mechanical",
-                            "microstructure",
-                            "material",
-                            "method",
-                            "experimental",
-                        )
-                    )
-                    else 3
-                )
-                ranked.append(
-                    (
-                        priority,
-                        len(blocks) + len(tables_by_document_id.get(document_id, ())) + position,
-                        {
-                            "source_kind": "figure",
-                            "source_ref": figure_id,
-                            "page": getattr(figure, "page", None),
-                            "heading_path": heading_path,
-                            "figure_label": getattr(figure, "figure_label", None),
-                            "caption_text": caption_text,
-                            "text": caption_text,
-                        },
-                    )
-                )
-            ranked.sort(key=lambda item: (item[0], item[1]))
-            contexts[document_id] = tuple(
-                item[2] for item in ranked[:_OBJECTIVE_DOCUMENT_CONTEXT_LIMIT]
-            )
-        return contexts
-
-    @staticmethod
-    def _document_evidence_input_fingerprint(
-        *,
-        objective: ResearchObjective,
-        document_input: PreparedDocumentInput,
-        model_name: str,
-        extraction_version: str,
-        scientific_versions: tuple[tuple[str, str], ...] = (
-            OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS
-        ),
-    ) -> str:
-        payload = {
-            "objective": {
-                "question": objective.question,
-                "material_scope": list(objective.material_scope),
-                "variables": list(objective.variables),
-                "outcomes": list(objective.outcomes),
-                "mechanisms": list(objective.mechanisms),
-                "constraints": list(objective.constraints),
-                "requested_comparator": objective.requested_comparator,
-                "source_relationship_ids": list(objective.source_relationship_ids),
-                "excluded_document_ids": list(objective.excluded_document_ids),
-            },
-            "document": document_input.to_record(),
-            "extraction_version": extraction_version,
-            "scientific_versions": dict(scientific_versions),
-            "model_name": model_name,
-        }
-        return sha256(
-            json.dumps(
-                payload,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
 
     @staticmethod
     def _objective_inputs_for_document(
@@ -742,64 +732,6 @@ class ObjectiveEvidenceAnalysisService:
             },
         }
 
-    @staticmethod
-    def _rebind_document_evidence(
-        checkpoint: ObjectiveDocumentEvidence,
-        analysis: ObjectiveAnalysis,
-        *,
-        objective: ResearchObjective,
-        objective_inputs: ObjectiveAnalysisInputs,
-    ) -> ObjectiveDocumentEvidenceArtifacts:
-        if checkpoint.contribution is None:
-            raise ValueError("terminal document Evidence lacks a contribution")
-        evidence_records = rebind_persisted_evidence(
-            collection_id=checkpoint.collection_id,
-            analysis=analysis,
-            objective=objective,
-            evidence_records=checkpoint.evidence_records,
-            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
-            tables_by_document_id=objective_inputs["tables_by_document_id"],
-            figures_by_document_id=objective_inputs["figures_by_document_id"],
-        )
-        contribution = rebind_persisted_contribution(
-            contribution=checkpoint.contribution,
-            analysis=analysis,
-            objective=objective,
-            evidence_records=evidence_records,
-        )
-        return ObjectiveDocumentEvidenceArtifacts(
-            contribution=contribution,
-            evidence_records=evidence_records,
-        )
-
-    @staticmethod
-    def _failed_document_contribution(
-        *,
-        collection_id: str,
-        objective_id: str,
-        analysis_version: int,
-        document_id: str,
-    ) -> PaperContribution:
-        return PaperContribution(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-            document_id=document_id,
-            analysis_status="failed",
-            relevance="uncertain",
-            paper_role="uncertain",
-            contribution_summary=None,
-            material_match=(),
-            changed_variables=(),
-            measured_property_scope=(),
-            test_environment_scope=(),
-            exclusion_reason=None,
-            warnings=(
-                "Evidence extraction failed for this paper; retry the analysis.",
-            ),
-            confidence=0,
-        )
-
     async def _build_objective_analysis_inputs(
         self,
         collection_id: str,
@@ -821,7 +753,8 @@ class ObjectiveEvidenceAnalysisService:
         }
 
 __all__ = [
-    "OBJECTIVE_DOCUMENT_EVIDENCE_SCIENTIFIC_VERSIONS",
-    "ObjectiveEvidenceAnalysisService",
+    "DocumentExperimentArtifacts",
+    "ObjectiveExperimentAnalysisArtifacts",
+    "ObjectiveExperimentAnalysisService",
     "ResearchObjectivesNotReadyError",
 ]

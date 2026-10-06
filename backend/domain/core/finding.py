@@ -9,12 +9,14 @@ from typing import Any, Final, Mapping
 
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
-    EVIDENCE_RESULT_DIRECTIONS,
     PAPER_CONTRIBUTION_STATUSES,
     ObjectiveEvidence,
-    ObjectiveEvidenceAttribute,
-    ObjectiveEvidenceContext,
     PaperContribution,
+)
+from domain.core.scientific_fact import (
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    ScientificAttribute,
+    ScientificContext,
 )
 
 
@@ -22,7 +24,13 @@ FINDING_ASSERTION_STRENGTHS: Final[frozenset[str]] = frozenset(
     {"causal", "associative", "descriptive"}
 )
 FINDING_SYNTHESIS_STATUSES: Final[frozenset[str]] = frozenset(
-    {"agreement", "conflict", "condition_dependent", "insufficient_confirmation"}
+    {
+        "single_study",
+        "agreement",
+        "conflict",
+        "condition_dependent",
+        "insufficient_confirmation",
+    }
 )
 FINDING_ORIGINS: Final[frozenset[str]] = frozenset(
     {"system_generated", "human_authored", "agent_authored", "hybrid"}
@@ -199,7 +207,7 @@ class Finding:
     certainty: float
     display_rank: int
     mechanisms: tuple[FindingMechanismRelation, ...]
-    scientific_context: ObjectiveEvidenceContext
+    scientific_context: ScientificContext
     limitations: tuple[str, ...]
     paper_contributions: tuple[FindingPaperContribution, ...]
     origin: str = "system_generated"
@@ -211,6 +219,11 @@ class Finding:
     # Authored Deep Path claims may need scientific review even when their
     # provenance and structural bindings are valid.
     warnings: tuple[str, ...] = ()
+    # New experiment-backed Findings point to the analysis selections instead
+    # of copying scientific facts or creating a second basis object.  The
+    # legacy Evidence-backed fields remain readable until the hard switch.
+    selection_ids: tuple[str, ...] = ()
+    comparison_group_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not all(
@@ -228,6 +241,12 @@ class Finding:
             raise ValueError("finding ID exceeds 128 characters")
         if self.analysis_version < 1:
             raise ValueError("finding requires positive analysis_version")
+        selection_ids = _strings(self.selection_ids)
+        comparison_group_ids = _strings(self.comparison_group_ids)
+        object.__setattr__(self, "selection_ids", selection_ids)
+        object.__setattr__(self, "comparison_group_ids", comparison_group_ids)
+        if not self.paper_contributions and not selection_ids:
+            raise ValueError("finding requires paper coverage or experiment selections")
         if not self.factors:
             raise ValueError("finding requires factors")
         factor_keys = [_normalize_term(value) for value in self.factors]
@@ -235,7 +254,7 @@ class Finding:
             set(factor_keys)
         ):
             raise ValueError("finding factors must be non-empty and unique")
-        if self.direction not in EVIDENCE_RESULT_DIRECTIONS:
+        if self.direction not in SCIENTIFIC_RESULT_DIRECTIONS:
             raise ValueError(f"unsupported finding direction: {self.direction}")
         if self.assertion_strength not in FINDING_ASSERTION_STRENGTHS:
             raise ValueError(
@@ -255,24 +274,23 @@ class Finding:
             raise ValueError("finding certainty must be between 0 and 1")
         if self.display_rank < 0:
             raise ValueError("finding display_rank cannot be negative")
-        if not self.paper_contributions:
-            raise ValueError("finding requires paper contribution coverage")
-        document_ids = [item.document_id for item in self.paper_contributions]
-        if len(document_ids) != len(set(document_ids)):
-            raise ValueError("finding paper contributions must be unique")
-        if not self.supporting_evidence_ids:
-            raise ValueError("finding requires supporting direct evidence")
-        if set(self.supporting_evidence_ids) & set(self.contradicting_evidence_ids):
-            raise ValueError("supporting and contradicting evidence must be disjoint")
-        mechanism_ids = set(
-            _ordered_union(item.supporting_evidence_ids for item in self.mechanisms)
-        )
-        if not mechanism_ids <= set(self.context_evidence_ids):
-            raise ValueError("finding mechanism evidence must bind as paper context")
-        if self.synthesis_status != self.synthesis_status_for(
-            self.paper_contributions
-        ):
-            raise ValueError("finding synthesis status differs from paper evidence")
+        if self.paper_contributions:
+            document_ids = [item.document_id for item in self.paper_contributions]
+            if len(document_ids) != len(set(document_ids)):
+                raise ValueError("finding paper contributions must be unique")
+            if not self.supporting_evidence_ids:
+                raise ValueError("finding requires supporting direct evidence")
+            if set(self.supporting_evidence_ids) & set(self.contradicting_evidence_ids):
+                raise ValueError("supporting and contradicting evidence must be disjoint")
+            mechanism_ids = set(
+                _ordered_union(item.supporting_evidence_ids for item in self.mechanisms)
+            )
+            if not mechanism_ids <= set(self.context_evidence_ids):
+                raise ValueError("finding mechanism evidence must bind as paper context")
+            if self.synthesis_status != self.synthesis_status_for(
+                self.paper_contributions
+            ):
+                raise ValueError("finding synthesis status differs from paper evidence")
         if self.attribution_scope == "isolated_effect" and len(self.factors) != 1:
             raise ValueError("isolated-effect Finding requires one factor")
         if self.attribution_scope == "joint_effect" and len(self.factors) < 2:
@@ -404,6 +422,8 @@ class Finding:
 
     @property
     def support_scope(self) -> str:
+        if self.selection_ids:
+            return "cross_paper" if len(self.selection_ids) >= 2 else "paper"
         return "cross_paper" if self.direct_document_count >= 2 else "paper"
 
     @classmethod
@@ -427,7 +447,7 @@ class Finding:
             factors=factors,
             outcome=outcome,
             direction=_choice(
-                payload.get("direction"), EVIDENCE_RESULT_DIRECTIONS, "unknown"
+                payload.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
             ),
             assertion_strength=_choice(
                 payload.get("assertion_strength"),
@@ -451,7 +471,7 @@ class Finding:
                 for item in _mapping_list(payload.get("mechanisms"))
             ),
             scientific_context=(
-                ObjectiveEvidenceContext.from_mapping(
+                ScientificContext.from_mapping(
                     _mapping(payload.get("scientific_context"))
                 )
             ),
@@ -473,6 +493,8 @@ class Finding:
             ),
             created_at=_datetime_or_none(payload.get("created_at")),
             warnings=_strings(payload.get("warnings")),
+            selection_ids=_strings(payload.get("selection_ids")),
+            comparison_group_ids=_strings(payload.get("comparison_group_ids")),
         )
 
     @staticmethod
@@ -530,9 +552,9 @@ class Finding:
         supporting_evidence: tuple[ObjectiveEvidence, ...],
         *,
         excluded_factors: tuple[str, ...] = (),
-    ) -> ObjectiveEvidenceContext:
+    ) -> ScientificContext:
         if not supporting_evidence:
-            return ObjectiveEvidenceContext()
+            return ScientificContext()
         excluded_names = {
             _normalize_term(value)
             for value in (
@@ -544,7 +566,7 @@ class Finding:
                 ),
             )
         }
-        return ObjectiveEvidenceContext(
+        return ScientificContext(
             material=_common_attributes(
                 supporting_evidence,
                 "material",
@@ -751,6 +773,10 @@ class Finding:
             "created_by_tool_call_id": self.created_by_tool_call_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if self.selection_ids:
+            record["selection_ids"] = list(self.selection_ids)
+        if self.comparison_group_ids:
+            record["comparison_group_ids"] = list(self.comparison_group_ids)
         if self.warnings:
             record["warnings"] = list(self.warnings)
         return record
@@ -761,7 +787,7 @@ def _common_attributes(
     category: str,
     *,
     excluded_names: set[str] | frozenset[str] = frozenset(),
-) -> tuple[ObjectiveEvidenceAttribute, ...]:
+) -> tuple[ScientificAttribute, ...]:
     first = tuple(
         item
         for item in getattr(evidence_records[0].scientific_context, category)
@@ -777,7 +803,7 @@ def _common_attributes(
     return tuple(item for item in first if _attribute_key(item) in common_keys)
 
 
-def _attribute_key(attribute: ObjectiveEvidenceAttribute) -> tuple[str, str, str]:
+def _attribute_key(attribute: ScientificAttribute) -> tuple[str, str, str]:
     return (
         _normalize_term(attribute.name),
         _stable_text(attribute.value),

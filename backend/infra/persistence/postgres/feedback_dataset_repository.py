@@ -1,0 +1,155 @@
+"""PostgreSQL persistence for maintained feedback datasets."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from datetime import datetime, timezone
+from hashlib import sha256
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from application.repositories.feedback_dataset_repository import StoredDataset
+from domain.feedback.dataset import Dataset, DatasetTaskType
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
+
+
+_SYSTEM_TASKS: tuple[tuple[DatasetTaskType, str], ...] = (
+    ("sft", "文献问答 SFT"),
+    ("preference", "回答偏好"),
+    ("evaluation", "评测"),
+)
+
+
+def system_dataset_id(collection_id: str, task_type: str) -> str:
+    digest = sha256(f"{collection_id}\x1f{task_type}".encode("utf-8")).hexdigest()[:32]
+    return f"fdset_system_{digest}"
+
+
+class PostgresFeedbackDatasetRepository:
+    backend_name = "postgresql"
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self.session_factory = session_factory
+
+    async def create(self, dataset: Dataset) -> Dataset:
+        async with self.session_factory.begin() as session:
+            row = FeedbackDatasetRow(**_row_values(dataset))
+            session.add(row)
+            await session.flush()
+        return dataset
+
+    async def read(self, dataset_id: str) -> Dataset | None:
+        async with self.session_factory() as session:
+            row = await session.get(FeedbackDatasetRow, dataset_id)
+            return _to_domain(row) if row is not None else None
+
+    async def read_record(self, dataset_id: str) -> StoredDataset | None:
+        async with self.session_factory() as session:
+            row = await session.get(FeedbackDatasetRow, dataset_id)
+            return _to_record(row) if row is not None else None
+
+    async def list_records_for_collection(
+        self,
+        *,
+        collection_id: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[StoredDataset, ...]:
+        statement = (
+            select(FeedbackDatasetRow)
+            .where(FeedbackDatasetRow.collection_id == collection_id)
+            .order_by(
+                FeedbackDatasetRow.created_at.desc(), FeedbackDatasetRow.dataset_id
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+        async with self.session_factory() as session:
+            return tuple(_to_record(row) for row in await session.scalars(statement))
+
+
+async def ensure_system_datasets(
+    session: AsyncSession, *, collection_id: str, owner_user_id: str, now: datetime,
+) -> tuple[Dataset, ...]:
+    """Use the caller's transaction for collection creation and case writes."""
+    records: list[Dataset] = []
+    for task_type, name in _SYSTEM_TASKS:
+        dataset_id = system_dataset_id(collection_id, task_type)
+        row = await session.get(FeedbackDatasetRow, dataset_id)
+        if row is None:
+            dataset = Dataset(
+                dataset_id=dataset_id,
+                collection_id=collection_id,
+                name=name,
+                task_type=task_type,
+                construction_spec={"mode": "automatic_feedback_workbench", "source": "feedback_case"},
+                spec_version=1,
+                created_by=owner_user_id,
+            )
+            try:
+                async with session.begin_nested():
+                    session.add(FeedbackDatasetRow(**_row_values(dataset, now=now)))
+                    await session.flush()
+            except IntegrityError:
+                row = await session.get(FeedbackDatasetRow, dataset_id)
+            else:
+                records.append(dataset)
+                continue
+        if row is None:
+            raise RuntimeError("system feedback dataset creation raced and was not readable")
+        records.append(_to_domain(row))
+    return tuple(records)
+
+
+def _row_values(dataset: Dataset, *, now: datetime | None = None) -> dict[str, Any]:
+    now = now or datetime.now(timezone.utc)
+    return {
+        "dataset_id": dataset.dataset_id,
+        "collection_id": dataset.collection_id,
+        "name": dataset.name,
+        "task_type": dataset.task_type,
+        "construction_spec": deepcopy(dataset.construction_spec),
+        "spec_version": dataset.spec_version,
+        "created_by": dataset.created_by,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _to_domain(row: FeedbackDatasetRow) -> Dataset:
+    return Dataset(
+        dataset_id=row.dataset_id,
+        collection_id=row.collection_id,
+        name=row.name,
+        task_type=row.task_type,  # type: ignore[arg-type]
+        construction_spec=deepcopy(row.construction_spec or {}),
+        spec_version=row.spec_version,
+        created_by=row.created_by,
+    )
+
+
+def _to_record(row: FeedbackDatasetRow) -> StoredDataset:
+    return StoredDataset(
+        dataset=_to_domain(row),
+        created_at=_datetime(row.created_at),
+        updated_at=_datetime(row.updated_at),
+    )
+
+
+def _datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value)
+        parsed = datetime.fromisoformat(
+            f"{text[:-1]}+00:00" if text.endswith("Z") else text
+        )
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+__all__ = ["PostgresFeedbackDatasetRepository"]

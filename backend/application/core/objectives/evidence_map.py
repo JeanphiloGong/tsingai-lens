@@ -4,15 +4,14 @@ from collections import Counter
 from hashlib import sha1
 from typing import Any, Iterable
 
+from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core import (
     DocumentProfile,
     Finding,
-    ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
     ResearchObjective,
 )
-
 
 PROJECTION_VERSION = "objective-evidence-map.v1"
 

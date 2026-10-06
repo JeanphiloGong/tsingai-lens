@@ -123,10 +123,6 @@ async def test_postgresql_enforces_auth_contract(
 
     from main import create_app
 
-    monkeypatch.setattr(
-        "main.FindingSynthesisService",
-        lambda **_kwargs: object(),
-    )
     with TestClient(create_app()) as client:
         login = client.post(
             "/api/v1/auth/login",

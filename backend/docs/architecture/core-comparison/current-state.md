@@ -38,10 +38,11 @@ comparison-semantics, or graph endpoint is registered.
 ## Current Ownership In Code
 
 Objective analysis owns comparison directly through its Evidence and Finding
-modules. `ObjectiveEvidenceComparison` records the conditions of one grounded
-within-paper comparison; `Finding` synthesizes agreement, conflict, and limits
-across those versioned Evidence records. There is no comparison repository,
-comparison domain module, Core-fact projection service, or fallback substrate.
+modules. `ScientificComparison` is the shared value object for one grounded
+within-paper comparison before and after Evidence materialization; `Finding`
+synthesizes agreement, conflict, and limits across those versioned Evidence
+records. There is no comparison repository, comparison domain module,
+Core-fact projection service, or fallback substrate.
 
 ## Current Contract Notes
 

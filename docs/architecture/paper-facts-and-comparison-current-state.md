@@ -24,13 +24,21 @@ confirmed Objective + prepared papers
        - SampleVariant[]
        - TestCondition[]
        - MeasurementResult[]
-  -> ObjectiveEvidence[] + PaperContribution[]
+  -> persisted PaperExperiment revision
+  -> ObjectiveExperimentSelection[]
+  -> optional ComparisonGroup[]
   -> Finding[]
+
+Existing Objective/Evidence response shapes are read-only projections of this
+graph. Human- or Agent-authored analysis versions keep their own immutable
+snapshot payload.
 ```
 
 The Sources may be distributed across Methods, a result table, and prose. Each
 fact retains its own Source support. `PaperExperiment` binds facts only within
-one paper. Cross-paper synthesis begins only after formal Evidence exists.
+one paper. Cross-paper synthesis begins only after fixed Objective selections
+have established compatible measurements; the user-facing Evidence shape is a
+read-only projection of those selections for automatic analyses.
 
 ## Model Hierarchy
 
@@ -40,15 +48,16 @@ These objects carry the main analysis meaning:
 
 | Object | Responsibility | Persistence |
 | --- | --- | --- |
-| `ObjectiveAnalysis` | Owns one versioned analysis run and its scientific or technical outcome | Stored in the Objective analysis payload |
-| `PaperContribution` | Accounts for one selected paper, including coverage, exclusion, failure, and Evidence disposition | Stored with the analysis |
-| `ObjectiveEvidence` | Formal Source-grounded evidence used by Finding and review workflows | Stored with the analysis |
-| `SourceObservation` | Holds one exact Source-local fact before formal Evidence materialization | Per-execution reconstruction state |
-| `PaperExperiment` | Binds same-paper observations, samples, conditions, and measurements | Per-execution reconstruction state |
+| `ObjectiveAnalysis` | Owns one versioned analysis run and its scientific or technical outcome | Stored as lifecycle metadata; authored snapshots remain in its payload |
+| `PaperContribution` | Accounts for one selected paper, including coverage, exclusion, failure, and selection disposition | Stored as analysis metadata or a compatibility projection |
+| `ObjectiveEvidence` | Compatibility/read model for Source-grounded experiment facts and authored Evidence | Projected from fixed selections for automatic analyses; stored in authored snapshots |
+| `SourceObservation` | Holds one exact Source-local fact while a revision is assembled | Per-execution reconstruction state |
+| `PaperExperiment` | Binds same-paper observations, samples, conditions, and measurements | Immutable revision rows |
 
-`SourceObservation` and `PaperExperiment` are scientifically meaningful even
-though they are not separate database tables. Persistence alone does not decide
-whether a model is a domain object.
+`SourceObservation` is transient Source-local evidence used while assembling a
+revision. `PaperExperiment` is the durable scientific record; its revision is
+what later Selections and Findings reference. Persistence is therefore part of
+the current model contract, not an implementation detail to infer from a prompt.
 
 ### Component Values
 
@@ -56,21 +65,23 @@ These types are parts of a larger record, not separate product concepts:
 
 - `SampleVariant`, `TestCondition`, and `MeasurementResult` belong to a
   `PaperExperiment`.
-- `ObjectiveEvidenceAttribute`, `ObjectiveEvidenceVariable`,
-  `ObjectiveEvidenceComparison`, `ObjectiveEvidenceResult`, and
-  `ObjectiveEvidenceContext` describe parts of one `ObjectiveEvidence`.
+- `ScientificAttribute`, `ScientificVariable`, `ScientificComparison`,
+  `ScientificResult`, and `ScientificContext` are shared source-fact value
+  objects used while building a revision and its compatibility projection.
+  They do not constitute a second Evidence lifecycle.
 - `InspectedObjectiveSourceRef` records which canonical Sources were inspected
   while accounting for one `PaperContribution`.
 
 They remain typed because their invariants matter, but the UI, API, and design
 language should not present them as independent workflow stages.
 
-### Execution Checkpoints
+### Historical Checkpoints
 
-`ObjectiveDocumentEvidence` is a reusable single-paper execution checkpoint. It
-stores an input fingerprint, status, contribution, Evidence records, and
-technical failure details so an analysis can resume safely. It is not an
-additional scientific conclusion or a sixth core research object.
+The former `ObjectiveDocumentEvidence` payload was a per-document execution
+checkpoint. It is no longer read or written by the automatic runtime. Migration
+`20260924_0075` removes embedded checkpoint maps from analysis snapshots while
+retaining a payload hash and `manual_review_required` row for historical audit.
+Retries write successor experiment revisions instead of reusing that checkpoint.
 
 ### Specialized Paper-Map Values
 
@@ -93,12 +104,14 @@ standalone paper entity.
 - `PaperExperiment.comparison_status()` checks two measurement identities and
   returns `comparable`, `non_comparable`, or `insufficient_context` for internal
   diagnostics.
-- `ObjectiveEvidenceComparison` carries the formal comparison content that can
-  enter downstream Evidence and Finding decisions.
+- `ScientificComparison` carries the source-supported comparison content that
+  can enter a revision, selection, and Finding decision.
 
-The internal status check is deliberately not another persisted
-`ExperimentComparison` object. Source lineage already lives on observations,
-and formal comparison content already lives on Evidence.
+`ExperimentComparison` is a persisted child of the immutable experiment
+revision, not an independent workflow aggregate. Its source lineage and
+comparability status stay with the revision; the Selection decides whether the
+comparison can support a Finding. `PaperExperiment.comparison_status()` is a
+diagnostic helper for the same judgment and does not create a second record.
 
 ## Methods And Context
 
@@ -107,10 +120,10 @@ independent `MethodFact` family. A Methods Source first enters as a
 `SourceObservation`. Its supported details then bind to the scientific object
 that consumes them:
 
-- sample preparation and process state -> `SampleVariant` or Evidence process
-  context;
-- test setup and environment -> `TestCondition` or Evidence test context;
-- characterization context -> Source-grounded Evidence context;
+- sample preparation and process state -> `SampleVariant` or a revision's
+  source-grounded context;
+- test setup and environment -> `TestCondition` or a revision's test context;
+- characterization context -> source-grounded revision context;
 - unresolved narrative -> retained observation or explicit uncertainty.
 
 This avoids maintaining an unused parallel method record while preserving the
@@ -127,14 +140,16 @@ The runtime sequence is:
 2. screening and routing select Sources relevant to the confirmed Objective;
 3. extraction creates `SourceObservation` records and validation immediately
    checks each observation against its exact Source;
-4. reconstruction binds accepted same-paper facts into `PaperExperiment`;
-5. materialization creates `ObjectiveEvidence` and `PaperContribution`;
-6. a per-document `ObjectiveDocumentEvidence` checkpoint supports safe reuse;
-7. Finding synthesis consumes published Evidence and contribution accounting.
+4. reconstruction binds accepted same-paper facts into a `PaperExperiment` draft;
+5. `ExperimentAnalysisWriter` persists an immutable revision and Objective
+   selections, then creates an optional comparison group and Finding;
+6. compatibility queries project the requested revision into the existing
+   Objective/Evidence response shape.
 
-`ObjectiveAnalysis`, checkpoints, contributions, Evidence, and Findings share
-the versioned Objective analysis payload. This does not make them the same kind
-of model and does not require every intermediate object to have a table.
+Automatic revisions, selections, groups, and Findings have independent
+identities and foreign keys. Authored Evidence/Finding snapshots remain inside
+their versioned Objective analysis payload and are not mixed with the automatic
+graph.
 
 ## Invariants
 
@@ -145,9 +160,10 @@ of model and does not require every intermediate object to have a table.
   result table.
 - Baseline and target roles require a Source-supported comparison.
 - Technical failure is not scientific absence.
-- A paper with no accepted Evidence still needs an explicit contribution or
+- A paper with no selected experiment still needs an explicit contribution or
   failure disposition.
-- Finding synthesis consumes formal Evidence, not raw model output.
+- Finding synthesis consumes fixed experiment selections, not raw model output
+  or a compatibility projection assembled from the latest revision.
 
 ## Removed Redundant Models
 
@@ -156,21 +172,17 @@ of model and does not require every intermediate object to have a table.
 - `MethodFact` was removed because the active chain never produced or consumed
   it; Methods information remains Source-grounded and binds to the actual sample,
   condition, result, or Evidence context.
-- `ExperimentComparison` was removed because its object fields were consumed
-  only to count an internal status. `PaperExperiment.comparison_status()` keeps
-  the judgment without introducing another public or persisted research object.
-
 Legacy JSON fields are ignored at the domain read boundary and are not emitted
 again. Historical migrations remain migration history and do not define the
 current runtime contract.
 
 ## Open Boundary
 
-The current `PaperExperiment` is an execution-time reconstruction rather than a
-durable user-editable experiment record. Promote more of it into persistence
-only when a concrete researcher workflow needs to inspect, correct, or reuse
-that structure independently of formal Evidence. Do not add a new domain family
-only because an extraction prompt can return another JSON section.
+The current `PaperExperiment` revision is durable but is not yet a general
+user-editable experiment workspace. Add authoring or correction commands only
+when a concrete researcher workflow needs them; do not mutate a revision that a
+Finding already references. Do not add a new domain family only because an
+extraction prompt can return another JSON section.
 
 ## Related Docs
 

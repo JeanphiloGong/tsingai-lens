@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from domain.core import ObjectiveAnalysis, PreparedDocumentInput, ResearchObjective
+from application.repositories.objective_repository import ObjectiveAnalysis
+from domain.core import PreparedDocumentInput, ResearchObjective
 from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
 from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
 
@@ -63,7 +64,7 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
         origin="system_discovered",
         created_by_tool_call_id=None,
         payload={
-            **_objective().to_record(),
+            **PostgresObjectiveRepository._objective_payload(_objective()),
             "created_at": legacy_created_at.isoformat(),
             "updated_at": legacy_updated_at.isoformat(),
         },

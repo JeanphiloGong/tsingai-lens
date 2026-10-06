@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import subprocess
+from dataclasses import asdict
+from pathlib import Path
 from time import perf_counter
-
-from pydantic import ValidationError
 
 from _common import (
     add_runtime_arguments,
@@ -26,6 +25,7 @@ from _common import (
     resolve_runtime,
     write_json_output,
 )
+from pydantic import ValidationError
 
 ensure_backend_root_on_path(Path(__file__).resolve().parents[2])
 
@@ -162,7 +162,13 @@ def run_baseline(scenario: dict, runtime, client) -> dict:
             ),
         )
     return {
-        "objectives": [o.to_record() for o in facts.research_objectives],
+        "objectives": [
+            {
+                key: list(value) if isinstance(value, tuple) else value
+                for key, value in asdict(objective).items()
+            }
+            for objective in facts.research_objectives
+        ],
         "execution_stats": usage.execution_stats(
             duration_ms=int((perf_counter() - started) * 1000)
         ).to_record(),
@@ -199,7 +205,10 @@ def run_proposal(scenario: dict, runtime, client) -> dict:
                 abstention_reason=result.abstention_reason,
                 candidates=[
                     {
-                        "objective": candidate.objective.to_record(),
+                        "objective": {
+                            key: list(value) if isinstance(value, tuple) else value
+                            for key, value in asdict(candidate.objective).items()
+                        },
                         "papers": [
                             {
                                 "document_id": paper.paper_map.document_id,

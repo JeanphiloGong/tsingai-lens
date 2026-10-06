@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import ast
-from datetime import datetime
+import asyncio
 import json
-from pathlib import Path
 import re
 import sys
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
-
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
@@ -32,17 +31,17 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
     FIGURES_FINAL_COLUMNS,
     TABLE_CELLS_FINAL_COLUMNS,
-    TABLES_FINAL_COLUMNS,
     TABLE_ROWS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.runtime.parsers.docling_pdf import (
+from infra.source.parsers.docling_pdf import (
     build_pdf_bundle,
     build_pdf_converter,
 )
@@ -209,7 +208,7 @@ async def _reparse_collection_inputs(
     if not inputs:
         raise SystemExit(f"no input PDFs found for collection: {collection_dir}")
 
-    config = SourceRuntimeConfig(root_dir=str(backend_root))
+    config = SourceParserConfig(root_dir=str(backend_root))
     object_store = FileObjectStore(collection_dir.parent)
     converter = build_pdf_converter()
     bundles = []
@@ -276,12 +275,12 @@ async def _collection_input_rows(
             raise ValueError("invalid collection object key")
         rows.append(
             {
-                "id": document.document_id,
-                "title": document.original_filename or Path(storage_key).name,
+                "id": document.document.document_id,
+                "title": document.document.original_filename or Path(storage_key).name,
                 "creation_date": document.created_at,
                 "source_path": storage_key,
                 "storage_key": storage_key,
-                "sha256": document.sha256,
+                "sha256": document.document.sha256,
                 "source_type": "pdf",
             }
         )

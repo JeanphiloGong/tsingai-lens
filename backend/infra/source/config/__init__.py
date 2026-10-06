@@ -1,1 +1,1 @@
-"""Source runtime configuration."""
+"""Source parser configuration."""

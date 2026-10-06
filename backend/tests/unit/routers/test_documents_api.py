@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-import base64
 from hashlib import sha256
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from pypdf import PdfWriter
+
+from application.repositories.collection_repository import StoredDocument
 
 try:
     from fastapi import HTTPException
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from tests.support.collection_service import (
-    build_test_collection_service,
-    build_test_source_import_service,
-)
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
@@ -26,15 +25,14 @@ from domain.source import (
     Document,
     source_documents_from_records,
 )
-from infra.source.ingestion.normalized_import import (
-    NormalizedImportBatch,
-    NormalizedImportDocument,
-    NormalizedImportSourceMetadata,
-)
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from infra.persistence.memory import (
     MemoryDocumentProfileRepository,
     MemorySourceArtifactRepository,
+)
+from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from tests.support.collection_service import (
+    build_test_collection_service,
+    build_test_source_import_service,
 )
 
 pytestmark = pytest.mark.anyio
@@ -435,34 +433,20 @@ async def test_document_source_route_streams_current_collection_document(documen
     ) = document_services
     record = await collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
-    payload = b"%PDF-1.4\nfixture\n"
-    documents = await build_test_source_import_service(
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    pdf = BytesIO()
+    writer.write(pdf)
+    payload = pdf.getvalue()
+    document = await build_test_source_import_service(
         collection_service
-    ).import_normalized_batch(
-        collection_id,
-        NormalizedImportBatch(
-            documents=(
-                NormalizedImportDocument(
-                    source_document_id="paper-1",
-                    origin_channel="upload",
-                    original_filename="paper-1.pdf",
-                    stored_filename="paper-1.pdf",
-                    media_type="application/pdf",
-                    storage_payload_base64=base64.b64encode(payload).decode("ascii"),
-                ),
-            ),
-            text_units=(),
-            source_metadata=NormalizedImportSourceMetadata(
-                channel="upload",
-                adapter_name="upload",
-                ingested_at="2026-07-19T00:00:00+00:00",
-            ),
-        ),
+    ).add_document(
+        collection_id, "paper-1.pdf", payload, "application/pdf",
     )
 
     response = await documents_controller.get_collection_document_source(
             collection_id,
-            documents[0]["document_id"],
+            document["document_id"],
             _document_request(document_services),
         )
 
@@ -504,15 +488,17 @@ async def test_document_source_route_rejects_path_outside_collection(
     ) = document_services
     record = await collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
-    unsafe_document = Document(
-        document_id="paper-1",
-        original_filename="paper-1.pdf",
+    unsafe_document = StoredDocument(
+        document=Document(
+            document_id="paper-1",
+            original_filename="paper-1.pdf",
+            sha256=sha256(b"outside").hexdigest(),
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=len(b"outside"),
+        ),
         stored_filename="outside.pdf",
         storage_key="../outside.pdf",
-        sha256=sha256(b"outside").hexdigest(),
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=len(b"outside"),
         created_at="2026-07-19T00:00:00+00:00",
     )
     await collection_service.repository.add_documents(
@@ -548,15 +534,17 @@ async def test_document_source_route_rejects_another_collections_storage_key(
     storage_key = f"{second['collection_id']}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
     collection_service.object_store.write(storage_key, payload, digest)
-    foreign_document = Document(
-        document_id="paper-1",
-        original_filename="paper-2.pdf",
+    foreign_document = StoredDocument(
+        document=Document(
+            document_id="paper-1",
+            original_filename="paper-2.pdf",
+            sha256=digest,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=len(payload),
+        ),
         stored_filename="paper-2.pdf",
         storage_key=storage_key,
-        sha256=digest,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=len(payload),
         created_at="2026-07-19T00:00:00+00:00",
     )
     await collection_service.repository.add_documents(

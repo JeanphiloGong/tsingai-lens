@@ -90,6 +90,8 @@ export type ChatTree = {
 };
 
 export type ChatToolCall = {
+	decision_basis?: 'explicit' | 'scope_grant';
+	authorization_revision?: number | null;
 	tool_call_id: string;
 	session_id: string;
 	assistant_message_id: string;
@@ -187,9 +189,6 @@ export type ChatProgress = {
 	elapsed_ms?: number;
 	remaining_tool_budget?: number;
 	remaining_token_budget?: number;
-	research_plan?: {
-		steps: Array<{ id: string; status: 'pending' | 'in_progress' | 'completed' | 'blocked' }>;
-	};
 };
 
 export function formatChatElapsed(elapsedMs?: number) {
@@ -237,11 +236,67 @@ export async function createChatSession(collectionId: string, signal?: AbortSign
 	})) as ChatSession;
 }
 
+export async function listChatSessions(
+	collectionId: string,
+	options: { limit?: number; offset?: number; signal?: AbortSignal } = {}
+) {
+	const params = new URLSearchParams({ collection_id: collectionId });
+	if (options.limit !== undefined) params.set('limit', String(options.limit));
+	if (options.offset !== undefined) params.set('offset', String(options.offset));
+	return (await requestJson(`${chatSessionPath()}?${params.toString()}`, {
+		signal: options.signal,
+		method: 'GET'
+	})) as { items: ChatSession[]; limit: number; offset: number };
+}
+
 export async function fetchChatSession(sessionId: string, signal?: AbortSignal) {
 	return (await requestJson(chatSessionPath(sessionId), {
 		signal,
 		method: 'GET'
 	})) as ChatSession;
+}
+
+export type AgentPermission = {
+	mode: 'read_only' | 'confirm' | 'auto';
+	actions: string[];
+	expires_at: string | null;
+	revision: number;
+};
+
+export const AGENT_WRITE_ACTIONS = [
+	'start_research_process',
+	'create_objective_candidate',
+	'confirm_objective',
+	'start_objective_analysis',
+	'create_paper_experiment_revision',
+	'create_finding_version',
+	'record_finding_feedback',
+	'curate_finding',
+	'create_research_plan',
+	'revise_research_plan'
+] as const;
+
+export type ChatPermission = AgentPermission;
+
+export async function fetchChatPermission(sessionId: string) {
+	return (await requestJson(`${chatSessionPath(sessionId)}/permissions`)) as ChatPermission;
+}
+
+export async function updateChatPermission(
+	sessionId: string,
+	permission: ChatPermission,
+	options: { allActions?: boolean } = {}
+) {
+	return (await requestJson(`${chatSessionPath(sessionId)}/permissions`, {
+		method: 'PUT',
+		body: JSON.stringify({
+			mode: permission.mode,
+			actions: permission.actions,
+			all_actions: options.allActions ?? false,
+			expires_at: permission.expires_at,
+			expected_revision: permission.revision
+		})
+	})) as ChatPermission;
 }
 
 export async function branchChatMessage(

@@ -2,37 +2,40 @@
 
 from __future__ import annotations
 
-from asyncio import CancelledError, Semaphore, Task as AsyncTask, create_task
-from dataclasses import replace
-from hashlib import sha256 as hash_sha256
 import json
 import logging
 import os
+from asyncio import CancelledError, Semaphore
+from asyncio import Task as AsyncTask
+from asyncio import create_task
+from dataclasses import replace
+from hashlib import sha256 as hash_sha256
 from pathlib import Path
-from typing import Any, Awaitable, Callable, cast
+from typing import Any, Awaitable, Callable
 
 import pandas as pd
 
-from application.core.document_profiles.extraction import DOCUMENT_PROFILE_PROMPT_VERSION
+from application.core.document_profiles.extraction import (
+    DOCUMENT_PROFILE_PROMPT_VERSION,
+)
 from application.core.document_profiles.service import DocumentProfileService
 from application.pipeline import PipelineRunService
 from application.pipeline.pipeline_run_service import document_preparation_error_message
+from application.repositories.collection_repository import StoredDocument
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
-from application.repositories.source_artifact_repository import SourceArtifactRepository
-from domain.source import Document, SourceDocument
 from domain.core.document_profile import PROFILE_STATUS_COMPLETED
-from infra.source.config.source_runtime_config import (
-    CacheConfig,
+from domain.source import Document, SourceDocument
+from infra.source.config.source_parser_config import (
     InputConfig,
     InputStorageConfig,
-    SourceRuntimeConfig,
+    SourceParserConfig,
     StorageConfig,
 )
-from infra.source.runtime.artifact_bundle import SourceArtifactBundle
-
+from infra.source.artifact_bundle import SourceArtifactBundle
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ DOCUMENT_ANALYSIS_VERSION = DOCUMENT_PROFILE_PROMPT_VERSION
 # Status polling and run finalization need connections while workers parse papers.
 _DEFAULT_PREPARATION_CONCURRENCY = 3
 
-SourceArtifactBuilder = Callable[..., Awaitable[list[Any]]]
+SourceArtifactBuilder = Callable[..., Awaitable[SourceArtifactBundle]]
 
 
 def _stage_fingerprint(stage: str, **values: str) -> str:
@@ -128,7 +131,7 @@ class DocumentPreparationService:
                 )
             except FileNotFoundError:
                 document = None
-            if document is not None and document.status == "processing":
+            if document is not None and document.document.status == "processing":
                 await self.collection_service.update_document_preparation(
                     run["collection_id"],
                     document_id,
@@ -163,7 +166,7 @@ class DocumentPreparationService:
             collection_id,
             document_id,
         )
-        fingerprint = self.preparation_fingerprint_for(document)
+        fingerprint = self.preparation_fingerprint_for(document.document)
         run, created = await self.pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,
             document_id=document_id,
@@ -196,8 +199,9 @@ class DocumentPreparationService:
         return run
 
     async def _can_reuse_preparation(
-        self, collection_id: str, document: Document
+        self, collection_id: str, record: StoredDocument
     ) -> bool:
+        document = record.document
         source_identity, profile_identity = self.fingerprints_for(document)
         if (
             document.status != "ready"
@@ -230,9 +234,10 @@ class DocumentPreparationService:
             stage = "source_parsing"
             preparation_warnings: list[str] = []
             try:
-                document = await self.collection_service.get_document(
+                record = await self.collection_service.get_document(
                     collection_id, document_id
                 )
+                document = record.document
                 source_identity, profile_identity = self.fingerprints_for(document)
                 fingerprint = profile_identity
                 await self.pipeline_run_service.update_run(
@@ -261,7 +266,15 @@ class DocumentPreparationService:
                 ):
                     source_document = await self._parse_document(
                         collection_id,
-                        document,
+                        record,
+                    )
+                    source_document = replace(
+                        source_document,
+                        metadata={
+                            **source_document.metadata,
+                            "parser_version": SOURCE_PARSER_VERSION,
+                            "source_fingerprint": source_identity,
+                        },
                     )
                     await self.source_artifact_repository.replace_document(
                         collection_id,
@@ -284,13 +297,14 @@ class DocumentPreparationService:
                             document_id,
                             exc_info=True,
                         )
-                    document = await self.collection_service.update_document_preparation(
+                    record = await self.collection_service.update_document_preparation(
                         collection_id,
                         document_id,
                         status="processing",
                         source_fingerprint=source_identity,
                         parser_version=SOURCE_PARSER_VERSION,
                     )
+                    document = record.document
                 stage = "document_profile"
                 await self.pipeline_run_service.update_run(
                     run_id,
@@ -313,6 +327,8 @@ class DocumentPreparationService:
                     profile = await self.document_profile_service.build_document_profile(
                         collection_id,
                         document_id,
+                        source_fingerprint=source_identity,
+                        profile_fingerprint=profile_identity,
                     )
                 if profile.profile_status != PROFILE_STATUS_COMPLETED:
                     await self.collection_service.update_document_preparation(
@@ -419,37 +435,24 @@ class DocumentPreparationService:
     async def _parse_document(
         self,
         collection_id: str,
-        document: Document,
+        record: StoredDocument,
     ) -> SourceDocument:
-        outputs = await self._get_source_artifact_builder()(
+        document = record.document
+        bundle = await self._get_source_artifact_builder()(
             config=self._source_config(collection_id, document.document_id),
             input_documents=pd.DataFrame(
                 [
                     {
                         "id": document.document_id,
-                        "source_path": document.stored_filename,
-                        "source_type": Path(document.stored_filename).suffix.lstrip("."),
+                        "source_path": record.stored_filename,
+                        "source_type": Path(record.stored_filename).suffix.lstrip("."),
                         "title": document.original_filename,
-                        "creation_date": document.created_at,
+                        "creation_date": record.created_at,
                         "text": None,
                     }
                 ]
             ),
         )
-        errors = [str(error) for output in outputs for error in output.errors or ()]
-        if errors:
-            raise RuntimeError("; ".join(errors))
-        bundle_output = next(
-            (
-                output
-                for output in reversed(outputs)
-                if isinstance(output.result, SourceArtifactBundle)
-            ),
-            None,
-        )
-        if bundle_output is None:
-            raise RuntimeError("Source pipeline did not return an artifact bundle")
-        bundle = cast(SourceArtifactBundle, bundle_output.result)
         parsed = bundle.to_documents()
         if len(parsed) != 1 or parsed[0].document_id != document.document_id:
             raise RuntimeError("Source pipeline returned the wrong document identity")
@@ -493,10 +496,10 @@ class DocumentPreparationService:
         self,
         collection_id: str,
         document_id: str,
-    ) -> SourceRuntimeConfig:
+    ) -> SourceParserConfig:
         paths = self.collection_service.get_paths(collection_id)
         working_dir = paths.output_dir / "documents" / document_id
-        return SourceRuntimeConfig(
+        return SourceParserConfig(
             root_dir=str(paths.collection_dir),
             input=InputConfig(
                 storage=InputStorageConfig(base_dir=str(paths.input_dir)),
@@ -505,12 +508,13 @@ class DocumentPreparationService:
                 file_pattern=r".*\.(txt|pdf)$",
             ),
             output=StorageConfig(base_dir=str(working_dir)),
-            cache=CacheConfig(base_dir=str(working_dir / "cache")),
         )
 
     def _get_source_artifact_builder(self) -> SourceArtifactBuilder:
         if self._source_artifact_builder is None:
-            from infra.source.runtime.build_source_artifacts import build_source_artifacts
+            from infra.source.build_source_artifacts import (
+                build_source_artifacts,
+            )
 
             self._source_artifact_builder = build_source_artifacts
         return self._source_artifact_builder

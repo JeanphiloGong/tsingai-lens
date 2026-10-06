@@ -37,12 +37,5 @@ class ChatResourceRef:
             href=(str(payload["href"]) if payload.get("href") is not None else None),
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "resource_type": self.resource_type,
-            "resource_id": self.resource_id,
-            "href": self.href,
-        }
-
 
 __all__ = ["ChatResourceRef"]

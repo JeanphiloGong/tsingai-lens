@@ -4,21 +4,20 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any
 
-from application.repositories.objective_repository import StoredObjective
-
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from application.repositories.transaction import RepositoryTransaction
 from domain.core import (
     Finding,
-    ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
 )
-
 
 _MIN_TIMESTAMP = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -33,9 +32,6 @@ class MemoryObjectiveRepository:
             tuple[str, str], tuple[datetime, datetime]
         ] = {}
         self._analyses: dict[tuple[str, str, int], ObjectiveAnalysis] = {}
-        self._document_evidence: dict[
-            tuple[str, str, str, str], ObjectiveDocumentEvidence
-        ] = {}
         self._contributions: dict[
             tuple[str, str, int], tuple[PaperContribution, ...]
         ] = {}
@@ -161,15 +157,11 @@ class MemoryObjectiveRepository:
         for existing in self._objectives.values():
             if existing.created_by_tool_call_id != created_by_tool_call_id:
                 continue
-            existing_record = existing.to_record()
-            objective_record = objective.to_record()
-            existing_record["rank"] = None
-            objective_record["rank"] = None
             if (
                 existing.collection_id != objective.collection_id
                 or existing.objective_id != objective.objective_id
                 or existing.created_by_user_id != created_by_user_id
-                or existing_record != objective_record
+                or replace(existing, rank=None) != replace(objective, rank=None)
             ):
                 raise ValueError(
                     "authored candidate tool call already created a different objective"
@@ -178,7 +170,7 @@ class MemoryObjectiveRepository:
         key = (objective.collection_id, objective.objective_id)
         existing = self._objectives.get(key)
         if existing is not None:
-            if existing.to_record() != objective.to_record():
+            if existing != objective:
                 raise ValueError("research objective identity collision")
             return existing
         rank = max(
@@ -238,10 +230,16 @@ class MemoryObjectiveRepository:
         origin: str = "system_generated",
         created_by_user_id: str | None = None,
         created_by_tool_call_id: str | None = None,
+        source_analysis_version: int | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id)
         now = datetime.now(timezone.utc)
         objective = self._require_objective(*key)
+        if (
+            source_analysis_version is not None
+            and objective.published_analysis_version != source_analysis_version
+        ):
+            raise ValueError("source analysis version is stale")
         if objective.confirmation_status == "candidate":
             objective = objective.confirm()
         existing = next(
@@ -259,6 +257,7 @@ class MemoryObjectiveRepository:
                 )
             if (
                 existing.origin != origin
+                or existing.source_analysis_version != source_analysis_version
                 or existing.created_by_user_id != created_by_user_id
                 or existing.created_by_tool_call_id != created_by_tool_call_id
             ):
@@ -288,8 +287,14 @@ class MemoryObjectiveRepository:
             progress_message="Objective analysis is queued.",
             created_at=datetime.now(timezone.utc),
             origin=origin,
+            scientific_record_source=(
+                "experiment_graph"
+                if origin == "system_generated"
+                else "authored_snapshot"
+            ),
             created_by_user_id=created_by_user_id,
             created_by_tool_call_id=created_by_tool_call_id,
+            source_analysis_version=source_analysis_version,
         )
         objective = objective.queue_analysis(version)
         self._objectives[key] = objective
@@ -405,24 +410,6 @@ class MemoryObjectiveRepository:
             interrupted_count += 1
         return interrupted_count
 
-    async def write_document_evidence(
-        self,
-        checkpoint: ObjectiveDocumentEvidence,
-    ) -> None:
-        self._require_objective(checkpoint.collection_id, checkpoint.objective_id)
-        self._document_evidence[checkpoint.key] = checkpoint
-
-    async def read_document_evidence(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_id: str,
-        input_fingerprint: str,
-    ) -> ObjectiveDocumentEvidence | None:
-        return self._document_evidence.get(
-            (collection_id, objective_id, document_id, input_fingerprint)
-        )
-
     async def publish_analysis(
         self,
         collection_id: str,
@@ -450,19 +437,74 @@ class MemoryObjectiveRepository:
             raise ValueError("objective evidence lacks owning paper contribution")
         for finding in findings:
             finding.validate_sources(evidence_records, contributions)
+        analysis = replace(
+            analysis,
+            scientific_record_source=(
+                "legacy_snapshot"
+                if analysis.origin == "system_generated"
+                else "authored_snapshot"
+            ),
+        )
         analysis = analysis.succeed(
             completed_at=datetime.now(timezone.utc),
             abstention_reason=abstention_reason,
             abstention_note=abstention_note,
         )
         objective_key = key[:2]
-        objective = self._require_objective(*objective_key).publish_analysis(analysis)
+        objective = self._require_objective(*objective_key).publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
         self._touch_objective(objective_key, datetime.now(timezone.utc))
         self._contributions[key] = contributions
         self._evidence[key] = evidence_records
         self._findings[key] = findings
+        return objective, analysis
+
+    async def publish_experiment_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        contributions: tuple[PaperContribution, ...] = (),
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
+        transaction: RepositoryTransaction | None = None,
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
+        key = (collection_id, objective_id, analysis_version)
+        analysis = self._require_analysis(*key)
+        if analysis.status != "running":
+            raise ValueError("only running objective analysis can be published")
+        if contributions:
+            input_documents = {item.document_id for item in analysis.document_inputs}
+            contribution_documents = {item.document_id for item in contributions}
+            if contribution_documents != input_documents:
+                raise ValueError("paper contributions must cover every analysis input")
+            if any(item.key[:3] != key for item in contributions):
+                raise ValueError("paper contribution belongs to another analysis")
+        analysis = replace(analysis, scientific_record_source="experiment_graph")
+        analysis = analysis.succeed(
+            completed_at=datetime.now(timezone.utc),
+            abstention_reason=abstention_reason,
+            abstention_note=abstention_note,
+        )
+        objective_key = key[:2]
+        objective = self._require_objective(*objective_key).publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
+        self._analyses[key] = analysis
+        self._objectives[objective_key] = objective
+        self._touch_objective(objective_key, datetime.now(timezone.utc))
+        if contributions:
+            self._contributions[key] = contributions
         return objective, analysis
 
     async def publish_authored_analysis(
@@ -512,7 +554,12 @@ class MemoryObjectiveRepository:
             finding.validate_sources(evidence_records, contributions)
 
         objective = objective.queue_analysis(analysis.analysis_version)
-        objective = objective.publish_analysis(analysis)
+        objective = objective.publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
         self._analyses[key] = analysis
         self._objectives[objective_key] = objective
         self._touch_objective(objective_key, datetime.now(timezone.utc))

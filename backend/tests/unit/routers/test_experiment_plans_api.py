@@ -3,13 +3,13 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
-import pytest
 
 from application.goal.experiment_plan_service import ExperimentPlanService
 from controllers.goal import experiment_plans as experiment_plans_controller
-from controllers.schemas.goal.experiment_plan import (
+from controllers.goal.experiment_plans import (
     ExperimentPlanCreateRequest,
     ExperimentPlanUpdateRequest,
 )

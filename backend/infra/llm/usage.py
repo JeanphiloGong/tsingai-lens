@@ -6,7 +6,11 @@ from contextvars import ContextVar
 from threading import Lock
 from typing import Any
 
-from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
+from application.repositories.pipeline_run_repository import (
+    ExecutionStats,
+    ModelUsage,
+    TokenUsage,
+)
 
 
 class LLMUsageCollector:

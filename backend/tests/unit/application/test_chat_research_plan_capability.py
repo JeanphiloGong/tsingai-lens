@@ -548,14 +548,17 @@ async def test_agent_can_inspect_current_or_named_research_plan_revision() -> No
 
 
 @pytest.mark.parametrize("label_status", ["gold", "unreviewed"])
-async def test_checked_unsaved_plan_returns_existing_render_without_another_model_call(label_status) -> None:
+async def test_checked_unsaved_plan_returns_existing_render_after_model_answer(label_status) -> None:
     proposal = ProposeResearchPlanCapability(
         collection_service=_CollectionService(),
         finding_feedback_service=_FindingFeedbackService(label_status=label_status),
     )
     model = _DiscoveryModel(
         ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)),
-        TimeoutError("A redundant explanation would exceed the remaining deadline."),
+        ModelTurn(content=(
+            "The provisional plan is ready for your review and has not been saved."
+            + (" supporting conclusions still require researcher review." if label_status != "gold" else "")
+        )),
     )
     chunks = []
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((proposal,))).run_turn(
@@ -565,11 +568,10 @@ async def test_checked_unsaved_plan_returns_existing_render_without_another_mode
     assert result.status.value == "completed"
     assert result.pending_approval is None
     draft = next(item for item in result.tool_results if item.data.get("structured_plan"))
-    assert draft.data["content"] in result.messages[-1].content
     assert "not been saved" in result.messages[-1].content
     assert ("supporting conclusions still require researcher review" in result.messages[-1].content) == (label_status != "gold")
     assert "".join(chunks) == result.messages[-1].content
-    assert isinstance(model.turns[0], TimeoutError)
+    assert not model.turns
 
 
 async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service() -> None:

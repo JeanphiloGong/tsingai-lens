@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import base64
+import json
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
-import json
 from zipfile import ZipFile
 
-from pypdf import PdfWriter
 import pytest
+from pypdf import PdfWriter
 
-import application.source.source_import_service as source_import_service_module
+from application.repositories.collection_repository import StoredDocument
 from application.source.collection_service import CollectionService
 from application.source.source_archive_service import (
     CollectionSourceArchiveError,
@@ -17,17 +17,10 @@ from application.source.source_archive_service import (
     SourceArchiveService,
 )
 from application.source.source_import_service import SourceImportService
+from domain.chat.permissions import AUTO_ACTIONS
 from domain.source import Document
 from infra.persistence.memory import MemoryCollectionRepository
-from infra.source.ingestion.normalized_import import (
-    NormalizedImportBatch,
-    NormalizedImportDocument,
-    NormalizedImportSourceMetadata,
-    NormalizedImportTextUnit,
-)
-from infra.source.ingestion.source_adapter import SourceAdapterRequest
 from tests.support.collection_service import build_test_collection_service
-
 
 pytestmark = pytest.mark.anyio
 
@@ -59,11 +52,7 @@ def test_source_archive_operations_have_a_direct_owner() -> None:
     assert "build_source_archive" in SourceArchiveService.__dict__
     assert "resolve_document_source_file" in SourceArchiveService.__dict__
     assert "add_document" not in CollectionService.__dict__
-    assert "import_from_adapter" not in CollectionService.__dict__
-    assert "import_normalized_batch" not in CollectionService.__dict__
     assert "add_document" in SourceImportService.__dict__
-    assert "import_from_adapter" in SourceImportService.__dict__
-    assert "import_normalized_batch" in SourceImportService.__dict__
 
 
 async def test_collection_contains_its_uploaded_documents(tmp_path) -> None:
@@ -120,14 +109,18 @@ async def test_upload_retry_reuses_content_identity_and_preserves_preparation(tm
         collection_id, "renamed.pdf", content, "application/pdf", reuse_existing=True,
     )
     assert recovered == prepared
+    input_dir = service.workspace.get_paths(collection_id).input_dir
+    assert [path.name for path in input_dir.iterdir()] == [original["stored_filename"]]
     with pytest.raises(ValueError, match="document content already exists"):
         await importer.add_document(collection_id, "again.pdf", content, "application/pdf")
+    assert [path.name for path in input_dir.iterdir()] == [original["stored_filename"]]
     different = await importer.add_document(
         collection_id, "study.pdf", _valid_pdf_bytes("Different experiment"),
         "application/pdf", reuse_existing=True,
     )
     assert different["document_id"] != original["document_id"]
     assert len((await service.get_collection(collection_id))["documents"]) == 2
+    assert len(list(input_dir.iterdir())) == 2
 
 
 async def test_collection_update_preserves_documents(tmp_path) -> None:
@@ -149,6 +142,33 @@ async def test_collection_update_preserves_documents(tmp_path) -> None:
     assert updated["documents"] == [document]
 
 
+async def test_collection_agent_default_permission_is_owner_scoped(tmp_path) -> None:
+    service = build_test_collection_service(tmp_path / "collections")
+    collection = await service.create_collection("Permission defaults", owner_user_id="user-1")
+    expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+    saved = await service.set_agent_default_permission_for_user(
+        collection["collection_id"],
+        "user-1",
+        mode="auto",
+        actions=[],
+        all_actions=True,
+        expires_at=expiry,
+        expected_revision=0,
+    )
+
+    assert saved["actions"] == sorted(AUTO_ACTIONS)
+    assert (
+        await service.get_agent_default_permission_for_user(
+            collection["collection_id"], "user-1"
+        )
+    ) == saved
+    with pytest.raises(FileNotFoundError):
+        await service.get_agent_default_permission_for_user(
+            collection["collection_id"], "other-user"
+        )
+
+
 async def test_missing_collection_is_not_inferred_from_workspace(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     service.workspace.create_collection_dirs("col_orphaned_workspace")
@@ -157,49 +177,22 @@ async def test_missing_collection_is_not_inferred_from_workspace(tmp_path) -> No
         await service.get_collection("col_orphaned_workspace")
 
 
-async def test_normalized_batch_becomes_documents_directly(tmp_path) -> None:
+async def test_upload_registers_document_and_preserves_original_bytes(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
-    collection = await service.create_collection("Imported Collection")
-    batch = NormalizedImportBatch(
-        documents=(
-            NormalizedImportDocument(
-                source_document_id="srcdoc_1",
-                origin_channel="upload",
-                original_filename="paper.txt",
-                stored_filename="normalized_paper.txt",
-                media_type="text/plain",
-            ),
-        ),
-        text_units=(
-            NormalizedImportTextUnit(
-                text_unit_id="tu_1",
-                source_document_id="srcdoc_1",
-                sequence=1,
-                text="Mix and anneal.",
-                char_count=15,
-            ),
-            NormalizedImportTextUnit(
-                text_unit_id="tu_0",
-                source_document_id="srcdoc_1",
-                sequence=0,
-                text="Experimental Section",
-                char_count=20,
-            ),
-        ),
-        source_metadata=NormalizedImportSourceMetadata(
-            channel="upload",
-            adapter_name="upload",
-            ingested_at="2026-08-27T00:00:00+00:00",
-        ),
+    collection = await service.create_collection("Uploaded Collection")
+    content = b"  Experimental Section\r\nMix and anneal.\r\n"
+    document = await _import_service(service).add_document(
+        collection["collection_id"], "../paper.TXT", content, " text/plain "
     )
 
-    documents = await _import_service(service).import_normalized_batch(
-        collection["collection_id"], batch
-    )
-
-    assert len(documents) == 1
-    assert documents[0]["document_id"].startswith("doc_")
-    assert set(documents[0]) == {
+    assert document["document_id"].startswith("doc_")
+    assert document["original_filename"] == "paper.TXT"
+    assert document["stored_filename"].endswith("_paper.txt")
+    assert document["media_type"] == "text/plain"
+    assert document["status"] == "stored"
+    assert document["size_bytes"] == len(content)
+    assert document["sha256"] == sha256(content).hexdigest()
+    assert set(document) == {
         "document_id",
         "original_filename",
         "stored_filename",
@@ -216,12 +209,11 @@ async def test_normalized_batch_becomes_documents_directly(tmp_path) -> None:
         "profile_fingerprint",
         "preparation_fingerprint",
     }
-    expected = b"Experimental Section\nMix and anneal."
     assert service.object_store.read(
-        documents[0]["storage_key"], documents[0]["sha256"]
-    ) == expected
+        document["storage_key"], document["sha256"]
+    ) == content
     current = await service.get_collection(collection["collection_id"])
-    assert current["documents"] == documents
+    assert current["documents"] == [document]
 
 
 async def test_failed_document_registration_removes_unregistered_bytes(
@@ -230,38 +222,51 @@ async def test_failed_document_registration_removes_unregistered_bytes(
 ) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Failed upload")
-    batch = NormalizedImportBatch(
-        documents=(
-            NormalizedImportDocument(
-                source_document_id="srcdoc_failed",
-                origin_channel="upload",
-                original_filename="failed.txt",
-                stored_filename="failed.txt",
-                media_type="text/plain",
-                storage_payload_base64=base64.b64encode(b"not registered").decode("ascii"),
-            ),
-        ),
-        text_units=(),
-        source_metadata=NormalizedImportSourceMetadata(
-            channel="upload",
-            adapter_name="upload",
-            ingested_at="2026-08-27T00:00:00+00:00",
-        ),
-    )
+    written_keys: list[str] = []
+    write = service.object_store.write
+
+    def capture_write(storage_key, payload, sha256) -> None:
+        write(storage_key, payload, sha256)
+        written_keys.append(storage_key)
 
     async def fail_add_documents(*_args, **_kwargs) -> None:
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(service.repository, "add_documents", fail_add_documents)
+    monkeypatch.setattr(service.object_store, "write", capture_write)
 
     with pytest.raises(RuntimeError, match="database unavailable"):
-        await _import_service(service).import_normalized_batch(
-            collection["collection_id"], batch
+        await _import_service(service).add_document(
+            collection["collection_id"], "failed.txt", b"not registered", "text/plain"
         )
 
-    key = f"{collection['collection_id']}/input/failed.txt"
+    assert len(written_keys) == 1
     with pytest.raises(FileNotFoundError):
-        service.object_store.read(key, sha256(b"not registered").hexdigest())
+        service.object_store.read(written_keys[0], sha256(b"not registered").hexdigest())
+    assert (await service.get_collection(collection["collection_id"]))["documents"] == []
+
+
+async def test_registration_error_preserves_bytes_already_registered(monkeypatch, tmp_path) -> None:
+    service = build_test_collection_service(tmp_path / "collections")
+    collection_id = (await service.create_collection("Committed upload"))["collection_id"]
+    add_documents = service.repository.add_documents
+    content = b"Experimental Section\nMix and anneal."
+
+    async def commit_then_fail(*args, **kwargs) -> None:
+        await add_documents(*args, **kwargs)
+        raise RuntimeError("connection lost after commit")
+
+    monkeypatch.setattr(service.repository, "add_documents", commit_then_fail)
+    with pytest.raises(RuntimeError, match="connection lost after commit"):
+        await _import_service(service).add_document(
+            collection_id, "paper.txt", content, "text/plain"
+        )
+
+    documents = (await service.get_collection(collection_id))["documents"]
+    assert len(documents) == 1
+    assert service.object_store.read(
+        documents[0]["storage_key"], documents[0]["sha256"]
+    ) == content
 
 
 async def test_source_archive_uses_document_ids(tmp_path) -> None:
@@ -336,15 +341,17 @@ async def test_source_resolution_reads_only_current_collection_documents(tmp_pat
 async def test_source_resolution_rejects_invalid_storage_key(tmp_path) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Unsafe")
-    document = Document(
-        document_id="doc_unsafe",
-        original_filename="unsafe.pdf",
+    document = StoredDocument(
+        document=Document(
+            document_id="doc_unsafe",
+            original_filename="unsafe.pdf",
+            sha256="a" * 64,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=1,
+        ),
         stored_filename="unsafe.pdf",
         storage_key="other/input/unsafe.pdf",
-        sha256="a" * 64,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=1,
         created_at="2026-08-27T00:00:00+00:00",
     )
     await service.repository.add_documents(
@@ -355,7 +362,7 @@ async def test_source_resolution_rejects_invalid_storage_key(tmp_path) -> None:
 
     with pytest.raises(DocumentSourceUnavailableError) as exc_info:
         await _archive_service(service).resolve_document_source_file(
-            collection["collection_id"], document.document_id
+            collection["collection_id"], document.document.document_id
         )
     assert exc_info.value.code == "document_source_path_invalid"
 
@@ -375,86 +382,26 @@ async def test_delete_collection_removes_documents_and_bytes(tmp_path) -> None:
         service.object_store.read(uploaded["storage_key"], uploaded["sha256"])
 
 
-async def test_import_from_adapter_adds_documents_without_manifest(tmp_path) -> None:
-    service = build_test_collection_service(tmp_path / "collections")
-    collection = await service.create_collection("Adapter")
-
-    class FakeAdapter:
-        channel = "search"
-        adapter_name = "fake_search"
-        adapter_version = "1"
-
-        def fetch(self, request: SourceAdapterRequest) -> NormalizedImportBatch:
-            return NormalizedImportBatch(
-                documents=(
-                    NormalizedImportDocument(
-                        source_document_id="srcdoc_search",
-                        origin_channel="search",
-                        original_filename="result.txt",
-                        stored_filename="result.txt",
-                        media_type="text/plain",
-                    ),
-                ),
-                text_units=(
-                    NormalizedImportTextUnit(
-                        text_unit_id="tu_search",
-                        source_document_id="srcdoc_search",
-                        sequence=0,
-                        text="Search result",
-                        char_count=13,
-                    ),
-                ),
-                source_metadata=NormalizedImportSourceMetadata(
-                    channel="search",
-                    adapter_name="fake_search",
-                    adapter_version="1",
-                    ingested_at="2026-08-27T00:00:00+00:00",
-                    raw_locator=request.raw_locator,
-                ),
-            )
-
-    result = await _import_service(service).import_from_adapter(
-        collection["collection_id"], FakeAdapter(), "doi:10.1000/test"
-    )
-
-    assert len(result) == 1
-    assert (await service.get_collection(collection["collection_id"]))["documents"] == result
-
-
-async def test_add_file_uses_normalized_upload(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("filename", "content", "media_type", "message"),
+    [
+        ("paper.pdf", _valid_pdf_bytes()[:100], "application/pdf", "PDF is damaged"),
+        ("paper.txt", b"\xff", "text/plain", "text upload must be valid UTF-8"),
+        ("paper.txt", b"", "text/plain", "uploaded file is empty"),
+        ("paper.bin", b"\xff", "application/octet-stream", "unsupported upload type"),
+    ],
+)
+async def test_invalid_upload_leaves_no_document_or_bytes(
+    tmp_path, filename, content, media_type, message,
+) -> None:
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Upload")
-    captured: dict[str, object] = {}
+    collection_id = collection["collection_id"]
 
-    def fake_normalize_upload(filename: str, content: bytes, media_type: str | None = None):
-        captured.update(filename=filename, content=content, media_type=media_type)
-        return NormalizedImportBatch(
-            documents=(
-                NormalizedImportDocument(
-                    source_document_id="srcdoc_upload",
-                    origin_channel="upload",
-                    original_filename=filename,
-                    stored_filename="normalized.pdf",
-                    media_type=media_type,
-                    storage_payload_base64=base64.b64encode(content).decode("ascii"),
-                ),
-            ),
-            text_units=(),
-            source_metadata=NormalizedImportSourceMetadata(
-                channel="upload",
-                adapter_name="upload",
-                ingested_at="2026-08-27T00:00:00+00:00",
-            ),
+    with pytest.raises(ValueError, match=message):
+        await _import_service(service).add_document(
+            collection_id, filename, content, media_type
         )
 
-    monkeypatch.setattr(source_import_service_module, "normalize_upload", fake_normalize_upload)
-    uploaded = await _import_service(service).add_document(
-        collection["collection_id"], "paper.pdf", b"pdf", "application/pdf"
-    )
-
-    assert captured == {
-        "filename": "paper.pdf",
-        "content": b"pdf",
-        "media_type": "application/pdf",
-    }
-    assert uploaded["stored_filename"] == "normalized.pdf"
+    assert (await service.get_collection(collection_id))["documents"] == []
+    assert list(service.workspace.get_paths(collection_id).input_dir.iterdir()) == []

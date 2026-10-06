@@ -19,16 +19,14 @@ collection workspace
   -> reviewed downstream assistant or experiment plan
 ```
 
-Objective analysis owns scientific synthesis. Comparisons is the collection
-overview of published Findings, not a second conclusion system. Documents own
-Source verification.
+Objective analysis owns scientific synthesis. Published Findings and their
+cross-paper evidence are reviewed within their owning Objective. Documents
+own Source verification.
 
 ## Collection Navigation
 
 - `/collections/[id]`
   Workspace, files, task progress, warnings, and next action.
-- `/collections/[id]/comparisons`
-  Published cross-paper Findings grouped by Objective.
 - `/collections/[id]/documents`
   Paper inventory and source reading entry.
 - `/collections/[id]/objectives`
@@ -62,20 +60,17 @@ Primary action order:
 2. monitor when a build is queued/running;
 3. retry when the latest build failed;
 4. open Objectives when candidate discovery is complete;
-5. open comparisons when a published Finding exists;
+5. open the owning Objective to review published Findings;
 6. open documents to inspect Source content.
 
 The workspace does not expose retired internal pipeline stages as product
 concepts.
 
-## Comparisons
+## Finding Comparison
 
-The comparisons page reads confirmed Objectives and their published analysis
-versions. It displays only persisted Findings, grouped under the Objective that
-owns them. A Finding link opens the Objective review workspace, where the
-researcher can inspect its exact ObjectiveEvidence and Source. If no published
-Finding exists, the page directs the researcher to Objectives instead of
-offering a synthetic comparison build.
+The Objective review workspace owns published Finding review, cross-paper
+evidence comparison, and exact ObjectiveEvidence and Source inspection. There
+is no standalone collection comparison page or duplicate Finding summary.
 
 ## Research Objectives
 
@@ -96,39 +91,51 @@ Actions are state-specific:
 When a retry fails but an older published version exists, the page keeps those
 published Findings accessible and shows the failed retry separately.
 
-## Finding Workspace
+## Objective Review Workspace
 
-The Objective detail page has two levels:
+The Objective detail page has three explicit views:
 
-1. a compact Finding list;
-2. one selected Finding detail.
+1. a results overview with the experiment comparison and complete Finding list;
+2. an analysis-scope tab for selecting ready papers and starting a new analysis;
+3. one focused Finding detail opened by clicking a Finding (or by a
+   `finding_id` URL parameter).
 
-The list shows the statement, synthesis status, qualitative certainty, and
-directly contributing paper count. It does not repeat the selected detail's
+The results overview is the default for a published analysis. It does not
+select the first Finding automatically. Returning from a focused Finding
+clears `finding_id` and returns to the overview, so the page does not show a
+second persistent detail panel beside the list.
+
+The list shows the statement, synthesis status, and directly contributing paper
+count. It does not repeat the selected detail's
 factor/outcome relation or expose internal IDs.
 
 The selected detail shows:
 
-- the Finding statement, factors, outcome, direction, and attribution scope;
-- baseline, target, reported result, and comparability from structured Evidence;
-- typed material, sample, process, and test scientific context;
-- deterministic analysis boundaries and aggregate status counts for PaperContributions
-  without Evidence;
-- subordinate mechanisms with translated relation and assertion strength;
-- exact Evidence excerpts grouped by contribution role;
-- titled paper/page/source metadata and Open source action;
-- one Feedback action that expands the review form.
+- the Finding statement and its origin;
+- the fixed experiment comparisons that support or contradict the Finding, with
+  table/chart switching, outcome selection, source links, and explicit missing
+  context;
+- typed material, sample, process, and test conditions that describe where the
+  Finding applies;
+- conclusion limits shown separately from the applicable conditions;
+- subordinate mechanism relationships with translated relation and assertion
+  strength, linked to their exact Evidence Sources;
+- collapsed analysis/experiment version metadata, including the fixed
+  selections and comparison groups that produced the Finding;
+- collapsed paper contributions and exact Source excerpts grouped by paper and
+  source location; and
+- no inline correction, feedback, or revision action on the published Finding.
 
-Feedback uses `analysis_version + finding_id`. The list response already
-contains the complete Finding display shape, so changing selection reuses that
-item and loads only its Evidence. Stale rapid-selection responses are
-discarded. Only contributions with matched Evidence receive full paper groups;
-empty contributions collapse into one aggregate status line. When every
-contribution is empty, the section shows one collection-level empty state
-instead of repeated paper placeholders. One Evidence comparison remains one
-row even when factors changed jointly; the row identifies support or
-contradiction and retains the reported direction. Empty context categories are
-omitted, and each mechanism links to its exact mechanism-context Evidence.
+The list response already contains the complete Finding display shape, so
+changing selection reuses that item and loads only its Evidence and experiment
+projection. Stale rapid-selection responses are discarded. Only contributions
+with matched Evidence receive full paper groups; empty contributions collapse
+into one aggregate status line. When every contribution is empty, the section
+shows one collection-level empty state instead of repeated paper placeholders.
+One Evidence comparison remains one row even when factors changed jointly; the
+row identifies support or contradiction and retains the reported direction.
+Empty context categories are omitted, and each mechanism links to its exact
+mechanism-context Evidence.
 
 ## Document Verification
 
@@ -167,11 +174,10 @@ any underlying snapshot changes.
 
 ## Responsive Rules
 
-- On desktop, a sticky compact Finding list and the selected review detail form
-  a two-column master-detail workspace; feedback opens on demand near the end
-  of the evidence review.
-- On mobile, the Finding list precedes the selected detail as clearly separated
-  full-width regions.
+- On desktop, the results overview keeps the comparison table and Finding list
+  in one reading flow; a focused Finding replaces that overview until the user
+  returns.
+- On mobile, the overview and focused Finding remain separate full-width views.
 - On mobile, tables become scrollable or stacked without truncating statement
   meaning or source quotes.
 - Fixed controls keep stable dimensions; long scientific terms wrap.

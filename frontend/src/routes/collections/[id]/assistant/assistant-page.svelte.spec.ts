@@ -1,4 +1,4 @@
-import { page as browserPage } from 'vitest/browser';
+import { page as browserPage, userEvent } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { authState, fetchCurrentSession, login, logout } from '../../../_shared/auth';
@@ -42,7 +42,14 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 });
 
 vi.mock('$app/stores', () => ({ page: pageStore }));
-vi.stubGlobal('fetch', fetchMock);
+vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
+	if (requestPath(input).endsWith('/permissions')) {
+		return Promise.resolve(
+			jsonResponse({ mode: 'confirm', actions: [], expires_at: null, revision: 0 })
+		);
+	}
+	return fetchMock(input, init);
+});
 
 const Page = (await import('./+page.svelte')).default;
 const Conversation = (await import('./ResearchConversation.svelte')).default;
@@ -184,6 +191,22 @@ function installApi({
 	fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 		const path = requestPath(input);
 		const method = requestMethod(input, init);
+		if (path === '/api/v1/chat-sessions' && method === 'GET') {
+			return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
+		}
+		if (path === '/api/v1/collections/col_123/objectives' && method === 'GET') {
+			return Promise.resolve(
+				jsonResponse({
+					collection_id: 'col_123',
+					objectives: [
+						{
+							objective_id: 'obj_energy_1',
+							question: 'How does laser energy affect Ti-6Al-4V strength?'
+						}
+					]
+				})
+			);
+		}
 		if (path === '/api/v1/chat-sessions' && method === 'POST') {
 			return Promise.resolve(jsonResponse(session, 201));
 		}
@@ -314,6 +337,28 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
 			.toBeVisible();
+	});
+
+	it('executes slash commands locally instead of sending them as research text', async () => {
+		installApi();
+		const composer = await renderReady();
+		await composer.fill('/per');
+		await expect.element(browserPage.getByTestId('slash-command-menu')).toBeVisible();
+		await userEvent.keyboard('{Enter}');
+		await expect.element(composer).toHaveValue('/permissions');
+		await userEvent.keyboard('{Enter}');
+		await expect.element(browserPage.getByRole('combobox')).toBeVisible();
+		await composer.fill('/missing');
+		await userEvent.keyboard('{Enter}');
+		await expect
+			.element(browserPage.getByRole('alert'))
+			.toHaveTextContent('Unknown local command /missing');
+		expect(
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input).endsWith('/messages') && requestMethod(input, init) === 'POST'
+			)
+		).toBe(false);
 	});
 
 	it('prefills the exact Finding review without submitting or replacing researcher edits', async () => {
@@ -469,7 +514,10 @@ describe('collections/[id]/assistant Research Agent', () => {
 			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 				const path = requestPath(input);
 				const method = requestMethod(input, init);
-				if (path === '/api/v1/chat-sessions') {
+				if (path === '/api/v1/chat-sessions' && method === 'GET') {
+					return jsonResponse({ items: [], limit: 12, offset: 0 });
+				}
+				if (path === '/api/v1/chat-sessions' && method === 'POST') {
 					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
 				}
 				const id = path.split('/')[4];
@@ -2489,14 +2537,14 @@ describe('collections/[id]/assistant Research Agent', () => {
 		).toBe(false);
 	});
 
-	it('shows Source-grounded drafts and complete table results for review', async () => {
+	it('shows experiment drafts alongside complete tables and bounded Source reads', async () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
 				completion_reason: 'model_answer',
 				warnings: [],
 				messages: [
-					message('msg_user_1', 'user', 'Inspect this table and draft evidence'),
+					message('msg_user_1', 'user', 'Inspect this table and draft the paper experiment'),
 					message('msg_call_table', 'assistant', '', {
 						tool_call_id: null,
 						tool_calls: [
@@ -2538,7 +2586,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 						tool_calls: [
 							{
 								tool_call_id: 'call_draft',
-								name: 'create_evidence_draft',
+								name: 'propose_paper_experiment_draft',
 								arguments: {},
 								position: 0
 							}
@@ -2549,14 +2597,30 @@ describe('collections/[id]/assistant Research Agent', () => {
 						tool_result: {
 							...baseToolResult('call_draft'),
 							data: {
+								draft_id: 'experiment_draft_1',
+								draft_digest: 'a'.repeat(64),
+								status: 'pending_approval',
+								published: false,
+								requires_user_approval: true,
 								draft: {
-									source_ref: 'table_2',
-									source_kind: 'table',
-									evidence_role: 'direct_result',
-									source_excerpt: 'P150 elongation was 82%.',
-									changed_variables: [{ name: 'preheat', target_value: 150 }]
+									experiments: [{
+										label: 'P150 tensile result',
+										scope_description: 'Reported elongation for the P150 condition.',
+										measurements: [{
+											measurement_key: 'elongation-p150', outcome: 'elongation',
+											value: 82, unit: '%', source_labels: ['S001']
+										}],
+										source_labels: ['S001']
+									}],
+									source_labels: ['S001'],
+									unresolved_issues: []
 								}
-							}
+							},
+							resource_refs: [{
+								resource_type: 'paper_experiment_draft',
+								resource_id: 'experiment_draft_1',
+								href: '/collections/col_123/documents/doc_1?view=paper-experiment-draft'
+							}]
 						}
 					})
 				],
@@ -2565,7 +2629,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			}
 		});
 
-		await send('Inspect this table and draft evidence');
+		await send('Inspect this table and draft the paper experiment');
 
 		await expect.element(browserPage.getByText('Complete Source table')).toBeInTheDocument();
 		await expect
@@ -2586,10 +2650,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 			)
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Evidence draft completed' }))
+			.element(browserPage.getByRole('heading', { name: 'PaperExperiment draft completed' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('table_2')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('P150 elongation was 82%.')).toBeInTheDocument();
+		expect(document.querySelector('a[href="/collections/col_123/documents/doc_1?view=paper-experiment-draft"]')).not.toBeNull();
 	});
 
 	it('uses the research-plan approval boundary and wording', async () => {
@@ -2845,7 +2908,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('Finding authoring', { exact: true }))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText(statement, { exact: true })).toBeInTheDocument();
-		await expect.element(browserPage.getByText('evidence_1', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('evidence_1', { exact: true })).not.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
@@ -2859,160 +2922,91 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 	});
 
-	it('shows Source-grounded Evidence authoring as a distinct approved action', async () => {
+	it('requires approval to save the exact reviewed experiment draft', async () => {
 		const call = pendingCall({
-			name: 'create_evidence_version',
-			arguments: {
-				objective_id: 'obj_1',
-				source_analysis_version: 2,
-				document_id: 'doc_1',
-				source_kind: 'text_window',
-				source_ref: 'block_results',
-				source_excerpt: 'Higher temperature increased strength to 620 MPa.',
-				source_digest: 'a'.repeat(64),
-				evidence_role: 'direct_result',
-				changed_variables: [{ name: 'temperature', baseline_value: 400, target_value: 500 }],
-				comparison: null,
-				reported_result: {
-					outcome: 'strength',
-					direction: 'increase',
-					result_text: 'Higher temperature increased strength to 620 MPa.'
-				},
-				attribution_scope: 'association_only',
-				scientific_context: {
-					material: [],
-					sample: [],
-					process: [],
-					test: []
-				},
-				supersedes_evidence_id: null,
-				authoring_note: null
-			}
+			name: 'create_paper_experiment_revision',
+			arguments: { draft_id: 'experiment_draft_1', draft_digest: 'a'.repeat(64) }
 		});
 		installApi({
 			messageTurn: {
-				status: 'approval_required',
-				completion_reason: null,
-				warnings: [],
+				status: 'approval_required', completion_reason: null, warnings: [],
 				messages: [
-					message('msg_user_1', 'user', 'Record this source as Evidence'),
+					message('msg_user_1', 'user', 'Save the reviewed paper experiment'),
 					message('msg_call_write', 'assistant', '', {
-						tool_call_id: null,
-						tool_calls: [
-							{
-								tool_call_id: call.tool_call_id,
-								name: call.name,
-								arguments: call.arguments,
-								position: 0
-							}
-						]
+						tool_calls: [{
+							tool_call_id: call.tool_call_id, name: call.name,
+							arguments: call.arguments, position: 0
+						}]
 					})
 				],
-				pending_approval: call,
-				error_code: null
+				pending_approval: call, error_code: null
 			}
 		});
 
-		await send('Record this source as Evidence');
+		await send('Save the reviewed paper experiment');
 
-		await expect
-			.element(browserPage.getByText('Evidence authoring', { exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText('Higher temperature increased strength to 620 MPa.', { exact: true })
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Publish this Source-grounded Evidence as a new immutable analysis version. A revision keeps the previous Evidence and Findings unchanged.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Approve and publish Evidence' }))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('PaperExperiment revision', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText(
+			'Save the reviewed PaperExperiment revision and its Objective Selection. This creates no Finding.'
+		)).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Approve and save PaperExperiment revision' })).toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
 	});
 
-	it('distinguishes Agent-authored paper analysis from automatic analysis', async () => {
+	it.each(['approved', 'rejected'] as const)('records the %s decision for an experiment revision', async (decision) => {
 		const call = pendingCall({
-			name: 'publish_agent_objective_analysis',
-			arguments: {
-				objective_id: 'obj_1',
-				document_ids: ['doc_1'],
-				paper_summaries: [
-					{
-						document_id: 'doc_1',
-						relevance: 'high',
-						paper_role: 'primary_experiment',
-						contribution_summary: 'Reports one source-backed porosity comparison.',
-						confidence: 0.9
-					}
-				],
-				evidence_drafts: [
-					{
-						draft_id: 'draft_1',
-						document_id: 'doc_1',
-						source_kind: 'text_window',
-						source_ref: 'block_results',
-						source_excerpt: 'Porosity decreased from 1.8% to 0.7%.',
-						source_digest: 'a'.repeat(64),
-						evidence_role: 'direct_result',
-						changed_variables: [{ name: 'laser power' }],
-						comparison: null,
-						reported_result: {
-							outcome: 'porosity',
-							direction: 'decrease',
-							result_text: 'Porosity decreased from 1.8% to 0.7%.'
-						},
-						attribution_scope: 'association_only',
-						scientific_context: { material: [], sample: [], process: [], test: [] },
-						confidence: 0.9
-					}
-				]
-			}
+			name: 'create_paper_experiment_revision',
+			arguments: { draft_id: 'experiment_draft_1', draft_digest: 'a'.repeat(64) }
 		});
 		installApi({
-			messageTurn: {
-				status: 'approval_required',
-				completion_reason: null,
-				warnings: [],
-				messages: [
-					message('msg_user_1', 'user', 'Read these papers and analyze the question yourself'),
-					message('msg_call_write', 'assistant', '', {
-						tool_call_id: null,
-						tool_calls: [
-							{
-								tool_call_id: call.tool_call_id,
-								name: call.name,
-								arguments: call.arguments,
-								position: 0
-							}
-						]
-					})
-				],
-				pending_approval: call,
-				error_code: null
+			trajectory: {
+				feedback: [],
+				items: [message('msg_call_write', 'assistant', '', {
+					tool_calls: [{
+						tool_call_id: call.tool_call_id, name: call.name,
+						arguments: call.arguments, position: 0
+					}]
+				})],
+				pending_approval: call
+			},
+			decisionTurn: {
+				status: decision === 'approved' ? 'completed' : 'rejected',
+				completion_reason: decision === 'approved' ? 'model_answer' : null,
+				warnings: [], pending_approval: null, error_code: null,
+				messages: decision === 'approved' ? [
+					message('msg_result_write', 'tool', '', {
+						tool_call_id: call.tool_call_id,
+						tool_result: {
+							...baseToolResult(call.tool_call_id),
+							data: { selection_ids: ['selection_1'] },
+							resource_refs: [{
+								resource_type: 'document', resource_id: 'doc_1',
+								href: '/collections/col_123/documents/doc_1'
+							}]
+						}
+					}),
+					message('msg_final_write', 'assistant', 'The reviewed experiment revision was saved.')
+				] : []
 			}
 		});
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		render(Page);
 
-		await send('Read these papers and analyze the question yourself');
+		await browserPage.getByRole('button', {
+			name: decision === 'approved' ? 'Approve and save PaperExperiment revision' : 'Reject'
+		}).click();
 
-		await expect
-			.element(browserPage.getByText('Agent paper analysis', { exact: true }))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					"Publish the Agent's complete paper-by-paper analysis after Lens revalidates every Source excerpt and Evidence record. No Finding will be created yet."
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Approve and publish analysis' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
+		await expect.element(browserPage.getByText(
+			decision === 'approved'
+				? 'The reviewed experiment revision was saved.'
+				: 'The PaperExperiment revision was not saved.'
+		)).toBeInTheDocument();
+		const decisionRequest = fetchMock.mock.calls.find(
+			([input, init]) => requestPath(input).endsWith('/decision') && requestMethod(input, init) === 'POST'
+		);
+		expect(requestBody(decisionRequest![0], decisionRequest![1])).toEqual({
+			decision, arguments_digest: call.arguments_digest
+		});
 	});
 
 	it('presents evidence abstention without implying that a Finding will be created', async () => {
@@ -3248,6 +3242,14 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByText('Research question confirmation', { exact: true }))
 			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('How does laser energy affect Ti-6Al-4V strength?', { exact: true })
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('obj_energy_1', { exact: true }))
+			.not.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(

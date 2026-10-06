@@ -67,6 +67,8 @@
   `/collections/{collection_id}/objectives/{objective_id}` 是 objective-first
   工作区入口；确认、分析、Findings 复核、数据集、Assistant focus 和实验方案都使用同一个
   `objective_id`，不维护第二套持久化目标身份
+- 研究目标详情页默认进入已发布分析的结果总览：先看实验比较表和 Finding 列表；分析范围通过独立页签调整。
+  点击 Finding 后通过 `finding_id` 进入单条 Finding 详情，返回操作清理该参数并回到总览，页面不会自动选中第一条 Finding。
 - `/collections/{collection_id}/assistant` 使用同源 `chat-sessions` API，是绑定当前
   collection 的 Research Agent 入口。普通对话不要求 capability；读取和草拟 capability
   自动执行并将结构化结果与最终回答分开显示；消息 POST 通过同一 URL 的
@@ -74,9 +76,9 @@
   收尾；Core 写入停在持久化的精确参数审批点。
   Chat 是会话、消息、capability 轨迹和审批的唯一运行时权威，但不拥有 Objective、
   Evidence、Finding 或 Analysis 真值。Objective 链接仅指向 Core 的规范记录。
-- `/collections/{collection_id}/comparisons` 只读取已发布 Objective analysis
-  的 Findings；它不读取或重建旧 comparison row、Evidence Card、Materials
-  或 Graph 投影
+- 独立的 `/collections/{collection_id}/comparisons` 页面及导航入口已移除。
+  已发布 Findings 及跨论文证据比较统一在所属研究目标中审阅；不读取或重建旧
+  comparison row、Evidence Card、Materials 或 Graph 投影
 - `/collections/{collection_id}/graph` 是次级的 Objective Evidence Map：用户先选择
   一个已有已发布 analysis 的 Objective，再按 `Objective -> Finding -> Evidence ->
 Source -> Document` 回溯关系。页面只调用 Objective 的 `evidence-map` 接口；失败

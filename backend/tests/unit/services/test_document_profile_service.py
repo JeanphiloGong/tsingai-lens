@@ -18,7 +18,7 @@ from tests.support.collection_service import (
 )
 from domain.core.document_profile import DocumentProfile
 from domain.source import SourceDocument, source_documents_from_records
-from infra.source.runtime.source_evidence import build_blocks
+from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
 from infra.persistence.memory import MemoryDocumentProfileRepository
 from infra.persistence.memory import MemorySourceArtifactRepository
 
@@ -45,7 +45,7 @@ async def _write_source_artifacts(
     documents: pd.DataFrame,
     text_units: pd.DataFrame | None = None,
 ) -> None:
-    blocks = build_blocks(documents, text_units)
+    blocks = build_plain_text_blocks(documents, text_units)
     source_documents = source_documents_from_records(
             documents=documents.to_dict(orient="records"),
             text_units=(
@@ -72,6 +72,8 @@ async def _build_profiles(
             await profile_service.build_document_profile(
                 collection_id,
                 document.document_id,
+                source_fingerprint=f"source-{document.document_id}",
+                profile_fingerprint=f"profile-{document.document_id}",
             )
             for document in documents
         ]

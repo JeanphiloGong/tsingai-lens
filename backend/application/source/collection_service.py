@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any
@@ -9,16 +9,39 @@ from uuid import uuid4
 from application.repositories.collection_repository import (
     CollectionRepository,
     CollectionSummary,
+    StoredCollection,
+    StoredDocument,
 )
-from domain.source import Collection, Document
 from application.repositories.object_store import ObjectStore
-from infra.persistence.file.collection_workspace import CollectionPaths
+from domain.chat.permissions import change_permission, permission_record
+from domain.source import Collection
 from infra.persistence.file import FileCollectionWorkspace
+from infra.persistence.file.collection_workspace import CollectionPaths
 from infra.persistence.file.object_store import FileObjectStore
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def document_details(record: StoredDocument) -> dict[str, Any]:
+    return {
+        **asdict(record.document),
+        "stored_filename": record.stored_filename,
+        "storage_key": record.storage_key,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at or record.created_at,
+    }
+
+
+def collection_details(record: StoredCollection) -> dict[str, Any]:
+    return {
+        **asdict(record.collection),
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "paper_count": len(record.documents),
+        "documents": [document_details(document) for document in record.documents],
+    }
 
 
 class CollectionService:
@@ -95,12 +118,16 @@ class CollectionService:
     ) -> dict:
         collection_id = f"col_{uuid4().hex[:12]}"
         now = _now_iso()
-        record = Collection.create(
-            collection_id=collection_id,
-            owner_user_id=owner_user_id,
-            name=name,
-            description=description,
-            now_iso=now,
+        record = StoredCollection(
+            collection=Collection(
+                collection_id=collection_id,
+                owner_user_id=owner_user_id,
+                name=name,
+                description=description,
+                status="idle",
+            ),
+            created_at=now,
+            updated_at=now,
         )
         self.workspace.create_collection_dirs(collection_id)
         try:
@@ -108,7 +135,7 @@ class CollectionService:
         except Exception:
             self.workspace.delete_collection_dir(collection_id)
             raise
-        return record.to_record()
+        return collection_details(record)
 
     async def list_collections(
         self, owner_user_id: str | None = None
@@ -119,7 +146,7 @@ class CollectionService:
         record = await self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return record.to_record()
+        return collection_details(record)
 
     async def get_collection_for_user(
         self, collection_id: str, owner_user_id: str
@@ -129,11 +156,50 @@ class CollectionService:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record
 
+    async def get_agent_default_permission_for_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> dict[str, Any]:
+        await self.get_collection_for_user(collection_id, owner_user_id)
+        return permission_record(
+            await self.repository.read_agent_default_permission(collection_id)
+        )
+
+    async def set_agent_default_permission_for_user(
+        self,
+        collection_id: str,
+        owner_user_id: str,
+        *,
+        mode: str,
+        actions: list[str],
+        all_actions: bool = False,
+        expires_at: str | None,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        await self.get_collection_for_user(collection_id, owner_user_id)
+        current = permission_record(
+            await self.repository.read_agent_default_permission(collection_id)
+        )
+        updated = change_permission(
+            current,
+            mode=mode,
+            actions=actions,
+            all_actions=all_actions,
+            expires_at=expires_at,
+            expected_revision=expected_revision,
+        )
+        if not await self.repository.set_agent_default_permission(
+            collection_id,
+            updated,
+            expected_revision=current["revision"],
+        ):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
+        return updated
+
     async def get_document(
         self,
         collection_id: str,
         document_id: str,
-    ) -> Document:
+    ) -> StoredDocument:
         record = await self.repository.read_document(collection_id, document_id)
         if record is None:
             raise FileNotFoundError(
@@ -152,34 +218,40 @@ class CollectionService:
         profile_fingerprint: str | None = None,
         parser_version: str | None = None,
         document_analysis_version: str | None = None,
-    ) -> Document:
+    ) -> StoredDocument:
         current = await self.get_document(collection_id, document_id)
+        document = current.document
         updated = replace(
             current,
-            status=str(status),
             updated_at=_now_iso(),
-            preparation_fingerprint=(
-                preparation_fingerprint
-                if preparation_fingerprint is not None
-                else current.preparation_fingerprint
-            ),
-            source_fingerprint=(
-                source_fingerprint
-                if source_fingerprint is not None
-                else current.source_fingerprint
-            ),
-            profile_fingerprint=(
-                profile_fingerprint
-                if profile_fingerprint is not None
-                else current.profile_fingerprint
-            ),
-            parser_version=(
-                parser_version if parser_version is not None else current.parser_version
-            ),
-            document_analysis_version=(
-                document_analysis_version
-                if document_analysis_version is not None
-                else current.document_analysis_version
+            document=replace(
+                document,
+                status=str(status),
+                preparation_fingerprint=(
+                    preparation_fingerprint
+                    if preparation_fingerprint is not None
+                    else document.preparation_fingerprint
+                ),
+                source_fingerprint=(
+                    source_fingerprint
+                    if source_fingerprint is not None
+                    else document.source_fingerprint
+                ),
+                profile_fingerprint=(
+                    profile_fingerprint
+                    if profile_fingerprint is not None
+                    else document.profile_fingerprint
+                ),
+                parser_version=(
+                    parser_version
+                    if parser_version is not None
+                    else document.parser_version
+                ),
+                document_analysis_version=(
+                    document_analysis_version
+                    if document_analysis_version is not None
+                    else document.document_analysis_version
+                ),
             ),
         )
         if not await self.repository.update_document(updated):
@@ -197,7 +269,11 @@ class CollectionService:
             for key, value in fields.items()
             if key in {"name", "description", "status"}
         }
-        normalized = replace(current, **allowed_fields, updated_at=_now_iso())
+        normalized = replace(
+            current,
+            collection=replace(current.collection, **allowed_fields),
+            updated_at=_now_iso(),
+        )
         if not await self.repository.update_collection(normalized):
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return await self.get_collection(collection_id)

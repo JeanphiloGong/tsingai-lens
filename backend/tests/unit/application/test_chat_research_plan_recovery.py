@@ -30,7 +30,6 @@ async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missi
     model = _Model(
         *((ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", malformed),)),) if initial_schema_error else ()),
         ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", invalid),)),
-        ModelTurn(content="I will correct the Evidence selection before returning the plan."),
         *correction,
         ModelTurn(tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)),
         ModelTurn(content="The provisional plan now cites only the selected finding's evidence."),
@@ -74,11 +73,11 @@ async def test_unresolved_plan_citations_do_not_expose_saving_or_claim_completio
     )
     assert result.pending_approval is None
     assert writer.executed_arguments == []
-    assert model.all_tool_spec_names[-1] == ()
-    assert "No reviewable draft was produced" in model.contexts[-1][-1].content
+    assert "propose_research_plan" in model.all_tool_spec_names[-1]
+    assert "Execution observations" in model.contexts[-1][-1].content
 
 
-def test_plan_generation_receives_inspected_links_instead_of_unrelated_overview_ids():
+def test_plan_links_do_not_prescribe_a_stage_action_before_a_draft_exists():
     from application.chat.capability_policy import stage_instruction
 
     instruction = stage_instruction(("propose_research_plan",), [], successful_results={
@@ -89,5 +88,4 @@ def test_plan_generation_receives_inspected_links_instead_of_unrelated_overview_
             "evidence": [{"evidence_id": "linked-evidence-1"}],
         }],
     })
-    assert "finding_id=finding-1, evidence_ids=['linked-evidence-1']" in instruction
-    assert "overview-only" not in instruction
+    assert instruction is None

@@ -6,11 +6,12 @@ This package owns two different research activities:
 
 1. form candidate questions from lightweight maps of explicitly selected papers;
 2. answer one confirmed question by extracting, grounding, binding, and
-   comparing Evidence from explicitly selected papers.
+   comparing PaperExperiment revisions from explicitly selected papers.
 
 The two activities share paper inputs but not scientific authority. A Paper Map
-can suggest what to inspect; only Objective analysis can publish Evidence and
-Findings.
+can suggest what to inspect; only Objective analysis can publish experiment
+selections and Findings. Authored Evidence remains a separate immutable
+analysis snapshot.
 
 ## Start Here
 
@@ -23,7 +24,7 @@ Use the following entry points when modifying the Core workflow:
 | Form candidates | `ObjectiveCandidateService.discover_candidate_facts()` | candidate Objectives |
 | Create/confirm a candidate | `ObjectiveAuthoringService.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
 | Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
-| Generate analysis artifacts | `ObjectiveEvidenceAnalysisService.generate_objective_analysis_artifacts()` | per-paper Evidence and Finding inputs |
+| Reconstruct experiments | `ObjectiveExperimentAnalysisService.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
 | Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / read methods | immutable published snapshot |
 
 Paper Map construction is intentionally split by responsibility:
@@ -40,11 +41,12 @@ helper does not authorize changing Source order, recovery budgets, or map
 status semantics.
 
 `ObjectiveInputService.load_or_build_paper_maps()` may call the model and store
-a refreshed map. Its other input reads do not create Objectives or Evidence.
+a refreshed map. Its other input reads do not create Objectives or experiments.
 Discovery stores candidate Objectives; authoring stores only the explicitly
-requested creation or confirmation. Scientific analysis returns records and
-stores reusable per-paper checkpoints; `ObjectiveAnalysisService` controls the
-complete version's publication. Both HTTP and Agent callers use these owners.
+requested creation or confirmation. Scientific analysis returns experiment
+records; `ExperimentAnalysisWriter` stores revisions, selections, optional
+groups, and Findings. `ObjectiveAnalysisService` controls the complete
+version's publication. Both HTTP and Agent callers use these owners.
 
 The analysis runtime receives `ObjectiveInputService` and
 `DocumentProfileService` directly at construction. It does not reach through
@@ -61,7 +63,7 @@ the scientific engine to discover those dependencies.
 | Initial or expanded Paper Map reading scope | `paper_map_sources.py` | `test_paper_research_map_service.py` |
 | Map extraction and technical recovery | `paper_map_extraction.py` | `test_paper_research_map_service.py` |
 | Map merging or status | `paper_map_aggregation.py` | `test_tc4_paper_map_policy.py` |
-| One paper's scientific Evidence flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
+| One paper's scientific experiment flow | `objective_analysis_service.py` | `test_objective_analysis_workflow.py` |
 | Analysis versions, progress, and publication | `analysis_service.py` | `test_objective_analysis_service.py` |
 | Optional single-paragraph Finding summary | `finding_summary.py`, called by `analysis_service.py` | `test_finding_summary.py` |
 
@@ -75,11 +77,13 @@ The scientific order is always the source of truth:
 ```text
 Paper Map -> candidate Objective -> confirmed Objective
   -> framing -> routing -> Source extraction -> grounding
-  -> paper experiment binding -> cross-paper Finding
+  -> PaperExperiment revision -> Objective selection
+  -> optional ComparisonGroup -> Finding
 ```
 
 Paper Maps and routes are navigation inputs. Only grounded Source facts may
-become Evidence, and only compatible Evidence may become a Finding.
+become experiment measurements, and only compatible selections may become a
+Finding.
 
 ## Document-Level Paper Map
 
@@ -200,13 +204,11 @@ POST objectives/{objective_id}/analysis {document_ids}
 At most one version is queued or running for an Objective. Retry allocates the
 next version. A failed retry never hides an earlier published version.
 
-`processed_document_count` counts selected papers with completed Evidence
-inspections, including reusable successful checkpoints and persisted failures.
-Framing, routing, and individual Source reads do not increment it. A failed
-inspection is finished work, not successful scientific evidence; its failure
-remains visible in the contribution. Counts are unique and progress writes are
-serialized across concurrent papers. Finding synthesis can still be running
-after all selected paper inspections have finished.
+`processed_document_count` counts selected papers whose Source inspection and
+experiment reconstruction have finished. Framing, routing, and individual
+Source reads do not increment it. A failed reconstruction is visible in the
+transient contribution and does not create a selection. Counts are unique and
+progress writes are serialized across concurrent papers.
 
 `analysis_errors.py` owns user-facing wording for existing failure codes.
 Analysis writes use those messages, and failed-analysis reads also apply them
@@ -229,15 +231,16 @@ Objective + Profile + Paper Map navigation prior
   -> Source-local extraction
   -> deterministic grounding
   -> within-paper experiment binding
-  -> persist a reusable document Evidence checkpoint
+  -> persist an immutable PaperExperiment revision
 ```
 
 Then across papers:
 
 ```text
-PaperContributions + grounded ObjectiveEvidence
+PaperExperiment revisions + Objective selections
   -> align material state, variables, methods, and outcomes
   -> preserve non-comparability and conflicts
+  -> optionally build a ComparisonGroup
   -> synthesize Findings
   -> publish one immutable analysis version
 ```
@@ -322,7 +325,8 @@ same papers + confirmed Objective
   -> same relevant-paper and Source recall
   -> source-local facts with complete lineage
   -> within-paper experiment binding
-  -> comparable / descriptive / abstained Evidence
+  -> selected experiment results and a comparable / descriptive / abstained
+     Evidence compatibility projection
   -> Finding, or an explicit no-defensible-comparison result
 ```
 
@@ -330,14 +334,11 @@ Technical failures such as provider timeouts, invalid JSON, token saturation,
 and retry exhaustion are recorded separately as `extraction_failed`. They are
 not converted into scientific absence and do not count as a valid conclusion.
 
-Each document inspection is independently resumable. Its reuse fingerprint
-covers the confirmed Objective's scientific intent, the exact prepared Document,
-the extraction version, and model identity. A matching completed inspection is
-reused on a later analysis version; failed or unfinished inspection reruns.
-Cached contributions and Evidence are rebound to the current analysis version,
-then the complete selected set enters Finding synthesis once. Publication remains
-one atomic `ObjectiveAnalysis` snapshot and does not expose partial checkpoint
-state through the public API.
+Each analysis fixes the prepared Document inputs and writes immutable experiment
+revisions. A later supplement or correction creates a successor revision; it
+does not mutate a published Finding. The automatic path has no reusable
+per-document Evidence checkpoint. Published projections resolve the exact
+revision referenced by each Selection.
 
 ## Main Owners
 
@@ -355,8 +356,10 @@ state through the public API.
 - `analysis/source_screening.py`: paper relevance and Source scope.
 - `analysis/evidence_routing.py`: likely Source selection.
 - `analysis/source_extraction.py`: Source-local extraction and grounding.
-- `analysis/paper_experiment.py`: within-paper experiment binding.
-- `analysis/finding_synthesis.py`: cross-paper Finding synthesis.
+- `analysis/paper_experiment_extraction.py` and
+  `analysis/paper_experiment_contract.py`: bounded Draft extraction,
+  reconciliation, and source binding for within-paper experiments.
+- `analysis/experiment_finding_synthesis.py`: cross-paper Finding synthesis.
 - `evidence_map.py`: read-only published Evidence graph projection.
 
 ## Consumer Boundary

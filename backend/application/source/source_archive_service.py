@@ -11,7 +11,7 @@ from zipfile import ZIP_STORED, ZipFile
 
 from application.repositories.collection_repository import CollectionRepository
 from application.repositories.object_store import ObjectStore
-
+from application.source.collection_service import collection_details
 
 _SOURCE_ARCHIVE_MAX_MIB = 256
 _SOURCE_ARCHIVE_MAX_BYTES = _SOURCE_ARCHIVE_MAX_MIB * 1024 * 1024
@@ -159,7 +159,7 @@ class SourceArchiveService:
         record = await self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return record.to_record()
+        return collection_details(record)
 
     def _write_source_archive(
         self,

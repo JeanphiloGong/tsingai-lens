@@ -6,10 +6,6 @@ import pytest
 from application.chat import model as chat_model
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.objectives import finding_summary
-from application.core.objectives.analysis import finding_synthesis
-from application.core.objectives.analysis.finding_synthesis import (
-    StructuredFindingSynthesis,
-)
 from application.core.objectives.analysis.source_extraction import (
     DirectEvidenceExtractionModelOutput,
     DirectEvidenceExtractionsModelOutput,
@@ -67,9 +63,6 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         PaperFrameBatchResult: (
             "application.core.objectives.analysis.source_screening"
         ),
-        StructuredFindingSynthesis: (
-            "application.core.objectives.analysis.finding_synthesis"
-        ),
     }
 
     assert all(
@@ -84,7 +77,6 @@ def test_objective_judgments_own_their_response_contracts() -> None:
         (paper_map_outputs, "ExperimentalPaperMapModelOutput"),
         (paper_map_outputs, "ReviewPaperMapModelOutput"),
         (axis_equivalence, "AxisCanonicalizationPlanModelOutput"),
-        (finding_synthesis, "FindingSynthesisModelOutput"),
         (finding_summary, "FindingSummaryModelOutput"),
         (chat_model, "ResearchWorkingCheckModelOutput"),
         (chat_model, "ResearchWorkingNotesModelOutput"),

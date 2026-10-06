@@ -19,13 +19,26 @@ into that research meaning, including when explaining pending approval.
 
 One turn follows this sequence:
 
+Finding lookup is not limited to the latest bounded query results. The exact
+handler validates collection ownership and the requested record identity. A
+transient draft remains an observation: the model may read again or revise its
+answer; draft success does not synthesize an automatic final response.
+
 ```text
 user message -> bounded model decision -> capability call
   -> capability result -> trajectory checkpoint -> final answer or approval
 ```
 
 Read capabilities may inspect canonical collection resources. Write
-capabilities stop for exact user approval. Chat never owns a second Objective,
+capabilities stop for exact user approval by default. Collection defaults can
+choose read-only, confirmation, or an automatic grant for new sessions; a
+session permission can then override that authority. An automatic grant may
+be persistent (`expires_at: null`, until revoked or changed) or temporary (up
+to 24 hours). Both scopes can authorize any currently registered write action
+selected by the user, and the backend expands an all-actions request. ChatSessionService
+claims every automatic write in the repository before resuming the same Runner;
+it never sends write calls through the parallel read executor. Revocation and
+claim share the session row lock. Chat never owns a second Objective,
 Evidence, Finding, or Analysis record; it calls the Source and Core services.
 
 ## Boundary Checklist
@@ -42,13 +55,18 @@ Evidence, Finding, or Analysis record; it calls the Source and Core services.
 When adding a capability, define its typed input/output and approval risk first;
 do not add scientific state to the Chat trajectory.
 
+Agent-authored experiment records use `propose_paper_experiment_draft` followed
+by the separately approved `create_paper_experiment_revision`. The capability
+does not own experiment persistence: it reloads canonical Sources and delegates
+identity, revision, Selection, and atomic graph writes to `application/core/`.
+
 ## Main Flow
 
 ```text
 authenticated user + collection
   -> ChatSessionService validates and persists the user message
   -> ChatContextBuilder selects a bounded trajectory for the model
-  -> ResearchAgentRunner exposes short read/draft descriptions and explicit writes
+  -> ResearchAgentRunner exposes a catalog of registered read, draft and write tools
   -> ChatModel selects names through discover_research_tools when needed
   -> Runner exposes the selected registered parameter schemas for this request
   -> ChatModel returns an answer, independent reads, or one draft/write call
@@ -57,6 +75,10 @@ authenticated user + collection
   -> ChatSessionService checkpoints the trajectory and final response
 ```
 
+Exact Finding reads return review_scope:
+feedback lists belong to that version only and do not include ancestors.
+A new Finding's empty feedback list cannot erase an older version's reviews.
+
 Source context attached from the document reader is resolved against the
 canonical Source before the model runs. A quote is inspection material, not
 Evidence or permission to mutate a scientific record.
@@ -64,27 +86,41 @@ Evidence or permission to mutate a scientific record.
 Repeated identical calls within one model response execute once. Retained calls
 are assigned contiguous positions so checkpointed requests and results stay paired.
 
+Independent read calls whose capability is marked `parallel_safe` run behind the
+configured read semaphore. Their completion timing cannot reorder the model's
+request positions or the persisted tool-result messages; a read capability that
+is not marked safe stays sequential. Draft and write calls are never mixed into
+that read batch.
+
 Read and draft capabilities can execute during the turn. Write capabilities
 persist their exact arguments and digest, stop for the authenticated user's
-approval, and execute only that approved call once. Rejection, provider
+approval or a current scoped grant, and execute only that authorized call once.
+Automatic authority records its permission revision and scope_grant basis.
+Rejection, provider
 failure, malformed model output, and resource limits remain technical trajectory
 outcomes; they are not scientific conclusions.
 
-Read and transient-draft discovery uses the model's interpretation of the
+Research tool discovery uses the model's interpretation of the
 request, including filenames, paper identifiers, and conversational references.
 It does not require words such as "paper" or "source" to unlock inspection.
 Greetings, general knowledge, and application explanations can finish without
-discovery. An explicit no-tools request exposes no capabilities.
+discovery. Tool visibility is controlled by the caller's explicit per-turn
+`permission_mode`: `confirm` keeps the normal discovery and exact write
+approval path, `read_only` removes durable writes while retaining reads and
+transient drafts, and `none` exposes no capabilities. A phrase such as “do not
+search” is conversational guidance for the model, not an authorization switch.
 
 `discover_research_tools` is an ordinary typed function call, not a provider's
-native ToolSearch API. Its short catalog comes from registered read/draft
+native ToolSearch API. Its short catalog comes from registered read/draft/write
 handlers. It loads up to six named schemas per call and performs no scientific
 read, write, or approval. Successful results retain selected names only for
 the active user request; definitions always come from the current registry.
 The registry and each tool's risk are the authority for catalog membership;
 there is no parallel static list of known capabilities. Removed names are
-ignored. Discovery grants no execution permission. Automatically selected
-prerequisite readers remain available after execution in that request too.
+ignored. Discovery grants no execution permission. Loaded tools remain
+available after navigation; the model can discover additional tools, revisit a
+completed browse, or answer without a prescribed reader/draft order. The
+`source_inspection_required` flag records the model's assessment, not a gate.
 The next user request starts with a fresh catalog.
 
 Persistence intent is scoped to the requested action: saving error feedback
@@ -426,7 +462,11 @@ checks, certify a scientific stage, or automatically restart interrupted work.
   the emergency cycle ceiling. One private request path enforces model
   deadlines and output allowances for both decisions and answer-only
   finalization. Technical limits permit finalization with scope warnings only
-  while turn time remains; a failed finalization remains a failure.
+  while turn time remains. A response or finalization failure remains a failure
+  unless an approved durable write in the current continuation already has a
+  matching successful result. In that case, the runner checkpoints a short
+  deterministic confirmation and returns `completed` with a non-blocking
+  warning; the persisted write remains authoritative.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
   while pinning the active question and keeping whole request/result batches
   together. Selection uses the token capacity remaining after request overhead

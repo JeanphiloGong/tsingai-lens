@@ -1,0 +1,95 @@
+{
+  "schema_version": "multi_experiment_gold.v1",
+  "paper_id": "P004",
+  "papers": [
+    {
+      "paper_id": "P004",
+      "evidence_disposition": "coverage_incomplete",
+      "coverage": {
+        "routed_source_count": 20,
+        "extracted_source_count": 19,
+        "comparable_evidence_count": 3,
+        "failed_source_count": 0,
+        "uninspected_source_count": 1,
+        "missing_fields": [
+          "supplementary phase-identification details",
+          "specimen-level replicate identity",
+          "wear coverage for unlisted Table 2 combinations"
+        ],
+        "inspected_source_ids": ["E001", "E004", "E005", "E006", "E007", "E008", "E009", "E010", "E011", "E012", "E013", "E014", "E015", "E016", "E017", "E018", "E019", "E020", "E021"],
+        "routed_source_refs": [
+          {"source_kind": "supplementary_material", "source_ref": "supplementary:S1-S4"}
+        ],
+        "uninspected_source_refs": [
+          {
+            "source_kind": "supplementary_material",
+            "source_ref": "supplementary:S1-S4",
+            "reason": "Detailed phase confirmation is referenced by the paper but is not included in the tracked compact snapshot."
+          }
+        ],
+        "technical_failures": [],
+        "reason": "The paper supports conditional, paper-local comparisons, but not a complete mapping of every outcome to every process state."
+      }
+    }
+  ],
+  "expected_findings": [
+    {
+      "finding_id": "F001",
+      "label": "Heat treatment changes elongation at the selected fixed SLM condition",
+      "decision": "conditional_finding",
+      "relation_ids": ["P004:X02:R02"],
+      "source_ids": ["E009", "E014", "E015", "E021"],
+      "claim": "At 120 W / 100 mm/s, furnace HT and HIP increase reported elongation relative to as-SLM while lowering reported strength; the ± statistic type remains unspecified.",
+      "allowed_assertion_strength": "associative",
+      "scope": "P004:X02 only"
+    },
+    {
+      "finding_id": "F002",
+      "label": "Heat treatment lowers residual stress in the selected stratum",
+      "decision": "conditional_finding",
+      "relation_ids": ["P004:X02:R03"],
+      "source_ids": ["E011"],
+      "claim": "The selected 120 W / 100 mm/s measurements report lower residual stress after furnace HT or HIP than as-SLM.",
+      "allowed_assertion_strength": "associative",
+      "scope": "selected condition, not all Table 2 rows"
+    },
+    {
+      "finding_id": "F003",
+      "label": "The process matrix associates higher energy-density settings with higher density",
+      "decision": "association_only",
+      "relation_ids": ["P004:X01:R01"],
+      "source_ids": ["E006", "E008", "E012"],
+      "claim": "Across the jointly varied power/speed matrix, density and pore observations change with the reported energy-density settings.",
+      "allowed_assertion_strength": "associative",
+      "scope": "P004:X01 matrix"
+    }
+  ],
+  "abstentions": [
+    {
+      "abstention_id": "A001",
+      "relationship_id": "P004:X03:R02",
+      "decision": "abstain",
+      "reason": "Wear tests cover selected 120 W speed strata only; unlisted Table 2 combinations are uninspected, not negative results.",
+      "finding_ids": []
+    },
+    {
+      "abstention_id": "A002",
+      "relationship_id": "P004:X01:R01",
+      "decision": "abstain",
+      "reason": "Laser power and scan speed co-vary, so the compact gold does not support an isolated causal claim for derived energy density.",
+      "finding_ids": []
+    },
+    {
+      "abstention_id": "A003",
+      "relationship_id": "P004:X02:R04",
+      "decision": "abstain",
+      "reason": "The conventional cold-rolled control is a route context comparator, not a matched SLM post-treatment counterfactual.",
+      "finding_ids": []
+    }
+  ],
+  "technical_failure_guard": {
+    "rule": "A parser timeout, malformed JSON response, or unavailable model call must increase failed_source_count and leave scientific findings unchanged; it must never be encoded as a negative measurement or a scientific abstention.",
+    "expected_failed_source_count_when_injected": 1,
+    "expected_disposition_when_injected": "extraction_failed"
+  }
+}

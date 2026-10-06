@@ -1,7 +1,8 @@
 # TsingAI-Lens Deploy Bundle
 
 This directory is the minimal self-hosted runtime bundle for Lens. It runs the
-published Lens images with one internal PostgreSQL service.
+published Lens images with one internal PostgreSQL service and four internal
+analysis Worker services.
 
 This is the repository's only Docker Compose entrypoint. For source-tree
 development, use the module-local instructions in
@@ -22,7 +23,7 @@ Install the deploy bundle with:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/JeanphiloGong/tsingai-lens/main/deploy/install.sh \
-  | sh -s -- --version v0.12.24 --ref v0.12.24
+  | sh -s -- --version v0.13.1 --ref v0.13.1
 ```
 
 Use `--ref <git-ref>` when you want the deploy files themselves to come from a
@@ -155,7 +156,7 @@ Edit `.env` to set that generated value, the published image tag, and the host
 port:
 
 ```bash
-LENS_VERSION=v0.12.24
+LENS_VERSION=v0.13.1
 LENS_HTTP_PORT=8080
 POSTGRES_PASSWORD=<generated-64-character-hex-value>
 ```
@@ -214,6 +215,40 @@ Application startup never creates or changes database schema.
 ./scripts/lens ps
 ```
 
+`./scripts/lens up` starts the backend, frontend, PostgreSQL, and the four
+analysis Workers together. The Workers are long-running processes built from
+the backend image; they do not expose HTTP ports and are not started by a Chat
+request. The backend only records a pending `analysis_jobs` row, and the
+matching Worker claims it and writes the analysis result or dataset sample.
+
+The expected service names are:
+
+```text
+postgres
+backend
+frontend
+feedback-analysis-worker
+correction-signal-analysis-worker
+tool-failure-analysis-worker
+dataset-sample-worker
+```
+
+Inspect a particular Worker when a job remains pending:
+
+```bash
+./scripts/lens logs feedback-analysis-worker
+./scripts/lens logs correction-signal-analysis-worker
+./scripts/lens logs tool-failure-analysis-worker
+./scripts/lens logs dataset-sample-worker
+```
+
+Stopping a Worker leaves newly created jobs in `pending`; starting the service
+again lets it continue polling. Docker's `restart: unless-stopped` restarts a
+Worker container after a process failure. Each claimed job has a database lease
+(`worker_id`, `lease_expires_at`, `heartbeat_at`, and `lease_version`). When a
+Worker exits, the next Worker pass returns an expired `running` job to
+`pending`; dataset sample jobs also return from `building` to `pending`.
+
 Open:
 
 ```text
@@ -233,13 +268,14 @@ http://localhost:8080
 ./scripts/lens logs
 ./scripts/lens ps
 ./scripts/lens pull
-./scripts/lens upgrade v0.12.24
+./scripts/lens upgrade v0.13.1
 ```
 
 Command mapping:
 
 - `doctor` checks Docker, Compose, password shape, PostgreSQL readiness,
-  Alembic head state, the data directory, and frontend/backend reachability.
+  Alembic head state, the data directory, all four analysis Workers, and
+  frontend/backend reachability.
 - `up` runs `docker compose up -d`.
 - `down` runs `docker compose down`.
 - `logs` follows `docker compose logs`.
@@ -257,11 +293,16 @@ Back up PostgreSQL and file-backed runtime data before changing versions. See
 cp -a data/backend data/backend.backup.$(date +%Y%m%d%H%M%S)
 ```
 
-Edit `LENS_VERSION` in `.env`, stop the application, pull the new images,
-migrate with the new backend image, and start Lens again:
+Edit `LENS_VERSION` in `.env`, stop the application and Workers, pull the new
+images, migrate with the new backend image, and start Lens again:
 
 ```bash
-docker compose --env-file .env -f compose.yml stop frontend backend
+docker compose --env-file .env -f compose.yml stop \
+  frontend backend \
+  feedback-analysis-worker \
+  correction-signal-analysis-worker \
+  tool-failure-analysis-worker \
+  dataset-sample-worker
 docker compose --env-file .env -f compose.yml pull
 docker compose --env-file .env -f compose.yml up -d postgres
 docker compose --env-file .env -f compose.yml run --rm backend alembic upgrade head
@@ -288,13 +329,18 @@ version still owns file-backed structured state.
 ## Restore
 
 Restore only from a trusted, non-empty archive. This procedure stops the
-backend, replaces the `lens` database, verifies the Alembic head, and then
-starts the backend again:
+backend and Workers, replaces the `lens` database, verifies the Alembic head,
+and then starts the application services again:
 
 ```bash
 lens_backup_file=../lens-backups/lens-YYYYMMDDHHMMSS.dump
 test -s "$lens_backup_file"
-docker compose --env-file .env -f compose.yml stop backend
+docker compose --env-file .env -f compose.yml stop \
+  frontend backend \
+  feedback-analysis-worker \
+  correction-signal-analysis-worker \
+  tool-failure-analysis-worker \
+  dataset-sample-worker
 docker compose --env-file .env -f compose.yml exec -T postgres \
   psql --set=ON_ERROR_STOP=1 --username=lens --dbname=postgres \
   --command='DROP DATABASE IF EXISTS lens WITH (FORCE)' \
@@ -304,7 +350,7 @@ docker compose --env-file .env -f compose.yml exec -T postgres \
   --username=lens --dbname=lens < "$lens_backup_file"
 docker compose --env-file .env -f compose.yml run --rm backend \
   alembic current --check-heads
-docker compose --env-file .env -f compose.yml start backend
+docker compose --env-file .env -f compose.yml up -d
 ./scripts/lens doctor
 ```
 

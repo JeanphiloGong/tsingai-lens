@@ -11,8 +11,8 @@ from infra.persistence.memory import (
     MemoryDocumentProfileRepository,
     MemoryObjectiveRepository,
     MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
     MemoryPipelineRunRepository,
+    MemorySourceArtifactRepository,
 )
 from tests.support.chat_repository import MemoryChatRepository
 from tests.support.experiment_plan_repository import (
@@ -21,7 +21,6 @@ from tests.support.experiment_plan_repository import (
 from tests.support.objective_review_repository import (
     InMemoryObjectiveReviewRepository,
 )
-
 
 API_V1_PREFIX = "/api/v1"
 
@@ -43,7 +42,7 @@ class _ImmediateDocumentPreparationService:
             document_id,
         )
         fingerprint = sha256(
-            f"{document.sha256}:test-parser:test-analysis".encode("utf-8")
+            f"{document.document.sha256}:test-parser:test-analysis".encode("utf-8")
         ).hexdigest()
         run, created = await self.pipeline_run_service.get_or_create_document_run(
             collection_id=collection_id,

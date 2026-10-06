@@ -1,0 +1,207 @@
+{
+  "schema_version": "paper_experiment_sources.v1",
+  "paper_id": "P004",
+  "sources": [
+    {
+      "source_id": "E004",
+      "source_kind": "table",
+      "source_ref": "pdf:p2:table-1",
+      "page": 2,
+      "section": "2.1 Sample preparation and experimental setup",
+      "quote": "Chemical composition of the conventional cold-rolled SS316L and spherical SS316L powders.",
+      "supports": ["cold_rolled_control", "material_identity"],
+      "scope": "CR_control_and_powder_context"
+    },
+    {
+      "source_id": "E001",
+      "source_kind": "abstract",
+      "source_ref": "pdf:p1:abstract",
+      "page": 1,
+      "section": "Abstract",
+      "quote": "The fabricated SLM samples were subjected to two different heat treatments: a typical furnace-type heat treatment conducted at 1100 °C for 0.5 h and hot isostatic pressing performed at 1100 °C and 100 MPa for 1.5 h.",
+      "supports": ["heat_treatment_arms", "treatment_parameters"],
+      "scope": "paper_level_summary"
+    },
+    {
+      "source_id": "E005",
+      "source_kind": "text_window",
+      "source_ref": "pdf:p2:section-2.1:equipment-and-atmosphere",
+      "page": 2,
+      "section": "2.1 Sample preparation and experimental setup",
+      "quote": "The building chamber ... was maintained at an oxygen concentration below 0.5 vol% ... filled with argon gas (purity: 99.99%) to prevent oxidation.",
+      "supports": ["process_context", "atmosphere"],
+      "scope": "SLM_samples"
+    },
+    {
+      "source_id": "E006",
+      "source_kind": "text_window",
+      "source_ref": "pdf:p2:section-2.1:process-range",
+      "page": 2,
+      "section": "2.1 Sample preparation and experimental setup",
+      "quote": "The experimental conditions for the SLM process were fixed at a layer thickness of 0.03 mm and a hatch distance of 0.12 mm. The laser power ranged from 100 to 140 W, and the laser beam scan speed varied from 100 to 280 mm/s.",
+      "supports": ["process_matrix", "fixed_context", "varied_factors"],
+      "scope": "SLM_samples"
+    },
+    {
+      "source_id": "E007",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p2-3:fig-2:chessboard-strategy",
+      "page": 2,
+      "section": "2.1 Sample preparation and experimental setup",
+      "quote": "The laser beam scanned the layer with a chessboard strategy ... blocks with dimensions of 5 × 5 mm2 ... adjacent blocks ... 90° ... every chessboard scan direction was rotated by 30°.",
+      "supports": ["scan_strategy", "fixed_context"],
+      "scope": "SLM_samples"
+    },
+    {
+      "source_id": "E008",
+      "source_kind": "table",
+      "source_ref": "tbl_doc_a3cedb1c7570_2_table_2",
+      "page": 4,
+      "section": "2.1 Sample preparation and experimental setup",
+      "table_id": "tbl_doc_a3cedb1c7570_2_table_2",
+      "artifact_path": "backend/tests/fixtures/p004_table_continuation.json",
+      "quote": "Experimental conditions and measured density for the SLM SS316L samples. Typical furnace-type of HT and HIP were conducted after the SLM process.",
+      "supports": ["sample_arms", "process_matrix", "density_measurements", "heat_treatment_comparisons"],
+      "scope": "all_table_2_rows",
+      "cell_scope": {
+        "row_labels": ["as-SLM", "HT-SLM", "HIP-SLM"],
+        "columns": ["Laser power (W)", "Scan speed (mm/s)", "Laser energy density (J/mm3)", "Density (%)"]
+      }
+    },
+    {
+      "source_id": "E009",
+      "source_kind": "text_window",
+      "source_ref": "pdf:p3:section-2.4:mechanical-test-conditions",
+      "page": 3,
+      "section": "2.4 Mechanical properties",
+      "quote": "The tensile strength was measured ... at a crosshead speed of 0.005 mm/s. The sample geometry and testing parameters followed ... ASTM E8/E8M–16a ... microhardness ... load of 200 kgf and a holding time of 10 s.",
+      "supports": ["tensile_condition", "hardness_condition", "test_context"],
+      "scope": "CR_and_SLM_samples"
+    },
+    {
+      "source_id": "E010",
+      "source_kind": "text_window",
+      "source_ref": "pdf:p3:section-2.5:wear-test-conditions",
+      "page": 3,
+      "section": "2.5 Wear behaviors",
+      "quote": "A dry sliding wear test was conducted ... following the requirements of ASTM G99 ... total sliding distance was 200 m with a sliding speed of 28.8 mm/s and a normal load of 30 N.",
+      "supports": ["wear_condition", "test_context"],
+      "scope": "selected_wear_samples"
+    },
+    {
+      "source_id": "E011",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p4:fig-5:residual-stress",
+      "page": 4,
+      "section": "3.1 X-ray diffraction and residual stress",
+      "quote": "The SLM samples were fabricated at a laser power of 120 W and scan speed of 100 mm/s ... as-SLM ... 99.5 MPa ... HT-SLM ... 17.8 MPa ... HIP-SLM ... 27.5 MPa.",
+      "supports": ["residual_stress_measurements", "selected_condition_scope", "heat_treatment_comparison"],
+      "scope": "CR_and_120W_100mm_per_s_stratum"
+    },
+    {
+      "source_id": "E012",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p5-6:fig-6:density-and-pores",
+      "page": 5,
+      "section": "3.2 Microstructure",
+      "quote": "The number and size of pores decreased with increasing laser power and decreasing scan speed ... high density ... increasing the laser energy density.",
+      "supports": ["density_trend", "pore_observation", "joint_process_association"],
+      "scope": "SLM_process_matrix"
+    },
+    {
+      "source_id": "E013",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p6-8:figs-7-9:microstructure",
+      "page": 6,
+      "section": "3.2 Microstructure",
+      "quote": "as-SLM grain size 17.6 μm; HT-SLM 21.4 μm; HIP-SLM 22.9 μm; cellular microstructure disappeared after heat treatment.",
+      "supports": ["grain_size", "cellular_microstructure", "heat_treatment_comparison"],
+      "scope": "CR_and_120W_100mm_per_s_stratum",
+      "supplementary_dependency": true
+    },
+    {
+      "source_id": "E014",
+      "source_kind": "table",
+      "source_ref": "pdf:p9:table-3:mechanical-properties",
+      "page": 9,
+      "section": "3.3 Mechanical properties",
+      "quote": "Mechanical properties of CR and SLM samples: hardness, yield strength, tensile strength, elongation.",
+      "supports": ["hardness_results", "yield_strength_results", "tensile_strength_results", "elongation_results"],
+      "scope": "CR_and_SLM_parameter_matrix",
+      "table_id": "semantic:p9:table-3",
+      "parse_risk": "long_table_requires_row_and_column_binding"
+    },
+    {
+      "source_id": "E015",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p9-10:figs-10-12:mechanical-results",
+      "page": 9,
+      "section": "3.3 Mechanical properties",
+      "quote": "Heat treatments decreased hardness/tensile strength and improved elongation; dimples and pores were observed on fracture surfaces.",
+      "supports": ["mechanical_direction", "fracture_observation"],
+      "scope": "selected_120W_100mm_per_s_stratum"
+    },
+    {
+      "source_id": "E021",
+      "source_kind": "text_window",
+      "source_ref": "pdf:p9:section-3.3:prose-value-conflict",
+      "page": 9,
+      "section": "3.3 Mechanical properties",
+      "quote": "The yield strengths and elongation were measured as 464.8 MPa and 32.8%, as well as 222.5 MPa and 63.5% for the as-SLM and CR, respectively. After the heat treatments of the as-SLM, the elongation significantly improved to 48.2 and 51.3% for the HT-SLM and HIP-SLM, respectively.",
+      "supports": ["reported_value_conflict", "elongation", "source_priority_review"],
+      "scope": "selected_120W_100mm_per_s_stratum",
+      "conflict_group": "P004:elongation:120-100",
+      "conflict_groups": ["P004:elongation:120-100:as-SLM", "P004:elongation:120-100:HT-SLM", "P004:elongation:120-100:HIP-SLM"]
+    },
+    {
+      "source_id": "E016",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p10:fig-13:coefficient-of-friction",
+      "page": 10,
+      "section": "3.4 Wear behaviors",
+      "quote": "For the as-SLM(120/100), the COF was found to be 0.54; however, the HT-SLM(120/100) and HIP-SLM(120/100) samples ... 0.62 and 0.63, respectively.",
+      "supports": ["coefficient_of_friction", "selected_wear_scope", "heat_treatment_comparison"],
+      "scope": "120W_100mm_per_s_stratum"
+    },
+    {
+      "source_id": "E017",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p10-11:fig-14:wear-loss",
+      "page": 10,
+      "section": "3.4 Wear behaviors",
+      "quote": "Comparable wear loss was obtained for the CR (0.56 mm3) and as-SLM(120/100) (0.57 mm3) ... heat treatments deteriorated the wear resistance ... wear loss was found to be 0.57 and 0.67 mm3 for as-SLM(120/100) and as-SLM(120/280), respectively.",
+      "supports": ["wear_loss", "selected_wear_scope", "scan_speed_comparison"],
+      "scope": "CR_and_selected_120W_strata"
+    },
+    {
+      "source_id": "E018",
+      "source_kind": "figure_and_text",
+      "source_ref": "pdf:p11-12:fig-15:worn-surface",
+      "page": 11,
+      "section": "3.4 Wear behaviors",
+      "quote": "Pores and accumulated wear debris were observed in the contact area of the as-SLM samples after the pin-on-disk test.",
+      "supports": ["wear_surface_observation", "pore_context"],
+      "scope": "selected_wear_samples"
+    },
+    {
+      "source_id": "E019",
+      "source_kind": "conclusion",
+      "source_ref": "pdf:p12:conclusion",
+      "page": 12,
+      "section": "4. Conclusion",
+      "quote": "The heat treatments induced a decrease in the tensile strength, as well as an increase in the elongation ... heat treatments deteriorated wear resistance.",
+      "supports": ["paper_level_synthesis", "mechanical_direction", "wear_direction"],
+      "scope": "paper_level_summary"
+    },
+    {
+      "source_id": "E020",
+      "source_kind": "data_availability",
+      "source_ref": "pdf:p12:data-availability",
+      "page": 12,
+      "section": "Data availability",
+      "quote": "The raw/processed data required to reproduce these findings cannot be shared at this time.",
+      "supports": ["raw_data_unavailable"],
+      "scope": "paper_level_limit"
+    }
+  ]
+}

@@ -56,7 +56,7 @@ def _references_retired_core_persistence(path: Path) -> bool:
     return False
 
 
-def test_product_facing_modules_do_not_import_graphrag_outside_source_runtime():
+def test_product_facing_modules_do_not_import_graphrag_outside_source_boundary():
     backend_root = Path(__file__).resolve().parents[3]
     scan_roots = [
         backend_root / "application",
@@ -77,7 +77,7 @@ def test_product_facing_modules_do_not_import_graphrag_outside_source_runtime():
     assert violations == []
 
 
-def test_maintained_runtime_does_not_reference_retired_core_persistence():
+def test_maintained_backend_does_not_reference_retired_core_persistence():
     backend_root = Path(__file__).resolve().parents[3]
     scan_roots = [
         backend_root / "application",

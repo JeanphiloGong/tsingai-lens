@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+import json
 from typing import Any, Annotated, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,13 +13,14 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from application.chat.context_builder import ChatContextBuilder
 
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=160)]
 _OBJECTIVE_LIMIT = 12
 
 
-class QueryPublishedFindingsArguments(BaseModel):
+class QueryPublishedFindingsToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_ids: list[ObjectiveId] = Field(default_factory=list, max_length=12)
@@ -38,7 +41,7 @@ class QueryPublishedFindingsArguments(BaseModel):
         return normalized
 
 
-class InspectPublishedFindingArguments(BaseModel):
+class InspectPublishedFindingToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: ObjectiveId
@@ -59,7 +62,7 @@ class QueryPublishedFindingsCapability:
             "authorship."
         ),
         risk=ToolRisk.READ,
-        input_model=QueryPublishedFindingsArguments,
+        input_model=QueryPublishedFindingsToolRequest,
     )
 
     def __init__(
@@ -76,7 +79,7 @@ class QueryPublishedFindingsCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: QueryPublishedFindingsArguments,
+        arguments: QueryPublishedFindingsToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -284,10 +287,13 @@ class InspectPublishedFindingCapability:
             "new Finding derived from this parent. Includes updated Evidence for "
             "reassessing replaced inputs. The complete Finding object is the "
             "only valid basis for a curation or parent-derived authoring write; do not "
-            "reconstruct omitted fields from a summary."
+            "reconstruct omitted fields from a summary. Feedback and curation apply "
+            "only to the exact returned version. Empty lists do not establish that "
+            "ancestor versions have no reviews; inspect a known ancestor explicitly "
+            "or report historical review coverage as unknown."
         ),
         risk=ToolRisk.READ,
-        input_model=InspectPublishedFindingArguments,
+        input_model=InspectPublishedFindingToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, objective_analysis_service: Any,
@@ -299,7 +305,7 @@ class InspectPublishedFindingCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: InspectPublishedFindingArguments,
+        arguments: InspectPublishedFindingToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -366,7 +372,7 @@ class InspectPublishedFindingCapability:
             version,
             arguments.finding_id,
         )
-        return ChatToolResult(
+        result = ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
             data={
@@ -375,6 +381,7 @@ class InspectPublishedFindingCapability:
                 "finding": dict(detail["finding"]),
                 "feedback_records": [item.to_record() for item in feedback],
                 "curation_records": [item.to_record() for item in curations],
+                "review_scope": {**review_key, "includes_ancestor_reviews": False},
                 "evidence_review": review,
                 "replacement_evidence": replacement_evidence,
                 "finding_is_published": True,
@@ -398,11 +405,48 @@ class InspectPublishedFindingCapability:
             ),
             warnings=warnings,
         )
+        # Measure the actual escaped tool message, rather than raw excerpt text.
+        budget = max(0, min(context.max_result_tokens, 12_000) - 256)
+        while ChatContextBuilder.estimate_tokens({
+            "role": "tool", "tool_call_id": result.tool_call_id,
+            "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
+        }) > budget:
+            if not evidence_items:
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id,
+                    status="failed",
+                    error_code="finding_read_exceeds_budget",
+                    error_message=(
+                        "The complete Finding or one Evidence record exceeds the read budget. "
+                        "Open the exact Finding and Sources in the workspace; this result "
+                        "does not establish a complete review."
+                    ),
+                    resource_refs=(finding_ref,),
+                )
+            evidence_items.pop()
+            pending = {replacements.get(item["evidence_id"]) for item in evidence_items}
+            replacement_evidence = [item for item in replacement_evidence if item["evidence_id"] in pending]
+            next_offset = arguments.evidence_offset + len(evidence_items)
+            if not evidence_items and next_offset < evidence_total:
+                # A zero-length page must never ask the Agent to repeat its offset.
+                continue
+            visible_ids = {item["evidence_id"] for item in (*evidence_items, *replacement_evidence)}
+            result = replace(
+                result,
+                data={**result.data, "evidence": list(evidence_items),
+                      "replacement_evidence": replacement_evidence,
+                      "next_evidence_offset": next_offset if next_offset < evidence_total else None},
+                resource_refs=(finding_ref, *(ref for ref in result.resource_refs[1:]
+                    if ref.resource_id.rsplit(":", 1)[-1] in visible_ids)),
+                warnings=("Additional Finding Evidence was omitted to fit the read budget; "
+                          "continue with next_evidence_offset before a complete review.",),
+            )
+        return result
 
 
 __all__ = [
-    "InspectPublishedFindingArguments",
+    "InspectPublishedFindingToolRequest",
     "InspectPublishedFindingCapability",
-    "QueryPublishedFindingsArguments",
+    "QueryPublishedFindingsToolRequest",
     "QueryPublishedFindingsCapability",
 ]

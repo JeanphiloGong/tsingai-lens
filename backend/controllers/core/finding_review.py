@@ -1,78 +1,191 @@
 from __future__ import annotations
 
 import json
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from controllers.dependencies.auth import current_user_id
-from controllers.schemas.core.finding_review import (
-    EvidenceAuthoringCreateRequest,
-    EvidenceAuthoringResponse,
-    FindingAuthoringCreateRequest,
-    FindingAuthoringResponse,
-    FindingCurationCreateRequest,
-    FindingCurationListResponse,
-    FindingCurationResponse,
-    FindingFeedbackCreateRequest,
-    FindingFeedbackListResponse,
-    FindingFeedbackResponse,
-    FindingDatasetResponse,
-    FindingGoldDraftResponse,
+from controllers.schemas.core.research_objectives import (
+    FindingResponse,
+    ObjectiveAnalysisStateResponse,
+    ObjectiveEvidenceResponse,
 )
+
+FindingReviewStatus = Literal["correct", "incorrect", "partial", "unclear"]
+FindingIssueType = Literal[
+    "none",
+    "evidence_not_grounded",
+    "missing_evidence",
+    "insufficient_evidence",
+    "wrong_factor",
+    "wrong_outcome",
+    "wrong_direction",
+    "wrong_context",
+    "wrong_mechanism",
+    "wrong_attribution",
+    "wrong_synthesis",
+    "overclaim",
+    "unclear_statement",
+    "other",
+]
+FindingStatus = Literal["supported", "limited", "conflicted", "unsupported"]
+FindingDatasetLabelStatus = Literal["candidate", "silver", "gold", "rejected"]
+FindingDatasetUseStatus = Literal["training_ready", "review_candidate", "rejected"]
+FindingAbstentionReason = Literal[
+    "no_comparable_evidence",
+    "no_grounded_evidence",
+    "insufficient_evidence",
+]
+
+
+class FindingAuthoringCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_analysis_version: int = Field(..., ge=1)
+    selection_ids: list[str] = Field(default_factory=list, max_length=100)
+    comparison_group_ids: list[str] = Field(default_factory=list, max_length=20)
+    limitations: list[str] = Field(default_factory=list, max_length=20)
+    parent_finding_id: str | None = Field(default=None, max_length=128)
+    abstention_reason: FindingAbstentionReason | None = None
+
+    @model_validator(mode="after")
+    def validate_authoring_mode(self) -> "FindingAuthoringCreateRequest":
+        if any(len(value.strip()) > 1000 for value in self.limitations):
+            raise ValueError("Finding limitations cannot exceed 1000 characters")
+        selected = self.selection_ids + self.comparison_group_ids
+        if any(not value.strip() or len(value) > 128 for value in selected):
+            raise ValueError(
+                "experiment reference IDs must be non-empty and at most 128 characters"
+            )
+        if self.abstention_reason is not None:
+            if selected or self.parent_finding_id is not None:
+                raise ValueError("abstention cannot contain experiment selections")
+            if not any(value.strip() for value in self.limitations):
+                raise ValueError("abstention requires an explanation")
+            return self
+        if not self.selection_ids:
+            raise ValueError("Finding requires at least one experiment selection")
+        return self
+
+
+class FindingAuthoringResponse(BaseModel):
+    analysis: ObjectiveAnalysisStateResponse
+    finding: FindingResponse | None = None
+    abstention_reason: FindingAbstentionReason | None = None
+
+
+class FindingFeedbackCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_version: int = Field(..., ge=1)
+    review_status: FindingReviewStatus
+    issue_type: FindingIssueType = Field(default="none")
+    note: str | None = Field(default=None, max_length=2000)
+    reviewer: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "FindingFeedbackCreateRequest":
+        if self.review_status == "correct" and self.issue_type != "none":
+            raise ValueError("correct feedback cannot report an issue")
+        if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
+            raise ValueError(f"{self.review_status} feedback requires an issue")
+        return self
+
+
+class FindingFeedbackResponse(BaseModel):
+    feedback_id: str
+    collection_id: str
+    objective_id: str
+    analysis_version: int
+    finding_id: str
+    review_status: FindingReviewStatus
+    issue_type: FindingIssueType
+    note: str | None = None
+    reviewer: str | None = None
+    created_at: str
+
+
+class FindingFeedbackListResponse(BaseModel):
+    collection_id: str
+    objective_id: str
+    analysis_version: int
+    finding_id: str
+    items: list[FindingFeedbackResponse] = Field(default_factory=list)
+
+
+class FindingCurationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_version: int = Field(..., ge=1)
+    curated_status: FindingStatus = Field(default="limited")
+    curated_finding: FindingResponse
+    note: str | None = Field(default=None, max_length=2000)
+    reviewer: str | None = Field(default=None, max_length=120)
+
+
+class FindingCurationResponse(BaseModel):
+    curation_id: str
+    collection_id: str
+    objective_id: str
+    analysis_version: int
+    finding_id: str
+    curated_status: FindingStatus
+    curated_finding: FindingResponse
+    note: str | None = None
+    reviewer: str | None = None
+    updated_at: str
+
+
+class FindingCurationListResponse(BaseModel):
+    collection_id: str
+    objective_id: str
+    analysis_version: int
+    finding_id: str
+    items: list[FindingCurationResponse] = Field(default_factory=list)
+
+
+class FindingDatasetSampleResponse(BaseModel):
+    sample_id: str
+    objective_id: str
+    analysis_version: int
+    finding_id: str
+    research_objective: str
+    document_ids: list[str] = Field(default_factory=list)
+    label_status: FindingDatasetLabelStatus
+    dataset_use_status: FindingDatasetUseStatus
+    finding_fingerprint: str
+    evidence_fingerprint: str
+    system_prediction: FindingResponse
+    expert_target: FindingResponse | None = None
+    training_target: FindingResponse
+    evidence: list[ObjectiveEvidenceResponse] = Field(default_factory=list)
+    training_schema_version: str
+    training_prompt_version: str
+    training_messages: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class FindingDatasetResponse(BaseModel):
+    schema_version: str
+    collection_id: str
+    objective_id: str | None = None
+    items: list[FindingDatasetSampleResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class FindingGoldDraftResponse(BaseModel):
+    gold_id: str
+    collection_id: str
+    version: str
+    target_layer: str
+    metric_profile: str
+    items: list[dict[str, Any]] = Field(default_factory=list)
 
 
 router = APIRouter(prefix="/collections", tags=["finding-review"])
-
-
-@router.post(
-    "/{collection_id}/objectives/{objective_id}/evidence",
-    response_model=EvidenceAuthoringResponse,
-    status_code=201,
-    summary="Create a researcher-confirmed Evidence version",
-)
-async def create_evidence_version(
-    collection_id: str,
-    objective_id: str,
-    payload: EvidenceAuthoringCreateRequest,
-    request: Request,
-) -> EvidenceAuthoringResponse:
-    try:
-        result = await request.app.state.evidence_authoring_service.create_version(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            source_analysis_version=payload.source_analysis_version,
-            document_id=payload.document_id,
-            source_kind=payload.source_kind,
-            source_ref=payload.source_ref,
-            source_excerpt=payload.source_excerpt,
-            evidence_role=payload.evidence_role,
-            changed_variables=tuple(
-                item.model_dump() for item in payload.changed_variables
-            ),
-            comparison=(payload.comparison.model_dump() if payload.comparison else None),
-            reported_result=(
-                payload.reported_result.model_dump() if payload.reported_result else None
-            ),
-            attribution_scope=payload.attribution_scope,
-            scientific_context=payload.scientific_context.model_dump(),
-            supersedes_evidence_id=payload.supersedes_evidence_id,
-            authoring_note=payload.authoring_note,
-            created_by_user_id=await current_user_id(request),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return EvidenceAuthoringResponse(
-        analysis=result.analysis.to_record(),
-        evidence={
-            **result.evidence.to_record(),
-            "supports_finding": result.evidence.supports_finding,
-            "eligible_for_finding_authoring": result.evidence.eligible_for_finding_authoring,
-        },
-        affected_finding_ids=list(result.affected_finding_ids),
-    )
 
 
 @router.post(
@@ -88,22 +201,18 @@ async def create_finding_version(
     request: Request,
 ) -> FindingAuthoringResponse:
     try:
-        result = await request.app.state.finding_authoring_service.create_version(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            source_analysis_version=payload.source_analysis_version,
-            statement=payload.statement,
-            assertion_strength=payload.assertion_strength,
-            supporting_evidence_ids=tuple(payload.supporting_evidence_ids),
-            contradicting_evidence_ids=tuple(payload.contradicting_evidence_ids),
-            context_evidence_ids=tuple(payload.context_evidence_ids),
-            condition_boundary_evidence_ids=tuple(
-                payload.condition_boundary_evidence_ids
-            ),
-            limitations=tuple(payload.limitations),
-            parent_finding_id=payload.parent_finding_id,
-            abstention_reason=payload.abstention_reason,
-            created_by_user_id=await current_user_id(request),
+        result = (
+            await request.app.state.finding_authoring_service.create_selection_version(
+                collection_id=collection_id,
+                objective_id=objective_id,
+                source_analysis_version=payload.source_analysis_version,
+                created_by_user_id=await current_user_id(request),
+                selection_ids=tuple(payload.selection_ids),
+                comparison_group_ids=tuple(payload.comparison_group_ids),
+                parent_finding_id=payload.parent_finding_id,
+                limitations=tuple(payload.limitations),
+                abstention_reason=payload.abstention_reason,
+            )
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -143,7 +252,7 @@ async def record_finding_feedback(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingFeedbackResponse(**feedback.to_record())
+    return FindingFeedbackResponse.model_validate(feedback, from_attributes=True)
 
 
 @router.get(
@@ -174,7 +283,10 @@ async def list_finding_feedback(
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
-        items=[FindingFeedbackResponse(**item.to_record()) for item in records],
+        items=[
+            FindingFeedbackResponse.model_validate(item, from_attributes=True)
+            for item in records
+        ],
     )
 
 
@@ -205,7 +317,7 @@ async def record_finding_curation(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return FindingCurationResponse(**curation.to_record())
+    return FindingCurationResponse.model_validate(curation, from_attributes=True)
 
 
 @router.get(
@@ -236,7 +348,10 @@ async def list_finding_curations(
         objective_id=objective_id,
         analysis_version=analysis_version,
         finding_id=finding_id,
-        items=[FindingCurationResponse(**item.to_record()) for item in records],
+        items=[
+            FindingCurationResponse.model_validate(item, from_attributes=True)
+            for item in records
+        ],
     )
 
 

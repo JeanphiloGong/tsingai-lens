@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from application.repositories.auth_repository import AuthUserRecord
-
 from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from application.repositories.auth_repository import AuthUserRecord
+from application.repositories.collection_repository import StoredCollection
 from domain.evaluation import (
     EvaluationFailure,
     EvaluationGoldItem,
@@ -24,6 +24,7 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.evaluation_repository import (
     PostgresEvaluationRepository,
 )
+
 pytestmark = pytest.mark.anyio
 
 
@@ -43,12 +44,16 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
     collections = PostgresCollectionRepository(sessions)
     for collection_id in ("col-gold", "col-other"):
         await collections.add_collection(
-            Collection.create(
-                collection_id=collection_id,
-                owner_user_id="user-evaluation",
-                name=collection_id,
-                description=None,
-                now_iso="2026-07-20T00:00:00+00:00",
+            StoredCollection(
+                collection=Collection(
+                    collection_id=collection_id,
+                    owner_user_id="user-evaluation",
+                    name=collection_id,
+                    description=None,
+                    status="idle",
+                ),
+                created_at="2026-07-20T00:00:00+00:00",
+                updated_at="2026-07-20T00:00:00+00:00",
             )
         )
     repository = PostgresEvaluationRepository(sessions)
@@ -222,12 +227,16 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
     )
     collections = PostgresCollectionRepository(sessions)
     await collections.add_collection(
-        Collection.create(
-            collection_id="col-evaluation-cascade",
-            owner_user_id="user-evaluation-cascade",
-            name="Evaluation cascade",
-            description=None,
-            now_iso="2026-07-20T00:00:00+00:00",
+        StoredCollection(
+            collection=Collection(
+                collection_id="col-evaluation-cascade",
+                owner_user_id="user-evaluation-cascade",
+                name="Evaluation cascade",
+                description=None,
+                status="idle",
+            ),
+            created_at="2026-07-20T00:00:00+00:00",
+            updated_at="2026-07-20T00:00:00+00:00",
         )
     )
     await repository.upsert_gold_set(

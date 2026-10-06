@@ -5,10 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from application.core.document_profiles.extraction import (
+    DocumentProfileExtractionError,
+    DocumentProfileModelOutput,
+)
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.document_profiles.extraction import DocumentProfileExtractionError
-from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.pipeline import PipelineRunService
+from application.repositories.collection_repository import StoredDocument
 from application.source.document_preparation_service import DocumentPreparationService
 from domain.source import Document, SourceDocument
 from infra.persistence.memory import (
@@ -17,7 +20,6 @@ from infra.persistence.memory import (
     MemorySourceArtifactRepository,
 )
 from tests.support.collection_service import build_test_collection_service
-
 
 pytestmark = pytest.mark.anyio
 
@@ -32,15 +34,17 @@ async def preparation(tmp_path):
     collections = build_test_collection_service(tmp_path / "collections")
     collection = await collections.create_collection("LPBF porosity research")
     collection_id = collection["collection_id"]
-    document = Document(
-        document_id="doc_a",
-        original_filename="paper.pdf",
+    document = StoredDocument(
+        document=Document(
+            document_id="doc_a",
+            original_filename="paper.pdf",
+            sha256="a" * 64,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=100,
+        ),
         stored_filename="paper.pdf",
         storage_key=f"{collection_id}/input/paper.pdf",
-        sha256="a" * 64,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=100,
         created_at="2026-09-09T00:00:00+00:00",
     )
     await collections.repository.add_documents(
@@ -183,12 +187,12 @@ async def test_classification_retry_reuses_source_not_failed_profile(
     assert partial["nodes"]["document_profile"]["status"] == "failed"
     assert (
         await ctx.collections.get_document(ctx.collection_id, "doc_a")
-    ).status == "stored"
+    ).document.status == "stored"
     source = await ctx.sources.read_document(ctx.collection_id, "doc_a")
     assert source is not None
     if historical_status:
         await ctx.runs.finish_run(first["run_id"], status=historical_status)
-        source_id, profile_id = ctx.service.fingerprints_for(ctx.document)
+        source_id, profile_id = ctx.service.fingerprints_for(ctx.document.document)
         await ctx.collections.update_document_preparation(
             ctx.collection_id,
             "doc_a",
@@ -207,7 +211,7 @@ async def test_classification_retry_reuses_source_not_failed_profile(
     assert completed["nodes"]["document_profile"]["status"] == "succeeded"
     assert (
         await ctx.collections.get_document(ctx.collection_id, "doc_a")
-    ).status == "ready"
+    ).document.status == "ready"
     assert await ctx.sources.read_document(ctx.collection_id, "doc_a") == source
     assert parse_calls == 1
     assert extractor.calls == 2

@@ -106,19 +106,5 @@ class ChatSession:
             raise ValueError("session identity cannot be reassigned")
         return replace(self, updated_at=updated_at)
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "session_id": self.session_id,
-            "user_id": self.user_id,
-            "collection_id": self.collection_id,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "root_session_id": self.root_session_id,
-            "parent_session_id": self.parent_session_id,
-            "fork_message_id": self.fork_message_id,
-            "fork_position": self.fork_position,
-            "fork_content": self.fork_content,
-        }
-
 
 __all__ = ["ChatSession"]

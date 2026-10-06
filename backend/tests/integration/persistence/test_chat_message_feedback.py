@@ -4,15 +4,16 @@ import asyncio
 from hashlib import sha256
 from types import SimpleNamespace
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-import pytest
 from sqlalchemy import delete, func, inspect, select, update
 
-from application.auth.session_service import AuthSessionService, SESSION_COOKIE_NAME
+from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
 from application.chat.session_service import ChatSessionService
+from application.repositories.collection_repository import StoredCollection
 from application.source.collection_service import CollectionService
 from controllers.chat.sessions import router
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult, ToolRisk
@@ -20,10 +21,17 @@ from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
-from infra.persistence.postgres.models import AuthUser, ChatMessageFeedbackRow, ChatMessageRow, ChatSessionRow
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
+from infra.persistence.postgres.models import (
+    AuthUser,
+    ChatMessageFeedbackRow,
+    ChatMessageRow,
+    ChatSessionRow,
+)
 from infra.persistence.postgres.models.collection import Collection as CollectionRow
-
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 pytestmark = pytest.mark.anyio
 NOW = "2026-09-09T08:00:00+00:00"
@@ -40,10 +48,19 @@ async def feedback_app(postgres_session_factory, tmp_path):
         result = await auth.login(email=email, password="synthetic-test-password")
         cookies.append(result["session_id"])
     collections = PostgresCollectionRepository(postgres_session_factory)
-    await collections.add_collection(Collection.create(
-        collection_id="collection", owner_user_id=users[0]["user_id"],
-        name="LPBF comparison", description=None, now_iso=NOW,
-    ))
+    await collections.add_collection(
+        StoredCollection(
+            collection=Collection(
+                collection_id="collection",
+                owner_user_id=users[0]["user_id"],
+                name="LPBF comparison",
+                description=None,
+                status="idle",
+            ),
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
     repository = PostgresChatRepository(postgres_session_factory)
     chat = ChatSession.create(session_id="chat-1", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW)
     await repository.add_session(chat)
@@ -150,12 +167,34 @@ async def test_parent_deletion_cascades_feedback(feedback_app, parent):
 
 
 async def test_feedback_migration_can_be_rolled_back(postgres_sync_engine):
+    # The current head includes 20260924_0075, whose downgrade is deliberately
+    # irreversible. Start this round-trip at the last reversible checkpoint so
+    # the feedback migration itself is tested independently of that boundary.
+    reset_postgres_schema(postgres_sync_engine)
     config = Config("alembic.ini")
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
+        command.upgrade(config, "20260924_0074")
         assert "chat_message_feedback" in inspect(connection).get_table_names()
         command.downgrade(config, "20260908_0055")
         assert "chat_message_feedback" not in inspect(connection).get_table_names()
         assert "chat_messages" in inspect(connection).get_table_names()
         command.upgrade(config, "head")
+
+    # The rollback path intentionally crosses the historical 0055 schema. A
+    # clean head replay is the authoritative schema-drift check and avoids
+    # conflating that legacy path's unrelated Finding index differences with
+    # the Chat feedback migration under test.
+    reset_postgres_schema(postgres_sync_engine)
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")
         command.check(config)
+
+
+def test_latest_feedback_head_refuses_irreversible_downgrade(postgres_sync_engine):
+    config = Config("alembic.ini")
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        with pytest.raises(RuntimeError, match="irreversible"):
+            command.downgrade(config, "20260924_0074")

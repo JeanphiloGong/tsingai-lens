@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from hashlib import sha256
-import json
-import logging
 from math import isfinite
 from random import uniform
 from time import monotonic
@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 
+from application.chat import capability_policy
 from application.chat.capabilities import (
     AgentContext,
     CapabilityExecutionContext,
@@ -25,28 +26,59 @@ from application.chat.capabilities import (
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
-from application.chat import capability_policy, intent_policy
-from application.chat.model import ChatModel, ModelResponseError, ModelTurn, ModelUsage
+from application.chat.inline_citations import format_inline_citations
 from application.chat.model import (
     RESEARCH_AGENT_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT,
+    ChatModel,
+    ModelResponseError,
+    ModelTurn,
+    ModelUsage,
     ResearchWorkingCheckModelOutput,
     ResearchWorkingNotesModelOutput,
 )
 from application.core.structured_extraction.json_support import extract_json_object
+from application.repositories.chat_repository import ModelCallObserver
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,
     ChatSourceContext,
     ChatToolCall,
     ChatToolResult,
+    ToolCallStatus,
+    ToolPermissionMode,
     ToolResultStatus,
     ToolRisk,
 )
 from utils.logger import get_request_id
 
-
 logger = logging.getLogger(__name__)
+
+_ACTIONABLE_CAPABILITY_EXCEPTIONS = (
+    ValueError,
+    FileNotFoundError,
+    LookupError,
+    PermissionError,
+)
+_SENSITIVE_ERROR_MARKERS = (
+    "password",
+    "secret",
+    "api_key",
+    "apikey",
+    "access_token",
+    "authorization",
+    "bearer",
+)
+
+
+def _safe_capability_error_message(exc: BaseException) -> str:
+    """Keep domain validation details while hiding arbitrary internal errors."""
+    if not isinstance(exc, _ACTIONABLE_CAPABILITY_EXCEPTIONS):
+        return "The capability raised an internal error. Review the request and retry."
+    detail = " ".join(str(exc).split())[:500]
+    if not detail or any(marker in detail.casefold() for marker in _SENSITIVE_ERROR_MARKERS):
+        return "The capability rejected the request. Review the arguments and retry."
+    return detail
 
 _TrajectoryCheckpoint = Callable[
     [
@@ -58,7 +90,6 @@ _TrajectoryCheckpoint = Callable[
 ]
 
 _MODEL_RESPONSE_RETRY_LIMIT = 5
-_REQUIRED_ACTION_RETRY_LIMIT = 1
 _MAX_TOOL_CALLS_PER_RESPONSE = 32
 
 
@@ -114,6 +145,10 @@ _FINAL_ANSWER_INSTRUCTION = (
 )
 _INCOMPLETE_SCOPE_WARNING = (
     "The answer covers only inspected Sources; unread or failed work remains unresolved."
+)
+_SUCCESSFUL_WRITE_RESPONSE_UNAVAILABLE_WARNING = (
+    "The approved action completed, but the detailed response was unavailable; "
+    "the saved result remains authoritative."
 )
 
 def _now_iso() -> str:
@@ -171,6 +206,7 @@ class _RunProgress:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     unreported_model_calls: int = 0
+    requested_tool_calls: int = 0
     executed_tool_calls: int = 0
     seen_observations: set[str] = field(default_factory=set)
     consecutive_no_progress: int = 0
@@ -180,50 +216,8 @@ class _RunProgress:
     read_batch_tokens: int = 12_000
     compaction_attempts: int = 0
     complete_source_identities: set[tuple[str, str, str, str]] = field(default_factory=set)
-    research_plan: list[dict[str, str]] = field(default_factory=list)
-
-    def initialize_research_plan(self, request: str) -> None:
-        """Create a visible plan only for multi-step Finding review requests."""
-        normalized = request.casefold()
-        review_terms = ("finding", "结论", "证据")
-        draft_terms = ("修订草案", "结论草案", "draft finding", "finding draft")
-        if not any(term in normalized for term in review_terms) or not any(
-            term in normalized for term in draft_terms
-        ):
-            return
-        self.research_plan = [
-            {"id": "inspect_finding", "status": "in_progress"},
-            {"id": "inspect_sources", "status": "pending"},
-            {"id": "validate_claim", "status": "pending"},
-            {"id": "draft_finding", "status": "pending"},
-            {"id": "approval", "status": "pending"},
-        ]
-
-    def update_research_plan(self, tool_name: str, status: ToolResultStatus) -> None:
-        if not self.research_plan or status is not ToolResultStatus.SUCCEEDED:
-            return
-        transitions = {
-            "inspect_published_finding": ("inspect_finding", "inspect_sources"),
-            "create_finding_draft": ("validate_claim", "approval"),
-            "create_evidence_draft": ("validate_claim", "approval"),
-        }
-        transition = transitions.get(tool_name)
-        if transition is None:
-            return
-        current, next_step = transition
-        if tool_name in {"create_finding_draft", "create_evidence_draft"}:
-            for item in self.research_plan:
-                if item["id"] in {"inspect_sources", "validate_claim"} or (
-                    item["id"] == "draft_finding" and tool_name == "create_finding_draft"
-                ):
-                    item["status"] = "completed"
-            next_step = "approval"
-        current_item = next((item for item in self.research_plan if item["id"] == current), None)
-        if current_item is not None:
-            current_item["status"] = "completed"
-        next_item = next((item for item in self.research_plan if item["id"] == next_step), None)
-        if next_item is not None and next_item["status"] == "pending":
-            next_item["status"] = "in_progress"
+    model_call_observer: ModelCallObserver | None = None
+    model_call_session_id: str | None = None
 
     def start_response(self) -> None:
         self.response_message_id = f"msg_{uuid4().hex[:16]}"
@@ -347,7 +341,7 @@ class _RunProgress:
         }
 
     def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
-              requested_count: int = 0, new_resources: int = 0,
+              new_resources: int = 0,
               termination_reason: str | None = None, final_answer: bool = False,
               retry_attempt: int | None = None, retry_reason: str | None = None,
               http_status: int | None = None, retry_delay_ms: int | None = None) -> None:
@@ -356,7 +350,8 @@ class _RunProgress:
             "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
             "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
             "total_tokens": self.model_tokens, "unreported_model_calls": self.unreported_model_calls,
-            "requested_tool_count": requested_count, "executed_tool_count": self.executed_tool_calls,
+            "requested_tool_count": self.requested_tool_calls,
+            "executed_tool_count": self.executed_tool_calls,
             "new_resource_reference_count": new_resources,
             "observation_digest_changed": self.consecutive_no_progress == 0,
             "elapsed_ms": round((monotonic() - self.started_at) * 1000),
@@ -364,7 +359,6 @@ class _RunProgress:
                                       if self.limits.max_tool_calls is not None else None),
             "remaining_token_budget": (max(0, self.limits.max_model_tokens - self.model_tokens)
                                        if self.limits.max_model_tokens is not None else None),
-            "research_plan": [dict(item) for item in self.research_plan] if self.research_plan else None,
             "termination_reason": termination_reason, "final_answer_present": final_answer,
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
             "http_status": http_status, "retry_delay_ms": retry_delay_ms,
@@ -413,13 +407,24 @@ class ResearchAgentRunner:
         previous_messages: tuple[ChatMessage, ...],
         user_message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
         checkpoint: _TrajectoryCheckpoint | None = None,
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
+        model_call_observer: ModelCallObserver | None = None,
     ) -> AgentRunResult:
-        progress = _RunProgress(self.limits, progress_callback=progress_callback,
-                                response_started_callback=response_started_callback)
+        # Normalize the caller policy before creating any trajectory state. A
+        # direct application caller must not leave a partial turn when it
+        # supplies an unsupported mode; HTTP callers are already schema-bound.
+        permission_mode = ToolPermissionMode(permission_mode)
+        progress = _RunProgress(
+            self.limits,
+            progress_callback=progress_callback,
+            response_started_callback=response_started_callback,
+            model_call_observer=model_call_observer,
+            model_call_session_id=context.session_id,
+        )
         messages = [
             *previous_messages,
             ChatMessage.user(
@@ -430,7 +435,6 @@ class ResearchAgentRunner:
                 source_contexts=source_contexts,
             ),
         ]
-        progress.initialize_research_plan(user_message)
         calls: list[ChatToolCall] = []
         results: list[ChatToolResult] = []
         await self._checkpoint(checkpoint, messages, calls, results)
@@ -442,6 +446,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
             inherited_completed_writes=set(),
+            permission_mode=permission_mode,
             progress=progress,
         )
 
@@ -455,12 +460,26 @@ class ResearchAgentRunner:
         text_delta_callback: Callable[[str], None] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
+        model_call_observer: ModelCallObserver | None = None,
     ) -> AgentRunResult:
-        progress = _RunProgress(self.limits, progress_callback=progress_callback,
-                                response_started_callback=response_started_callback)
+        progress = _RunProgress(
+            self.limits,
+            progress_callback=progress_callback,
+            response_started_callback=response_started_callback,
+            model_call_observer=model_call_observer,
+            model_call_session_id=context.session_id,
+        )
+        requested_count, executed_count = self._active_turn_action_counts(previous_messages)
+        progress.requested_tool_calls = requested_count
+        progress.executed_tool_calls = executed_count
+        if not any(
+            request.tool_call_id == claimed_call.tool_call_id
+            for message in previous_messages
+            for request in message.tool_calls
+        ):
+            progress.requested_tool_calls += 1
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
-        progress.initialize_research_plan(self._active_user_request(messages))
         inherited_completed_writes = capability_policy.completed_write_names(messages)
         calls = [claimed_call]
         results: list[ChatToolResult] = []
@@ -504,7 +523,16 @@ class ResearchAgentRunner:
                 content += "\n\n" + str(result.data.get("curated_finding", {}).get("statement", ""))
             if result.data.get("note"):
                 content += "\n\n" + ("记录原因：" if chinese else "Recorded reason: ") + str(result.data["note"])
-            messages.append(self._assistant(context, content, progress))
+            messages.append(
+                self._assistant(
+                    context,
+                    content,
+                    progress,
+                    messages=messages,
+                    calls=calls,
+                    results=results,
+                )
+            )
             await self._checkpoint(checkpoint, messages, calls, results)
             if text_delta_callback is not None:
                 text_delta_callback(content)
@@ -519,6 +547,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
             inherited_completed_writes=inherited_completed_writes,
+            permission_mode=ToolPermissionMode.CONFIRM,
             progress=progress,
         )
 
@@ -532,6 +561,7 @@ class ResearchAgentRunner:
         checkpoint: _TrajectoryCheckpoint | None,
         text_delta_callback: Callable[[str], None] | None,
         inherited_completed_writes: set[str],
+        permission_mode: ToolPermissionMode | str,
         progress: _RunProgress,
     ) -> AgentRunResult:
         while True:
@@ -542,8 +572,6 @@ class ResearchAgentRunner:
                     checkpoint=checkpoint, text_delta_callback=text_delta_callback,
                 )
             response_retries = 0
-            required_action_retries = 0
-            required_action_instruction: ChatMessage | None = None
             while True:
                 stop_reason = progress.stop_before_model()
                 if stop_reason is not None:
@@ -558,48 +586,9 @@ class ResearchAgentRunner:
                         messages,
                         calls,
                         inherited_completed_writes=inherited_completed_writes,
+                        permission_mode=permission_mode,
                     )
                     tool_names = tuple(spec.name for spec in tool_specs)
-                    if not tool_specs and results:
-                        latest = results[-1]
-                        latest_call = next((call for call in reversed(calls)
-                                            if call.tool_call_id == latest.tool_call_id), None)
-                        if (
-                            latest_call is not None and latest_call.name == "create_finding_draft"
-                            and latest.status is ToolResultStatus.SUCCEEDED
-                            and isinstance(latest.data.get("draft"), Mapping)
-                            and latest.data.get("persistence") == "transient_chat_result"
-                        ):
-                            chinese = any("\u4e00" <= char <= "\u9fff" for char in self._active_user_request(messages))
-                            content = ("结论草案已生成，尚未保存或发布。" if chinese else
-                                       "The Finding draft is ready and has not been saved or published.")
-                            messages.append(self._assistant(context, content, progress))
-                            await self._checkpoint(checkpoint, messages, calls, results)
-                            if text_delta_callback is not None:
-                                text_delta_callback(content)
-                            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
-                            return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
-                                                completion_reason=AgentCompletionReason.MODEL_ANSWER)
-                        if (
-                            latest_call is not None and latest_call.name == "propose_research_plan"
-                            and latest.status is ToolResultStatus.SUCCEEDED
-                            and latest.data.get("draft_status") in {"ready_for_researcher_review", "needs_finding_review"}
-                            and isinstance(latest.data.get("content"), str) and latest.data["content"].strip()
-                        ):
-                            # The arguments were reviewed before execution; the capability
-                            # already rendered the complete draft and its source basis.
-                            chinese = any("\u4e00" <= char <= "\u9fff" for char in self._active_user_request(messages))
-                            lead = "研究方案草案已生成，尚未保存。" if chinese else "The research-plan draft is ready and has not been saved."
-                            if latest.data["draft_status"] == "needs_finding_review":
-                                lead += "所引用的研究结论仍需研究者审阅。" if chinese else " Its supporting conclusions still require researcher review."
-                            content = f"{lead}\n\n{latest.data['content']}"
-                            messages.append(self._assistant(context, content, progress))
-                            await self._checkpoint(checkpoint, messages, calls, results)
-                            if text_delta_callback is not None:
-                                text_delta_callback(content)
-                            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
-                            return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
-                                                completion_reason=AgentCompletionReason.MODEL_ANSWER)
                     schema_chars = sum(
                         len(
                             json.dumps(
@@ -620,26 +609,23 @@ class ResearchAgentRunner:
                         ",".join(tool_names) or "none",
                     )
                     decision_messages = tuple(messages)
-                    stage_instruction: ChatMessage | None = None
-                    if required_action_instruction is not None:
-                        decision_messages = (*decision_messages, required_action_instruction)
-                    else:
-                        stage_content = capability_policy.stage_instruction(
-                            tool_names,
-                            calls,
-                            successful_results=capability_policy.active_successful_results_by_name(messages),
-                        )
-                        if stage_content is not None:
-                            stage_instruction = ChatMessage.user(
-                                message_id=self._message_id(),
-                                session_id=context.session_id,
-                                content=stage_content,
-                                created_at=_now_iso(),
-                            )
-                            decision_messages = (*decision_messages, stage_instruction)
+                    stage_content = capability_policy.stage_instruction(
+                        tool_names,
+                        calls,
+                        successful_results=capability_policy.active_successful_results_by_name(messages),
+                        prior_experiment_draft=next(iter(reversed(
+                            capability_policy._successful_results_by_name(messages).get("propose_paper_experiment_draft", ())
+                        )), None),
+                    )
+                    if stage_content is not None:
+                        decision_messages = (*decision_messages, ChatMessage.user(
+                            message_id=self._message_id(),
+                            session_id=context.session_id,
+                            content=stage_content,
+                            created_at=_now_iso(),
+                        ))
                     if (
-                        required_action_instruction is None
-                        and stage_instruction is None
+                        stage_content is None
                         and not tool_specs
                         and (
                             self._latest_structured_deliverable(results) is not None
@@ -663,16 +649,10 @@ class ResearchAgentRunner:
                                     message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                                 ),
                             ),
-                            require_tool_call=capability_policy.required_tool_before_answer(
-                                tool_names,
-                                successful_results=capability_policy.active_successful_results_by_name(messages),
-                                calls=calls,
-                            ) is not None,
+                            require_tool_call=False,
                         ),
                         tool_specs, progress, text_delta_callback,
                     )
-                    progress.trace(context, phase="model", capability_names=tool_names,
-                                   requested_count=len(turn.tool_calls))
                 except ModelResponseError as exc:
                     if exc.reason == "model_allowance_exhausted":
                         return await self._finalize_with_current_evidence(
@@ -710,11 +690,26 @@ class ResearchAgentRunner:
                             response_retries + 1,
                         )
                         continue
+                    write_completion = await self._complete_after_successful_write_response_failure(
+                        context,
+                        messages,
+                        calls,
+                        results,
+                        progress,
+                        checkpoint=checkpoint,
+                        phase="terminal",
+                        technical_reason=exc.reason,
+                    )
+                    if write_completion is not None:
+                        return write_completion
                     messages.append(
                         self._assistant(
                             context,
                             self._failure_answer(messages, calls, results),
                             progress,
+                            messages=messages,
+                            calls=calls,
+                            results=results,
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -759,12 +754,27 @@ class ResearchAgentRunner:
                         )
                         await sleep(delay)
                         continue
+                    write_completion = await self._complete_after_successful_write_response_failure(
+                        context,
+                        messages,
+                        calls,
+                        results,
+                        progress,
+                        checkpoint=checkpoint,
+                        phase="terminal",
+                        technical_reason=failure["reason"],
+                    )
+                    if write_completion is not None:
+                        return write_completion
                     provider_timeout = failure["reason"] == "provider_timeout"
                     messages.append(
                         self._assistant(
                             context,
                             self._failure_answer(messages, calls, results),
                             progress,
+                            messages=messages,
+                            calls=calls,
+                            results=results,
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
@@ -783,55 +793,21 @@ class ResearchAgentRunner:
                         results,
                         "provider_timeout" if provider_timeout else "model_unavailable",
                     )
-                required_tool = capability_policy.required_tool_before_answer(
-                    tool_names,
-                    successful_results=capability_policy.active_successful_results_by_name(messages),
-                    calls=calls,
-                )
-                if (
-                    not turn.tool_calls
-                    and required_tool is not None
-                    and required_action_retries < _REQUIRED_ACTION_RETRY_LIMIT
-                ):
-                    required_action_retries += 1
-                    required_action_instruction = ChatMessage.user(
-                        message_id=self._message_id(),
-                        session_id=context.session_id,
-                        content=(
-                            "The active researcher explicitly requested a structured "
-                            "research deliverable. Do not answer yet. Use the prior "
-                            "research results and call the required research "
-                            f"action, `{required_tool}`, now."
-                        ),
-                        created_at=_now_iso(),
-                    )
-                    logger.info(
-                        "Research Agent retrying premature answer required_tool=%s",
-                        required_tool,
-                    )
-                    continue
-                if not turn.tool_calls and required_tool is not None:
-                    logger.warning(
-                        "Research Agent required action not completed tool=%s",
-                        required_tool,
-                    )
-                    messages.append(
-                        self._assistant(context, self._failure_answer(messages, calls, results), progress)
-                    )
-                    await self._checkpoint(checkpoint, messages, calls, results)
-                    progress.trace(context, phase="terminal", termination_reason="required_research_action_not_completed")
-                    return self._result(
-                        AgentRunStatus.FAILED,
-                        messages,
-                        calls,
-                        results,
-                        "required_research_action_not_completed",
-                    )
                 break
 
             if not turn.tool_calls:
+                progress.trace(context, phase="model", capability_names=tool_names)
                 reason = progress.stop_before_model() or AgentCompletionReason.MODEL_ANSWER
-                messages.append(self._assistant(context, turn.content, progress))
+                messages.append(
+                    self._assistant(
+                        context,
+                        turn.content,
+                        progress,
+                        messages=messages,
+                        calls=calls,
+                        results=results,
+                    )
+                )
                 await self._checkpoint(checkpoint, messages, calls, results)
                 progress.trace(context, phase="terminal", termination_reason=reason.value, final_answer=True)
                 return self._result(
@@ -847,6 +823,8 @@ class ResearchAgentRunner:
                 allowed_names=set(tool_names),
                 progress=progress,
             )
+            progress.requested_tool_calls += len(requested)
+            progress.trace(context, phase="model", capability_names=tool_names)
             batch_start = len(calls)
             calls.extend(call for call, _ in requested)
             await self._checkpoint(checkpoint, messages, calls, results)
@@ -858,7 +836,12 @@ class ResearchAgentRunner:
                 error = ("resource_budget", "These Sources or actions remain uninspected or unexecuted in this turn.")
                 validated_arguments = {}
             else:
-                error, validated_arguments = capability_policy.validate_batch(self.capabilities, requested, messages)
+                error, validated_arguments = capability_policy.validate_batch(
+                    self.capabilities,
+                    requested,
+                    messages,
+                    permission_mode=permission_mode,
+                )
             if error:
                 completed = tuple(self._failure(call, *error) for call, _ in requested)
             elif len(requested) == 1 and capability_policy.evaluate_authorization(requested[0][0].risk).requires_approval:
@@ -894,7 +877,6 @@ class ResearchAgentRunner:
                     capability_result = replace(capability_result, data={
                         **dict(capability_result.data), "source_coverage": coverage,
                     })
-                progress.update_research_plan(call.name, capability_result.status)
                 results.append(capability_result)
                 messages.append(self._result_message(context, capability_result))
                 progress_increased = progress.observe(call, capability_result) or progress_increased
@@ -902,9 +884,30 @@ class ResearchAgentRunner:
                 prior_no_progress + 1 if not progress_increased else 0
             )
             await self._checkpoint(checkpoint, messages, calls, results)
-            progress.trace(context, phase="tools", capability_names=tool_names, requested_count=len(requested),
+            progress.trace(context, phase="tools", capability_names=tool_names,
                            new_resources=len(progress.resource_refs) - old_resource_count,
                            termination_reason=stop_reason.value if stop_reason else None)
+            permission_error = next(
+                (
+                    result.error_code
+                    for _, result in completed
+                    if result.error_code == "tool_permission_denied"
+                ),
+                None,
+            )
+            if permission_error is not None:
+                progress.trace(
+                    context,
+                    phase="terminal",
+                    termination_reason=permission_error,
+                )
+                return self._result(
+                    AgentRunStatus.FAILED,
+                    messages,
+                    calls,
+                    results,
+                    error_code=permission_error,
+                )
             if stop_reason:
                 return await self._finalize_with_current_evidence(
                     stop_reason, progress, context, messages, calls, results,
@@ -934,7 +937,19 @@ class ResearchAgentRunner:
             output_limit = min(output_limit, 8192)
         if timeout <= 0:
             raise TimeoutError("research turn deadline reached")
-        model_context = replace(model_context, max_context_tokens=self.limits.max_context_tokens)
+        purpose = "compaction" if model_context.compacting else (
+            "finalization" if finalizing else "decision"
+        )
+        model_context = replace(
+            model_context,
+            max_context_tokens=self.limits.max_context_tokens,
+            model_call_observer=progress.model_call_observer,
+            model_call_purpose=purpose,
+            model_call_response_message_id=(
+                None if purpose == "compaction" else progress.response_message_id
+            ),
+            model_call_session_id=progress.model_call_session_id,
+        )
         prompt = RESEARCH_COMPACTION_SYSTEM_PROMPT if model_context.compacting else RESEARCH_AGENT_SYSTEM_PROMPT
         request_tokens = self.context_builder.estimate_tokens({
             "messages": model_context.provider_messages(prompt),
@@ -1124,7 +1139,7 @@ class ResearchAgentRunner:
                              ("document_id", "source_kind", "source_ref", "source_digest"))
             if identity not in completed:
                 continue
-            record = {key: source[key] for key in ("source_kind", "source_ref", "source_digest", "page", "heading_path", "content_offset")
+            record = {key: source[key] for key in ("source_label", "source_kind", "source_ref", "source_digest", "page", "heading_path", "content_offset")
                       if isinstance(source.get(key), (str, int))}
             content = source.get("content")
             if isinstance(content, str) and content:
@@ -1238,13 +1253,41 @@ class ResearchAgentRunner:
                 "Research Agent final answer failed exception_type=%s",
                 type(exc).__name__,
             )
-            messages.append(self._assistant(context, self._failure_answer(
-                messages, calls, results,
-            ), progress))
+            write_completion = await self._complete_after_successful_write_response_failure(
+                context,
+                messages,
+                calls,
+                results,
+                progress,
+                checkpoint=checkpoint,
+                phase="finalize",
+                technical_reason="final_answer_unavailable",
+            )
+            if write_completion is not None:
+                return write_completion
+            messages.append(
+                self._assistant(
+                    context,
+                    self._failure_answer(messages, calls, results),
+                    progress,
+                    messages=messages,
+                    calls=calls,
+                    results=results,
+                )
+            )
             progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
             await self._checkpoint(checkpoint, messages, calls, results)
             return self._result(AgentRunStatus.FAILED, messages, calls, results, "final_answer_unavailable")
-        messages.append(self._assistant(context, turn.content, progress))
+        messages.append(
+            self._assistant(
+                context,
+                turn.content,
+                progress,
+                messages=messages,
+                calls=calls,
+                results=results,
+            )
+        )
         progress.trace(context, phase="finalize", termination_reason=reason.value, final_answer=True)
         await self._checkpoint(checkpoint, messages, calls, results)
         return self._result(
@@ -1310,7 +1353,7 @@ class ResearchAgentRunner:
                 "Zero new reads does not erase earlier reading. Use earlier Source content still "
                 "present in the trajectory for the requested synthesis; distinguish historical "
                 "inspection from current validation. A reference alone cannot recover omitted "
-                "content or authorize a new Evidence write."
+                "content or authorize a new experiment or Finding write."
                 f"{deliverable_section}"
             ),
             created_at=_now_iso(),
@@ -1456,6 +1499,32 @@ class ResearchAgentRunner:
 
 
     @staticmethod
+    def _active_turn_action_counts(
+        messages: tuple[ChatMessage, ...] | list[ChatMessage],
+    ) -> tuple[int, int]:
+        last_user_index = max(
+            (
+                index
+                for index, message in enumerate(messages)
+                if message.role is ChatMessageRole.USER
+            ),
+            default=len(messages),
+        )
+        active = messages[last_user_index:]
+        requested_ids = {
+            request.tool_call_id
+            for message in active
+            for request in message.tool_calls
+        }
+        completed_ids = {
+            message.tool_result.tool_call_id
+            for message in active
+            if message.tool_result is not None
+        }
+        return len(requested_ids), len(requested_ids & completed_ids)
+
+
+    @staticmethod
     def _active_user_request(messages: list[ChatMessage]) -> str:
         return next(
             (
@@ -1465,6 +1534,68 @@ class ResearchAgentRunner:
             ),
             "Answer the researcher's current request.",
         )[:4_000]
+
+    async def _complete_after_successful_write_response_failure(
+        self,
+        context: AgentContext,
+        messages: list[ChatMessage],
+        calls: list[ChatToolCall],
+        results: list[ChatToolResult],
+        progress: _RunProgress,
+        *,
+        checkpoint: _TrajectoryCheckpoint | None,
+        phase: str,
+        technical_reason: str,
+    ) -> AgentRunResult | None:
+        successful_result_ids = {
+            result.tool_call_id
+            for result in results
+            if result.status is ToolResultStatus.SUCCEEDED
+        }
+        if not any(
+            call.risk is ToolRisk.WRITE
+            and call.status is ToolCallStatus.SUCCEEDED
+            and call.tool_call_id in successful_result_ids
+            for call in calls
+        ):
+            return None
+
+        chinese = any(
+            "\u4e00" <= char <= "\u9fff"
+            for char in self._active_user_request(messages)
+        )
+        content = (
+            "已批准的操作已完成并保存。详细回复暂时无法生成；请以已保存的结果为准。"
+            if chinese
+            else "The approved action completed and was saved. The detailed response is "
+            "unavailable; the saved result remains authoritative."
+        )
+        messages.append(
+            self._assistant(
+                context,
+                content,
+                progress,
+                messages=messages,
+                calls=calls,
+                results=results,
+            )
+        )
+        await self._checkpoint(checkpoint, messages, calls, results)
+        progress.trace(
+            context,
+            phase=phase,
+            termination_reason="write_completed_response_unavailable",
+            final_answer=True,
+            retry_reason=technical_reason,
+        )
+        return self._result(
+            AgentRunStatus.COMPLETED,
+            messages,
+            calls,
+            results,
+            completion_reason=AgentCompletionReason.MODEL_ANSWER,
+            warnings=(_SUCCESSFUL_WRITE_RESPONSE_UNAVAILABLE_WARNING,),
+        )
 
     @staticmethod
     def _failure_answer(
@@ -1629,7 +1760,8 @@ class ResearchAgentRunner:
             call, result = ResearchAgentRunner._failure(
                 call,
                 "capability_execution_failed",
-                "The research capability could not be completed.",
+                "The research capability could not be completed: "
+                + _safe_capability_error_message(exc),
             )
         return call, result
 
@@ -1648,11 +1780,24 @@ class ResearchAgentRunner:
         )
 
     @staticmethod
-    def _assistant(context: AgentContext, content: str, progress: _RunProgress) -> ChatMessage:
+    def _assistant(
+        context: AgentContext,
+        content: str,
+        progress: _RunProgress,
+        *,
+        messages: list[ChatMessage] | tuple[ChatMessage, ...] = (),
+        calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
+        results: list[ChatToolResult] | tuple[ChatToolResult, ...] = (),
+    ) -> ChatMessage:
         return ChatMessage.assistant(
             message_id=progress.response_message_id,
             session_id=context.session_id,
-            content=content,
+            content=format_inline_citations(
+                content,
+                calls=calls,
+                results=results,
+                messages=messages,
+            ),
             created_at=progress.response_created_at,
         )
 

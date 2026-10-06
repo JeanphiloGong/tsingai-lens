@@ -7,6 +7,68 @@ Benchmark and probe scripts live under [`benchmarks/`](benchmarks/). Keep
 general local debugging helpers at this level instead of adding them to the
 benchmark-only directory.
 
+## Feedback Analysis Worker
+
+Run one feedback-analysis job:
+
+```bash
+cd backend
+./.venv/bin/python scripts/feedback_analysis_worker.py --once
+```
+
+The worker does not retry failed jobs automatically. An operator can explicitly
+return one failed, result-less `feedback_analysis` job to `pending`:
+
+```bash
+cd backend
+./.venv/bin/python scripts/feedback_analysis_worker.py \
+  --requeue-job <job_id>
+```
+
+The command clears the failed run's timestamps and error code, preserves the
+job identity and idempotency key, and prints `pending`. It rejects succeeded,
+running, cancelled, non-feedback, or already-resulted jobs. This is an
+internal CLI operation; this checkpoint does not add an HTTP endpoint, RBAC, or
+automatic retry policy.
+
+## Correction Signal Analysis Worker
+
+Run one message-derived correction-signal job:
+
+```bash
+cd backend
+./.venv/bin/python scripts/correction_signal_analysis_worker.py --once
+```
+
+The worker only processes `correction_signal_analysis` jobs. A candidate is
+cancelled when its adjacent challenge disappears or its durable content digest
+changes; ordinary follow-up questions never enter this queue. It does not
+modify Chat messages or create a training target. Use `--interval <seconds>`
+for an explicit polling loop; no hidden FastAPI background task is started.
+
+The PaperExperiment Draft path is exercised by the Objective analysis
+application service, not by a standalone script in this directory. The service
+builds a bounded Source bundle, calls the configured provider, reconciles
+candidate boundaries, and writes an immutable revision only after deterministic
+binding checks. Live-provider validation artifacts live outside the production
+script surface; do not add a probe link here unless the script exists and its
+input, model, and output contract are documented.
+
+## Dataset Sample Worker
+
+Run the worker that turns automatically queued Collection cases into
+task-specific SFT, preference, or evaluation candidate revisions:
+
+```bash
+cd backend
+./.venv/bin/python scripts/dataset_sample_worker.py --once
+```
+
+The Collection workbench creates one internal queue per task type. The worker
+only builds a candidate; a human must still edit or confirm it before an
+export can be published. Use `--interval <seconds>` for a long-running
+process. Docker Compose starts this worker as `dataset-sample-worker`.
+
 ## Expert Gold Evaluation
 
 Use [`evaluation/expert_gold/`](evaluation/expert_gold/) for offline utilities
@@ -146,3 +208,7 @@ cd backend
   --destination /tmp/source-table-preview \
   --reparse-inputs
 ```
+
+For PaperExperiment quality, report raw model Draft counts separately from
+service reconciliation and binding. A partial revision is an auditable archive,
+not proof that the paper is ready for Objective selection or Finding synthesis.

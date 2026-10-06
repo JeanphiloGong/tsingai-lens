@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import IconButton from '../../../_shared/IconButton.svelte';
 	import { t } from '../../../_shared/i18n';
 	import {
@@ -42,7 +43,7 @@
 		Boolean(recoveringCallId);
 	$: questionsByAnswer = (() => {
 		let question: ChatMessage | undefined;
-		const questions = new Map<string, ChatMessage>();
+		const questions = new SvelteMap<string, ChatMessage>();
 		for (const message of messages) {
 			if (message.role === 'user') question = message;
 			else if (message.role === 'assistant' && question)
@@ -51,7 +52,7 @@
 		return questions;
 	})();
 	$: unansweredQuestions = (() => {
-		const ids = new Set<string>();
+		const ids = new SvelteSet<string>();
 		let questionId = '';
 		for (const message of messages) {
 			if (message.role === 'user') {
@@ -73,6 +74,7 @@
 	export let streamingText = '';
 	export let responseSnapshot: ChatResponseSnapshot | null = null;
 	export let pendingApproval: ChatToolCall | null = null;
+	export let collectionId = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
 	export let loading = false;
@@ -90,10 +92,9 @@
 		...(responseSnapshot?.status === 'running'
 			? {
 					...responseSnapshot.progress,
-					elapsed_ms: Math.max(
-						responseSnapshot.progress.elapsed_ms ?? 0,
-						now - Date.parse(responseSnapshot.started_at)
-					)
+					// The server's monotonic elapsed time is authoritative. Rebuilding it
+					// from the browser wall clock makes stale or skewed timestamps look active.
+					elapsed_ms: responseSnapshot.progress.elapsed_ms ?? 0
 				}
 			: {}),
 		...(recoveryError ? { phase: 'reconnecting' } : {})
@@ -327,7 +328,7 @@
 			{/if}
 
 			{#if pendingApproval}
-				<ApprovalPanel call={pendingApproval} {deciding} onDecide={decide} />
+				<ApprovalPanel call={pendingApproval} {collectionId} {deciding} onDecide={decide} />
 			{/if}
 			{#if showRecoveryRow || showReadingRow}
 				<AssistantMessage
@@ -350,7 +351,7 @@
 			{/if}
 		</div>
 	</div>
-	{#if !following && messages.length}
+	{#if !following && messages.length && !pendingApproval}
 		<div class="jump-to-latest">
 			<IconButton label={$t('researchAgent.latestMessage')} onClick={scrollToLatest}
 				>&darr;</IconButton

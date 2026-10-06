@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from application.repositories.auth_repository import AuthUserRecord
-
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -10,12 +8,20 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
+from application.repositories.auth_repository import AuthUserRecord
+from application.repositories.collection_repository import (
+    StoredCollection,
+    StoredDocument,
+)
 from domain.source import Collection, Document
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 from infra.persistence.postgres.models.document import Document as DocumentRow
-from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
-
+from infra.persistence.postgres.models.document_preparation import (
+    DocumentPreparationRow,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -37,27 +43,33 @@ async def collection_repository(postgres_session_factory):
     return PostgresCollectionRepository(postgres_session_factory)
 
 
-def _collection(collection_id: str, owner_user_id: str = "user_a") -> Collection:
-    return Collection.create(
-        collection_id=collection_id,
-        owner_user_id=owner_user_id,
-        name=f"Collection {collection_id}",
-        description=None,
-        now_iso="2026-08-27T00:00:00+00:00",
+def _collection(collection_id: str, owner_user_id: str = "user_a") -> StoredCollection:
+    return StoredCollection(
+        collection=Collection(
+            collection_id=collection_id,
+            owner_user_id=owner_user_id,
+            name=f"Collection {collection_id}",
+            description=None,
+            status="idle",
+        ),
+        created_at="2026-08-27T00:00:00+00:00",
+        updated_at="2026-08-27T00:00:00+00:00",
     )
 
 
-def _document(collection_id: str, suffix: str) -> Document:
+def _document(collection_id: str, suffix: str) -> StoredDocument:
     digest = sha256(suffix.encode("utf-8")).hexdigest()
-    return Document(
-        document_id=f"doc_{suffix}",
-        original_filename=f"{suffix}.pdf",
+    return StoredDocument(
+        document=Document(
+            document_id=f"doc_{suffix}",
+            original_filename=f"{suffix}.pdf",
+            sha256=digest,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=len(suffix),
+        ),
         stored_filename=f"stored-{suffix}.pdf",
         storage_key=f"{collection_id}/input/stored-{suffix}.pdf",
-        sha256=digest,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=len(suffix),
         created_at="2026-08-27T00:01:00+00:00",
         updated_at="2026-08-27T00:01:00+00:00",
     )
@@ -72,17 +84,17 @@ async def test_collection_repository_round_trips_current_documents_by_owner(
     await collection_repository.add_collection(first)
     await collection_repository.add_collection(second)
     await collection_repository.add_collection(other)
-    document = _document(first.collection_id, "first")
+    document = _document(first.collection.collection_id, "first")
     await collection_repository.add_documents(
-        first.collection_id,
+        first.collection.collection_id,
         (document,),
         updated_at=document.created_at,
     )
 
-    stored = await collection_repository.read_collection(first.collection_id)
+    stored = await collection_repository.read_collection(first.collection.collection_id)
     assert stored == replace(
         first,
-        status="uploaded",
+        collection=replace(first.collection, status="uploaded"),
         updated_at=document.created_at,
         documents=(document,),
     )
@@ -90,54 +102,62 @@ async def test_collection_repository_round_trips_current_documents_by_owner(
         item.collection_id
         for item in await collection_repository.list_collections("user_a")
     ] == ["col_z", "col_a"]
-    assert (await collection_repository.read_collection(second.collection_id)).documents == ()
+    assert (
+        await collection_repository.read_collection(second.collection.collection_id)
+    ).documents == ()
 
 
 async def test_collection_repository_updates_metadata_without_losing_documents(
     collection_repository,
 ) -> None:
     collection = _collection("col_update")
-    document = _document(collection.collection_id, "paper")
+    document = _document(collection.collection.collection_id, "paper")
     await collection_repository.add_collection(collection)
     await collection_repository.add_documents(
-        collection.collection_id,
+        collection.collection.collection_id,
         (document,),
         updated_at=document.created_at,
     )
-    stored = await collection_repository.read_collection(collection.collection_id)
+    stored = await collection_repository.read_collection(
+        collection.collection.collection_id
+    )
     updated = replace(
         stored,
-        name="Updated collection",
-        status="running",
+        collection=replace(
+            stored.collection, name="Updated collection", status="running"
+        ),
         updated_at="2026-08-27T00:02:00+00:00",
     )
 
     assert await collection_repository.update_collection(updated) is True
-    assert await collection_repository.read_collection(collection.collection_id) == updated
+    assert (
+        await collection_repository.read_collection(collection.collection.collection_id)
+        == updated
+    )
 
 
 async def test_collection_repository_round_trips_preparation_stage_fingerprints(
     collection_repository,
 ) -> None:
     collection = _collection("col_stage_fingerprints")
-    document = _document(collection.collection_id, "paper")
+    document = _document(collection.collection.collection_id, "paper")
     await collection_repository.add_collection(collection)
     await collection_repository.add_documents(
-        collection.collection_id,
+        collection.collection.collection_id,
         (document,),
         updated_at=document.created_at,
     )
     async with collection_repository.session_factory.begin() as session:
         session.add(
             DocumentPreparationRow(
-                document_id=document.document_id,
+                document_id=document.document.document_id,
                 source_format="pdf",
                 parser_name="test-parser",
                 parser_version="source-runtime.v1",
                 source_fingerprint="a" * 64,
                 artifact_json={"blocks": [], "tables": [], "figures": []},
                 profile_json={
-                    "document_id": document.document_id,
+                    "document_id": document.document.document_id,
                     "title": "Paper",
                     "doc_type": "uncertain",
                     "profile_warnings": [],
@@ -153,20 +173,23 @@ async def test_collection_repository_round_trips_preparation_stage_fingerprints(
         )
     prepared = replace(
         document,
-        status="ready",
-        parser_version="source-runtime.v1",
-        document_analysis_version="document-profile.v1+paper-map.v1",
-        source_fingerprint="a" * 64,
-        profile_fingerprint="b" * 64,
-        preparation_fingerprint="b" * 64,
+        document=replace(
+            document.document,
+            status="ready",
+            parser_version="source-runtime.v1",
+            document_analysis_version="document-profile.v1+paper-map.v1",
+            source_fingerprint="a" * 64,
+            profile_fingerprint="b" * 64,
+            preparation_fingerprint="b" * 64,
+        ),
         updated_at="2026-08-27T00:02:00+00:00",
     )
 
     assert await collection_repository.update_document(prepared) is True
     assert (
         await collection_repository.read_document(
-            collection.collection_id,
-            document.document_id,
+            collection.collection.collection_id,
+            document.document.document_id,
         )
         == prepared
     )
@@ -176,16 +199,16 @@ async def test_collection_repository_rejects_duplicate_document_content(
     collection_repository,
 ) -> None:
     collection = _collection("col_duplicate_content")
-    first = _document(collection.collection_id, "same")
+    first = _document(collection.collection.collection_id, "same")
     second = replace(
         first,
-        document_id="doc_other",
+        document=replace(first.document, document_id="doc_other"),
         stored_filename="other.pdf",
-        storage_key=f"{collection.collection_id}/input/other.pdf",
+        storage_key=f"{collection.collection.collection_id}/input/other.pdf",
     )
     await collection_repository.add_collection(collection)
     await collection_repository.add_documents(
-        collection.collection_id,
+        collection.collection.collection_id,
         (first,),
         updated_at=first.created_at,
     )
@@ -195,31 +218,39 @@ async def test_collection_repository_rejects_duplicate_document_content(
         match="document content already exists in collection",
     ):
         await collection_repository.add_documents(
-            collection.collection_id,
+            collection.collection.collection_id,
             (second,),
             updated_at=second.created_at,
         )
 
-    assert (await collection_repository.read_collection(collection.collection_id)).documents == (
-        first,
-    )
+    assert (
+        await collection_repository.read_collection(collection.collection.collection_id)
+    ).documents == (first,)
 
 
 async def test_collection_delete_removes_its_current_documents(
     collection_repository,
 ) -> None:
     collection = _collection("col_delete_documents")
-    document = _document(collection.collection_id, "paper")
+    document = _document(collection.collection.collection_id, "paper")
     await collection_repository.add_collection(collection)
     await collection_repository.add_documents(
-        collection.collection_id,
+        collection.collection.collection_id,
         (document,),
         updated_at=document.created_at,
     )
-    assert await collection_repository.delete_collection(collection.collection_id) is True
-    assert await collection_repository.read_collection(collection.collection_id) is None
+    assert (
+        await collection_repository.delete_collection(
+            collection.collection.collection_id
+        )
+        is True
+    )
+    assert (
+        await collection_repository.read_collection(collection.collection.collection_id)
+        is None
+    )
     async with collection_repository.session_factory() as session:
-        assert await session.get(DocumentRow, document.document_id) is None
+        assert await session.get(DocumentRow, document.document.document_id) is None
 
 
 async def test_collection_repository_rejects_unknown_owner(collection_repository) -> None:
@@ -241,11 +272,13 @@ async def test_collection_list_reads_only_summaries_in_two_queries(
         await collection_repository.add_collection(collection)
         if number:
             documents = tuple(
-                _document(collection.collection_id, f"{number}_{suffix}")
+                _document(collection.collection.collection_id, f"{number}_{suffix}")
                 for suffix in ("z", "a")
             )
             await collection_repository.add_documents(
-                collection.collection_id, documents, updated_at=documents[0].created_at
+                collection.collection.collection_id,
+                documents,
+                updated_at=documents[0].created_at,
             )
     await collection_repository.add_collection(_collection("col_private", "user_b"))
     statements = []

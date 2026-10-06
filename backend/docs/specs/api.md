@@ -143,7 +143,45 @@ handoff record or a second research-result identity.
 
 ### Research Agent Chat
 
+Session operation permissions are exposed by authenticated
+`GET/PUT /api/v1/chat-sessions/{session_id}/permissions`. PUT accepts `mode`
+(`read_only`, `confirm`, `auto`), an explicit `actions` list, and
+`expires_at` (`null` keeps an automatic grant active until it is
+revoked or changed, while a non-null value must be no more than 24 hours
+ahead), `all_actions`, and `expected_revision`. A session without a collection default and every branched session defaults
+to `confirm`; revision conflicts and invalid grants return `409`, inaccessible
+sessions return `404`. The model cannot call this settings endpoint.
+
+Automatic grants can cover every currently registered write action listed in
+`domain/chat/permissions.py`, including research-process and Objective actions,
+Evidence/Finding publication, review annotations, and research-plan changes.
+Evidence and Finding version creation publish a new analysis version; there is no
+separate save-only permission. The user selects the exact actions and optional
+expiry in the session permission control, while the default mode still requires exact
+confirmation. Calls record `decision_basis` (`explicit` or `scope_grant`) and
+`authorization_revision`.
+
+Revocation and acquiring execution authority lock the same session row. A
+revocation completed first prevents a new claim; an already claimed operation
+may finish. Repeated claims never restart a running/terminal call. A crash
+after claim may leave an interrupted operation requiring investigation; this
+does not promise transactional exactly-once effects across every domain service.
+New grants do not automatically execute old pending calls. Read-only mode
+blocks even explicit approvals. Request-level no-save constraints further
+restrict writes; natural-language detection remains bounded, and read-only
+settings are the deterministic control.
+
+Collection owners can set a default for newly created collection Agent sessions through
+authenticated `GET/PUT /api/v1/collections/{collection_id}/agent-permissions`.
+The endpoint uses the same mode, action, optional expiry, and revision contract and
+returns `404` for a collection the caller does not own. A collection default is
+copied when a session is created; changing it does not silently change an
+active session. Branches continue to default to confirmation. `all_actions=true` is expanded by the backend to every current
+registered write action, so clients do not need to maintain that authoritative
+list.
+
 - `POST /api/v1/chat-sessions`
+- `GET /api/v1/chat-sessions?collection_id={collection_id}`
 - `GET /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
@@ -158,6 +196,11 @@ record ordinary user and assistant conversation, model tool intent, and bounded
 structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
+
+The collection-scoped list returns the authenticated user's saved sessions,
+ordered by most recently updated, with `limit` and `offset` pagination. It is
+the source for restoring Chat history on another device; browser local storage
+may remember the active session but is not the authoritative history index.
 
 Message editing and answer regeneration preserve the original trajectory.
 `POST /chat-sessions/{session_id}/branches` accepts a saved user `message_id`,
@@ -241,8 +284,257 @@ identity and cannot receive feedback.
 `GET /chat-sessions/{session_id}/messages` returns a separate `feedback` array
 containing the current user's records, alongside `items` and `pending_approval`.
 The immutable message records and turn/stream contracts contain no feedback.
-MVP feedback is not supplied to models, training, evaluation datasets, or
-scientific review services.
+The rating is not supplied directly to a model and does not itself assert that
+an answer is wrong. In the current feedback-workbench flow, a saved rating is
+an input signal for an internal analysis job. The analysis Worker creates a
+candidate case and the task-specific sample Worker prepares a candidate for
+each fixed task; a human then edits or confirms the task sample before an
+immutable DatasetExport can include it.
+
+### Feedback Analysis Workbench
+
+The current product flow turns a saved Chat signal into a reviewable,
+source-grounded case and then into a maintained, task-specific dataset. The
+old P5 `DatasetSnapshot` contract is no longer a product read path. D7 reads
+legacy snapshots only from the one-way migration script; after migration there
+is no old snapshot detail, download, or compatibility query. A retained legacy
+table or file is an operations archive, not a browser contract.
+
+The case APIs expose the source-grounded analysis record for inspection and
+advanced correction. They do not rewrite the original messages or model-call
+audit:
+
+- `GET /api/v1/feedback-cases`
+- `GET /api/v1/feedback-cases/{case_id}`
+- `PATCH /api/v1/feedback-cases/{case_id}/annotation`
+- `POST /api/v1/feedback-cases/{case_id}/review`
+- `GET /api/v1/feedback-cases/{case_id}/review-decisions`
+
+The authenticated user must be able to access the case's Collection. The
+current validation phase has no separate annotator, reviewer, or dataset-admin
+role, so one authorized Collection user may inspect or edit a case. The fixed
+task workbench does not require a separate case annotation/review pass: it
+shows the case's readable evidence inside the task-specific editor and lets
+the user confirm or revise the generated sample. The browser carries business
+IDs and concurrency digests automatically rather than asking the user to type
+them.
+
+Candidate analysis is an internal review signal. There is no
+candidate-analysis download endpoint and no automatic confirmation. A task
+sample becomes downloadable only after its current revision is confirmed and
+included in an immutable `DatasetExport`; its model file contains readable
+evidence, while audit identities remain in the separate provenance sidecar.
+
+The flow is ordered:
+
+```text
+Chat feedback, correction, or tool failure
+  -> matching analysis job
+  -> candidate AnalysisResult and FeedbackCase
+  -> one task-specific sample-build job per fixed task
+  -> human edit or confirmation in SFT / Preference / Evaluation
+  -> confirmed DatasetExport / provenance sidecar
+```
+
+Analysis is a candidate signal only. A failed worker records a technical job
+failure; it cannot declare an answer incorrect or approve data. The case
+annotation/review endpoints remain available for detailed case-level review,
+but they are not prerequisites for the fixed task workbenches. Task sample
+edits and confirmations use the sample revision and generation digests
+described below.
+
+The maintained task-dataset flow is separate from an immutable historical
+snapshot. Every Collection has three fixed internal workbenches: SFT,
+preference, and evaluation. They are created in the Collection creation
+transaction, or initialized for historical Collections by the sample Worker;
+the browser chooses
+one task type and never configures a Dataset or selects case IDs:
+
+- `GET /api/v1/feedback-datasets?collection_id={collection_id}`
+- `GET /api/v1/feedback-datasets/{dataset_id}`
+- `GET /api/v1/feedback-datasets/{dataset_id}/samples?status={status}&limit={limit}&offset={offset}`
+- `GET /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}`
+- `PATCH /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}`
+- `POST /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}/confirm`
+- `POST /api/v1/feedback-datasets/{dataset_id}/samples/{sample_id}/actions`
+- `POST /api/v1/feedback-datasets/{dataset_id}/export-previews`
+- `POST /api/v1/feedback-datasets/{dataset_id}/exports`
+- `GET /api/v1/feedback-datasets/{dataset_id}/exports?limit={limit}&offset={offset}`
+- `GET /api/v1/feedback-datasets/{dataset_id}/exports/{export_id}/download?format=jsonl|json|provenance|manifest`
+
+The two POST operations from earlier migration checkpoints remain internal
+maintenance seams for importing or repairing data; they are not part of the
+user workflow. After any feedback, correction, or tool-failure analysis writes
+a `FeedbackCase`, its repository commits the analysis result, case, and all
+three sample-build jobs in one PostgreSQL transaction. A queue failure rolls
+back the entire write. List GETs only read; refreshing and pagination cannot
+enqueue model work. The sample Worker backfills historical cases in bounded
+batches once at process startup, skips withdrawn cases, and preserves existing
+samples through idempotent collection. The `dataset_sample_build`
+Worker reads the case's frozen context
+and readable evidence, writes an immutable task-specific candidate
+revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
+builders use the configured model to generate missing answers or criteria from
+the readable evidence. A first Preference build uses the configured model to
+assess the fixed answer pair against its shared readable evidence without
+rewriting or swapping either answer. It records `suggested_preference`
+(`a`, `b`, `tie`, or `unclear`) and a nonempty evidence-grounded `rationale`,
+while leaving `human_preference` unset. Missing assessment configuration leaves
+an unassessed pair in `needs_input`; invalid or unexplained model opinions are
+technical build failures. Preference rebuilds pass the review note and the current
+answer pair to the configured model when its source digest and construction
+version still match, preserving the review input and recording which revision
+was reviewed. A changed source is rebuilt from the current case evidence.
+The model may revise the requested answer or its
+suggestion and rationale; it cannot supply a human preference. The browser
+displays the suggestion and rationale beside the answer pair. Accepting the
+suggestion or choosing another preference is an explicit reviewer decision.
+Confirmation saves any local Preference changes first and confirms exactly
+the revision returned by that save through the existing PATCH and confirm
+endpoints; a failed save cannot submit a confirmation. An invalid or
+unchanged result does not become a new confirmed sample.
+Missing evidence or an explicit model abstention produces `needs_input`;
+provider errors and invalid responses produce `build_failed`. No Worker result
+automatically confirms training data. Internal message/source identities stay
+in revision provenance and are not inserted into model-facing context or
+evidence text.
+
+All four Worker types use the shared `analysis_jobs` envelope. A claim records
+`worker_id`, `lease_expires_at`, `heartbeat_at`, and an incremented
+`lease_version`; terminal completion clears the lease fields. Each Worker
+recovers expired `running` jobs before claiming new work. For a dataset sample,
+recovery also changes the linked sample from `building` back to `pending`, so a
+container restart cannot leave the sample permanently stuck.
+Dataset build completion checks the claimed `worker_id`, `lease_version`, and
+unexpired lease under the job row lock before any sample or job mutation.
+It also locks and rechecks the current source case at completion; a changed or
+withdrawn source cannot produce a candidate awaiting confirmation.
+An abandoned Worker cannot save a candidate, report failure, or cancel the
+replacement claim; its return value reflects the persisted job state.
+Sample builds have a 600-second wall-clock limit, shortened when the remaining
+lease leaves less time. Timeout cancels the awaited build and records
+`build_failed` with `dataset_sample_build_timeout` before the 900-second lease
+expires. All Workers renew an unexpired lease periodically with the claimed
+`worker_id` and `lease_version`; a renewal rejected by the database cancels the
+in-flight operation and prevents it from publishing a result. Sample builds
+also keep the 600-second wall-clock limit as a provider/runtime safeguard.
+
+Natural-language correction analysis first assesses whether the follow-up
+preserves the original research task (papers, comparison scope, outcome and
+requested response). Only `same_task` allows linking the first final answer
+following the challenge, stopping before the next user turn. Changed or
+uncertain tasks retain the signal and assessment without a corrected-answer
+pair. The runtime uses the configured model for this assessment; the local
+rule engine accepts only conservative correction-only cases.
+Preference construction requires the recorded task assessment for a Chat
+correction pair and rejects differing questions or supplied input digests.
+Its equal input digests describe the fixed review input, not proof of identical
+original provider requests. Missing, identical or unverified pairs produce
+`needs_input`.
+
+Case updates merge the context from different signal types, retaining readable
+source observations and correction-owned fields when rating or tool-failure
+analysis arrives. A new correction analysis replaces its own pairing fields,
+so a withdrawn or changed-task pairing cannot survive as an old correction.
+The same case-write transaction invalidates samples whose source digest
+changed. Worker candidates receive a new generation and rebuild job. Human
+revisions remain readable, while confirmation is cleared and the sample moves
+to `needs_input` with `source_changed_since_collection`; edit or rebuild it
+before confirming again. Discarded samples remain discarded.
+
+The sample workbench reads the current immutable revision and the source case
+context. The PATCH body contains `expected_revision_id` and the complete
+task-specific content; a successful edit appends a human revision and
+clears any previous confirmation. For a `needs_input` sample without a revision,
+send `expected_revision_id: null`, `expected_generation` from the loaded sample,
+and complete task-specific content. This creates the first human revision and
+transitions to `needs_confirmation`, without confirming it. Generation is also
+checked under the row lock, preventing an old editor from overwriting a rebuild.
+The service recomputes the source case digest before saving or confirming; if
+the case changed after the candidate was built, it returns `409
+sample_source_stale` and requires a rebuild from the current case.
+The browser provides editors for all three tasks, including missing questions,
+answers, criteria, and add/remove controls for readable evidence. The confirm
+body contains the same expected revision ID. Confirmation is conditional on the
+sample still pointing at that
+revision, records the confirming user and time, and is idempotent when the same
+revision was already confirmed. A stale revision returns `409
+sample_revision_stale`; the browser keeps its draft and asks the user to reload
+or compare before submitting again. The interface presents questions,
+readable context, answer text, and evidence excerpts; users do not type sample,
+case, message, or source IDs.
+
+An edited excerpt retains known Source provenance only when its title and text
+match the stored case evidence. New or replacement text is recorded as a
+human-supplied excerpt with the annotator's identity, without assigning it an
+unverified Source ID. The training content contains readable text in either
+case; the audit distinction remains in internal provenance.
+
+The actions endpoint accepts `action` (`rebuild`, `retry`, `discard`, or
+`restore`), `expected_revision_id`, and an optional `reason`; `rebuild` requires
+a non-empty reason. It requires an `Idempotency-Key` header. Reusing the same
+key and request returns the original action result; changing the request under
+the same key returns `409 sample_action_identity_conflict`. A changed sample
+revision or generation returns `409 sample_revision_stale`. Rebuild and retry
+create a new pending build job; discard invalidates any running build; restore
+returns to `needs_confirmation` only when the retained candidate still matches
+the current source, otherwise to `needs_input`. Neither action automatically
+confirms a sample. A late Worker result cannot replace a newer generation.
+
+The export flow always starts with `POST .../export-previews`. Its optional body
+`{"sample_ids": ["sample_123"]}` selects confirmed samples in this dataset.
+Omitting `sample_ids` selects all confirmed samples; an empty list, duplicates,
+or an unavailable sample returns `422`. The browser explicitly sends its selection.
+The server reads the selected confirmed revisions, validates readable context and provenance, and
+stores a short-lived member digest. The response contains the requested count,
+exportable count, sample previews, and user-readable issues. Publishing requires
+the preview ID and digest plus an `Idempotency-Key`; without
+`allow_partial: true`, any issue returns `422` and no export is created. With
+explicit partial consent, only the valid members are published; invalid samples
+remain in the queue. If a selected revision or confirmation changes after preview,
+publishing returns `409 export_preview_stale` and the browser must run a new
+preview. Both preview queries and publication transaction checks are restricted
+to selected sample IDs. Unselected stale or withdrawn samples cannot block a
+selected export. Unselected sample changes do not invalidate the preview or add rows to
+the export. An empty export is rejected.
+
+Each published export is immutable and has its own `export_id` and sequential
+version. `format=jsonl` and `format=json` contain task-specific model-facing
+rows. New publications use `literature-sft.v2`, `literature-preference.v2`,
+or `literature-evaluation.v2` in the manifest. Internal annotation revisions
+remain `v1`; export schemas describe the downloaded file, not the editor payload.
+SFT rows contain only `messages`, with the confirmed target as the final
+assistant message. Preference rows contain `prompt`, `chosen`, and `rejected`,
+each a message array; `prompt` is the shared input, and each completion is one
+assistant message selected according to the saved human preference.
+Evaluation rows contain `messages`, `reference`, `criteria`, and `evaluation_mode`.
+There are no standalone `context` or `evidence` fields in v2 main files.
+The `literature-context.v1` input template inserts each distinct reviewed context
+snippet as `文献：{document_title}\n原文：{text}`, joins snippets with a blank line,
+and prepends them to the last user message followed by `\n\n问题：{original content}`.
+Earlier messages and roles remain unchanged. Evidence used only for review,
+targets, preferences, reference answers, and criteria never enter this input.
+The manifest includes `data_format` (`messages-sft`, `trl-conversational-dpo`,
+or `messages-evaluation`) and `input_template`. These are data shapes, not a
+claim that training or a target model's chat template has been executed.
+Published v1 files remain downloadable byte-for-byte as stored; publishing again
+creates a new v2 export. The current offline preparation requires a v2 bundle
+and rejects v1 task schemas rather than silently converting them.
+Main rows do not contain
+sample, case, session, message, source, or locator IDs. `format=provenance`
+downloads the separate trace sidecar
+with row keys, source/message identities, evidence records, the original
+readable `context` and supporting `evidence`, and digests. The
+sidecar is for audit and later source lookup; it is not appended to the model
+prompt. `format=manifest` downloads the export manifest with the task schema,
+row count, member/content/provenance digests, and the names of the related
+files. Replaying the same idempotency key and publication digest returns the
+existing immutable export rather than creating another version.
+
+P6 dataset preparation and offline evaluation are read-only scripts over a
+published DatasetExport and its provenance sidecar; they do not add an online
+training endpoint or modify Chat. A legacy DatasetSnapshot can be consumed
+only by the D7 migration script, not by this product API.
 
 A user message may carry up to 12 `source_contexts` items selected from the
 same Collection's document reader. The item contains a stable Source resource
@@ -261,6 +553,15 @@ Analysis. The quoted content is never treated as model instructions. Existing
 messages have an empty context list and historical contexts may have a null
 digest.
 
+The message request accepts an optional `permission_mode` with values
+`confirm` (the default), `read_only`, or `none`. `confirm` preserves the normal
+Research Agent behavior: read and transient-draft capabilities may execute and
+durable writes require exact user approval. `read_only` rejects durable writes
+before execution, while `none` exposes and accepts no capabilities. This is a
+per-turn caller policy; natural-language phrases such as “do not search” do not
+change tool visibility. The mode does not remove Source, collection, or domain
+validation, and it does not turn a model proposal into approval.
+
 `POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
@@ -274,6 +575,26 @@ ends with one `turn` event whose data is the complete `ChatTurnResponse` after
 the durable trajectory checkpoints have succeeded. A terminal `error` event
 contains only a stable code and sanitized message. Partial text is never a
 completed Chat message or a scientific result.
+
+Assistant answer content uses inline Source citations. A source-backed sentence,
+comparison-table value, or paper-specific limitation is followed at the point of
+the claim by a Markdown link whose visible label is `P006.pdf · Table 3 · p. 8`.
+The server converts the model-only `[[cite:<source_ref>]]` marker after checking that
+the referenced Source was returned by a successful, complete `read_source`,
+`inspect_table`, or complete `inspect_document_sources` result. Search matches,
+truncated windows, and headings can be shown as inspection previews but are not
+supporting citation links. Ambiguous locators must be document-qualified; an
+unresolved internal locator is removed from user-visible prose.
+
+The human-readable link label is part of the response contract. Internal block,
+table, and figure IDs remain available in the private trajectory and in the link
+target for exact reader navigation, but never appear as visible labels or as a
+separate Source-ID list at the start or end of an answer. Existing stored answers
+are projected through the same conversion when a trajectory is read, so older
+answers do not require a data rewrite. During `text_delta` streaming, incomplete
+citation markers and internal IDs are withheld from the transient display; the
+final `turn` event and saved assistant message are authoritative for the complete
+inline links.
 
 `GET /messages` includes a nullable `response` snapshot: `response_id`, monotonic
 `sequence`, start/update timestamps, current `message_id` and
@@ -392,13 +713,11 @@ approval. The production Research Agent currently exposes these capabilities:
   distinct approval event. The runner checks its scientific claims before
   execution; a successful final draft appears as the exact structured result
   with a deterministic unsaved-status message, without another model rewrite;
-- `create_finding_version` is a `write` capability. It accepts the same
-  statement, assertion strength, version-local Evidence roles, limitations,
-  optional parent Finding, or explicit abstention as the human Finding
-  authoring command. After exact-argument approval it calls
-  `FindingAuthoringService.create_version()` and returns the canonical new
-  analysis and optional Finding. The source analysis and all existing Finding,
-  Evidence, and Source records remain unchanged;
+- `create_finding_version` is a `write` capability. It accepts fixed
+  experiment `selection_ids` and optional `comparison_group_ids`; it never
+  accepts Evidence IDs, a hand-written statement, or assertion strength.
+  After exact-argument approval it reads the canonical Finding aggregated for
+  that selection set and returns the fixed analysis projection;
 - `record_finding_feedback` is a `write` capability. After exact-argument
   approval, it calls the same `FindingFeedbackService.record_feedback()` path
   as the Finding workbench and records the authenticated user as reviewer. It
@@ -408,14 +727,6 @@ approval. The production Research Agent currently exposes these capabilities:
   `FindingFeedbackService.record_curation()` path as the Finding workbench.
   Service validation preserves Finding identity, paper coverage, Evidence IDs,
   and Source lineage; curation cannot create a new Finding;
-- `create_evidence_draft` records one transient Source-bound Evidence proposal
-  in the Chat trajectory. Before returning it, Lens verifies Collection
-  ownership, exact Source identity, complete-content digest, and verbatim
-  excerpt. It does not publish Evidence, advance an analysis version, or make
-  the proposed scientific fields verified Evidence;
-- `create_evidence_version` is the separate `write` capability for a reviewed
-  Evidence draft. Exact-argument approval invokes the same immutable
-  Source-to-Evidence versioning service used by the human authoring route;
 - `propose_objective_drafts` records at most three focused, single-outcome
   drafts in the Chat trajectory. PaperResearchMap relationships may be reported
   as proposal context, but they are never presented as Evidence and this call
@@ -454,30 +765,42 @@ approval. The production Research Agent currently exposes these capabilities:
   without allocating an analysis version. It
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
-- `publish_agent_objective_analysis` is a separate `write` capability for the
-  case where the researcher explicitly asks the Agent itself to analyze a
-  bounded paper scope. Before proposing the write, the Agent reads exact
-  Sources through `read_source`, or complete untruncated
-  `inspect_document_sources` results, over one or more turns. The
-  approved payload contains one summary for every selected ready Document.
-  Papers with supported facts carry structured Evidence drafts. A paper that
-  was inspected but supplied no grounded fact instead carries an explicit
-  `no_grounded_evidence` or `excluded_after_review` disposition, reason, and at
-  least one exact inspected Source locator and digest. A technical read or
-  extraction failure carries `extraction_failed` and its technical reason; it
-  is never treated as a scientific absence. The backend revalidates
-  each Source locator, complete-content SHA-256 digest, normalized verbatim
-  excerpt, Evidence contract, and no-Evidence inspection record before
-  allocating a version. It then publishes one
-  `agent_authored` analysis through the existing repository queue, claim, and
-  atomic publication lifecycle. If every non-excluded paper reports
-  `extraction_failed`, the active version is marked failed and remains retryable;
-  it does not publish `no_grounded_evidence` or advance the published pointer.
-  Mixed scopes may publish surviving Evidence while retaining failed paper
-  contributions. A successful version contains PaperContributions and Evidence
-  but no Finding; any conclusion requires a later approved
-  `create_finding_version` call. This capability has no separate HTTP endpoint,
-  draft store, background extraction, or Finding-synthesis call;
+- `propose_paper_experiment_draft` is a `draft` capability for Agent-authored
+  reconstruction of one paper's reusable experiment record. The Agent must
+  first read complete canonical Sources and may submit only response-local
+  scientific keys plus supplied Source labels. Lens reloads the prepared
+  document, resolves the authoritative Source catalog and fingerprint, and
+  rejects Lens-owned IDs, versions, ownership fields, and validation status in
+  the draft. The result is review-only and does not write a PaperExperiment;
+  its input schema requires each experiment's `label` and
+  `scope_description`, each variant's local `variant_key`, paper-reported
+  `variant_label`, and Source labels, and each test condition's local
+  `test_key`, `test_type`, Source labels, and protocol
+  specificity/completeness; reported temperature, rate, duration, and
+  replication values belong in the test condition's structured `parameters`.
+  When the Source explicitly binds that protocol to the experiment, the draft
+  must include `binding_source_labels`. Missing measurement-level binding,
+  non-concrete test identity, or an explicit outcome-scope mismatch prevents
+  that measurement from entering a Selection. Partial or unknown protocol
+  completeness is retained as limitation metadata and does not by itself block
+  a Selection when the identity and result-level binding are sufficient.
+  Each measurement requires a local key, outcome, reported value or result
+  text, and Source labels, and the schema uses typed `comparisons` and
+  `reported_interpretations` records. A comparison must name both local
+  variants, both sides' measurement keys, and its Source-backed binding labels;
+  an interpretation must include its author statement, `kind` (`result_summary`,
+  `mechanism_hypothesis`, or `limitation`), and Source labels. Test conditions
+  expose method, standard, structured parameters, and source-grounded protocol
+  specificity/completeness so the model can report temperature, rate,
+  replication, and other required context. Formal identities, binding/status
+  fields, SourceReference objects, and analysis ownership remain service-owned;
+- `create_paper_experiment_revision` is a separate `write` capability for an
+  approved, unchanged PaperExperiment draft. Lens revalidates the draft digest,
+  confirmed Objective, active analysis, current Source fingerprint, and user
+  ownership, then calls the canonical single-experiment writer. The immutable
+  PaperExperiment revision and its Objective Selection are committed through
+  the same atomic graph repository as automatic analysis. It does not create a
+  Finding; a Finding remains a separate Evidence/Selection-backed write;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work;
@@ -546,7 +869,14 @@ Only `completed` has a non-null `completion_reason`: `model_answer`,
 repeated identical observations, and the emergency ceiling allow one final
 model request with no tools, using inspected evidence and explicit unread or
 failed scope. It returns `completed` with warnings when an answer is available;
-finalization failure returns `failed` with a sanitized error code.
+response or finalization failure returns `failed` with a sanitized error code.
+The exception is an approved durable write in the current continuation whose
+tool call and matching result both already have status `succeeded`. A later
+response-generation failure does not reverse that completed action: the turn
+returns `completed` with `completion_reason: "model_answer"`, no error code, a
+deterministic saved-action message, and a non-blocking warning that the detailed
+response was unavailable. Successful reads, drafts, queued writes, failed
+writes, and writes from earlier turns do not use this fallback.
 
 Tool call and result failures are
 technical trajectory outcomes; they are not scientific absence, uncertainty,
@@ -600,9 +930,14 @@ fixed conditions, parameter levels, or measurements. Confirmed-Objective
 analysis may use it to prioritize Source inspection and surface coverage
 warnings, but only facts grounded in inspected Sources may populate Evidence.
 
-`ResearchObjective` is the only business aggregate root. Its identity is
-`(collection_id, objective_id)`. The analysis-state and command responses
-contain:
+`ResearchObjective` is the aggregate root for the research question and its
+analysis lifecycle. Its identity is `(collection_id, objective_id)`. Reusable
+paper-owned experiment content has a separate `PaperExperiment` revision
+boundary: it is identified by `(experiment_id, experiment_version)` and does
+not belong to one Objective. An Objective analysis connects the two through an
+explicit `ObjectiveExperimentSelection`; optional cross-paper groups and
+Findings are analysis-scoped records, not fields embedded in either aggregate.
+The Objective analysis-state and command responses contain:
 
 - question and material/process/property/comparison scope;
 - seed document IDs as question provenance and explicit exclusions as scope
@@ -725,6 +1060,17 @@ running, or failed, the list still belongs to `published_analysis`, not that
 newer version. The analysis command and analysis-status route share this
 response contract.
 
+PaperContribution is analysis-level coverage metadata, not a PaperExperiment
+field or scientific evidence for a Finding. Finding and experiment authoring
+copy the source analysis coverage into the new version, including excluded and
+failed papers with no experiment revision. This preserves the original input
+processing record; it does not assert that every paper supports the new Finding.
+The metadata is saved in the same publication transaction as the experiment
+graph. Finding synthesis consumes only fixed experiment revisions and their
+Selections and ComparisonGroups; it never consumes PaperContribution.
+Authored experiment graph snapshots retain the source analysis version and
+user identity; Agent publication also retains the committing tool-call ID.
+
 Each analysis-level contribution exposes `evidence_disposition`,
 `routed_source_count`, `extracted_source_count`,
 `comparable_evidence_count`, `failed_source_count`, and an optional
@@ -797,13 +1143,12 @@ It is durable authoring provenance, not scientific support; Evidence remains
 grounded through its Source identity and a Finding remains supported through
 its version-local Evidence bindings.
 
-The Findings POST command records one deliberate researcher Evidence-to-Finding
-decision. It never inserts into the published source version. The request
-identifies that current `source_analysis_version`, assigns existing
-version-local Evidence to support, contradiction, context, and optional
-condition-boundary roles, and supplies a statement, assertion strength,
-limitations, and optional `parent_finding_id`.
-The authenticated user identity is server-derived. Paper coverage, factors,
+The Findings POST command selects one Finding already aggregated from a fixed
+experiment analysis snapshot. The request identifies the
+`source_analysis_version`, one or more `selection_ids`, and optional
+`comparison_group_ids`. The authenticated user identity is server-derived;
+the conclusion, factors, outcome, direction, and evidence projection remain
+derived from the experiment records. Paper coverage, factors,
 outcome, direction, attribution, synthesis status, certainty, target version,
 and Source content are also server-derived and cannot be supplied by the
 browser.
@@ -811,35 +1156,76 @@ browser.
 ```json
 {
   "source_analysis_version": 3,
-  "statement": "Higher laser power is associated with lower porosity under the reported scan conditions.",
-  "assertion_strength": "associative",
-  "supporting_evidence_ids": ["evidence_a"],
-  "contradicting_evidence_ids": [],
-  "context_evidence_ids": ["evidence_b"],
-  "condition_boundary_evidence_ids": ["evidence_b"],
-  "limitations": ["Direct support is currently limited to one paper."],
-  "parent_finding_id": null,
-  "abstention_reason": null
+  "selection_ids": ["selection-1", "selection-2"],
+  "comparison_group_ids": ["comparison-group-1"]
 }
 ```
 
-A successful command returns `201` with the newly published authored analysis
-and its new canonical Finding. The repository clones the complete published
-PaperContribution, Evidence, and Finding snapshot into the next version,
-validates every selected Evidence and exact Source, appends the human-authored
-or hybrid Finding, and atomically advances the Objective's published pointer.
-The source version and parent Finding remain unchanged. `parent_finding_id`
-therefore means derivation, not in-place editing.
+A successful command returns `201` with a new immutable analysis snapshot and
+the canonical Finding synthesized from the requested selection/group set.
+Unknown selections, groups, or an unaggregated combination are rejected; the
+source snapshot remains unchanged.
+
+Optional `parent_finding_id` must identify a Finding in the source experiment
+analysis graph. The new Finding records that parent, hybrid origin, source
+analysis version, authenticated author, and authoring time. Optional
+`limitations` are trimmed, deduplicated, and appended to synthesized scientific
+limitations (at most 20 supplied entries, 1000 characters each). They do not
+replace the Source-grounded conclusion or its experiment selections.
+Experiment-backed Finding responses expose their `selection_ids` and optional
+`comparison_group_ids`; their legacy Evidence `paper_contributions` may be
+empty because selections carry that support. A one-study Finding uses
+`synthesis_status=single_study`. Responses require either paper contributions
+or experiment selections rather than accepting an unsupported conclusion.
 
 A researcher may instead submit one of `no_comparable_evidence`,
 `no_grounded_evidence`, or `insufficient_evidence` as `abstention_reason`, with
-an explanatory `limitations` entry and no statement, parent, or Evidence roles.
+an explanatory `limitations` entry and no selections, comparison groups, or
+parent. The new version retains the source analysis's document coverage.
+
 The new analysis version records the abstention as metadata and creates no
 placeholder Finding. An unauthenticated request returns `401`; missing or
 unowned collections and missing Objectives return `404`; stale source versions,
 concurrent analysis, unknown or ineligible Evidence, and scientifically
 inconsistent role selections return `409`; malformed request shapes return
 `422`.
+
+### Paper Experiment Analysis Projection
+
+The experiment-domain migration adds read-only routes; it does not replace or
+change the Objective, Finding, Evidence, or Agent request contracts above:
+
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis?analysis_version={n}`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-analysis/export?analysis_version={n}&format=json|csv`
+
+Both routes require a positive, explicit `analysis_version` and read the same
+fixed Selection, optional ComparisonGroup, Finding, and PaperExperiment
+revisions. The JSON projection preserves relations and source references; the
+CSV projection is a long table with one selected reported measurement per row.
+The export never uses a later experiment revision implicitly and never turns a
+derived difference into a reported measurement.
+
+Each CSV row keeps the selected measurement together with its experiment and
+Selection identity, variant label and subject/intervention/state/population
+context, applicable test method/protocol/population context, binding status,
+comparison keys, and Source references. Structured values remain JSON-encoded
+inside their CSV cells. The export does not infer missing conditions, pair
+different specimens merely because they share a group label, or silently
+average repeated measurements.
+
+A partial PaperExperiment revision that has no eligible Objective Selection is
+kept as an archive for later targeted rereading. A partial revision can still
+have an eligible Selection for a concrete, source-bound Objective slice; only
+the unresolved measurements are absent from these Selection-based projections.
+An incomplete archive without an eligible slice cannot appear as usable
+Evidence or a Finding. Such a revision remains discoverable through the
+PaperExperiment repository/document lineage rather than through an Objective
+analysis export.
+
+These are additive capabilities. Existing route paths, request parameters,
+authentication, task states, and response meanings remain frozen while the
+internal scientific records are migrated. A client that does not use these
+routes requires no request change.
 
 The Evidence POST command records one source-grounded Evidence decision from a
 specific prepared Document Source. It accepts `source_analysis_version`,
@@ -852,26 +1238,13 @@ is a substring of the canonical Source. It derives identity, page, resolution,
 confidence, and creator provenance. The browser cannot provide a creator,
 analysis target version, or Source outside the selected analysis.
 
-An Evidence correction never overwrites the old record. Supplying
-`supersedes_evidence_id` must refer to the current Evidence at the same Source
-locator; publication clones the complete source snapshot into the next
-immutable analysis version, marks the old record as superseded, and leaves old
-Findings pointing at their original Evidence. A successful command returns
-`201` with the new analysis, Evidence, and `affected_finding_ids`, including
-Findings referencing earlier ancestors of the corrected Evidence. The Agent
-receives these same IDs. `inspect_published_finding` includes the complete
-linked Evidence page, review metadata, and `replacement_evidence` for that
-page so it can compare old and current facts. It must recheck Sources, roles,
-measurement identity, conditions, and scope before proposing a parent-linked
-Finding draft. Publishing that draft requires a separate exact approval; the
-Evidence approval never authorizes downstream Finding writes.
-Stale versions, running analyses,
-unknown or out-of-scope Sources, invalid excerpts, and attempts to revise an
-already superseded record return `409`; malformed scientific shapes return
-  `422`. The Research Agent exposes the same operation as the approved
-  `create_evidence_version` write capability and must supply the digest returned
-  by `read_source` or a complete untruncated `inspect_document_sources` result;
-  it does not create a second Evidence identity.
+Evidence remains available through read-only projections for historical analyses
+and source traceback. New researcher and Agent writes use the reviewed
+PaperExperiment draft and the approved `create_paper_experiment_revision`
+capability; that write validates the complete Source digest, creates an
+immutable revision and Objective Selection, and does not create a Finding.
+Historical Evidence records remain readable, but no new Evidence version or
+independent Evidence identity can be created through the browser or Agent.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns

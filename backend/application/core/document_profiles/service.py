@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from asyncio import to_thread
+from dataclasses import replace
+from datetime import datetime, timezone
 import json
 import logging
 import math
@@ -8,6 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from application.core.document_profiles.extraction import (
+    DOCUMENT_PROFILE_PROMPT_VERSION,
     DocumentProfileExtractionError,
     DocumentProfileExtractor,
     build_default_document_profile_extractor,
@@ -244,6 +247,9 @@ class DocumentProfileService:
         self,
         collection_id: str,
         document_id: str,
+        *,
+        source_fingerprint: str,
+        profile_fingerprint: str,
     ) -> DocumentProfile:
         collection = await self.collection_service.get_collection(collection_id)
         document = await self.source_artifact_repository.read_document(
@@ -267,6 +273,13 @@ class DocumentProfileService:
             collection_id=collection_id,
             document=document,
             file_lookup=file_lookup,
+        )
+        profile = replace(
+            profile,
+            source_fingerprint=source_fingerprint,
+            profile_version=DOCUMENT_PROFILE_PROMPT_VERSION,
+            profile_fingerprint=profile_fingerprint,
+            generated_at=datetime.now(timezone.utc).isoformat(),
         )
         await self.document_profile_repository.replace(collection_id, profile)
         logger.info(

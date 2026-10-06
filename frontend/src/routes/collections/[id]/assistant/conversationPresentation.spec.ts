@@ -3,9 +3,45 @@ import type { ChatMessage, ChatToolResult } from '../../../_shared/chatSessions'
 import {
 	buildChatPresentation,
 	getChatSessionActivity,
+	getModelServiceErrorKey,
 	getRecoveredChatProgress,
-	getCurrentReadings
+	getCurrentReadings,
+	sanitizeStreamingCitationText
 } from './conversationPresentation';
+
+describe('getModelServiceErrorKey', () => {
+	it('maps model failures to stable service messages', () => {
+		expect(getModelServiceErrorKey('model_unavailable')).toBe(
+			'researchAgent.modelServiceUnavailable'
+		);
+		expect(getModelServiceErrorKey('provider_timeout')).toBe('researchAgent.modelServiceTimeout');
+		expect(getModelServiceErrorKey('model_response_invalid')).toBe(
+			'researchAgent.modelServiceInvalidResponse'
+		);
+		expect(getModelServiceErrorKey('provider_error')).toBe(
+			'researchAgent.modelServiceUnavailable'
+		);
+		expect(getModelServiceErrorKey('invalid_tool_batch')).toBeNull();
+	});
+});
+
+describe('sanitizeStreamingCitationText', () => {
+	it('hides complete and split citation markers until the persisted answer arrives', () => {
+		expect(
+			sanitizeStreamingCitationText(
+				'The result [[cite:tbl_doc_abc_table_3]] is bounded by `blk_doc_abc_results_1`.'
+			)
+		).toBe('The result  is bounded by .');
+		expect(sanitizeStreamingCitationText('The result [[cite:tbl_doc_abc')).toBe('The result ');
+		expect(sanitizeStreamingCitationText('The result blk_doc_abc_')).toBe('The result ');
+	});
+
+	it('keeps ordinary research prose intact', () => {
+		expect(sanitizeStreamingCitationText('The tensile strength is 334.2 MPa.')).toBe(
+			'The tensile strength is 334.2 MPa.'
+		);
+	});
+});
 
 function message(
 	messageId: string,
@@ -85,6 +121,7 @@ describe('buildChatPresentation', () => {
 				kind: 'passage',
 				status: 'reading',
 				title: 'Ti6Al4V treatment study',
+				href: '',
 				page: '7',
 				heading: '3.4 Tensile properties',
 				excerpt: 'Elongation increases at the first treatment level.',
@@ -94,6 +131,13 @@ describe('buildChatPresentation', () => {
 		const received = message('read-result', 'tool', {
 			toolResult: {
 				...result('read'),
+				resource_refs: [
+					{
+						resource_type: 'source',
+						resource_id: 'results-1',
+						href: '/collections/c1/documents/paper-a?source_ref=results-1'
+					}
+				],
 				data: {
 					document_id: 'paper-a',
 					source_ref: 'results-1',
@@ -103,6 +147,7 @@ describe('buildChatPresentation', () => {
 		});
 		expect(getCurrentReadings([...messages, received])[0]).toMatchObject({
 			status: 'received',
+			href: '/collections/c1/documents/paper-a?source_ref=results-1',
 			page: '7',
 			excerpt: 'Complete passage with all comparisons.'
 		});
@@ -233,6 +278,30 @@ describe('buildChatPresentation', () => {
 		expect(items[0]).toMatchObject({ kind: 'activity', status: 'in_progress' });
 	});
 
+	it('does not expose capability discovery as a user research operation', () => {
+		const items = buildChatPresentation([
+			message('discover-call', 'assistant', {
+				toolCallId: 'discover',
+				toolName: 'discover_research_tools'
+			}),
+			message('discover-result', 'tool', {
+				toolResult: result('discover')
+			}),
+			message('read-call', 'assistant', {
+				toolCallId: 'read',
+				toolName: 'inspect_document_sources'
+			}),
+			message('read-result', 'tool', { toolResult: result('read') })
+		]);
+
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({ kind: 'activity' });
+		if (items[0].kind !== 'activity') return;
+		expect(items[0].operations.map((operation) => operation.toolName)).toEqual([
+			'inspect_document_sources'
+		]);
+	});
+
 	it('compresses consecutive routine tool calls into one research activity group', () => {
 		const items = buildChatPresentation([
 			message('user_1', 'user', { content: 'Which findings support this question?' }),
@@ -280,7 +349,7 @@ describe('buildChatPresentation', () => {
 			'read_source',
 			'inspect_table',
 			'confirm_objective',
-			'create_evidence_draft',
+			'propose_paper_experiment_draft',
 			'create_finding_draft',
 			'assess_objective_quality',
 			'derive_objective',

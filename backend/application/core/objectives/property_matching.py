@@ -213,6 +213,10 @@ _PROPERTY_LABEL_ALIASES = {
     "maximum defect diameter": "max defect diameter",
     "maximum defect size": "max defect size",
     "maximum defect length": "max defect length",
+    # Methods often name the measured quantity "sample density" while the
+    # normalized result is reported as relative density. Keep this alias
+    # limited to the plain phrase; defect/current/energy density stay distinct.
+    "sample density": "density",
     "sigma y": "yield strength",
     "\u0131 y": "yield strength",
     "\u0131y": "yield strength",
@@ -354,6 +358,38 @@ _STRUCTURAL_TARGET_AXES = frozenset(
     {"densification", "relative density", "microstructure"}
 )
 _DENSITY_PROPERTIES = frozenset({"density", "relative density"})
+_RELATIVE_DENSITY_TARGET_AXES = frozenset(
+    {"density", "densification", "relative density"}
+)
+_RELATIVE_DENSITY_SOURCE_QUALIFIERS = frozenset(
+    {"absolute", "apparent", "bulk", "material", "measured", "nominal", "sample", "solid"}
+)
+_NON_RELATIVE_DENSITY_TERMS = frozenset(
+    {"current", "defect", "dislocation", "energy", "pore", "porosity", "power"}
+)
+_DENSITY_NORMALIZATION_TERMS = frozenset(
+    {
+        "basis",
+        "nominal",
+        "normalized",
+        "normalization",
+        "reference",
+        "theoretical",
+    }
+)
+_NARRATIVE_TEST_CONTEXT_NAMES = frozenset(
+    {
+        "comment",
+        "comments",
+        "detail",
+        "details",
+        "description",
+        "methods",
+        "note",
+        "notes",
+        "summary",
+    }
+)
 _GENERIC_RESULT_ROLE_TOKENS = frozenset(
     {
         "current",
@@ -742,6 +778,188 @@ def density_property_matches_structural_target(
         normalize_property_label(target_axis) in _STRUCTURAL_TARGET_AXES
         for target_axis in target_axes
     )
+
+
+def applicable_test_context_attributes(
+    attributes: Iterable[Any],
+    outcome: Any,
+    *,
+    reference_attributes: Iterable[Any] = (),
+) -> tuple[Any, ...]:
+    """Return test facts that can be assigned to one source result.
+
+    A Source may report several methods. Explicit outcome scopes are preferred;
+    an unscoped method is usable only when it is the sole unscoped method. The
+    density case is deliberately source-local: ``sample density`` supports a
+    ``relative density`` result only when the same test context also states a
+    normalization or reference density. This preserves the paper's wording
+    without treating every density-like quantity as interchangeable.
+    """
+
+    values = tuple(attributes)
+    references = tuple(reference_attributes)
+    scoped = tuple(
+        attribute
+        for attribute in values
+        if _test_context_has_explicit_outcome_scope(attribute)
+        and test_context_attribute_applies_to_outcome(
+            attribute,
+            outcome,
+            context_attributes=values,
+            reference_attributes=references,
+        )
+    )
+    if scoped:
+        return scoped
+    unscoped = tuple(
+        attribute
+        for attribute in values
+        if not _test_context_has_explicit_outcome_scope(attribute)
+        and not _test_context_is_narrative(attribute)
+    )
+    methods = tuple(
+        attribute for attribute in unscoped if _test_context_is_method(attribute)
+    )
+    if len(methods) == 1:
+        return unscoped
+    return unscoped if not methods and len(unscoped) == 1 else ()
+
+
+def test_context_attribute_applies_to_outcome(
+    attribute: Any,
+    outcome: Any,
+    *,
+    context_attributes: Iterable[Any] = (),
+    reference_attributes: Iterable[Any] = (),
+) -> bool:
+    """Check one explicitly scoped test fact against a result outcome."""
+
+    raw_outcomes = _attribute_field(attribute, "applies_to_outcomes", ())
+    applies_to_outcomes = tuple(
+        str(value).strip()
+        for value in (raw_outcomes if isinstance(raw_outcomes, (list, tuple, set)) else ())
+        if str(value).strip()
+    )
+    if not applies_to_outcomes:
+        values = tuple(context_attributes) or (attribute,)
+        return any(
+            item is attribute or item == attribute
+            for item in applicable_test_context_attributes(
+                values,
+                outcome,
+                reference_attributes=reference_attributes,
+            )
+        )
+    if outcome_matches_objective_scope(outcome, applies_to_outcomes):
+        # ``sample density`` and ``relative density`` are the same bounded
+        # outcome family for source routing, but a test method is only usable
+        # for the normalized result when the source also supplies a numeric
+        # reference/nominal density.
+        if normalize_property_label(outcome) == "relative density" and any(
+            _source_density_label_is_measurement(value)
+            for value in applies_to_outcomes
+        ):
+            return _relative_density_test_context_matches(
+                attribute,
+                outcome,
+                applies_to_outcomes=applies_to_outcomes,
+                context_attributes=tuple(context_attributes) or (attribute,),
+                reference_attributes=tuple(reference_attributes),
+            )
+        return True
+    return _relative_density_test_context_matches(
+        attribute,
+        outcome,
+        applies_to_outcomes=applies_to_outcomes,
+        context_attributes=tuple(context_attributes) or (attribute,),
+        reference_attributes=tuple(reference_attributes),
+    )
+
+
+def _test_context_has_explicit_outcome_scope(attribute: Any) -> bool:
+    raw_outcomes = _attribute_field(attribute, "applies_to_outcomes", ())
+    return bool(
+        isinstance(raw_outcomes, (list, tuple, set))
+        and any(str(value).strip() for value in raw_outcomes)
+    )
+
+
+def _test_context_is_narrative(attribute: Any) -> bool:
+    name = normalize_property_label(_attribute_field(attribute, "name", "")) or ""
+    return name in _NARRATIVE_TEST_CONTEXT_NAMES
+
+
+def _test_context_is_method(attribute: Any) -> bool:
+    name = normalize_property_label(_attribute_field(attribute, "name", "")) or ""
+    tokens = set(name.split())
+    return bool(
+        tokens & {"method", "technique"}
+        or name in {"characterisation", "characterization", "measurement", "test"}
+    )
+
+
+def _relative_density_test_context_matches(
+    attribute: Any,
+    outcome: Any,
+    *,
+    applies_to_outcomes: tuple[str, ...],
+    context_attributes: tuple[Any, ...],
+    reference_attributes: tuple[Any, ...],
+) -> bool:
+    target = normalize_property_label(outcome)
+    if target not in _RELATIVE_DENSITY_TARGET_AXES:
+        return False
+    if not any(_source_density_label_is_measurement(value) for value in applies_to_outcomes):
+        return False
+    return any(
+        is_density_normalization_reference(candidate)
+        for candidate in (*context_attributes, *reference_attributes)
+    )
+
+
+def _source_density_label_is_measurement(value: Any) -> bool:
+    normalized = normalize_property_label(value)
+    if not normalized:
+        return False
+    tokens = set(normalized.split())
+    if "density" not in tokens or tokens & _NON_RELATIVE_DENSITY_TERMS:
+        return False
+    return normalized in _DENSITY_PROPERTIES or bool(
+        tokens & _RELATIVE_DENSITY_SOURCE_QUALIFIERS
+    )
+
+
+def is_density_normalization_reference(attribute: Any) -> bool:
+    """Return whether a fact supplies a numeric density-normalization basis."""
+
+    name = normalize_property_label(_attribute_field(attribute, "name", "")) or ""
+    value = normalize_property_label(_attribute_field(attribute, "value", "")) or ""
+    tokens = set(name.split()) | set(value.split())
+    return (
+        "density" in tokens
+        and bool(tokens & _DENSITY_NORMALIZATION_TERMS)
+        and _attribute_has_numeric_value(attribute)
+    )
+
+
+def _attribute_has_numeric_value(attribute: Any) -> bool:
+    value = _attribute_field(attribute, "value")
+    if isinstance(value, bool) or value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    return bool(
+        re.search(
+            r"(?<![A-Za-z])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?",
+            str(value),
+        )
+    )
+
+
+def _attribute_field(attribute: Any, field: str, default: Any = None) -> Any:
+    if isinstance(attribute, Mapping):
+        return attribute.get(field, default)
+    return getattr(attribute, field, default)
 
 
 def source_text_mentions_axis(text: str, axis: str) -> bool:

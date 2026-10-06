@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from application.repositories.auth_repository import AuthUserRecord
-
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 
 import pytest
 
+from application.repositories.auth_repository import AuthUserRecord
+from application.repositories.collection_repository import (
+    StoredCollection,
+    StoredDocument,
+)
 from domain.source import (
     Collection,
     Document,
@@ -23,11 +26,12 @@ from domain.source import (
     SourceTextUnit,
 )
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-
 
 pytestmark = pytest.mark.anyio
 
@@ -48,12 +52,16 @@ async def source_repository(postgres_session_factory):
     )
     collections = PostgresCollectionRepository(postgres_session_factory)
     await collections.add_collection(
-        Collection.create(
-            collection_id=COLLECTION_ID,
-            owner_user_id="user_source",
-            name="Source collection",
-            description=None,
-            now_iso=NOW,
+        StoredCollection(
+            collection=Collection(
+                collection_id=COLLECTION_ID,
+                owner_user_id="user_source",
+                name="Source collection",
+                description=None,
+                status="idle",
+            ),
+            created_at=NOW,
+            updated_at=NOW,
         )
     )
     await collections.add_documents(
@@ -64,17 +72,19 @@ async def source_repository(postgres_session_factory):
     return PostgresSourceArtifactRepository(postgres_session_factory)
 
 
-def _document(document_id: str) -> Document:
+def _document(document_id: str) -> StoredDocument:
     digest = sha256(document_id.encode("utf-8")).hexdigest()
-    return Document(
-        document_id=document_id,
-        original_filename=f"{document_id}.pdf",
+    return StoredDocument(
+        document=Document(
+            document_id=document_id,
+            original_filename=f"{document_id}.pdf",
+            sha256=digest,
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=100,
+        ),
         stored_filename=f"stored-{document_id}.pdf",
         storage_key=f"{COLLECTION_ID}/input/stored-{document_id}.pdf",
-        sha256=digest,
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=100,
         created_at=NOW,
         updated_at=NOW,
     )

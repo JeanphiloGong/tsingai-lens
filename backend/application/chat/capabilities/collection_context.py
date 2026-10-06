@@ -18,7 +18,7 @@ _PAPER_LIMIT = 12
 _ABSTRACT_LIMIT = 1_200
 
 
-class GetCollectionContextArguments(BaseModel):
+class GetCollectionContextToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
@@ -31,7 +31,7 @@ class GetCollectionContextCapability:
             "claims or proposing new Objective drafts."
         ),
         risk=ToolRisk.READ,
-        input_model=GetCollectionContextArguments,
+        input_model=GetCollectionContextToolRequest,
     )
 
     def __init__(self, *, collection_service: Any, objective_repository: Any) -> None:
@@ -41,7 +41,7 @@ class GetCollectionContextCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        _arguments: GetCollectionContextArguments,
+        _arguments: GetCollectionContextToolRequest,
     ) -> ChatToolResult:
         collection = await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -111,7 +111,7 @@ class GetCollectionContextCapability:
         }
 
 
-class BrowseCollectionPapersArguments(BaseModel):
+class BrowseCollectionPapersToolRequest(BaseModel):
     """Bounded, researcher-visible paper screening parameters."""
 
     model_config = ConfigDict(extra="forbid")
@@ -145,7 +145,7 @@ class BrowseCollectionPapersCapability:
             "does not change the formal analysis scope."
         ),
         risk=ToolRisk.READ,
-        input_model=BrowseCollectionPapersArguments,
+        input_model=BrowseCollectionPapersToolRequest,
     )
 
     def __init__(
@@ -164,7 +164,7 @@ class BrowseCollectionPapersCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: BrowseCollectionPapersArguments,
+        arguments: BrowseCollectionPapersToolRequest,
     ) -> ChatToolResult:
         collection = await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -392,8 +392,8 @@ class BrowseCollectionPapersCapability:
 
 
 __all__ = [
-    "BrowseCollectionPapersArguments",
+    "BrowseCollectionPapersToolRequest",
     "BrowseCollectionPapersCapability",
-    "GetCollectionContextArguments",
+    "GetCollectionContextToolRequest",
     "GetCollectionContextCapability",
 ]

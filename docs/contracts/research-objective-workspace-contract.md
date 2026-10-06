@@ -26,7 +26,7 @@ ResearchObjective
      -> ObjectiveEvidence
      -> Finding
         -> FindingMechanismRelation
-        -> ObjectiveEvidenceContext
+        -> ScientificContext
         -> FindingPaperContribution
 ```
 
@@ -236,8 +236,9 @@ main direction.
 
 ### Scientific Context
 
-Finding reuses `ObjectiveEvidenceContext`. It contains the exact intersection
-of material, sample, process, and test attributes present in every supporting
+`ScientificContext` is a shared value object rather than an
+`ObjectiveEvidence`-owned model. A Finding contains the exact intersection of
+material, sample, process, and test attributes present in every supporting
 direct Evidence record. Differences remain in source Evidence and explicit
 limitations; they are never silently merged.
 

@@ -156,7 +156,7 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.25"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.27"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -177,13 +177,13 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "record or correct Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "exact complete Source" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "`read_source`" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "create_evidence_version" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Evidence draft" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "create_paper_experiment_revision" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "propose_paper_experiment_draft" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Finding draft" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Source-to-Evidence write" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Source-to-experiment write" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "analysis authored by you" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "publish_agent_objective_analysis" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "publishes no Finding" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "publish_agent_objective_analysis" not in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "fixed Selection/ComparisonGroup references" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "derive_objective" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "propose_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "create_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -215,8 +215,9 @@ def test_prompt_separates_product_questions_from_collection_reads() -> None:
     assert "application's purpose" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "without calling a tool" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "current collection's contents" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "browse the visible paper" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "screening only" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Use the collection overview when they are unknown" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Choose navigation" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "search snippets are navigation, not full-source evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "researcher may add" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "one highest-information clarification question" in RESEARCH_AGENT_SYSTEM_PROMPT
 

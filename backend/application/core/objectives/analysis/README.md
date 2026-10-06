@@ -1,94 +1,164 @@
 # Objective Analysis
 
-This package answers one confirmed research question using exact paper Sources.
-Navigation hints may guide reading, but only Source-grounded facts become
-Evidence. Technical failure is not a scientific conclusion.
+This package answers one confirmed research question using the paper Sources
+that were prepared for that question. A relevant Source is a reason to inspect
+the paper; it is not Evidence until its reported content and attribution have
+been checked. Technical failure is not a scientific conclusion.
 
-## Start Here
+## Runtime Chain
 
-`ObjectiveEvidenceAnalysisService.generate_objective_analysis_artifacts()` in
-[`../objective_analysis_service.py`](../objective_analysis_service.py) coordinates
-the selected papers and their reusable checkpoints. Read
-`_generate_document_evidence()` there for the single-paper scientific sequence.
-[`../analysis_service.py`](../analysis_service.py) separately owns scheduling,
-analysis versions, progress, and atomic publication.
+The automatic path follows the order in which a researcher would work. A model
+does not own the database graph or the final scientific status.
 
 ```text
-confirmed Objective + exact prepared papers
-  -> screen and route Sources for one paper
-  -> extract one Source -> validate that Source immediately
-     -> read missing same-paper context when needed
-  -> reconstruct same-paper experiments
-  -> materialize Evidence and checkpoint the paper
-  -> compare the selected paper outcomes
-  -> return Findings for publication
+confirmed Objective + prepared Documents
+  -> screen Sources for recall
+  -> route bounded Source inspection work
+  -> extract PaperExperiment Draft content
+  -> reconcile boundaries and local references in the service
+  -> resolve Source labels and binding states
+  -> write an immutable PaperExperiment revision
+  -> create an ObjectiveExperimentSelection only for a ready slice
+  -> optionally synthesize a cross-paper ComparisonGroup and Finding
 ```
 
-For example, a tensile table may contain elongation values while Methods
-identifies the preheated specimens. Inspect and validate both Sources before
-binding them. A review mentioning the same outcome is not a second primary
-measurement. Different sample states must not be pooled into one comparison.
-The control and treated specimens are baseline/target roles in that comparison;
-they are not promoted into standalone `BaselineReference` records.
+`PaperExperimentDraft` is a candidate content graph. It may contain broad or
+unknown sample/test facts, local keys, Source labels, and unresolved issues.
+That is useful archive content, but it is not an exact binding. The service
+must preserve the value and mark the affected measurement or revision
+`partial`/`uncertain`; it must not infer a sample or test from a generic label.
+Only a ready, source-grounded selection can enter Finding synthesis.
 
 ## Responsibilities
 
-| Step | Direct entry | Input and output | Model calls | Writes |
+| Stage | Owning code | Input -> output | Model calls | Durable writes |
 |---|---|---|---|---|
-| Screen | `source_screening.screen_sources` | Objective and paper Sources -> frames | Yes, bounded batches | None |
-| Route | `evidence_routing.route_sources` | Screened frames and Source tree -> deterministic inspection tasks | No (screening owns semantic relevance) | None |
-| Extract | `source_extraction.extract_and_validate_source_facts` | Routes and Sources -> source observations | When deterministic extraction is insufficient | None |
-| Ground | `source_validation.validate_source_fact` | One source observation and its exact Source -> validated, uncertain, or rejected observation | No | None |
-| Bind | `paper_experiment.reconstruct_paper_experiments` / `assemble_paper_experiments` | Same-paper facts -> scoped `PaperExperiment` records with measurement links and derived-observation lineage | No | None |
-| Materialize | `evidence_materialization.materialize_evidence` | `PaperExperiment` Source observations plus application `SourceReadAudit` records -> Evidence and contribution records | No | None; caller stores records |
-| Compare | `finding_synthesis.FindingSynthesisService.synthesize` | Paper contributions and Evidence -> Findings | Optional assertion judge | None; caller publishes |
+| Screen | `source_screening.screen_sources` | Objective and paper Sources -> transient frames | Bounded | None |
+| Route | `evidence_routing.route_sources` | Frames and Source tree -> deterministic inspection routes | None | None |
+| Extract | `PaperExperimentExtractor.extract` in [`paper_experiment_extraction.py`](paper_experiment_extraction.py) | Routed Source bundle -> `PaperExperimentModelOutput`/Draft | Bounded extraction and targeted retries | None |
+| Prepare | `prepare_model_output` in [`paper_experiment_contract.py`](paper_experiment_contract.py) | Raw response -> validated local keys, source-label use, candidate direction and audit issues | None | None |
+| Reconcile | `reconcile_model_output` | Candidate scopes -> service-owned accepted scopes | None | None |
+| Bind | `bind_model_output` | Reconciled Draft -> formal Source references and `PaperExperimentRevision` | None | None |
+| Write/select | `ExperimentAnalysisWriter.write_experiment_analysis` | Revisions -> immutable revisions and Objective selections | None | Revisions and selections |
+| Synthesize | `ExperimentFindingSynthesisService` | Ready selections -> optional groups and Findings | Optional assertion annotation | Groups/Findings |
+| Project | `ExperimentCompatibilityProjection` | Fixed experiment graph -> existing Objective/Evidence/Finding response shapes | None | None |
 
-Extraction and grounding alternate per Source, not as two collection-wide
-passes. The next Source sees only already accepted facts. Missing conditions
-remain missing unless an inspected Source in the same paper supports them.
-The detailed rules are in [Scientific Analysis](docs/scientific-analysis.md).
+`source_extraction.py` remains the Source-local fact reader used by the
+screening/routing path. It does not allocate experiment identities. The old
+`paper_experiment.py` assembly and revision-converter path is retired; do not
+add new callers or documentation links to it.
 
-Within `source_extraction.py`, start with
-`extract_and_validate_source_facts()` for the reading loop, then
-`_extract_source_round()` for one batch's immediate extraction and validation.
-The loop reuses that batch operation without recursive execution modes.
-`_build_adaptive_context_routes()` coordinates missing-result anchors, candidate
-collection, result-local matching, and next-read selection. Its private
-`_ContextSourceCandidate` names navigation scores and Source identities; it is
-not a persisted record or grounded Evidence.
+## Candidate Contract and Scientific Gates
 
-## Technical Support
+The model receives service-created `Sxxx` labels, not database IDs. Its output
+contains only:
 
-- [`table_repair.py`](table_repair.py): `repair_table_source()` restores a
-  parser-fragmented table, with unchanged row-label, token, and numeric-sequence
-  checks. It returns the original or verified Source and any repair error.
-  Its optional model call is layout recovery, not scientific fact extraction.
-- [`source_text.py`](source_text.py): numeric text parsing shared by table
-  checks and Source inspection; no model or persistence.
-- [`../llm/structured_response.py`](../llm/structured_response.py): provider
-  invocation, structured response recovery, usage, and traces.
-- [`diagnostics.py`](diagnostics.py): internal analysis observations; diagnostics
-  never fill an Evidence field. Failure records retain exception types and
-  frame locations without provider exception text, source code, or locals.
+- one or more bounded Drafts with response-local `series_key`, `variant_key`,
+  `test_key`, `measurement_key`, and `comparison_key` values;
+- reported sample/condition/test/result content and candidate local edges;
+- the supplied Source labels used by each fact or binding edge; and
+- unresolved boundary, conflict, or attribution issues.
+
+The model must not emit formal IDs, collection/objective ownership, revision
+numbers, `SourceReference` records, or final `binding_status`, `direction`,
+`basis`, or attribution decisions. The service supplies those values after
+validation. A model-provided `identity_specificity=exact` or
+`protocol_completeness=complete` is advisory and cannot promote a broad label.
+
+`protocol_completeness` and `missing_parameters` record how much protocol
+coverage the Source provides. `partial` or `unknown` coverage alone does not
+block an Objective Selection. A measurement still needs a concrete sample and
+test identity, Source-backed variant and test binding edges, and an explicit
+`outcome_scope` (when present) that includes the reported outcome. Missing
+protocol details remain visible as a limitation on the resulting Finding.
+
+The gates are intentionally separate:
+
+1. **Content gate:** a reported result has a value/text and a reviewable Source.
+2. **Binding gate:** the result has a source-backed sample edge and test edge;
+   the sample identity is concrete and the test protocol is applicable.
+3. **Boundary gate:** an independent experiment split has positive
+   Source-backed evidence. A section, table, outcome, or model response order
+   is not a split by itself. Overlapping scopes are retained as views of a
+   parent, not silently promoted to new experiments.
+4. **Conflict gate:** competing reports remain separate measurements with an
+   unresolved issue. The service never chooses a value merely because it was
+   returned first.
+5. **Objective gate:** only measurements/comparisons needed by the current
+   Objective and satisfying the preceding gates create a Selection.
+
+Paper-native identifiers are content, not Lens identities. To keep the Draft
+contract usable across research fields, names such as `stimulus_id` or
+`condition_id` may be preserved only inside an explicit
+`population_scope.reported_identifiers` or
+`measurement_scope.reported_identifiers` map. Lens-owned identities and every
+other `*_id`/`*_ids` field remain prohibited outside those maps; the service
+still allocates all formal IDs after the source and boundary gates.
+
+Failure at a gate is visible. The revision can retain an auditable partial
+archive, and an exact source-bound subset may still create a Selection and
+Finding; the blocked measurements remain out of that slice. A provider or
+parser failure is recorded as a technical failure and is retryable; it is never
+converted into scientific absence.
+
+Automatic extraction declares experiment `label`/`scope_description` and
+test-condition fields in the provider schema. Each declared test candidate
+requires a non-empty response-local `test_key`; this key does not certify
+concrete scientific identity. A measurement's `test_key` may still be null
+when the Source does not establish its test binding. Reported operating values
+belong in test `parameters`, while absent conditions remain explicit gaps.
+
+Schema and content-contract rejection reasons enter the next bounded repair
+request. If every attempt is rejected and no valid Draft or scientific empty
+response was obtained, extraction returns `technical_failure`. The document
+coverage records `extraction_failed`; when all relevant papers fail this way,
+the existing analysis failure path prevents successful publication. A valid
+empty response remains scientific abstention, and valid incomplete content
+remains a partial archive. Zero Findings alone is therefore not a failure.
+
+## Handling Known Extraction Failures
+
+Live extraction has exposed three distinct problems, and they require different
+responses:
+
+| Observation | Correct response |
+|---|---|
+| `sample`/`condition`/`test` is too broad to bind a result | Keep the reported value and Source; add candidate keys or an unresolved issue; set the binding to partial/uncertain. Read the specific Methods row, caption, or footnote before retrying. |
+| `boundary-first` creates too many experiments | Treat boundary proposals as advisory. Do not allocate identity from a section/table boundary. Reconcile only explicit parent scopes, selected strata with a matching selector, or physical splits with positive Source evidence. |
+| `fact-first`/`hybrid` merge independent work or drop conflicts | Merge only same-local-key complementary facts with overlapping Source lineage and no conflicting scalar report. Preserve conflicting values as separate measurements and run a targeted follow-up for the missing relation. |
+
+The next attempt is therefore a bounded repair request, not an unconstrained
+second reading of the paper. It names the missing binding edge, boundary
+evidence, conflicting Source pair, or omitted result rows. If the repair cannot
+close that item, keep the revision partial and stop; do not fill it from general
+knowledge or from another paper.
+
+## Tests and Verification
+
+See [Objective Analysis Verification](../../../../tests/objective-analysis-verification.md)
+for the end-to-end scenario and commands. Focused regression tests are:
+
+- `tests/unit/application/test_paper_experiment_extraction.py`
+- `tests/unit/application/test_paper_experiment_authoring_contract.py`
+- `tests/unit/application/test_experiment_analysis_writer.py`
+- `tests/unit/application/test_experiment_compatibility_projection.py`
+- `tests/unit/application/test_objective_analysis_service.py`
+
+The live benchmark is evidence about a particular model, prompt, Source bundle,
+and endpoint. Report raw model recall separately from deterministic
+canonicalization. A JSON response or a high measurement count is not a pass:
+boundary precision/recall, result-level Source traceability, conflict recall,
+and exact binding must be checked before claiming strict analysis.
 
 ## Changing This Module
 
-Modify the owner of the decision, then its existing regression test. For a
-table-layout problem, begin with `table_repair.py`; for an unsupported field,
-begin with `source_validation.py`; for incorrect cross-paper grouping, begin
-with `finding_synthesis.py`. Do not change all three to accommodate one result.
-Adding a scientific stage also requires the coordinator, checkpoint version,
-and scenario tests to acknowledge it; moving code does not change a version.
+Change the owner of the failed decision and its focused regression test. For
+Source layout, start with `table_repair.py`; for fact acceptance or binding,
+start with `source_validation.py` or `paper_experiment_contract.py`; for
+boundary reconciliation, start with the contract and writer tests; for
+cross-paper eligibility, start with `experiment_finding_synthesis.py`.
 
-Preserve comparable, associative, descriptive, unresolved, and non-comparable
-outcomes. A completed inspection can yield no Finding. Provider or parsing
-failure remains retryable; partial technical failure remains visible in paper
-contributions and traces. Publication never exposes incomplete checkpoint work.
-
-## Tests
-
-See [Objective Analysis Verification](../../../../tests/objective-analysis-verification.md)
-for the real-paper cases, fixture limits, and commands. The nearest focused
-tests are `test_objective_evidence_extraction.py`,
-`test_objective_evidence_comparison.py`, and
-`test_objective_evidence_materialization.py` under `tests/unit/application/`.
+Do not add a second fact ledger, a compatibility wrapper, or a new public API to
+hide an extraction failure. Preserve descriptive, associative, unresolved, and
+non-comparable outcomes, and remove obsolete assembly/converter references when
+the owning implementation changes.

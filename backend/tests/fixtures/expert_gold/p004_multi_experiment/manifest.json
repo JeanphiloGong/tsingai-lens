@@ -1,0 +1,63 @@
+{
+  "schema_version": "paper_experiment_gold.v1",
+  "paper_id": "P004",
+  "title": "Heat treatment effect on the microstructure, mechanical properties, and wear behaviors of stainless steel 316L prepared via selective laser melting",
+  "doi": "10.1016/j.msea.2021.140805",
+  "publication": {
+    "journal": "Materials Science & Engineering A",
+    "volume": "806",
+    "article_number": "140805",
+    "year": 2021,
+    "document_type": "experimental_research"
+  },
+  "pdf_sha256": "b9a872c792dd7a441d69efdce0b0316427717e6615547d56aa771695928a52e7",
+  "source_snapshot": {
+    "document_id": "doc_a3cedb1c7570",
+    "document_id_scope": "tracked_compact_table_fixture",
+    "production_replay_snapshot": {
+      "collection_id": "col_2c31f3f68364",
+      "source_document_id": "srcdoc_4fb24bbb6753",
+      "document_id": "17d3918e5b989b08ae629c156261a4e6aa39380dd493e0f438a20e0bbf8e3e87c8dcc6c3ea67c7e69ab47eb0d35bd542275b9a5c821bcedca852eb9df1e75373",
+      "locator_note": "Production replay IDs are snapshot-specific; semantic page/table locators remain the portable gold identity."
+    },
+    "snapshot_kind": "local_docling_export_plus_pdf_review",
+    "tracked_artifacts": [
+      "backend/tests/fixtures/p004_table_continuation.json",
+      "backend/tests/fixtures/p004_table_2_visual.txt"
+    ],
+    "local_pdf_required_for_full_replay": true,
+    "note": "The PDF is intentionally not committed. The hash and semantic page/table locators identify the reviewed source; the tracked table fixture preserves the long-table continuation that previously caused binding errors."
+  },
+  "objective": {
+    "objective_key": "heat_treatment_effect_on_elongation_316l",
+    "question": "How does heat treatment affect elongation in 316L stainless steel?",
+    "material_scope": ["316L stainless steel"],
+    "variables": ["heat treatment"],
+    "primary_outcome": "elongation",
+    "scope": "objective_scoped_comparison",
+    "reconstruction_scope": "paper_local_experiment_archive",
+    "context_outcomes": [
+      "density",
+      "residual_stress",
+      "phase_and_microstructure",
+      "grain_size",
+      "surface_hardness",
+      "yield_strength",
+      "tensile_strength",
+      "elongation",
+      "coefficient_of_friction",
+      "wear_loss"
+    ],
+    "do_not_claim": [
+      "A whole-paper causal effect of energy density independent of laser power and scan speed",
+      "Wear behavior for every Table 2 process/heat-treatment combination",
+      "Residual stress for samples outside the explicitly measured 120 W / 100 mm/s stratum"
+    ]
+  },
+  "annotation": {
+    "basis": "Existing P004 expert tables, direct PDF text review, tracked Docling table continuation, and independent multi-agent source checks",
+    "review_status": "gold_candidate_requires_domain_signoff",
+    "last_reviewed": "2026-09-22",
+    "purpose": "Acceptance fixture for paper-local experiment reconstruction, provenance, revision, and scientific abstention"
+  }
+}

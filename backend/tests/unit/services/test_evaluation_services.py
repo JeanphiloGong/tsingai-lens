@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from application.evaluation.core_evaluation_service import CoreEvaluationService
@@ -121,6 +123,7 @@ class FakeEvaluationRepository:
         )
         return curation
 
+
     async def list_curations(
         self,
         collection_id: str,
@@ -158,6 +161,62 @@ class FakeEvaluationRepository:
             )
             and (finding_id is None or feedback.finding_id == finding_id)
         )
+
+
+class _RecordedExperimentProjection:
+    def __init__(self, *, finding, evidence, contribution) -> None:
+        self.finding = finding.to_record()
+        self.evidence = evidence.to_record()
+        self.contribution = contribution.to_record()
+
+    async def list_findings(
+        self, collection_id, objective_id, analysis_version, *, offset=0, limit=50
+    ):
+        assert (collection_id, objective_id, analysis_version) == (
+            "col-gold",
+            "obj-1",
+            1,
+        )
+        records = (self.finding,)
+        return records[offset : offset + limit], len(records)
+
+    async def read_finding(
+        self, collection_id, objective_id, analysis_version, finding_id
+    ):
+        assert (collection_id, objective_id, analysis_version, finding_id) == (
+            "col-gold",
+            "obj-1",
+            1,
+            "finding-1",
+        )
+        return self.finding
+
+    async def list_evidence(
+        self,
+        collection_id,
+        objective_id,
+        analysis_version,
+        *,
+        finding_id=None,
+        offset=0,
+        limit=100,
+    ):
+        assert (collection_id, objective_id, analysis_version) == (
+            "col-gold",
+            "obj-1",
+            1,
+        )
+        assert finding_id in {None, "finding-1"}
+        records = (self.evidence,)
+        return records[offset : offset + limit], len(records)
+
+    async def list_contributions(self, collection_id, objective_id, analysis_version):
+        assert (collection_id, objective_id, analysis_version) == (
+            "col-gold",
+            "obj-1",
+            1,
+        )
+        return (self.contribution,)
 
 
 async def test_evaluation_gold_service_registers_gold_set_for_collection():
@@ -491,6 +550,102 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
             "related_source_refs": [],
         },
     )
+
+
+async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> None:
+    repository = await _published_objective_repository()
+    analysis = await repository.read_analysis("col-gold", "obj-1", 1)
+    assert analysis is not None
+    repository._analyses[("col-gold", "obj-1", 1)] = replace(
+        analysis,
+        scientific_record_source="experiment_graph",
+    )
+    finding = await repository.read_finding("col-gold", "obj-1", 1, "finding-1")
+    evidence, _ = await repository.list_evidence("col-gold", "obj-1", 1)
+    contributions = await repository.list_contributions("col-gold", "obj-1", 1)
+    assert finding is not None and len(evidence) == len(contributions) == 1
+    projection = _RecordedExperimentProjection(
+        finding=finding,
+        evidence=evidence[0],
+        contribution=contributions[0],
+    )
+
+    async def reject_legacy_read(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("legacy scientific-fact repository was read")
+
+    repository.list_findings = reject_legacy_read
+    repository.read_finding = reject_legacy_read
+    repository.list_evidence = reject_legacy_read
+    repository.list_contributions = reject_legacy_read
+
+    evaluation_repository = FakeEvaluationRepository()
+    snapshot_service = EvaluationPredictionSnapshotService(
+        collection_service=FakeCollectionService(),
+        objective_repository=repository,
+        evaluation_repository=evaluation_repository,
+        experiment_projection=projection,
+    )
+    feedback_service = FindingFeedbackService(
+        review_repository=InMemoryObjectiveReviewRepository(),
+        objective_repository=repository,
+        experiment_projection=projection,
+    )
+
+    snapshot = await snapshot_service.create_core_snapshot(
+        collection_id="col-gold",
+        snapshot_id="experiment-snapshot",
+    )
+    dataset = await feedback_service.export_dataset(
+        collection_id="col-gold",
+        objective_id="obj-1",
+    )
+
+    assert snapshot.items[0].payload["finding_id"] == "finding-1"
+    assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
+
+
+async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_available() -> None:
+    repository = await _published_objective_repository()
+    source = await repository.read_analysis("col-gold", "obj-1", 1)
+    assert source is not None
+    repository._analyses[("col-gold", "obj-1", 1)] = replace(
+        source,
+        origin="human_authored",
+        scientific_record_source="authored_snapshot",
+        source_analysis_version=0,
+        created_by_user_id="researcher-1",
+    )
+
+    class RejectingProjection:
+        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+        async def read_finding(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+        async def list_contributions(self, *args, **kwargs):  # noqa: ARG002
+            pytest.fail("authored analysis must not read the experiment projection")
+
+    snapshot_service, _ = _prediction_snapshot_service(repository)
+    snapshot_service.experiment_projection = RejectingProjection()
+    feedback_service = FindingFeedbackService(
+        review_repository=InMemoryObjectiveReviewRepository(),
+        objective_repository=repository,
+        experiment_projection=RejectingProjection(),
+    )
+
+    snapshot = await snapshot_service.create_core_snapshot(
+        collection_id="col-gold", snapshot_id="authored-snapshot"
+    )
+    dataset = await feedback_service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1"
+    )
+
+    assert snapshot.items[0].payload["finding_id"] == "finding-1"
+    assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
 
 
 async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:

@@ -1,39 +1,39 @@
 from __future__ import annotations
 
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
-
-from domain.core.research_objective import (
-    ObjectiveEvidenceComparison,
-    ObjectiveEvidenceContext,
-    ObjectiveEvidenceResult,
-    ObjectiveEvidenceVariable,
-)
 
 import pytest
 
-from domain.core import (
+from application.repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
+)
+from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
-    PreparedDocumentInput,
     PaperContribution,
-    PaperSourceUnitCoverage,
-    PaperSourceUnitCoverageStatus,
+    PaperResearchMap,
     PaperResearchScope,
     PaperResearchSignal,
+    PaperSourceUnitCoverage,
+    PaperSourceUnitCoverageStatus,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
-    PaperResearchRelationship,
-    PaperResearchMap,
+    PreparedDocumentInput,
+    ResearchObjective,
     ReviewKnowledgeItem,
     ReviewSynthesisMap,
-    ResearchObjective,
     build_research_objective_id,
     is_question_shaped_objective,
     normalize_objective_confidence,
     normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
 )
 
 
@@ -330,7 +330,7 @@ def test_research_objective_normalizes_scope_and_round_trips() -> None:
         }
     )
 
-    record = objective.to_record()
+    record = asdict(objective)
 
     assert record["collection_id"] == "collection-1"
     assert record["objective_id"] == build_research_objective_id(
@@ -342,14 +342,14 @@ def test_research_objective_normalizes_scope_and_round_trips() -> None:
         constraints=tuple(record["constraints"]),
         requested_comparator=record["requested_comparator"],
     )
-    assert record["material_scope"] == ["316L"]
-    assert record["variables"] == ["heat treatment"]
-    assert record["outcomes"] == ["corrosion", "EIS"]
-    assert record["mechanisms"] == ["passive film stability"]
-    assert record["constraints"] == [
+    assert record["material_scope"] == ("316L",)
+    assert record["variables"] == ("heat treatment",)
+    assert record["outcomes"] == ("corrosion", "EIS")
+    assert record["mechanisms"] == ("passive film stability",)
+    assert record["constraints"] == (
         "LPBF",
         "room-temperature electrochemical testing",
-    ]
+    )
     assert record["requested_comparator"] == "as-built material"
     assert record["confidence"] == 1.0
     assert record["confirmation_status"] == "candidate"
@@ -390,13 +390,50 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
     confirmed = candidate.confirm()
     queued = confirmed.queue_analysis(1)
     succeeded = _analysis().start().succeed()
-    published = queued.publish_analysis(succeeded)
+    published = queued.publish_analysis(
+        collection_id=succeeded.collection_id,
+        objective_id=succeeded.objective_id,
+        analysis_version=succeeded.analysis_version,
+        status=succeeded.status,
+    )
 
     assert candidate.confirmation_status == "candidate"
     assert confirmed.confirmation_status == "confirmed"
     assert queued.active_analysis_version == 1
     assert queued.published_analysis_version is None
     assert published.published_analysis_version == 1
+
+
+def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
+    payload = _analysis().to_record()
+    payload.pop("scientific_record_source")
+    payload.update(
+        {
+            "analysis_version": 2,
+            "origin": "human_authored",
+            "source_analysis_version": 1,
+            "created_by_user_id": "researcher-1",
+        }
+    )
+
+    authored = ObjectiveAnalysis.from_mapping(payload)
+
+    assert authored.scientific_record_source == "authored_snapshot"
+
+
+def test_authored_experiment_graph_requires_source_provenance() -> None:
+    analysis = _analysis(
+        analysis_version=2,
+        origin="human_authored",
+        scientific_record_source="experiment_graph",
+        source_analysis_version=1,
+        created_by_user_id="researcher-1",
+    )
+    assert analysis.source_analysis_version == 1
+    with pytest.raises(ValueError, match="requires source_analysis_version"):
+        replace(analysis, source_analysis_version=None)
+    with pytest.raises(ValueError, match="requires created_by_user_id"):
+        replace(analysis, created_by_user_id=None)
 
 
 def test_research_objective_requires_newer_analysis_version() -> None:
@@ -415,7 +452,12 @@ def test_research_objective_rejects_cross_objective_publication() -> None:
     analysis = _analysis(objective_id="another-objective").start().succeed()
 
     with pytest.raises(ValueError, match="another objective"):
-        objective.publish_analysis(analysis)
+        objective.publish_analysis(
+            collection_id=analysis.collection_id,
+            objective_id=analysis.objective_id,
+            analysis_version=analysis.analysis_version,
+            status=analysis.status,
+        )
 
 
 def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:
@@ -528,85 +570,6 @@ def test_objective_analysis_statuses_do_not_include_objective_confirmation() -> 
         "succeeded",
         "failed",
     }
-
-
-def test_objective_document_evidence_preserves_scientific_absence_as_success() -> None:
-    started_at = datetime(2026, 8, 27, 8, 0, tzinfo=timezone.utc)
-    completed_at = datetime(2026, 8, 27, 8, 2, tzinfo=timezone.utc)
-    running = ObjectiveDocumentEvidence.start(
-        collection_id="collection-1",
-        objective_id="objective-1",
-        document_id="paper-1",
-        input_fingerprint="checkpoint-input-1",
-        analysis_version=2,
-        extraction_version="objective-document-evidence.v1",
-        model_name="test-model",
-        started_at=started_at,
-    )
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 2,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "low",
-            "paper_role": "primary_experiment",
-            "confidence": 0.8,
-            "evidence_disposition": "no_routable_evidence",
-            "routed_source_count": 0,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 0,
-            "evidence_disposition_reason": (
-                "The paper was inspected and contains no Source for this Objective."
-            ),
-        }
-    )
-
-    succeeded = running.succeed(
-        contribution=contribution,
-        evidence_records=(),
-        completed_at=completed_at,
-    )
-
-    assert succeeded.status == "succeeded"
-    assert succeeded.contribution == contribution
-    assert succeeded.evidence_records == ()
-    assert succeeded.completed_at == completed_at
-    assert ObjectiveDocumentEvidence.from_mapping(succeeded.to_record()) == succeeded
-
-
-def test_objective_document_evidence_rejects_cross_document_payload() -> None:
-    running = ObjectiveDocumentEvidence.start(
-        collection_id="collection-1",
-        objective_id="objective-1",
-        document_id="paper-1",
-        input_fingerprint="checkpoint-input-1",
-        analysis_version=2,
-        extraction_version="objective-document-evidence.v1",
-        model_name="test-model",
-    )
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 2,
-            "document_id": "paper-2",
-            "analysis_status": "failed",
-            "relevance": "uncertain",
-            "paper_role": "uncertain",
-            "warnings": ["Technical extraction failed."],
-            "confidence": 0,
-        }
-    )
-
-    with pytest.raises(ValueError, match="another document"):
-        running.fail(
-            contribution=contribution,
-            error_code="provider_error",
-            error_message="provider unavailable",
-        )
 
 
 def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
@@ -754,7 +717,7 @@ def test_excluded_paper_contribution_requires_reason() -> None:
 def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch) -> None:
     selected = _candidate_evidence().select(evidence_role="direct_result")
 
-    result = ObjectiveEvidenceResult.from_mapping({
+    result = ScientificResult.from_mapping({
         "outcome": "strength", "value": 610, "unit": "MPa",
         "result_text": "The heat-treated sample reached 610 MPa.",
     })
@@ -779,19 +742,19 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     )
     extracted = selected.mark_extracted(
         changed_variables=(
-            ObjectiveEvidenceVariable(
+            ScientificVariable(
                 name="heat treatment",
                 baseline_value="as-built",
                 target_value="heat-treated",
             ),
         ),
-        comparison=ObjectiveEvidenceComparison.from_mapping({
+        comparison=ScientificComparison.from_mapping({
             "baseline_label": "as-built",
             "target_label": "heat-treated",
             "axis_names": ["heat treatment"],
             "comparable": True,
         }),
-        reported_result=ObjectiveEvidenceResult.from_mapping({
+        reported_result=ScientificResult.from_mapping({
             "outcome": "yield strength",
             "value": 610,
             "unit": "MPa",
@@ -799,7 +762,7 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
             "result_text": "The heat-treated sample reached 610 MPa.",
         }),
         attribution_scope="isolated_effect",
-        scientific_context=ObjectiveEvidenceContext.from_mapping({
+        scientific_context=ScientificContext.from_mapping({
             "material": [{"name": "alloy", "value": "316L"}],
             "test": [{"name": "method", "value": "tensile test"}],
         }),
@@ -917,6 +880,19 @@ def test_objective_evidence_exposes_research_state_without_promoting_incomplete_
         attribution_scope="descriptive_only",
         resolution_status="partial",
     )
+    needs_context = _candidate_evidence(
+        selection_status="candidate",
+        reported_result={
+            "outcome": "microstructure",
+            "value": None,
+            "unit": None,
+            "direction": "mixed",
+            "result_text": "The sample showed a cellular microstructure.",
+        },
+        attribution_scope="descriptive_only",
+        resolution_status="unresolved",
+        selection_reason="The sample and test bindings remain unresolved.",
+    )
     incomparable = _candidate_evidence(
         selection_status="extracted",
         comparison={
@@ -944,6 +920,7 @@ def test_objective_evidence_exposes_research_state_without_promoting_incomplete_
     assert comparable.evidence_status == "comparable"
     assert association.evidence_status == "association_only"
     assert descriptive.evidence_status == "descriptive"
+    assert needs_context.evidence_status == "needs_context"
     assert incomparable.evidence_status == "non_comparable"
     assert failed.evidence_status == "extraction_failed"
 
@@ -998,7 +975,7 @@ def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
         evidence_role="condition_context",
     ).select(evidence_role="condition_context")
     extracted = evidence.mark_extracted(
-        scientific_context=ObjectiveEvidenceContext.from_mapping({
+        scientific_context=ScientificContext.from_mapping({
             "test": [{"name": "temperature", "value": 25, "unit": "C"}]
         })
     )
@@ -1012,7 +989,7 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
 
     with pytest.raises(ValueError, match="rejected -> extracted"):
         rejected.mark_extracted(
-            scientific_context=ObjectiveEvidenceContext.from_mapping({"process": [{"name": "state", "value": "invalid"}]})
+            scientific_context=ScientificContext.from_mapping({"process": [{"name": "state", "value": "invalid"}]})
         )
     with pytest.raises(ValueError, match="identity and source"):
         _candidate_evidence(source_excerpt="")

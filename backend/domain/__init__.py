@@ -1,5 +1,5 @@
 """Domain layer exports."""
 
-from domain.source import ArtifactStatusRecord, Collection, Document
+from domain.source import Collection, Document
 
-__all__ = ["ArtifactStatusRecord", "Collection", "Document"]
+__all__ = ["Collection", "Document"]

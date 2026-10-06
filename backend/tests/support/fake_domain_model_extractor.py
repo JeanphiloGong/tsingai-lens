@@ -6,9 +6,6 @@ from collections.abc import Callable
 from typing import Any
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
-from application.core.objectives.analysis.finding_synthesis import (
-    StructuredFindingSynthesis,
-)
 from application.core.objectives.analysis.source_extraction import (
 	DirectEvidenceExtractionsModelOutput,
 	EvidenceExtractionModelOutput,
@@ -219,8 +216,6 @@ class FakeDomainModelExtractor:
                     ]
                 }
             )
-        elif response_model is StructuredFindingSynthesis:
-            response = StructuredFindingSynthesis()
         else:
             raise TypeError(
                 f"unsupported fake structured response: {response_model.__name__}"

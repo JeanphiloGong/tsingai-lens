@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from application.core.objectives.objective_analysis_service import (
+    ObjectiveExperimentAnalysisService,
     ObjectiveScopeNotReadyError,
-    ObjectiveEvidenceAnalysisService,
 )
 from application.core.objectives.scope_screening import screen_objective_scope
 from domain.core import PaperResearchMap, ResearchObjective
-
 
 pytestmark = pytest.mark.anyio
 
@@ -192,11 +192,9 @@ def test_review_citation_lead_is_navigation_for_inspection_not_recommended_scope
 
 
 def test_explicit_objective_exclusion_never_reenters_recommended_scope() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            **_objective(seed_document_ids=()).to_record(),
-            "excluded_document_ids": ["paper-excluded"],
-        }
+    objective = replace(
+        _objective(seed_document_ids=()),
+        excluded_document_ids=("paper-excluded",),
     )
 
     preview = screen_objective_scope(
@@ -226,11 +224,10 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
     paper_map_repository = SimpleNamespace(
         list_collection=lambda collection_id: _async_value(paper_maps)
     )
-    service = ObjectiveEvidenceAnalysisService(
+    service = ObjectiveExperimentAnalysisService(
         collection_service=collection_service,
         paper_map_repository=paper_map_repository,
         objective_repository=objective_repository,
-        finding_synthesis_service=SimpleNamespace(),
         objective_input_service=SimpleNamespace(),
     )
 
@@ -243,7 +240,7 @@ async def test_service_loads_the_persisted_objective_and_every_collection_map() 
 
 
 async def test_service_reports_scope_not_ready_without_collection_paper_maps() -> None:
-    service = ObjectiveEvidenceAnalysisService(
+    service = ObjectiveExperimentAnalysisService(
         collection_service=SimpleNamespace(
             get_collection=lambda collection_id: _async_value(
                 {"collection_id": collection_id}
@@ -257,7 +254,6 @@ async def test_service_reports_scope_not_ready_without_collection_paper_maps() -
                 _objective()
             )
         ),
-        finding_synthesis_service=SimpleNamespace(),
         objective_input_service=SimpleNamespace(),
     )
 

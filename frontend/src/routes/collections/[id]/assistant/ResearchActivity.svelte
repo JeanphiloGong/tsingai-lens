@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Check, CircleAlert, LoaderCircle } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import type { ChatPresentationItem, ToolActivityOperation } from './conversationPresentation';
 	import {
@@ -36,6 +37,75 @@
 		).join(' · ');
 	}
 
+	function resourceOperation(activity: ActivityItem) {
+		return activityOperations(activity).find(
+			(operation) => (operation.resultMessage?.tool_result?.resource_refs.length ?? 0) > 0
+		);
+	}
+
+	function operationArguments(operation: ToolActivityOperation) {
+		return (
+			operation.requestMessage?.tool_calls.find(
+				(call) => call.tool_call_id === operation.toolCallId
+			)?.arguments ?? {}
+		);
+	}
+
+	function resultData(operation: ToolActivityOperation) {
+		return operation.resultMessage?.tool_result?.data ?? {};
+	}
+
+	function textValue(value: unknown) {
+		return typeof value === 'string' && value.trim() ? value.trim() : '';
+	}
+
+	function operationContext(operation: ToolActivityOperation) {
+		const args = operationArguments(operation);
+		const data = resultData(operation);
+		const document =
+			data.document && typeof data.document === 'object'
+				? (data.document as Record<string, unknown>)
+				: {};
+		const title =
+			textValue(data.document_title) ||
+			textValue(data.title) ||
+			textValue(document.title) ||
+			textValue(document.filename) ||
+			textValue(args.document_title) ||
+			(textValue(args.document_id) ? $t('researchAgent.progress.currentPaper') : '');
+		const source =
+			textValue(data.heading_path) ||
+			textValue(args.heading_path) ||
+			textValue(data.source_kind) ||
+			textValue(args.source_kind) ||
+			(textValue(data.source_ref) || textValue(args.source_ref) || textValue(args.table_ref)
+				? $t('researchAgent.capability.sourcePassage')
+				: '');
+		const page = data.page ?? args.page;
+		const location = [
+			source,
+			page !== undefined && page !== null
+				? $t('researchAgent.progress.sourcePage', { page: String(page) })
+				: ''
+		]
+			.filter(Boolean)
+			.join(' · ');
+		const query = textValue(args.query);
+		return [title, location, query ? $t('researchAgent.progress.searchQuery', { query }) : '']
+			.filter(Boolean)
+			.join(' · ');
+	}
+
+	function operationExcerpt(operation: ToolActivityOperation) {
+		const data = resultData(operation);
+		return (
+			textValue(data.content) ||
+			textValue(data.table_markdown) ||
+			textValue(data.source_excerpt) ||
+			textValue(data.excerpt)
+		).slice(0, 520);
+	}
+
 	function activityHasWarnings(activity: ActivityItem) {
 		return activityOperations(activity).some(
 			(operation) => (operation.resultMessage?.tool_result?.warnings.length ?? 0) > 0
@@ -55,13 +125,6 @@
 				previousAutomaticOpen = automaticOpen;
 			}
 		};
-	}
-
-	function activityStatusLabel(activity: ActivityItem) {
-		if (activity.status === 'failed') return $t('researchAgent.capability.statusFailed');
-		if (activity.status === 'in_progress') return $t('researchAgent.capability.statusQueued');
-		if (activity.status === 'pending') return $t('researchAgent.capability.statusPending');
-		return $t('researchAgent.capability.statusSucceeded');
 	}
 
 	function operationTitle(operation: ToolActivityOperation) {
@@ -86,13 +149,19 @@
 	>
 		<summary>
 			<span class="activity-icon" aria-hidden="true">
-				{item.status === 'failed' ? '!' : item.status === 'completed' ? '✓' : '…'}
+				{#if item.status === 'failed'}<CircleAlert
+						size={15}
+					/>{:else if item.status === 'completed'}<Check size={15} />{:else}<LoaderCircle
+						size={15}
+					/>{/if}
 			</span>
 			<span class="activity-heading">
 				<strong>{activitySummary(item)}</strong>
 				<small>{activityCapabilityNames(item)}</small>
+				{#if activityOperations(item).length === 1 && operationContext(activityOperations(item)[0])}
+					<span class="activity-context">{operationContext(activityOperations(item)[0])}</span>
+				{/if}
 			</span>
-			<span class="activity-status">{activityStatusLabel(item)}</span>
 			<span class="activity-toggle" aria-hidden="true"></span>
 		</summary>
 		<div class="activity-operations">
@@ -101,13 +170,22 @@
 					<span class="operation-mark" aria-hidden="true"></span>
 					<div>
 						<strong>{operationTitle(operation)}</strong>
+						{#if operationContext(operation)}
+							<p class="operation-context">{operationContext(operation)}</p>
+						{/if}
 						{#if operationSummary(operation)}
 							<p>{operationSummary(operation)}</p>
+						{/if}
+						{#if operationExcerpt(operation)}
+							<details class="operation-excerpt">
+								<summary>{$t('agentReview.passage')}</summary>
+								<blockquote>{operationExcerpt(operation)}</blockquote>
+							</details>
 						{/if}
 						{#if operation.resultMessage?.tool_result?.warnings.length}
 							<ResultWarnings warnings={operation.resultMessage.tool_result.warnings} />
 						{/if}
-						{#if operation.resultMessage && operation.resultMessage.tool_result?.resource_refs.length}
+						{#if operation === resourceOperation(item) && operation.resultMessage && operation.resultMessage.tool_result?.resource_refs.length}
 							<ResultResources message={operation.resultMessage} />
 						{/if}
 					</div>
@@ -118,10 +196,10 @@
 
 <style>
 	.research-activity {
-		margin: 0 0 18px 48px;
-		border: 1px solid var(--border-default);
+		margin: 0 0 12px 48px;
+		border: 0;
 		border-radius: 6px;
-		background: var(--surface-card);
+		background: transparent;
 		color: var(--text-primary);
 		animation: message-enter 180ms ease both;
 	}
@@ -136,11 +214,11 @@
 
 	.research-activity summary {
 		display: grid;
-		grid-template-columns: 24px minmax(0, 1fr) auto 12px;
+		grid-template-columns: 20px minmax(0, 1fr) 12px;
 		align-items: center;
 		gap: 10px;
-		min-height: 52px;
-		padding: 8px 12px;
+		min-height: 38px;
+		padding: 6px 0;
 		cursor: pointer;
 		list-style: none;
 		transition: background-color 140ms ease;
@@ -165,7 +243,7 @@
 		width: 22px;
 		height: 22px;
 		border-radius: 50%;
-		background: var(--success-bg);
+		background: transparent;
 		color: var(--success-text);
 		font-size: 12px;
 		font-weight: 800;
@@ -188,7 +266,8 @@
 	}
 
 	.activity-heading strong {
-		font-size: 13px;
+		font-size: 12px;
+		font-weight: 500;
 	}
 
 	.activity-heading small {
@@ -199,10 +278,12 @@
 		white-space: nowrap;
 	}
 
-	.activity-status {
-		color: var(--text-secondary);
-		font-size: 11px;
-		font-weight: 700;
+	.activity-context {
+		overflow: hidden;
+		color: var(--text-primary);
+		font-size: 12px;
+		line-height: 17px;
+		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
@@ -221,8 +302,8 @@
 	}
 
 	.activity-operations {
-		padding: 0 12px 10px 46px;
-		border-top: 1px solid var(--border-default);
+		padding: 0 12px 10px 30px;
+		border-left: 1px solid var(--border-default);
 	}
 
 	.activity-operation {
@@ -251,6 +332,35 @@
 		line-height: 18px;
 	}
 
+	.activity-operation .operation-context {
+		color: var(--text-primary);
+		font-weight: 500;
+	}
+
+	.operation-excerpt {
+		margin-top: 7px;
+	}
+
+	.operation-excerpt summary {
+		width: fit-content;
+		color: var(--text-secondary);
+		font-size: 11px;
+		cursor: pointer;
+	}
+
+	.operation-excerpt blockquote {
+		max-height: 160px;
+		margin: 7px 0 0;
+		padding: 8px 10px;
+		border-left: 2px solid var(--border-default);
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+		overflow: auto;
+		white-space: pre-wrap;
+	}
+
 	@media (max-width: 560px) {
 		.research-activity {
 			margin-left: 0;
@@ -258,10 +368,6 @@
 
 		.research-activity summary {
 			grid-template-columns: 24px minmax(0, 1fr) 12px;
-		}
-
-		.activity-status {
-			display: none;
 		}
 	}
 

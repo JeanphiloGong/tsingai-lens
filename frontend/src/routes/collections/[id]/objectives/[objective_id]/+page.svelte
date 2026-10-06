@@ -4,1203 +4,382 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
-	import { SvelteURLSearchParams } from 'svelte/reactivity';
+	import { ArrowLeft, Download, RefreshCw, X } from '@lucide/svelte';
 	import FindingAuthoringEditor from '../../_components/FindingAuthoringEditor.svelte';
-	import EvidenceAuthoringEditor from '../../_components/EvidenceAuthoringEditor.svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
+	import ExperimentResults from '../../_components/ExperimentResults.svelte';
+	import ObjectiveResultsOverview from '../../_components/ObjectiveResultsOverview.svelte';
 	import { downloadBlob, errorMessage } from '../../../../_shared/api';
 	import { t } from '../../../../_shared/i18n';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
-		fetchObjectiveAnalysis,
-		fetchObjectiveAnalysisStatus,
-		fetchObjectiveEvidence,
-		fetchObjectiveFindings,
+		fetchObjectiveAnalysis, fetchObjectiveAnalysisStatus, fetchObjectiveEvidence,
+		fetchExperimentAnalysis, experimentAnalysisExportUrl, fetchObjectiveFindings,
 		objectiveFindingDatasetUrl,
-		runObjectiveAnalysis,
-		type FindingDatasetLabelStatus,
-		type FindingDatasetUseStatus,
-		type ObjectiveAnalysis,
-		type ObjectiveEvidence,
-		type ObjectiveFinding,
-		type FindingAuthoringResult,
-		type FindingEvidenceReview
+		type FindingDatasetLabelStatus, type FindingDatasetUseStatus, type ObjectiveAnalysis,
+		type ObjectiveEvidence, type ObjectiveFinding, type FindingAuthoringResult,
+		type ExperimentAnalysisProjection
 	} from '../../../../_shared/researchView';
 
-	const POLL_DELAY_MS = 2500;
 	let analysis: ObjectiveAnalysis | null = null;
 	let findings: ObjectiveFinding[] = [];
-	let evidenceReviews: Record<string, FindingEvidenceReview> = {};
 	let evidence: ObjectiveEvidence[] = [];
 	let documentTitles: Record<string, string> = {};
 	let selectedFinding: ObjectiveFinding | null = null;
 	let selectedFindingId = '';
-	let loading = false;
+	let loading = true;
 	let findingLoading = false;
-	let actionRunning = false;
 	let error = '';
 	let actionError = '';
 	let findingError = '';
 	let loadedKey = '';
+	let loadSequence = 0;
+	let evidenceSequence = 0;
+	let projectionSequence = 0;
+	let navigationPending = false;
+	let disposed = false;
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
-	let findingRequestSequence = 0;
-	let authoringRequestSequence = 0;
 	let authoringOpen = false;
-	let authoringLoading = false;
-	let authoringError = '';
-	let authoringEvidence: ObjectiveEvidence[] = [];
-	let authoringEvidenceVersion: number | null = null;
-	let authoringParent: ObjectiveFinding | null = null;
-	let evidenceAuthoringOpen = false;
-	let evidenceAuthoringSource: ObjectiveEvidence | null = null;
-	let evidenceAuthoringMode: 'create' | 'revise' = 'create';
+	let projection: ExperimentAnalysisProjection | null = null;
+	let experimentLoading = false;
+	let experimentError = '';
+	let view: 'results' | 'scope' = 'results';
+	let exportOpen = false;
+	let exportFormat: 'json' | 'csv' = 'csv';
+	let exportLoading = false;
+	let exportError = '';
 	let datasetLabelStatus: FindingDatasetLabelStatus | '' = '';
 	let datasetUseStatus: FindingDatasetUseStatus | '' = '';
-	let datasetDownloading = false;
-	let datasetError = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
-	$: currentUrl = $page.url;
 	$: requestedFindingId = $page.url.searchParams.get('finding_id') ?? '';
-	$: active = analysis?.active_analysis ?? null;
 	$: published = analysis?.published_analysis ?? null;
+	$: active = analysis?.active_analysis ?? null;
 	$: isProcessing = active?.status === 'queued' || active?.status === 'running';
-	$: if (browser && collectionId && objectiveId && `${collectionId}:${objectiveId}` !== loadedKey) {
-		loadedKey = `${collectionId}:${objectiveId}`;
+	$: selectedExperimentVersions = projection && selectedFinding
+		? [
+				...new Set(
+					(selectedFinding.selection_ids ?? [])
+						.map((selectionId) => projection?.selections.find((item) => item.selection_id === selectionId)?.experiment_version)
+						.filter((version): version is number => version !== undefined)
+				)
+			]
+		: [];
+	$: if (browser && collectionId && objectiveId && loadedKey !== collectionId + ':' + objectiveId) {
+		loadedKey = collectionId + ':' + objectiveId;
+		closeAuthoring();
+		exportOpen = false;
 		void loadObjective();
 	}
+	$: if (browser && !loading && analysis) syncFinding(requestedFindingId);
 
-	onDestroy(clearPoll);
+	onDestroy(() => {
+		disposed = true;
+		loadSequence++;
+		evidenceSequence++;
+		projectionSequence++;
+		clearPoll();
+	});
 
-	async function loadObjective(preferredFindingId = '', updateFindingUrl = false) {
-		findingRequestSequence += 1;
+	async function loadObjective(preferredFindingId?: string) {
+		const sequence = ++loadSequence;
+		const key = loadedKey;
+		const ids = [collectionId, objectiveId] as const;
+		evidenceSequence++;
+		projectionSequence++;
 		loading = true;
 		error = '';
 		clearPoll();
 		try {
-			const [objectiveResult, profilesResult] = await Promise.allSettled([
-				fetchObjectiveAnalysis(collectionId, objectiveId),
-				fetchDocumentProfiles(collectionId)
+			const [result, profiles] = await Promise.allSettled([
+				fetchObjectiveAnalysis(...ids), fetchDocumentProfiles(ids[0])
 			]);
-			if (objectiveResult.status === 'rejected') throw objectiveResult.reason;
-			analysis = objectiveResult.value;
-			documentTitles =
-				profilesResult.status === 'fulfilled'
-					? Object.fromEntries(
-							profilesResult.value.items.map((item) => [item.document_id, item.title || ''])
-						)
-					: {};
-			await loadFindings(preferredFindingId, updateFindingUrl);
+			if (disposed || sequence !== loadSequence || key !== loadedKey) return;
+			if (result.status === 'rejected') throw result.reason;
+			analysis = result.value;
+			documentTitles = profiles.status === 'fulfilled'
+				? Object.fromEntries(profiles.value.items.map(item => [item.document_id, item.title || ''])) : {};
+			view = analysis.published_analysis ? 'results' : 'scope';
+			await Promise.all([loadFindings(), loadProjection()]);
+			if (disposed || sequence !== loadSequence || key !== loadedKey) return;
+			if (preferredFindingId !== undefined) await navigateFinding(preferredFindingId, true);
+			else await selectFinding(requestedFindingId);
 			schedulePoll();
 		} catch (err) {
+			if (disposed || sequence !== loadSequence) return;
 			error = errorMessage(err);
 			analysis = null;
 			findings = [];
-			evidence = [];
 			selectedFinding = null;
-			documentTitles = {};
+			evidence = [];
 		} finally {
-			loading = false;
+			if (!disposed && sequence === loadSequence) loading = false;
 		}
 	}
 
-	async function loadFindings(preferredFindingId = '', updateFindingUrl = false) {
-		if (!analysis?.objective.published_analysis_version) {
-			findingRequestSequence += 1;
-			findings = [];
-			evidence = [];
-			selectedFinding = null;
-			selectedFindingId = '';
-			return;
-		}
-		const analysisVersion = analysis.objective.published_analysis_version;
-		const loadedFindings: ObjectiveFinding[] = [];
-		const loadedReviews: Record<string, FindingEvidenceReview> = {};
-		while (true) {
-			const page = await fetchObjectiveFindings(
-				collectionId,
-				objectiveId,
-				analysisVersion,
-				loadedFindings.length,
-				200
-			);
-			loadedFindings.push(...page.items);
-			Object.assign(loadedReviews, page.evidence_reviews);
-			if (loadedFindings.length >= page.total) break;
-			if (!page.items.length) throw new Error('Finding 分页结果不完整。');
-		}
-		findings = loadedFindings;
-		evidenceReviews = loadedReviews;
-		const nextId =
-			(preferredFindingId && findings.some((item) => item.finding_id === preferredFindingId)
-				? preferredFindingId
-				: requestedFindingId && findings.some((item) => item.finding_id === requestedFindingId)
-					? requestedFindingId
-					: selectedFindingId && findings.some((item) => item.finding_id === selectedFindingId)
-						? selectedFindingId
-						: findings[0]?.finding_id) ?? '';
-		await selectFinding(nextId, updateFindingUrl && Boolean(nextId));
-	}
-
-	async function openAuthoring(parent: ObjectiveFinding | null = null) {
-		if (!published) return;
-		authoringOpen = true;
-		authoringParent = parent;
-		authoringError = '';
-		const version = published.analysis_version;
-		if (authoringEvidenceVersion === version && authoringEvidence.length) return;
-		const requestSequence = ++authoringRequestSequence;
-		authoringLoading = true;
+	async function loadProjection() {
+		const sequence = ++projectionSequence;
+		const key = loadedKey;
+		const version = analysis?.objective.published_analysis_version;
+		projection = null;
+		experimentError = '';
+		experimentLoading = Boolean(version);
+		if (!version) return;
 		try {
-			const records: ObjectiveEvidence[] = [];
-			while (true) {
-				const page = await fetchObjectiveEvidence(
-					collectionId,
-					objectiveId,
-					version,
-					null,
-					records.length,
-					500
-				);
-				records.push(...page.items);
-				if (records.length >= page.total) break;
-				if (!page.items.length) throw new Error('Evidence 分页结果不完整。');
-			}
-			if (requestSequence !== authoringRequestSequence) return;
-			authoringEvidence = records;
-			authoringEvidenceVersion = version;
+			const result = await fetchExperimentAnalysis(collectionId, objectiveId, version);
+			if (!disposed && sequence === projectionSequence && key === loadedKey) projection = result;
 		} catch (err) {
-			if (requestSequence === authoringRequestSequence) authoringError = errorMessage(err);
+			if (!disposed && sequence === projectionSequence && key === loadedKey) experimentError = errorMessage(err);
 		} finally {
-			if (requestSequence === authoringRequestSequence) authoringLoading = false;
+			if (!disposed && sequence === projectionSequence) experimentLoading = false;
 		}
 	}
 
-	function closeAuthoring() {
-		authoringRequestSequence += 1;
-		authoringOpen = false;
-		authoringParent = null;
-		authoringError = '';
-		authoringLoading = false;
+	async function loadFindings() {
+		const version = analysis?.objective.published_analysis_version;
+		const key = loadedKey;
+		const items: ObjectiveFinding[] = [];
+		if (version) {
+			while (true) {
+				const result = await fetchObjectiveFindings(collectionId, objectiveId, version, items.length, 200);
+				if (disposed || key !== loadedKey || version !== analysis?.objective.published_analysis_version) return;
+				items.push(...result.items);
+				if (items.length >= result.total) break;
+				if (!result.items.length) throw new Error($t('objectiveWorkspace.incomplete'));
+			}
+		}
+		findings = items;
 	}
 
-	function openEvidenceAuthoring(item: ObjectiveEvidence, mode: 'create' | 'revise') {
+	function syncFinding(id: string) {
+		if (navigationPending || id === selectedFindingId) return;
 		closeAuthoring();
-		evidenceAuthoringOpen = true;
-		evidenceAuthoringSource = item;
-		evidenceAuthoringMode = mode;
+		view = 'results';
+		void selectFinding(id);
 	}
 
-	function closeEvidenceAuthoring() {
-		evidenceAuthoringOpen = false;
-		evidenceAuthoringSource = null;
-	}
-
-	async function handleFindingSaved(result: FindingAuthoringResult) {
-		const findingId = result.finding?.finding_id ?? '';
+	async function openScope() {
 		closeAuthoring();
-		authoringEvidence = [];
-		authoringEvidenceVersion = null;
-		await loadObjective(findingId, Boolean(findingId));
+		view = 'scope';
+		await selectFinding('');
+		const url = new URL($page.url);
+		url.searchParams.delete('finding_id');
+		// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route is resolved before preserving query state
+		await goto(resolve('/collections/[id]/objectives/[objective_id]', { id: collectionId, objective_id: objectiveId }) + url.search, { replaceState: true, noScroll: true });
 	}
 
-	async function handleEvidenceSaved() {
-		const selectedId = selectedFindingId;
-		closeEvidenceAuthoring();
-		authoringEvidence = [];
-		authoringEvidenceVersion = null;
-		await loadObjective(selectedId, Boolean(selectedId));
+	async function navigateFinding(id: string, replaceState = false) {
+		closeAuthoring();
+		view = 'results';
+		const url = new URL($page.url);
+		if (id) url.searchParams.set('finding_id', id);
+		else url.searchParams.delete('finding_id');
+		navigationPending = true;
+		try {
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- the route is resolved before preserving query state
+			await goto(resolve('/collections/[id]/objectives/[objective_id]', { id: collectionId, objective_id: objectiveId }) + url.search, { replaceState, noScroll: true });
+		} finally {
+			navigationPending = false;
+		}
+		await selectFinding(id);
 	}
 
-	async function selectFinding(findingId: string, updateUrl = true) {
-		const requestSequence = ++findingRequestSequence;
-		selectedFindingId = findingId;
-		selectedFinding = findings.find((item) => item.finding_id === findingId) ?? null;
+	async function selectFinding(id: string) {
+		const sequence = ++evidenceSequence;
+		const key = loadedKey;
+		const version = analysis?.objective.published_analysis_version;
+		selectedFindingId = id;
+		selectedFinding = findings.find(item => item.finding_id === id) ?? null;
 		evidence = [];
-		findingError = '';
-		if (!findingId || !analysis?.objective.published_analysis_version) return;
-		const analysisVersion = analysis.objective.published_analysis_version;
-		const requestKey = `${collectionId}:${objectiveId}:${analysisVersion}:${findingId}`;
+		findingError = id && !selectedFinding ? $t('objectiveWorkspace.missingFinding') : '';
+		findingLoading = false;
+		if (!selectedFinding || !version) return;
 		findingLoading = true;
 		try {
-			const loadedEvidence: ObjectiveEvidence[] = [];
+			const items: ObjectiveEvidence[] = [];
 			while (true) {
-				const page = await fetchObjectiveEvidence(
-					collectionId,
-					objectiveId,
-					analysisVersion,
-					findingId,
-					loadedEvidence.length,
-					500
-				);
-				loadedEvidence.push(...page.items);
-				if (loadedEvidence.length >= page.total) break;
-				if (!page.items.length) throw new Error('Evidence 分页结果不完整。');
+				const result = await fetchObjectiveEvidence(collectionId, objectiveId, version, id, items.length, 500);
+				if (disposed || sequence !== evidenceSequence || key !== loadedKey) return;
+				items.push(...result.items);
+				if (items.length >= result.total) break;
+				if (!result.items.length) throw new Error($t('objectiveWorkspace.incomplete'));
 			}
-			const currentRequestKey = `${collectionId}:${objectiveId}:${analysis?.objective.published_analysis_version ?? ''}:${selectedFindingId}`;
-			if (requestSequence !== findingRequestSequence || requestKey !== currentRequestKey) return;
-			evidence = loadedEvidence;
-			if (updateUrl) {
-				const url = new URL(currentUrl);
-				url.searchParams.set('finding_id', findingId);
-				const objectiveHref: `/collections/${string}/objectives/${string}` = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}${url.search}`;
-				await goto(resolve(objectiveHref), {
-					replaceState: true,
-					noScroll: true,
-					keepFocus: true
-				});
-			}
+			evidence = items;
 		} catch (err) {
-			if (requestSequence === findingRequestSequence) findingError = errorMessage(err);
+			if (!disposed && sequence === evidenceSequence) findingError = errorMessage(err);
 		} finally {
-			if (requestSequence === findingRequestSequence) findingLoading = false;
+			if (!disposed && sequence === evidenceSequence) findingLoading = false;
 		}
 	}
 
-	function reviewFinding(findingId: string) {
+	function openAuthoring() { authoringOpen = true; }
+	function closeAuthoring() { authoringOpen = false; }
+	async function handleFindingSaved(result: FindingAuthoringResult) {
 		closeAuthoring();
-		void selectFinding(findingId);
+		await loadObjective(result.finding?.finding_id ?? '');
 	}
-
-	function directPaperCount(finding: ObjectiveFinding) {
-		return finding.paper_contributions.filter(
-			(item) => item.supporting_evidence_ids.length || item.contradicting_evidence_ids.length
-		).length;
-	}
-
-	function synthesisLabel(value: ObjectiveFinding['synthesis_status']) {
-		return {
-			agreement: '多文献一致',
-			conflict: '文献冲突',
-			condition_dependent: '条件依赖',
-			insufficient_confirmation: '证据待确认'
-		}[value];
-	}
-
-	function certaintyLabel(value: number) {
-		if (value >= 0.8) return '较高确定性';
-		if (value >= 0.6) return '中等确定性';
-		return '较低确定性';
-	}
-
-	function findingOriginLabel(value: ObjectiveFinding['origin'] | undefined) {
-		if (value === 'human_authored') return '研究者创建';
-		if (value === 'agent_authored') return 'Agent 分析';
-		if (value === 'hybrid') return '研究者修订';
-		return '系统分析';
-	}
-
-	function abstentionLabel(value: string | null) {
-		return (
-			{
-				no_comparable_evidence: '研究者判断：现有结果不可直接比较',
-				no_grounded_evidence: '研究者判断：没有足够的原文支持',
-				insufficient_evidence: '研究者判断：证据数量或质量不足'
-			}[value ?? ''] ?? '研究者记录了证据不足'
-		);
-	}
-
-	function evidenceStatusLabel(value: string) {
-		return (
-			{
-				comparable: '可直接比较',
-				association_only: '只能说明关联',
-				descriptive: '仅描述结果',
-				needs_context: '需要补充上下文',
-				non_comparable: '条件不可直接比较',
-				extraction_failed: '技术提取失败'
-			}[value] ?? '待判断'
-		);
-	}
-
-	function evidenceGapHref(gap: ObjectiveAnalysis['evidence_review']['gaps'][number]) {
-		const base = resolve('/collections/[id]/documents/[document_id]', {
-			id: collectionId,
-			document_id: gap.document_id
-		});
-		const params = new SvelteURLSearchParams({
-			view: 'parsed-paper',
-			evidence_id: gap.evidence_id,
-			source_ref: gap.source_ref,
-			quote: gap.source_excerpt
-		});
-		if (gap.page_numbers[0]) params.set('page', String(gap.page_numbers[0]));
-		return `${base}?${params.toString()}` as `/collections/${string}/documents/${string}`;
-	}
-
-	async function startAnalysis() {
-		if (!analysis || actionRunning || isProcessing) return;
-		const documentIds = (
-			analysis.active_analysis?.document_inputs.length
-				? analysis.active_analysis.document_inputs
-				: analysis.published_analysis?.document_inputs.length
-					? analysis.published_analysis.document_inputs
-					: analysis.objective.seed_document_ids.map((document_id) => ({
-							document_id,
-							preparation_fingerprint: ''
-						}))
-		).map((item) => item.document_id);
-		if (!documentIds.length) {
-			actionError = '请先从研究目标列表选择已准备的论文。';
-			return;
-		}
-		actionRunning = true;
+	async function handleScopeStarted(result: ObjectiveAnalysis) {
+		analysis = result;
+		view = result.published_analysis ? 'results' : 'scope';
 		actionError = '';
-		try {
-			analysis = await runObjectiveAnalysis(collectionId, objectiveId, documentIds);
-			schedulePoll();
-		} catch (err) {
-			actionError = errorMessage(err);
-		} finally {
-			actionRunning = false;
+		if (result.objective.published_analysis_version) {
+			await Promise.all([loadFindings(), loadProjection()]);
+			view = 'results';
 		}
+		schedulePoll();
 	}
-
+	function clearPoll() {
+		if (pollTimer) clearTimeout(pollTimer);
+		pollTimer = null;
+	}
 	function schedulePoll() {
 		clearPoll();
-		const status = analysis?.active_analysis?.status;
-		if (!browser || (status !== 'queued' && status !== 'running')) return;
-		pollTimer = setTimeout(refreshAnalysis, POLL_DELAY_MS);
+		if (!disposed && ['queued', 'running'].includes(analysis?.active_analysis?.status ?? '')) {
+			pollTimer = setTimeout(() => void refreshAnalysis(), 2500);
+		}
 	}
-
 	async function refreshAnalysis() {
+		const key = loadedKey;
+		actionError = '';
 		try {
 			const status = await fetchObjectiveAnalysisStatus(collectionId, objectiveId);
-			const previousVersion = analysis?.objective.published_analysis_version ?? null;
-			if (analysis?.active_analysis && status.status) {
-				analysis = {
-					...analysis,
-					active_analysis: { ...analysis.active_analysis, ...status }
-				};
-			}
-			if (status.status !== 'queued' && status.status !== 'running') {
-				const refreshed = await fetchObjectiveAnalysis(collectionId, objectiveId);
-				const nextVersion = refreshed.objective.published_analysis_version;
-				if (nextVersion !== previousVersion) {
-					findingRequestSequence += 1;
-					selectedFinding = null;
-					evidence = [];
+			if (disposed || key !== loadedKey) return;
+			if (status.status === 'queued' || status.status === 'running') {
+				if (analysis?.active_analysis) analysis = { ...analysis, active_analysis: { ...analysis.active_analysis, ...status } };
+			} else {
+				const previous = analysis?.objective.published_analysis_version;
+				const result = await fetchObjectiveAnalysis(collectionId, objectiveId);
+				if (disposed || key !== loadedKey) return;
+				analysis = result;
+				if (previous !== result.objective.published_analysis_version) {
+					evidenceSequence++;
 					closeAuthoring();
-					authoringEvidence = [];
-					authoringEvidenceVersion = null;
-				}
-				analysis = refreshed;
-				if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
-					await loadFindings();
+					await Promise.all([loadFindings(), loadProjection()]);
+					if (disposed || key !== loadedKey) return;
+					const id = findings.some(item => item.finding_id === requestedFindingId) ? requestedFindingId : '';
+					if (id !== requestedFindingId) await navigateFinding(id, true);
+					else await selectFinding(id);
 				}
 			}
 			schedulePoll();
 		} catch (err) {
-			actionError = errorMessage(err);
+			if (!disposed && key === loadedKey) actionError = errorMessage(err);
 			clearPoll();
 		}
 	}
-
-	function clearPoll() {
-		if (!pollTimer) return;
-		clearTimeout(pollTimer);
-		pollTimer = null;
-	}
-
-	function actionLabel() {
-		if (actionRunning) return '正在启动...';
-		if (active?.status === 'failed') return '重试分析';
-		if (published) return '重新分析';
-		return '确认并分析';
-	}
-
-	function joined(items: string[]) {
-		return items.length ? items.join(', ') : '-';
-	}
-
-	function datasetFilters() {
-		return {
-			...(datasetLabelStatus ? { label_status: datasetLabelStatus } : {}),
-			...(datasetUseStatus ? { dataset_use_status: datasetUseStatus } : {})
-		};
-	}
-
-	async function downloadDataset(format: 'json' | 'training_jsonl' | 'llamafactory_alpaca') {
-		if (!published || datasetDownloading) return;
-		datasetDownloading = true;
-		datasetError = '';
+	function showExport(node: HTMLDialogElement) { node.showModal(); }
+	async function downloadData(format: 'csv' | 'json' | 'training_jsonl' | 'llamafactory_alpaca', dataset = false) {
+		if (!published || exportLoading) return;
+		exportLoading = true;
+		exportError = '';
 		try {
-			const extension = format === 'json' ? 'json' : 'jsonl';
-			await downloadBlob(
-				objectiveFindingDatasetUrl(collectionId, objectiveId, format, datasetFilters()),
-				`objective-${objectiveId}-finding-dataset.${extension}`
-			);
-		} catch (err) {
-			datasetError = errorMessage(err);
-		} finally {
-			datasetDownloading = false;
-		}
+			const version = published.analysis_version;
+			const path = dataset
+				? objectiveFindingDatasetUrl(collectionId, objectiveId, format as 'json' | 'training_jsonl' | 'llamafactory_alpaca', {
+					...(datasetLabelStatus ? { label_status: datasetLabelStatus } : {}),
+					...(datasetUseStatus ? { dataset_use_status: datasetUseStatus } : {})
+				})
+				: experimentAnalysisExportUrl(collectionId, objectiveId, version, format as 'csv' | 'json');
+			await downloadBlob(path, 'objective-' + objectiveId + '-v' + version + (dataset ? '-findings' : '-experiments') + '.' + (format === 'csv' || format === 'json' ? format : 'jsonl'));
+		} catch (err) { exportError = errorMessage(err); }
+		finally { exportLoading = false; }
 	}
 </script>
 
-<svelte:head><title>{analysis?.objective.question ?? '研究目标'}</title></svelte:head>
+<svelte:head><title>{analysis?.objective.question ?? $t('objectiveWorkspace.list')}</title></svelte:head>
 
 {#if loading}
-	<p class="page-state" aria-busy="true">正在加载研究目标...</p>
+	<p class="page-state" aria-busy="true">{$t('objectiveWorkspace.loading')}</p>
 {:else if error || !analysis}
-	<p class="page-state page-state--error" role="alert">{error || '研究目标不存在。'}</p>
+	<div class="page-state" role="alert"><p>{error || $t('objectiveWorkspace.missingObjective')}</p><button class="btn btn--ghost" on:click={() => loadObjective()}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button></div>
 {:else}
 	<section class="objective-page">
 		<header class="objective-header">
 			<div>
-				<a href={resolve('/collections/[id]/objectives', { id: collectionId })}>研究目标</a>
+				<a class="back" href={resolve('/collections/[id]/objectives', { id: collectionId })}><ArrowLeft size={16} />{$t('objectiveWorkspace.list')}</a>
 				<h1>{analysis.objective.question}</h1>
+				<p class="meta">{analysis.objective.material_scope.join(' · ')}{#if published} · {$t('objectiveWorkspace.publishedVersion', { version: published.analysis_version })}{/if}</p>
 			</div>
 			<div class="header-actions">
-				{#if !isProcessing}
-					<button
-						class="btn btn--primary btn--small"
-						type="button"
-						disabled={actionRunning}
-						on:click={startAnalysis}
-					>
-						{actionLabel()}
-					</button>
-				{/if}
+				{#if active?.status === 'failed'}<button class="btn btn--ghost btn--small" type="button" on:click={() => void openScope()}><RefreshCw size={16} />{$t('objectiveWorkspace.retryAnalysis')}</button>{/if}
+				{#if published && active?.status !== 'failed' && !isProcessing}<button class="btn btn--ghost btn--small" type="button" on:click={() => void openScope()}><RefreshCw size={16} />{$t('objectiveWorkspace.reanalyze')}</button>{/if}
+				{#if published}<button class="btn btn--ghost btn--small" on:click={() => { exportError = ''; exportOpen = true; }}><Download size={16} />{$t('objectiveWorkspace.export')}</button>{/if}
 			</div>
 		</header>
-
-		{#if active && (active.status !== 'succeeded' || !published)}
-			<section class:failed={active.status === 'failed'} class="analysis-state" role="status">
-				<div>
-					<strong
-						>{active.status === 'failed'
-							? '本次分析失败'
-							: active.status === 'succeeded'
-								? '分析完成'
-								: '正在分析'}</strong
-					>
-					<span>
-						{active.status === 'failed'
-							? $t('researchAgent.capability.analysisFailed')
-							: active.progress_message || active.phase}
-					</span>
-					{#if active.status === 'failed' && published && active.analysis_version !== published.analysis_version}
-						<span class="version-note"
-							>正在显示已发布的 v{published.analysis_version}；重试 v{active.analysis_version} 失败。</span
-						>
-					{/if}
-				</div>
-				{#if active.total_document_count > 0}
-					<span>{active.processed_document_count}/{active.total_document_count} 篇文献</span>
+		{#if active && active.status !== 'succeeded'}
+			<div class="analysis-state" class:failed={active.status === 'failed'} role="status">
+				<strong>{$t(isProcessing ? 'objectiveWorkspace.active' : 'objectiveWorkspace.failed')}</strong>
+				<span>{active.status === 'failed' ? $t('researchAgent.capability.analysisFailed') : active.progress_message || $t('objectiveWorkspace.runProgress', { processed: active.processed_document_count, total: active.total_document_count })}</span>
+				{#if published}<span>{$t('objectiveWorkspace.retained')}</span>{/if}
+				{#if active.status === 'failed'}<button class="btn btn--ghost btn--small" on:click={() => void openScope()}>{$t('objectiveWorkspace.scope')}</button>{/if}
+			</div>
+		{/if}
+		{#if actionError}<div role="alert"><p>{actionError}</p><button class="btn btn--ghost" on:click={refreshAnalysis}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button></div>{/if}
+		{#if published?.abstention_reason}<p class="analysis-state">{published.abstention_note || $t('objectiveWorkspace.emptyFindings')}</p>{/if}
+		<ObjectiveResultsOverview {analysis} {projection} {experimentLoading} {experimentError} {findings} {collectionId} {documentTitles} bind:view {selectedFindingId} {authoringOpen} onSelectFinding={navigateFinding} onScopeStarted={handleScopeStarted} onRetryProjection={loadProjection} onNewFinding={() => openAuthoring()}>
+			<section slot="selected" class="finding-workspace" aria-label={$t('objectiveWorkspace.findingDetail')} aria-busy={findingLoading}>
+				{#if authoringOpen && published}
+					{#key published.analysis_version}
+						<FindingAuthoringEditor {collectionId} {objectiveId} analysisVersion={published.analysis_version} onSaved={handleFindingSaved} onCancel={closeAuthoring} />
+					{/key}
+				{:else if findingLoading}<p class="page-state">{$t('objectiveWorkspace.loading')}</p>
+				{:else if findingError}<div role="alert"><p>{findingError}</p>{#if selectedFinding}<button class="btn btn--ghost" on:click={() => selectFinding(selectedFindingId)}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button>{/if}</div>
+				{:else if selectedFinding}
+					<FindingWorkbench finding={selectedFinding} {evidence} {collectionId} {documentTitles} experimentVersions={selectedExperimentVersions}>
+						<div slot="comparison">
+							{#if projection}<ExperimentResults {projection} {collectionId} {objectiveId} {documentTitles} findingId={selectedFinding.finding_id} selectionIds={selectedFinding.selection_ids ?? []} />
+							{:else}<p role="alert">{experimentError || $t('objectiveWorkspace.unavailable')}</p><button class="btn btn--ghost" on:click={loadProjection}><RefreshCw size={16} />{$t('objectiveWorkspace.retry')}</button>{/if}
+						</div>
+					</FindingWorkbench>
 				{/if}
 			</section>
-		{/if}
-		{#if actionError}<p class="action-error" role="alert">{actionError}</p>{/if}
-
-		{#if published?.abstention_reason}
-			<section class="authored-abstention" aria-label="研究者证据判断">
-				<strong>{abstentionLabel(published.abstention_reason)}</strong>
-				{#if published.abstention_note}<span>{published.abstention_note}</span>{/if}
-			</section>
-		{/if}
-
-		{#if published}
-			<section class="findings-workspace" aria-label="Finding 审阅工作区">
-				<aside class="findings-sidebar" aria-label="Finding 列表">
-					<div class="findings-heading">
-						<div>
-							<h2>Findings</h2>
-						</div>
-						<div class="findings-meta" aria-label="分析元信息">
-							<span>{findings.length} 条 · v{published.analysis_version}</span>
-							{#if published.model_name}
-								<span>模型 {published.model_name}</span>
-							{:else}
-								<span>模型未记录</span>
-							{/if}
-						</div>
-					</div>
-					<button
-						class="btn btn--primary btn--small new-finding"
-						type="button"
-						on:click={() => openAuthoring(null)}
-					>
-						新建 Finding
-					</button>
-					{#if findings.length}
-						{#if findings.length > 1}
-							<select
-								class="mobile-finding-select"
-								aria-label={$t('research.findingReview.selectFinding')}
-								value={selectedFindingId}
-								on:change={(event) => reviewFinding(event.currentTarget.value)}
-							>
-								{#each findings as item, index (item.finding_id)}
-									<option value={item.finding_id}>{index + 1}. {item.statement}</option>
-								{/each}
-							</select>
-						{/if}
-						<ul class="finding-list">
-							{#each findings as item (item.finding_id)}
-								<li>
-									<button
-										type="button"
-										aria-pressed={!authoringOpen && item.finding_id === selectedFindingId}
-										class:selected={!authoringOpen && item.finding_id === selectedFindingId}
-										on:click={() => reviewFinding(item.finding_id)}
-									>
-										<span>{item.statement}</span>
-										<small>{findingOriginLabel(item.origin)}</small>
-										{#if evidenceReviews[item.finding_id]?.needs_review}
-											<small class="review-required"
-												>{$t('research.findingReview.basisUpdated')}</small
-											>
-										{/if}
-										<small
-											>{synthesisLabel(item.synthesis_status)} · {certaintyLabel(item.certainty)} · {directPaperCount(
-												item
-											)} 篇直接文献</small
-										>
-									</button>
-								</li>
-							{/each}
-						</ul>
-					{:else}
-						<p class="empty-findings">当前版本尚无 Finding。</p>
-					{/if}
-					{#if analysis.evidence_review.total_evidence_count > 0}
-						<details
-							class="evidence-review secondary-details"
-							aria-label={$t('research.findingReview.coverage')}
-						>
-							<summary>
-								{$t('research.findingReview.coverage')}
-								<span
-									>{$t('research.findingReview.coverageCount', {
-										count: analysis.evidence_review.total_evidence_count
-									})}</span
-								>
-								{#if analysis.evidence_review.gap_count}
-									<span class="gap-count"
-										>{$t('research.findingReview.gapCount', {
-											count: analysis.evidence_review.gap_count
-										})}</span
-									>
-								{/if}
-							</summary>
-							<div class="evidence-review__body">
-								<p>
-									{$t('research.findingReview.coverageTotal', {
-										count: analysis.evidence_review.total_evidence_count,
-										results: analysis.evidence_review.result_count
-									})}
-								</p>
-								<div class="evidence-review__counts" aria-label="证据状态统计">
-									{#each Object.entries(analysis.evidence_review.status_counts) as [status, count] (status)}
-										<span class="evidence-count"
-											><strong>{count}</strong> {evidenceStatusLabel(status)}</span
-										>
-									{/each}
-								</div>
-								{#if analysis.evidence_review.gaps.length}
-									<div class="evidence-review__gaps">
-										<h3>{$t('research.findingReview.gapsTitle')}</h3>
-										{#each analysis.evidence_review.gaps as gap (gap.evidence_id)}
-											<article class="evidence-gap">
-												<div class="evidence-gap__heading">
-													<strong>{evidenceStatusLabel(gap.evidence_status)}</strong>
-													<span>
-														{documentTitles[gap.document_id] ||
-															$t('research.findingReview.untitledPaper')}
-														{#if gap.page_numbers.length}
-															· p.{gap.page_numbers.join(', ')}{/if}
-													</span>
-												</div>
-												<p>{gap.reason}</p>
-												{#if gap.outcome}<small
-														>{$t('research.findingReview.outcome', { outcome: gap.outcome })}</small
-													>{/if}
-												{#if gap.source_excerpt}<blockquote>{gap.source_excerpt}</blockquote>{/if}
-												<a href={resolve(evidenceGapHref(gap))}
-													>{$t('research.findingReview.openSource')}</a
-												>
-											</article>
-										{/each}
-									</div>
-								{/if}
-								{#if analysis.evidence_review.omitted_gap_count > 0}
-									<p>
-										{$t('research.findingReview.omittedGaps', {
-											count: analysis.evidence_review.omitted_gap_count
-										})}
-									</p>
-								{/if}
-							</div>
-						</details>
-					{/if}
-					<details class="export-panel secondary-details" aria-label="导出 Finding 数据">
-						<summary>{$t('research.findingReview.export')}</summary>
-						<div class="export-filters">
-							<label>
-								<span>标注状态</span>
-								<select bind:value={datasetLabelStatus} disabled={datasetDownloading}>
-									<option value="">全部</option>
-									<option value="candidate">候选</option>
-									<option value="silver">银标</option>
-									<option value="gold">金标</option>
-									<option value="rejected">已拒绝</option>
-								</select>
-							</label>
-							<label>
-								<span>数据用途</span>
-								<select bind:value={datasetUseStatus} disabled={datasetDownloading}>
-									<option value="">全部</option>
-									<option value="training_ready">可训练</option>
-									<option value="review_candidate">待审阅</option>
-									<option value="rejected">已拒绝</option>
-								</select>
-							</label>
-						</div>
-						<div class="export-actions">
-							<button
-								class="btn btn--ghost btn--small"
-								type="button"
-								disabled={datasetDownloading}
-								on:click={() => downloadDataset('json')}
-							>
-								导出 JSON
-							</button>
-							<button
-								class="btn btn--ghost btn--small"
-								type="button"
-								disabled={datasetDownloading}
-								on:click={() => downloadDataset('training_jsonl')}
-							>
-								导出训练 JSONL
-							</button>
-							<button
-								class="btn btn--ghost btn--small"
-								type="button"
-								disabled={datasetDownloading}
-								on:click={() => downloadDataset('llamafactory_alpaca')}
-							>
-								导出 LlamaFactory JSONL
-							</button>
-							{#if datasetDownloading}<span class="export-status" role="status"
-									>正在准备下载...</span
-								>{/if}
-						</div>
-						{#if datasetError}<p class="export-error" role="alert">{datasetError}</p>{/if}
-					</details>
-				</aside>
-
-				<section
-					class="finding-workspace"
-					aria-label="Finding 详情"
-					aria-busy={findingLoading || authoringLoading}
-				>
-					{#if evidenceAuthoringOpen && evidenceAuthoringSource}
-						<EvidenceAuthoringEditor
-							{collectionId}
-							{objectiveId}
-							analysisVersion={published.analysis_version}
-							sourceEvidence={evidenceAuthoringSource}
-							documentTitle={documentTitles[evidenceAuthoringSource.document_id] ?? '当前文献'}
-							mode={evidenceAuthoringMode}
-							onSaved={handleEvidenceSaved}
-							onCancel={closeEvidenceAuthoring}
-						/>
-					{:else if authoringOpen && authoringLoading}
-						<p class="page-state">正在加载当前版本的 Evidence...</p>
-					{:else if authoringOpen && authoringError}
-						<div class="finding-error" role="alert">
-							<p>{authoringError}</p>
-							<button
-								class="btn btn--ghost btn--small"
-								type="button"
-								on:click={() => openAuthoring(authoringParent)}>重试加载 Evidence</button
-							>
-						</div>
-					{:else if authoringOpen}
-						{#key `${published.analysis_version}:${authoringParent?.finding_id ?? 'blank'}`}
-							<FindingAuthoringEditor
-								{collectionId}
-								{objectiveId}
-								analysisVersion={published.analysis_version}
-								evidence={authoringEvidence}
-								{documentTitles}
-								parentFinding={authoringParent}
-								onSaved={handleFindingSaved}
-								onCancel={closeAuthoring}
-							/>
-						{/key}
-					{:else if findingLoading}
-						<p class="page-state">正在加载原文证据...</p>
-					{:else if findingError}
-						<div class="finding-error" role="alert">
-							<p>{findingError}</p>
-							<button
-								class="btn btn--ghost btn--small"
-								type="button"
-								on:click={() => selectFinding(selectedFindingId, false)}>重试加载证据</button
-							>
-						</div>
-					{:else if selectedFinding}
-						<FindingWorkbench
-							finding={selectedFinding}
-							evidenceReview={evidenceReviews[selectedFinding.finding_id] ?? null}
-							derivedFindings={findings.filter(
-								(item) => item.parent_finding_id === selectedFinding?.finding_id
-							)}
-							parentFinding={findings.find(
-								(item) => item.finding_id === selectedFinding?.parent_finding_id
-							) ?? null}
-							onSelectFinding={(finding) => reviewFinding(finding.finding_id)}
-							{evidence}
-							{collectionId}
-							{documentTitles}
-							onDerive={(finding) => openAuthoring(finding)}
-							onAuthorEvidence={openEvidenceAuthoring}
-						/>
-					{:else}
-						<div class="page-state page-state--complete">
-							<p>分析已完成，但当前证据未形成可直接比较的 Finding。</p>
-							<span
-								>v{published.analysis_version} · {published.model_name
-									? `模型 ${published.model_name}`
-									: '模型未记录'}</span
-							>
-							<span>可以记录证据不足，或从现有 Evidence 创建研究者 Finding。</span>
-						</div>
-					{/if}
-				</section>
-			</section>
-		{:else if !isProcessing}
-			<p class="page-state">确认并开始分析后，这里将展示可追溯的 Findings。</p>
-		{/if}
-		<details class="secondary-details research-scope">
-			<summary>{$t('research.findingReview.scope')}</summary>
-			{#if analysis.objective.requested_comparator}<p class="scope-comparator">
-					{analysis.objective.requested_comparator}
-				</p>{/if}
-			<div class="scope-strip">
-				<div><span>材料</span><strong>{joined(analysis.objective.material_scope)}</strong></div>
-				<div><span>变量</span><strong>{joined(analysis.objective.variables)}</strong></div>
-				<div><span>结果</span><strong>{joined(analysis.objective.outcomes)}</strong></div>
-				<div><span>机制</span><strong>{joined(analysis.objective.mechanisms)}</strong></div>
-				<div><span>约束</span><strong>{joined(analysis.objective.constraints)}</strong></div>
-				<div>
-					<span>文献</span><strong>{analysis.objective.seed_document_ids.length} 篇</strong>
-				</div>
-			</div>
-		</details>
+		</ObjectiveResultsOverview>
 	</section>
+	{#if exportOpen && published}
+		<dialog use:showExport on:close={() => exportOpen = false} on:cancel={() => exportOpen = false} aria-labelledby="objective-export-title">
+			<header><h2 id="objective-export-title">{$t('objectiveWorkspace.exportTitle')}</h2><button class="icon-button" title={$t('objectiveWorkspace.cancel')} aria-label={$t('objectiveWorkspace.cancel')} on:click={() => exportOpen = false}><X size={18} /></button></header>
+			<p>{$t('objectiveWorkspace.exportScope', { version: published.analysis_version })}</p>
+			<fieldset disabled={exportLoading}><legend>{$t('objectiveWorkspace.format')}</legend>
+				<label><input type="radio" bind:group={exportFormat} value="csv" />{$t('objectiveWorkspace.csv')}</label>
+				<label><input type="radio" bind:group={exportFormat} value="json" />{$t('objectiveWorkspace.json')}</label>
+			</fieldset>
+			<details><summary>{$t('objectiveWorkspace.dataset')}</summary>
+				<div class="dataset-filters">
+						<label>{$t('objectiveWorkspace.labelStatus')}<select bind:value={datasetLabelStatus}><option value="">{$t('objectiveWorkspace.all')}</option>{#each ['candidate', 'silver', 'gold', 'rejected'] as status (status)}<option value={status}>{$t('objectiveWorkspace.' + status)}</option>{/each}</select></label>
+						<label>{$t('objectiveWorkspace.useStatus')}<select bind:value={datasetUseStatus}><option value="">{$t('objectiveWorkspace.all')}</option>{#each ['training_ready', 'review_candidate', 'rejected'] as status (status)}<option value={status}>{$t('objectiveWorkspace.' + status)}</option>{/each}</select></label>
+				</div>
+					<div class="dataset-actions">{#each ['json', 'training_jsonl', 'llamafactory_alpaca'] as format (format)}<button class="btn btn--ghost btn--small" disabled={exportLoading} on:click={() => downloadData(format as 'json' | 'training_jsonl' | 'llamafactory_alpaca', true)}><Download size={14} />{format === 'json' ? 'JSON' : format === 'training_jsonl' ? 'JSONL' : 'LlamaFactory JSONL'}</button>{/each}</div>
+			</details>
+			{#if exportError}<p role="alert">{exportError}</p>{/if}
+			<footer><button class="btn btn--ghost" on:click={() => exportOpen = false}>{$t('objectiveWorkspace.cancel')}</button><button class="btn btn--primary" disabled={exportLoading} on:click={() => downloadData(exportFormat)}><Download size={16} />{$t(exportLoading ? 'objectiveWorkspace.downloading' : 'objectiveWorkspace.download')}</button></footer>
+		</dialog>
+	{/if}
 {/if}
 
 <style>
-	.objective-page {
-		width: min(1360px, 100%);
-		margin: 0 auto;
-		display: grid;
-		gap: 16px;
-	}
-	.objective-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 20px;
-	}
-	.objective-header a {
-		color: var(--text-secondary);
-		font-size: 13px;
-	}
-	.objective-header > div {
-		min-width: 0;
-	}
-	h1,
-	h2,
-	p {
-		margin: 0;
-	}
-	h1 {
-		margin-top: 8px;
-		max-width: 850px;
-		font-size: 20px;
-		line-height: 1.4;
-		overflow-wrap: anywhere;
-	}
-	.header-actions {
-		display: flex;
-		flex-shrink: 0;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-	.secondary-details {
-		border-top: 1px solid var(--border-default);
-		font-size: 12px;
-	}
-	.secondary-details > summary {
-		min-height: 36px;
-		padding: 8px 0;
-		box-sizing: border-box;
-		color: var(--text-secondary);
-		line-height: 20px;
-		cursor: pointer;
-		overflow-wrap: anywhere;
-	}
-	.secondary-details > summary:hover,
-	.secondary-details[open] > summary {
-		color: var(--text-primary);
-	}
-	.secondary-details > summary:focus-visible,
-	.mobile-finding-select:focus-visible {
-		outline: 2px solid var(--brand-primary);
-		outline-offset: 2px;
-	}
-	.secondary-details > summary span {
-		margin-left: 6px;
-	}
-	.secondary-details > summary .gap-count {
-		color: var(--warning-text);
-	}
-	.scope-comparator {
-		padding: 8px 0 12px;
-		color: var(--text-secondary);
-		overflow-wrap: anywhere;
-	}
-	.scope-strip {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		border-block: 1px solid var(--border-default);
-	}
-	.scope-strip div {
-		padding: 12px 14px;
-		display: grid;
-		gap: 4px;
-		border-right: 1px solid var(--border-default);
-	}
-	.scope-strip div:last-child {
-		border-right: 0;
-	}
-	.scope-strip span {
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-	.scope-strip strong {
-		font-size: 13px;
-		overflow-wrap: anywhere;
-	}
-	.analysis-state {
-		padding: 12px 14px;
-		display: flex;
-		justify-content: space-between;
-		gap: 16px;
-		border-left: 3px solid #3676a8;
-		background: var(--surface-subtle);
-	}
-	.analysis-state > div {
-		display: grid;
-		gap: 3px;
-	}
-	.analysis-state span {
-		color: var(--text-secondary);
-	}
-	.analysis-state.failed {
-		border-color: #b42318;
-	}
-	.authored-abstention {
-		display: grid;
-		gap: 4px;
-		padding: 12px 14px;
-		border-left: 3px solid #8a6d1d;
-		background: var(--surface-subtle);
-	}
-	.authored-abstention span {
-		color: var(--text-secondary);
-		white-space: pre-line;
-	}
-	.evidence-review__body {
-		display: grid;
-		gap: 14px;
-		padding: 8px 0 16px;
-		overflow-wrap: anywhere;
-	}
-	.evidence-review h3 {
-		font-size: 14px;
-	}
-	.evidence-review p,
-	.evidence-gap span,
-	.evidence-gap small {
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 1.5;
-	}
-	.evidence-review__counts {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-	.evidence-count {
-		display: inline-flex;
-		align-items: baseline;
-		gap: 5px;
-		padding: 5px 8px;
-		border: 1px solid var(--border-default);
-		background: var(--surface-card);
-		font-size: 12px;
-	}
-	.evidence-count strong {
-		font-size: 14px;
-	}
-	.evidence-review__gaps {
-		display: grid;
-		gap: 8px;
-	}
-	.evidence-gap {
-		display: grid;
-		gap: 5px;
-		padding: 10px 12px;
-		border-left: 3px solid #8a6d1d;
-		background: var(--surface-card);
-	}
-	.evidence-gap__heading {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px 10px;
-		align-items: baseline;
-	}
-	.evidence-gap__heading strong {
-		font-size: 12px;
-	}
-	.evidence-gap blockquote {
-		margin: 2px 0 0;
-		padding-left: 10px;
-		border-left: 2px solid var(--border-default);
-		font-size: 13px;
-		line-height: 1.55;
-		white-space: pre-line;
-	}
-	.evidence-gap a {
-		width: fit-content;
-		color: var(--accent, #2d6a4f);
-		font-size: 12px;
-		font-weight: 600;
-	}
-	.analysis-state .version-note {
-		color: var(--text-primary);
-		font-weight: 600;
-	}
-	.action-error,
-	.page-state--error {
-		color: var(--danger, #b42318);
-	}
-	.findings-workspace {
-		display: grid;
-		grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
-		gap: 28px;
-		align-items: start;
-	}
-	.findings-sidebar {
-		min-width: 0;
-		position: sticky;
-		top: 16px;
-		max-height: calc(100vh - 32px);
-		overflow-y: auto;
-		padding-right: 24px;
-		border-right: 1px solid var(--border-default);
-	}
-	.findings-heading {
-		display: flex;
-		justify-content: space-between;
-		gap: 10px;
-		align-items: flex-start;
-		margin-bottom: 12px;
-	}
-	.findings-heading h2 {
-		font-size: 16px;
-		line-height: 24px;
-	}
-	.mobile-finding-select {
-		display: none;
-		width: 100%;
-		min-width: 0;
-		min-height: 36px;
-		margin-bottom: 12px;
-		padding: 6px 8px;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: var(--surface-card);
-		color: inherit;
-		font: inherit;
-		font-size: 13px;
-	}
-	.findings-meta {
-		display: grid;
-		max-width: 55%;
-		gap: 4px;
-		justify-items: end;
-		text-align: right;
-		color: var(--text-secondary);
-		font-size: 12px;
-	}
-	.findings-meta span {
-		overflow-wrap: anywhere;
-	}
-	.finding-list {
-		max-height: 360px;
-		overflow-y: auto;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-		border-top: 1px solid var(--border-default);
-	}
-	.new-finding {
-		width: 100%;
-		margin-bottom: 12px;
-	}
-	.empty-findings {
-		padding: 14px 0;
-		border-block: 1px solid var(--border-default);
-		color: var(--text-secondary);
-		font-size: 13px;
-	}
-	.finding-list button {
-		width: 100%;
-		border: 0;
-		border-bottom: 1px solid var(--border-default);
-		background: transparent;
-		color: inherit;
-		display: grid;
-		gap: 7px;
-		text-align: left;
-		align-items: center;
-		padding: 13px 10px 13px 12px;
-		cursor: pointer;
-	}
-	.finding-list button:hover,
-	.finding-list button.selected {
-		background: var(--surface-subtle);
-	}
-	.finding-list button.selected {
-		box-shadow: inset 3px 0 #3a7d5d;
-	}
-	.finding-list small {
-		color: var(--text-secondary);
-		font-style: normal;
-		line-height: 1.45;
-	}
-	.export-panel {
-		padding-bottom: 8px;
-	}
-	.export-panel label span,
-	.export-status {
-		color: var(--text-secondary);
-		font-size: 12px;
-		line-height: 1.5;
-	}
-	.export-filters {
-		display: grid;
-		gap: 8px;
-		margin-top: 12px;
-	}
-	.export-filters label {
-		display: grid;
-		gap: 4px;
-	}
-	.export-filters select {
-		width: 100%;
-		min-height: 34px;
-		padding: 6px 8px;
-		border: 1px solid var(--border-default);
-		border-radius: 4px;
-		background: var(--surface-card);
-		color: inherit;
-		font: inherit;
-		font-size: 12px;
-	}
-	.export-actions {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 8px;
-		margin-top: 12px;
-	}
-	.export-error {
-		margin-top: 10px;
-		color: var(--danger, #b42318) !important;
-	}
-	.finding-workspace {
-		min-width: 0;
-	}
-	.finding-error {
-		display: grid;
-		justify-items: start;
-		gap: 12px;
-		padding: 20px 0;
-		color: var(--danger, #b42318);
-	}
-	.page-state {
-		padding: 30px 0;
-		color: var(--text-secondary);
-	}
-	.page-state--complete {
-		display: grid;
-		gap: 6px;
-	}
-	.page-state--complete span {
-		font-size: 12px;
-	}
-	@media (max-width: 1000px) {
-		.findings-workspace {
-			grid-template-columns: 1fr;
-			gap: 16px;
-		}
-		.findings-sidebar {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			column-gap: 12px;
-			position: static;
-			max-height: none;
-			overflow: visible;
-			padding: 0;
-			border-right: 0;
-			border-bottom: 1px solid var(--border-default);
-		}
-		.finding-list {
-			display: none;
-		}
-		.mobile-finding-select {
-			display: block;
-		}
-		.mobile-finding-select,
-		.secondary-details,
-		.empty-findings {
-			grid-column: 1 / -1;
-		}
-		.findings-heading {
-			flex-wrap: wrap;
-			gap: 4px 12px;
-			align-items: center;
-		}
-		.findings-meta {
-			max-width: 100%;
-			font-size: 11px;
-		}
-		.new-finding {
-			width: auto;
-			align-self: start;
-		}
-	}
-	@media (max-width: 820px) {
-		.objective-header {
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 12px;
-		}
-		.findings-meta {
-			max-width: 100%;
-			justify-items: start;
-			text-align: left;
-		}
-		.scope-strip {
-			grid-template-columns: 1fr 1fr;
-		}
-	}
+	.objective-page { width: min(1360px, 100%); margin: 0 auto; display: grid; gap: 20px; min-width: 0; }
+	.objective-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
+	.objective-header > div { min-width: 0; } .header-actions { display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+	h1 { margin: 12px 0 8px; font-size: 22px; line-height: 1.4; overflow-wrap: anywhere; }
+	.back { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 13px; }
+	.meta { margin: 0; color: var(--text-secondary); font-size: 13px; }
+	.analysis-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; border-left: 3px solid var(--brand-primary); background: var(--brand-soft); font-size: 13px; }
+	.analysis-state.failed { border-color: var(--danger-text); background: var(--danger-bg); }
+	.finding-workspace { min-width: 0; } .page-state { padding: 28px 0; color: var(--text-secondary); }
+	[role='alert'] { color: var(--danger-text); }
+	dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); box-sizing: border-box; padding: 24px; border: 1px solid var(--border-default); border-radius: 6px; background: var(--surface-card); color: var(--text-primary); }
+	dialog::backdrop { background: rgb(0 0 0 / 40%); }
+	dialog header, dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+	dialog h2 { margin: 0; font-size: 18px; } dialog p, dialog summary { font-size: 13px; color: var(--text-secondary); }
+	.icon-button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; background: transparent; color: inherit; cursor: pointer; }
+	fieldset { border: 0; padding: 12px 0 20px; margin: 0; display: grid; gap: 12px; font-size: 14px; }
+	fieldset label { display: flex; gap: 8px; } legend { font-size: 13px; }
+	dialog details { border-top: 1px solid var(--border-default); padding: 12px 0; } summary { cursor: pointer; }
+	.dataset-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+	.dataset-filters label { display: grid; gap: 8px; font-size: 13px; min-width: 0; }
+	select { width: 100%; min-height: 34px; border: 1px solid var(--border-default); border-radius: 4px; background: var(--surface-card); color: inherit; }
+	.dataset-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+	dialog footer { justify-content: flex-end; margin-top: 20px; }
+	@media (max-width: 700px) { .objective-header { flex-wrap: wrap; } h1 { font-size: 20px; } }
 </style>

@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from dataclasses import asdict
+from typing import Literal
 
-from application.repositories.objective_repository import StoredObjective
-from application.core.objectives.finding_summary import FindingSummaryUnavailable
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
+from application.core.objectives.finding_summary import FindingSummaryUnavailable
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
 )
-
-from controllers.schemas.core.research_objectives import (
+from application.repositories.objective_repository import StoredObjective
+from controllers.core.research_objective_schemas import (
     FindingDetailResponse,
-    FindingSummaryRequest,
-    FindingSummaryResponse,
     FindingListResponse,
-    DocumentSelectionRequest,
+    FindingSummaryResponse,
     ObjectiveAnalysisResponse,
     ObjectiveAnalysisStatusResponse,
     ObjectiveEvidenceListResponse,
@@ -26,6 +26,17 @@ from controllers.schemas.core.research_objectives import (
     PaginatedObjectiveListResponse,
 )
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
+
+
+class DocumentSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_ids: list[str] = Field(min_length=1)
+
+
+class FindingSummaryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    analysis_version: int = Field(ge=1)
+    language: Literal["en", "zh"] = "en"
 
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
@@ -98,7 +109,7 @@ async def preview_collection_objective_scope(
     request: Request,
 ) -> ObjectiveScopeResponse:
     try:
-        preview = await request.app.state.evidence_analysis_service.preview_objective_scope(
+        preview = await request.app.state.experiment_analysis_service.preview_objective_scope(
             collection_id,
             objective_id,
         )
@@ -350,7 +361,7 @@ async def get_objective_evidence_map(
 
 def _objective_response_record(stored: StoredObjective) -> dict:
     return {
-        **stored.objective.to_record(),
+        **asdict(stored.objective),
         "created_at": stored.created_at.isoformat() if stored.created_at else None,
         "updated_at": stored.updated_at.isoformat() if stored.updated_at else None,
     }
@@ -366,7 +377,8 @@ def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
         active_analysis=active.to_record() if active is not None else None,
         published_analysis=(published.to_record() if published is not None else None),
         paper_contributions=[
-            item.to_record() for item in payload.get("paper_contributions") or ()
+            item if isinstance(item, dict) else item.to_record()
+            for item in payload.get("paper_contributions") or ()
         ],
         evidence_review=payload.get("evidence_review")
         or {

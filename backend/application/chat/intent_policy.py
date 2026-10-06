@@ -83,8 +83,12 @@ FINDING_CAPABILITIES = {
     "inspect_objective_analysis",
     "assess_objective_quality",
     "create_finding_draft",
-    "create_evidence_draft",
     "derive_objective",
+}
+PAPER_EXPERIMENT_CAPABILITIES = {
+    *SOURCE_READ_CAPABILITIES,
+    "inspect_objective_analysis",
+    "propose_paper_experiment_draft",
 }
 FINDING_READ_CAPABILITIES = {
     "get_collection_context",
@@ -116,26 +120,11 @@ WRITE_CAPABILITIES = {
     "record_finding_feedback",
     "curate_finding",
     "create_finding_version",
-    "create_evidence_version",
-    "publish_agent_objective_analysis",
+    "create_paper_experiment_revision",
     "create_research_plan",
     "revise_research_plan",
 }
 
-NO_TOOL_PHRASES = (
-    "不用查",
-    "不要查",
-    "无需查",
-    "不查论文",
-    "不用检索",
-    "不要检索",
-    "不用操作",
-    "不要操作",
-    "without searching",
-    "do not search",
-    "don't search",
-    "without tools",
-)
 NO_WRITE_PHRASES = (
     "只读", "read-only", "不要写入", "不写入",
     "不要保存",
@@ -351,6 +340,17 @@ PLAN_READ_TERMS = (
     "list plans",
     "inspect plan",
 )
+PAPER_EXPERIMENT_TERMS = (
+    "paperexperiment",
+    "paper experiment",
+    "实验记录",
+    "实验档案",
+    "建立实验",
+    "维护实验",
+    "补充实验结果",
+    "experiment record",
+    "experiment archive",
+)
 PROCESS_TERMS = (
     "当前状态",
     "目前状态",
@@ -411,19 +411,16 @@ def _write_targets(text: str) -> set[str]:
     if mentions_terms(text, ("人工修订", "human revision", "curation", "curate")):
         targets.add("curate_finding")
     elif mentions_terms(text, ("修订", "revision", "revise")):
-        targets.add(
-            "create_evidence_version"
-            if mentions_terms(text, ("evidence", "证据")) else "create_finding_version"
-        )
+        targets.add("create_finding_version")
     if mentions_terms(text, ("分析", "analysis")):
-        targets.update({"start_objective_analysis", "publish_agent_objective_analysis"})
+        targets.add("start_objective_analysis")
     if mentions_terms(text, ("方案", "计划", "plan")):
-        targets.difference_update({"curate_finding", "create_finding_version", "create_evidence_version"})
+        targets.difference_update({"curate_finding", "create_finding_version"})
         targets.update({"create_research_plan", "revise_research_plan"})
     if mentions_terms(text, ("新版本", "new version", "新 finding", "新finding", "独立", "new finding")):
-        if not targets.intersection({"start_objective_analysis", "publish_agent_objective_analysis"}):
+        if not targets.intersection({"start_objective_analysis"}):
             targets.discard("curate_finding")
-            targets.add("create_evidence_version" if mentions_terms(text, ("evidence", "证据")) else "create_finding_version")
+            targets.add("create_finding_version")
     return targets
 
 
@@ -450,7 +447,7 @@ def _write_request_scope(text: str) -> tuple[str, set[str]]:
         elif mentions_terms(clause, ("保存", "saving", "save", "写入")):
             forbidden.update(WRITE_CAPABILITIES)
         elif mentions_terms(clause, ("发布", "publish", "publishing")):
-            forbidden.update({"create_finding_version", "create_evidence_version", "publish_agent_objective_analysis"})
+            forbidden.update({"create_finding_version"})
         else:
             forbidden.update(WRITE_CAPABILITIES)
     return " ".join(affirmative), forbidden
@@ -517,6 +514,7 @@ def capability_names_for_intent(
     )
     process_intent = mentions(PROCESS_TERMS)
     source_grounded_intent = mentions(SOURCE_GROUNDED_TERMS)
+    paper_experiment_intent = mentions(PAPER_EXPERIMENT_TERMS)
 
     if paper_intent:
         allowed.update(COLLECTION_READ_CAPABILITIES)
@@ -554,6 +552,8 @@ def capability_names_for_intent(
             allowed.update(SOURCE_READ_CAPABILITIES)
     if process_intent:
         allowed.update(PROCESS_CAPABILITIES)
+    if paper_experiment_intent and (paper_intent or source_intent or has_source_context):
+        allowed.update(PAPER_EXPERIMENT_CAPABILITIES)
 
     continuation_intent = mentions(
         ("继续", "再看", "再读", "追加", "排除", "一起看", "continue", "also")
@@ -655,26 +655,11 @@ def capability_names_for_intent(
         allowed.add("create_finding_draft")
     if finding_intent and write_mentions(("标记", "标为", "mark")):
         allowed.add("record_finding_feedback")
-    evidence_write_intent = write_mentions(
-        (
-            "记录证据",
-            "保存证据",
-            "修订证据",
-            "record evidence",
-            "save evidence",
-            "revise evidence",
-            "correct evidence",
-            "update evidence",
-        )
-    ) or (
-        persist_intent and write_mentions(("evidence", "证据"))
-        and (not _write_targets(write_text) or "create_evidence_version" in _write_targets(write_text))
-    )
-    if evidence_write_intent:
-        allowed.add("create_evidence_version")
-    if write_mentions(("发布分析", "保存分析")) or (
-        write_mentions(("publish",)) and write_mentions(("analysis",))
+    if paper_experiment_intent and persist_intent:
+        allowed.add("create_paper_experiment_revision")
+    if paper_experiment_intent and write_mentions(
+        ("实验草案", "实验记录草案", "paper experiment draft", "experiment draft")
     ):
-        allowed.add("publish_agent_objective_analysis")
+        allowed.add("propose_paper_experiment_draft")
     allowed.difference_update(forbidden_writes)
     return allowed

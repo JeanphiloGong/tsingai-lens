@@ -9,45 +9,8 @@
 		type DocumentType
 	} from '../../../_shared/documents';
 	import { t } from '../../../_shared/i18n';
-	import { getContext } from 'svelte';
-	import { DOCUMENT_AGENT, type DocumentAgent } from './documentAgent';
-	const agent = getContext<DocumentAgent>(DOCUMENT_AGENT);
-	$: selectedIds = new Set($agent.papers.map((paper) => paper.document_id));
-	$: selectedOnPage =
-		profiles?.items.filter((paper) => selectedIds.has(paper.document_id)).length ?? 0;
-
-	function togglePaper(profile: DocumentProfile, index: number) {
-		if ($agent.busy) return;
-		agent.update((state) => ({
-			...state,
-			papers: selectedIds.has(profile.document_id)
-				? state.papers.filter((paper) => paper.document_id !== profile.document_id)
-				: [
-						...state.papers,
-						{ document_id: profile.document_id, title: displayTitle(profile, index) }
-					]
-		}));
-	}
-	function selectPage() {
-		if (!profiles || $agent.busy) return;
-		const pageIds = new Set(profiles.items.map((paper) => paper.document_id));
-		const allSelected = selectedOnPage === profiles.items.length;
-		agent.update((state) => ({
-			...state,
-			papers: allSelected
-				? state.papers.filter((paper) => !pageIds.has(paper.document_id))
-				: [
-						...state.papers,
-						...profiles!.items
-							.filter((paper) => !selectedIds.has(paper.document_id))
-							.map((paper, index) => ({
-								document_id: paper.document_id,
-								title: displayTitle(paper, offset + index)
-							}))
-					]
-		}));
-	}
-
+	import { onDestroy } from 'svelte';
+	import { Search } from '@lucide/svelte';
 	let profiles: DocumentProfilesResponse | null = null;
 	let loading = false;
 	let error = '';
@@ -56,8 +19,7 @@
 	let appliedQuery = '';
 	let documentTypeInput: DocumentType | '' = '';
 	let appliedDocumentType: DocumentType | '' = '';
-	let warningsOnlyInput = false;
-	let appliedWarningsOnly = false;
+	let searchTimer: ReturnType<typeof setTimeout> | undefined;
 	let offset = 0;
 	let requestSequence = 0;
 	const PAGE_SIZE = 25;
@@ -65,18 +27,22 @@
 	$: collectionId = $page.params.id ?? '';
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
-		void loadProfiles();
+		clearTimeout(searchTimer);
+		searchInput = '';
+		documentTypeInput = '';
+		void loadProfiles(0, '', '');
 	}
 
-	$: filtersActive = Boolean(appliedQuery || appliedDocumentType || appliedWarningsOnly);
+	$: filtersActive = Boolean(searchInput.trim() || documentTypeInput);
 
 	async function loadProfiles(
 		nextOffset = offset,
-		nextQuery = appliedQuery,
-		nextDocumentType = appliedDocumentType,
-		nextWarningsOnly = appliedWarningsOnly
+		nextQuery = searchInput.trim(),
+		nextDocumentType = documentTypeInput
 	) {
+		clearTimeout(searchTimer);
 		const requestId = ++requestSequence;
+		offset = nextOffset;
 		loading = true;
 		error = '';
 		try {
@@ -84,15 +50,12 @@
 				offset: nextOffset,
 				limit: PAGE_SIZE,
 				query: nextQuery,
-				docType: nextDocumentType || undefined,
-				hasWarnings: nextWarningsOnly ? true : undefined
+				docType: nextDocumentType || undefined
 			});
 			if (requestId !== requestSequence) return;
 			profiles = result;
-			offset = nextOffset;
 			appliedQuery = nextQuery;
 			appliedDocumentType = nextDocumentType;
-			appliedWarningsOnly = nextWarningsOnly;
 		} catch (err) {
 			if (requestId !== requestSequence) return;
 			profiles = null;
@@ -102,24 +65,24 @@
 		}
 	}
 
-	function applyFilters() {
-		void loadProfiles(0, searchInput.trim(), documentTypeInput, warningsOnlyInput);
+	onDestroy(() => {
+		clearTimeout(searchTimer);
+		requestSequence += 1;
+	});
+	function searchChanged() {
+		clearTimeout(searchTimer);
+		requestSequence += 1;
+		loading = true;
+		error = '';
+		searchTimer = setTimeout(() => void loadProfiles(0), 250);
 	}
-
-	function clearFilters() {
-		searchInput = '';
-		documentTypeInput = '';
-		warningsOnlyInput = false;
-		void loadProfiles(0, '', '', false);
-	}
-
 	function previousPage() {
-		void loadProfiles(Math.max(0, offset - PAGE_SIZE), appliedQuery);
+		void loadProfiles(Math.max(0, offset - PAGE_SIZE), appliedQuery, appliedDocumentType);
 	}
 
 	function nextPage() {
 		if (!profiles || offset + profiles.count >= profiles.total) return;
-		void loadProfiles(offset + PAGE_SIZE, appliedQuery);
+		void loadProfiles(offset + PAGE_SIZE, appliedQuery, appliedDocumentType);
 	}
 
 	function displayTitle(profile: DocumentProfile, index: number) {
@@ -146,13 +109,9 @@
 <svelte:head><title>{$t('collection.tabs.papers')}</title></svelte:head>
 
 <section class="papers-page fade-up">
-	<a class="workspace-link" href={`/collections/${collectionId}`}
-		>{$t('researchAgent.backToWorkspace')}</a
-	>
 	<header class="papers-header">
 		<div>
 			<h2>{$t('collection.tabs.papers')}</h2>
-			<p>{$t('research.documents.profileLead')}</p>
 		</div>
 		{#if profiles}
 			<span
@@ -161,19 +120,28 @@
 		{/if}
 	</header>
 
-	<form class="paper-filters" role="search" on:submit|preventDefault={applyFilters}>
+	<form class="paper-filters" role="search" on:submit|preventDefault={() => loadProfiles(0)}>
 		<label class="filter-field" for="paper-search">
-			<span>{$t('research.documents.searchLabel')}</span>
+			<Search size={18} aria-hidden="true" />
 			<input
 				id="paper-search"
 				type="search"
+				aria-label={$t('research.documents.searchLabel')}
+				on:input={searchChanged}
 				bind:value={searchInput}
 				placeholder={$t('research.documents.searchPlaceholder')}
 			/>
 		</label>
 		<label class="filter-field" for="paper-type-filter">
-			<span>{$t('research.documents.paperType')}</span>
-			<select id="paper-type-filter" bind:value={documentTypeInput}>
+			<select
+				id="paper-type-filter"
+				aria-label={$t('research.documents.paperType')}
+				bind:value={documentTypeInput}
+				on:change={(event) => {
+					documentTypeInput = event.currentTarget.value as DocumentType | '';
+					void loadProfiles(0);
+				}}
+			>
 				<option value="">{$t('research.documents.allPaperTypes')}</option>
 				<option value="experimental">{$t('overview.docTypeExperimental')}</option>
 				<option value="review">{$t('overview.docTypeReview')}</option>
@@ -181,48 +149,7 @@
 				<option value="uncertain">{$t('overview.docTypeUncertain')}</option>
 			</select>
 		</label>
-		<label class="warning-filter">
-			<input type="checkbox" bind:checked={warningsOnlyInput} />
-			<span>{$t('research.documents.hasWarnings')}</span>
-		</label>
-		<div class="filter-actions">
-			<button class="btn btn--primary btn--small" type="submit">
-				{$t('research.documents.applyFilters')}
-			</button>
-			{#if filtersActive}
-				<button class="btn btn--ghost btn--small" type="button" on:click={clearFilters}>
-					{$t('research.documents.clearFilters')}
-				</button>
-			{/if}
-		</div>
 	</form>
-	<div class="selection-toolbar">
-		<label
-			><input
-				type="checkbox"
-				checked={Boolean(profiles?.items.length) && selectedOnPage === profiles?.items.length}
-				indeterminate={selectedOnPage > 0 && selectedOnPage < (profiles?.items.length ?? 0)}
-				disabled={$agent.busy || loading || !profiles?.items.length}
-				on:change={selectPage}
-			/>{$t('researchAgent.paperScope.selectPage')}</label
-		>
-		<span aria-live="polite"
-			>{$t('researchAgent.paperScope.selected', { count: $agent.papers.length })}</span
-		>
-		{#if $agent.papers.length}<button
-				class="btn btn--ghost btn--small"
-				type="button"
-				disabled={$agent.busy}
-				on:click={() => agent.update((state) => ({ ...state, papers: [] }))}
-				>{$t('researchAgent.paperScope.clear')}</button
-			>{/if}
-		<button
-			class="btn btn--primary btn--small"
-			type="button"
-			on:click={() => agent.update((state) => ({ ...state, open: true }))}
-			>{$t('workbench.askResearchAgent')}</button
-		>
-	</div>
 
 	{#if loading}
 		<p class="page-state" aria-busy="true">{$t('research.documents.profileLoading')}</p>
@@ -253,167 +180,134 @@
 			</span>
 		</div>
 		<div class="paper-list">
+			<div class="paper-list-head">
+				<span>{$t('research.documents.columnTitle')}</span>
+				<span>{$t('research.documents.columnStatus')}</span>
+				<span>{$t('research.documents.columnPages')}</span>
+			</div>
 			{#each profiles.items as profile, index (profile.document_id)}
-				<div class="paper-row" data-paper-row>
-					<input
-						class="paper-checkbox"
-						type="checkbox"
-						disabled={$agent.busy}
-						checked={selectedIds.has(profile.document_id)}
-						aria-label={$t('researchAgent.paperScope.select', {
-							title: displayTitle(profile, offset + index)
-						})}
-						on:change={() => togglePaper(profile, offset + index)}
-					/>
+				<a
+					class="paper-row"
+					data-paper-row
+					href={resolve('/collections/[id]/documents/[document_id]', {
+						id: collectionId,
+						document_id: profile.document_id
+					})}
+				>
 					<div class="paper-row__identity">
-						<span class="paper-type">{documentTypeLabel(profile)}</span>
 						<h3>{displayTitle(profile, offset + index)}</h3>
+						<span class="paper-type">{documentTypeLabel(profile)}</span>
 					</div>
 
-					<div class="paper-row__metadata">
-						{#if profile.page_count}
-							<span>{$t('research.documents.pageCount', { count: profile.page_count })}</span>
-						{/if}
-						{#if profile.confidence !== null}
-							<span
-								>{$t('research.documents.profileConfidence', {
-									value: Math.round(profile.confidence * 100)
-								})}</span
-							>
-						{/if}
-					</div>
-
-					<div class="paper-row__action">
-						<a
-							class="btn btn--ghost btn--small"
-							href={resolve('/collections/[id]/documents/[document_id]', {
-								id: collectionId,
-								document_id: profile.document_id
-							})}
+					<div class="paper-row__status">
+						<span
+							>{$t(
+								profile.profile_status === 'completed'
+									? 'research.documents.parsingComplete'
+									: 'research.documents.parsingFailed'
+							)}</span
 						>
-							{$t('research.documents.openPaper')}
-						</a>
 					</div>
-
-					{#if profile.profile_warnings.length}
-						<ul class="paper-warnings">
-							{#each profile.profile_warnings as warning (warning)}
-								<li>{warning}</li>
-							{/each}
-						</ul>
-					{/if}
-				</div>
+					<div class="paper-row__pages">
+						<span
+							>{profile.page_count
+								? $t('research.documents.pageCount', { count: profile.page_count })
+								: '-'}</span
+						>
+					</div>
+				</a>
 			{/each}
 		</div>
-		<nav class="paper-pagination" aria-label={$t('research.documents.paginationLabel')}>
-			<button
-				class="btn btn--ghost btn--small"
-				type="button"
-				disabled={offset === 0 || loading}
-				on:click={previousPage}
-			>
-				{$t('research.documents.previousPage')}
-			</button>
-			<span>{pageRange()}</span>
-			<button
-				class="btn btn--ghost btn--small"
-				type="button"
-				disabled={offset + profiles.count >= profiles.total || loading}
-				on:click={nextPage}
-			>
-				{$t('research.documents.nextPage')}
-			</button>
-		</nav>
+		{#if profiles.total > PAGE_SIZE}
+			<nav class="paper-pagination" aria-label={$t('research.documents.paginationLabel')}>
+				<button
+					class="btn btn--ghost btn--small"
+					type="button"
+					disabled={offset === 0 || loading}
+					on:click={previousPage}
+				>
+					{$t('research.documents.previousPage')}
+				</button>
+				<span>{pageRange()}</span>
+				<button
+					class="btn btn--ghost btn--small"
+					type="button"
+					disabled={offset + profiles.count >= profiles.total || loading}
+					on:click={nextPage}
+				>
+					{$t('research.documents.nextPage')}
+				</button>
+			</nav>
+		{/if}
 	{/if}
 </section>
 
 <style>
 	.papers-page {
-		width: min(1120px, 100%);
+		width: min(1296px, 100%);
 		margin: 0 auto;
 		display: grid;
-		gap: 22px;
+		gap: 20px;
+		container-type: inline-size;
 	}
-
 	.papers-header {
 		display: flex;
-		align-items: flex-end;
+		align-items: center;
 		justify-content: space-between;
-		gap: 24px;
-		padding-bottom: 18px;
-		border-bottom: 1px solid var(--border-default);
+		gap: 16px;
 	}
-
-	.papers-header h2,
-	.papers-header p,
-	.paper-row h3,
-	.page-state h3,
-	.page-state p {
-		margin: 0;
-	}
-
 	.papers-header h2 {
-		font-size: 28px;
+		margin: 0;
+		font-size: 26px;
 		line-height: 36px;
 	}
-
-	.papers-header p {
-		max-width: 680px;
-		margin-top: 6px;
-		color: var(--text-secondary);
-		line-height: 22px;
-	}
-
 	.papers-header > span {
 		color: var(--text-secondary);
 		font-size: 13px;
 	}
-
 	.paper-filters {
-		display: grid;
-		grid-template-columns: minmax(260px, 1fr) minmax(180px, 240px) auto auto;
-		align-items: end;
+		display: flex;
+		justify-content: flex-end;
 		gap: 12px;
 	}
-
 	.filter-field {
-		display: grid;
-		gap: 6px;
-		min-width: 0;
-		font-size: 13px;
-		font-weight: 700;
-	}
-
-	.warning-filter,
-	.filter-actions {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		min-width: 0;
 	}
-
-	.warning-filter {
-		min-height: 38px;
-		font-size: 13px;
-		white-space: nowrap;
+	.filter-field:first-child {
+		width: min(352px, 100%);
+		gap: 10px;
+		padding: 0 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 6px;
+		background: var(--surface-card);
+		color: var(--text-secondary);
 	}
-
-	.filter-field input,
-	.filter-field select {
+	.filter-field:first-child:focus-within {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 2px;
+	}
+	.filter-field input {
 		width: 100%;
+		min-width: 0;
+		height: 38px;
+		border: 0;
+		outline: 0;
+		background: transparent;
+		color: var(--text-primary);
+		font: inherit;
+		font-size: 13px;
+	}
+	.filter-field select {
 		min-height: 38px;
+		max-width: 100%;
 		padding: 7px 10px;
 		border: 1px solid var(--border-default);
+		border-radius: 6px;
 		background: var(--surface-card);
 		color: var(--text-primary);
 	}
-
-	.paper-results-status {
-		display: flex;
-		justify-content: space-between;
-		color: var(--text-secondary);
-		font-size: 13px;
-	}
-
 	.page-state {
 		display: grid;
 		justify-items: start;
@@ -421,165 +315,110 @@
 		padding: 24px 0;
 		color: var(--text-secondary);
 	}
-
+	.page-state h3,
+	.page-state p {
+		margin: 0;
+	}
 	.page-state--error {
 		color: var(--danger-text);
 	}
-
+	.paper-results-status {
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
 	.paper-list {
 		display: grid;
 		border-top: 1px solid var(--border-default);
 	}
-
+	.paper-list-head {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(160px, auto) minmax(90px, 120px);
+		align-items: center;
+		gap: 24px;
+		min-height: 42px;
+		padding: 0 16px;
+		border-bottom: 1px solid var(--border-default);
+		background: var(--bg-subtle);
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 600;
+	}
+	.paper-list-head span:last-child {
+		text-align: right;
+	}
 	.paper-row {
 		display: grid;
-		grid-template-columns: 20px minmax(0, 1fr) minmax(90px, auto) auto;
+		grid-template-columns: minmax(0, 1fr) minmax(160px, auto) minmax(90px, 120px);
 		align-items: center;
-		gap: 16px;
-		min-height: 70px;
-		padding: 11px 4px;
+		gap: 24px;
+		min-height: 92px;
+		padding: 16px;
 		border-bottom: 1px solid var(--border-default);
+		background: var(--surface-card);
+		text-decoration: none;
+		color: var(--text-primary);
 	}
-
+	.paper-row:hover {
+		background: var(--surface-hover, var(--surface-card));
+	}
+	.paper-row:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: -2px;
+	}
 	.paper-row__identity {
 		min-width: 0;
 		display: grid;
-		gap: 4px;
+		gap: 6px;
 	}
-
-	.paper-type {
-		width: fit-content;
-		color: var(--text-secondary);
-		font-size: 10px;
-		font-weight: 700;
-		text-transform: uppercase;
-	}
-
 	.paper-row h3 {
+		margin: 0;
 		overflow-wrap: anywhere;
-		font-size: 14px;
-		line-height: 20px;
+		font-size: 16px;
+		line-height: 24px;
+		color: var(--brand-primary);
 	}
-
-	.paper-row__metadata {
+	.paper-row:hover h3 {
+		text-decoration: underline;
+	}
+	.paper-type {
 		color: var(--text-secondary);
 		font-size: 12px;
-		line-height: 18px;
 	}
-
-	.paper-row__metadata {
-		display: grid;
-		gap: 4px;
+	.paper-row__status,
+	.paper-row__pages {
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
+	.paper-row__pages {
 		text-align: right;
 	}
-
-	.paper-warnings {
-		grid-column: 1 / -1;
-		margin: 0;
-		padding: 8px 4px 0 20px;
-		border-top: 1px solid var(--border-default);
-		color: var(--warning-text);
-		font-size: 12px;
-		line-height: 19px;
-	}
-
 	.paper-pagination {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-		padding-top: 8px;
 		color: var(--text-secondary);
 		font-size: 13px;
 	}
-
-	@media (max-width: 720px) {
-		.papers-header {
-			align-items: flex-start;
-			flex-direction: column;
-		}
-
-		.paper-row {
-			grid-template-columns: 20px minmax(0, 1fr);
-			gap: 8px;
-			padding: 12px 0;
-		}
-
-		.paper-row__action,
-		.paper-row__metadata {
-			grid-column: 2;
-			justify-self: start;
-			text-align: left;
-		}
-
+	@container (max-width: 720px) {
 		.paper-filters {
-			grid-template-columns: 1fr;
-		}
-
-		.filter-actions {
-			align-items: stretch;
 			flex-wrap: wrap;
 		}
-
-		.filter-actions .btn {
-			flex: 1;
+		.filter-field:first-child {
+			width: 100%;
 		}
-
-		.paper-pagination {
-			align-items: stretch;
-			flex-direction: column;
-		}
-	}
-	.workspace-link {
-		font-size: 12px;
-		color: var(--text-secondary);
-	}
-	.selection-toolbar {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 12px;
-		padding: 10px 0;
-		border-block: 1px solid var(--border-default);
-		font-size: 12px;
-	}
-	.selection-toolbar label {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-	.selection-toolbar > span {
-		margin-right: auto;
-		color: var(--text-secondary);
-	}
-	input[type='checkbox'] {
-		width: 16px;
-		height: 16px;
-		accent-color: var(--brand-primary);
-		cursor: pointer;
-	}
-	.paper-row:has(.paper-checkbox:checked) {
-		background: var(--brand-soft);
-	}
-	.papers-page {
-		container-type: inline-size;
-	}
-	@container (max-width: 850px) {
-		.paper-filters {
-			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		}
-	}
-	@container (max-width: 500px) {
-		.paper-filters {
-			grid-template-columns: minmax(0, 1fr);
+		.paper-list-head {
+			display: none;
 		}
 		.paper-row {
-			grid-template-columns: 20px minmax(0, 1fr);
+			grid-template-columns: minmax(0, 1fr);
+			gap: 12px;
 		}
-		.paper-row__metadata,
-		.paper-row__action {
-			grid-column: 2;
+		.paper-row__pages {
 			text-align: left;
+		}
+		.paper-pagination {
+			flex-wrap: wrap;
 		}
 	}
 </style>

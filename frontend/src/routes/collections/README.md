@@ -30,31 +30,27 @@ This node owns the Collection route family.
   completion exposes Findings, while failure keeps its explanation and retry on
   the same row.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`
-  Published Finding list and one selected Finding detail. A researcher can
-  create a new Finding from all eligible Evidence in the current published
-  version, or derive one from a selected system Finding. Evidence roles and
-  exact Source links stay visible in the editor. Saving publishes a new
-  immutable analysis snapshot, reloads that version, and selects the authored
-  Finding; the prior Finding remains unchanged. The same editor can record an
-  explicit evidence abstention without creating a placeholder Finding. The
-  workspace marks Findings whose cited Evidence was replaced as needing review,
-  links original and subsequent Finding versions, and opens an editable Agent
-  review request without submitting it. The authoring editor excludes replaced
-  Evidence from all roles and does not preassign its replacement. An affected
-  historical Finding keeps its original evidence and does not offer a fresh AI
-  summary until the researcher selects a conclusion based on current evidence.
-  Selecting a Finding automatically loads its saved feedback and latest curation
-  for the exact Collection, Objective, analysis version, and Finding identity.
-  The workbench keeps the original conclusion visible beside the saved correction,
-  its reason, reviewer, time, scope, and Source links. Loading failures expose a
-  retry; switching identity ignores stale responses. Opening the feedback editor
-  remains an explicit action and refreshes its latest saved decision.
+  Research Objective review workspace. The default results view shows the
+  experiment comparison overview and the complete published Finding list;
+  analysis scope is a separate tab. Clicking a Finding opens its focused
+  detail view through the `finding_id` URL parameter, and the back action
+  returns to the results overview without selecting a Finding automatically.
+  A researcher can create a new Finding from fixed PaperExperiment selections
+  and optional comparison groups in the current published analysis. Saving
+  publishes a new immutable analysis snapshot, reloads that version, and keeps
+  the previous Finding unchanged. The selected Finding detail is read-only: it
+  explains the experiment-backed result, comparison, applicability, and exact
+  Source links. Scientific corrections return to the experiment data and
+  selection flow; the detail page has no inline feedback, curation, or Evidence
+  replacement workflow. Feedback and curation APIs remain available to the
+  separate evaluation and Research Agent workbenches. The detail view leads
+  with the selected experiment data, then separates applicability, conclusion
+  boundaries, and mechanism evidence. Source contributions and analysis/
+  experiment version metadata stay collapsed until audit is needed.
   The sidebar can export the published Finding dataset as JSON or training JSONL
   with label and dataset-use filters. The collection workspace also exposes
   collection-level Finding JSON/JSONL and expert gold-draft downloads beside
   the original paper archive.
-- `collections/[id]/comparisons/+page.svelte`
-  Published cross-paper Finding overview grouped by Objective.
 - `collections/[id]/graph/+page.svelte`
   Secondary Objective Evidence Map. It selects one published Objective and
   shows deterministic Finding, Evidence, exact Source, paper, and coverage
@@ -64,8 +60,15 @@ This node owns the Collection route family.
   Objective-level coverage stays visible in either filter. Source return links
   retain the Objective and Finding selection.
 - `collections/[id]/documents/*`
-  Parsed-paper reading and exact Source verification. Papers can be selected
-  across list pages, and up to 12 stable Source blocks can be selected for a
+  Collection paper browsing, parsed-paper reading and exact Source verification.
+  Search updates after a short debounce; document-type changes apply immediately
+  before pagination. Each whole paper row links to its reader. The list has no
+  paper-selection toolbar, warning filter, apply/reset buttons or reader button.
+  Wide layouts show paper, parsing status and page-count column headers; narrow
+  layouts collapse those headers into the paper cards. Returning to the list
+  restores the normal Collection chrome while keeping already opened paper tabs
+  available for the next reader visit.
+  Up to 12 stable Source blocks can be selected for a
   question. The Collection Agent opens alongside the list or reader and remains
   mounted when collapsed. New session starts a separate Collection-bound
   conversation. The handoff creates no Objective, Evidence, or Finding.
@@ -102,12 +105,13 @@ This node owns the Collection route family.
   shown by the Objective workspace.
   For a published Finding, the Agent reads the complete Finding, linked
   Evidence, and exact Sources before proposing feedback or curation. Both
-  writes require exact user approval and reuse the Finding workbench's existing
-  review service. From the current published analysis, the Agent may also
-  propose a new Finding with exact eligible Evidence roles or an explicit
-  evidence abstention. Approval calls the same authoring service as the human
-  editor and publishes a new immutable analysis version; Chat does not create
-  another Finding, Evidence, or review identity.
+  writes require exact user approval and remain separate from the read-only
+  Finding detail. From the current published analysis, the Agent may also
+  propose a new Finding by selecting canonical PaperExperiment results and
+  optional comparison groups. Approval calls the same experiment-selection
+  authoring service as the Objective results workspace and publishes a new
+  immutable analysis version; Chat does not create another Finding, Evidence,
+  or review identity.
   It can also inspect one exact prepared Source and propose a structured
   Source-grounded Evidence record. That write requires the same exact
   approval, Source digest, and immutable-version publication as the human
@@ -129,8 +133,94 @@ This node owns the Collection route family.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.
+  The composer also provides a Codex-style local slash-command menu.
+  `/permissions` opens the current session's authority controls, `/settings`
+  opens collection defaults, and `/status`, `/new`, `/history`, `/tree`, and
+  `/help` operate on the client conversation surface. These commands are
+  resolved before message submission and are never sent to the Agent as
+  research text.
+- `collections/[id]/settings/+page.svelte`
+  Collection-level Agent permission defaults for newly created sessions. The
+  owner can choose read-only, per-write confirmation, or a persistent/temporary
+  automatic grant and can authorize the complete current write-action set. Existing
+  sessions keep their own permission record and must be changed from the
+  conversation control.
+- `collections/[id]/feedback/+page.svelte`
+  Fixed task workbenches for the current Collection: SFT, preference, and
+  evaluation. Analysis workers continuously turn new feedback cases into
+  candidate samples; opening a task takes the user directly to its queue. The
+  dataset workbench keeps SFT, preference, and evaluation task tabs together,
+  exposes status filters and question search, and provides a header shortcut
+  that selects every confirmed sample before opening the existing export
+  preflight flow.
+  The entry and all three annotation editors use the application's shared
+  brand, surface, text, and state tokens in both light and dark themes. The
+  entry uses a compact task selector. Feedback routes use a flat, compact
+  application header and a contiguous queue, answer editor, and evidence
+  layout. Sample questions sit above the answer editor, while evidence remains
+  alongside it in an independently scrollable column on desktop; narrow screens stack the editor and evidence below
+  a horizontally scrollable queue. Evaluation criteria are independent editable
+  rows: adding a row requires completing it before saving, deleting a row
+  removes only that criterion, and reloading restores each saved criterion once.
+  Rebuild, discard, restore, and retry
+  controls stay available in the expandable additional-actions section.
+  Candidate analysis stays inside the workbench as an internal review signal;
+  only a confirmed sample revision can be published as model-facing JSONL.
+  The validation scenario uses two open-access Nature Communications papers:
+  Martin et al. (2019), DOI `10.1038/s41467-019-10009-2`, on keyhole pore
+  formation at scan-velocity changes, and Pham et al. (2020), DOI
+  `10.1038/s41467-020-14453-3`, on scan strategy and side-branching. The
+  detail view keeps their material, process variable, outcome, page, DOI, and
+  Source excerpt together so a reviewer can judge comparability from the
+  papers themselves. Workers identify missing inputs instead of pretending they
+  are confirmed training examples.
 
 ## Objective Interaction
+
+The maintained feedback task page opens one fixed task workbench and shows its
+sample queue. SFT and evaluation candidates are generated from the case's
+readable evidence; preference candidates use the original and corrected
+answers when both exist. For SFT, the page keeps the question and readable evidence beside
+an editable candidate answer; saving appends a human revision and confirming
+binds that exact revision. A stale revision returns a conflict without losing
+the local draft. Users operate on questions, answers, and evidence text; sample,
+case, message, and source identities remain browser request parameters rather
+than visible labels. A reviewer can send a candidate back with a reason, retry
+a failed build, discard a sample, or restore it to an unconfirmed state.
+Preference review displays the Worker's recommendation and evidence-grounded
+rationale beside the unchanged answer pair. The reviewer explicitly accepts
+that recommendation or selects a different preference. Confirming saves any
+local preference changes and then confirms the returned revision, so no
+separate save click is required. If saving fails, confirmation is not sent;
+if confirmation fails after saving, the saved version and choice remain
+available for retry. Worker suggestions never populate the human choice
+without a reviewer action.
+The queue keeps discarded and incomplete samples reachable for recovery. All
+three task editors also open for `needs_input` samples without a revision.
+Users can complete a missing question, answer pair or reference and criteria,
+and add or remove readable evidence excerpts. Saving complete input creates
+the first human revision with the loaded generation as a concurrency check;
+confirmation is a separate action. Editing evidence also updates the model's
+context, so the export cannot retain a stale excerpt.
+The former snapshot page and download endpoints are not product surfaces after
+D7; legacy snapshots are read only by the migration script and may remain
+only in an operations archive.
+
+The task page's collapsible export section sits below sample review as a separate delivery step after
+confirmation. Users select confirmed samples individually or select the full
+confirmed queue. The request freezes that selection, shows the count of valid rows and each issue,
+and lets the user open an affected sample or explicitly publish only the valid
+rows. Publishing freezes the confirmed revision set; later edits create a new
+export rather than changing an earlier file. New v2 JSONL and JSON downloads use
+Messages SFT, conversational DPO (`prompt/chosen/rejected` message arrays), or
+evaluation messages with separate reference/criteria. Reviewed document text
+is embedded in the last user message; standalone context/evidence remain only
+in the provenance sidecar. The export history distinguishes v2 formats from
+immutable historical v1 files, which are downloaded as originally stored.
+The provenance download keeps
+the row-to-message/source mapping and evidence locators for audit, while the
+manifest download binds the task schema, file names, row count, and digests.
+These internal identifiers stay out of the training file.
 
 The selected Finding and the Evidence Map share `FindingEvidenceSummary.svelte`.
 Opening "AI summary" requests one short paragraph; it has no categorized
@@ -150,16 +240,16 @@ Research Objective
      -> typed scientific context, deterministic analysis boundaries, and mechanisms
      -> PaperContribution bindings
      -> exact Evidence excerpts and Source links
-     -> researcher-authored Finding or explicit evidence abstention
-     -> feedback action
+     -> fixed PaperExperiment selections and comparison groups
 ```
 
-Finding authoring exposes only decisions the researcher actually makes:
-statement strength, limitations, and Evidence roles. It never asks for
-internal IDs as visible labels or for derived factors, outcome, direction,
-certainty, attribution, synthesis, paper coverage, creator identity, or target
-version. Blank creation and parent-derived revision call the same backend
-command; neither edits a published result in place.
+Finding authoring exposes the fixed PaperExperiment selections and optional
+comparison groups that the researcher chooses. It never asks for internal IDs
+as visible labels or for derived factors, outcome, direction, certainty,
+attribution, synthesis, paper coverage, creator identity, or target version.
+The results overview creates a new immutable analysis version; the selected
+Finding detail does not provide a revision or feedback control and never edits
+a published result in place.
 
 Objective confirmation state and analysis execution state remain separate
 domain states, but one analysis command owns the approval-and-queue transition.
@@ -205,18 +295,17 @@ Published Finding metadata shows the model recorded for that published analysis,
 not the model attached to a newer active or failed retry. Historical analyses
 without model metadata are labeled explicitly instead of guessing a model.
 
-The Finding list returns the complete display shape. Selection reuses that item
-and loads only its paginated Evidence with the published `analysis_version`;
-stale rapid-selection responses are discarded.
-The Finding route uses a compact Collection link and single-row navigation in
+The Finding list returns the complete display shape. Clicking a row opens the
+focused Finding view and loads only its paginated Evidence with the published
+`analysis_version`; the back action returns to the results overview, and stale
+rapid-selection responses are discarded.
+The Objective route uses a compact Collection link and single-row navigation in
 place of the Collection overview header. Published results appear directly
 beneath the Objective question. Evidence
-coverage is a compact, initially collapsed sidebar disclosure with record and
-review-gap counts; expanding it preserves gap reasons, excerpts, status counts,
-and exact Source links. Research scope and export controls are also collapsed
-instead of introducing the results with explanatory panels. On narrow screens,
-multiple Findings use a select control so the full list does not precede the
-selected result. No-Finding outcomes remain explicit, and active or failed
+coverage is a compact, initially collapsed disclosure with record and review-gap
+counts; expanding it preserves gap reasons, excerpts, status counts, and exact
+Source links. Research scope is a separate tab, while export is available from
+the page header. No-Finding outcomes remain explicit, and active or failed
 analysis states remain visible alongside any previously published results.
 The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned
@@ -240,26 +329,29 @@ mechanisms link to their exact supporting Evidence.
 
 ## Product Boundary
 
-The collection comparison page is a read-only overview of published
-Objective Findings. It does not rebuild conclusions from legacy comparison
-rows, Evidence cards, material projections, or collection-wide graph
-projections. The Objective Evidence Map is a read-only view of those same
+Published Findings are reviewed within their owning research Objective. The
+standalone collection comparison route and navigation entry have been removed;
+cross-paper comparison remains part of the experiment-backed Finding view. The
+interface does not rebuild conclusions from legacy comparison rows, Evidence
+cards, material projections, or collection-wide graph projections.
+The Objective Evidence Map is a read-only view of those same
 published records, not another aggregate or analysis path. The Objective page
-owns the single confirmation-and-analysis command; the Finding page owns expert
-authorship and review; the document reader owns Source verification. Current
-Finding authoring reuses already published Evidence. The Agent and HTTP
-Evidence command can record a verified Source decision; selecting arbitrary
-raw document text, tables, or figures directly inside the document reader
-remains the later #191 workflow, and
-Objective-local paper-scope review remains #340.
+owns the confirmation-and-analysis command and experiment-selection authoring;
+the Finding page owns read-only interpretation and Source verification; the
+document reader owns exact Source review. Feedback and curation remain
+available through the separate Agent and evaluation workbenches. The Agent and
+HTTP Evidence command can record a verified Source decision; selecting
+arbitrary raw document text, tables, or figures directly inside the document
+reader remains the later #191 workflow, and Objective-local paper-scope review
+remains #340.
 The Research Agent may consume published Findings and propose a new
 researcher-approved version through the same authoring service. It does not
 introduce a second conclusion identity. Experiment plans remain downstream
 consumers of published Findings.
 
 The Papers route reports the complete profiled collection size while rendering
-one bounded, compact page. Its title/filename search, document-type filter, and
-parsing-warning filter are collection-wide and run before pagination. Page,
+one bounded, compact page. Its title/filename search and document-type filter
+apply automatically across the collection before pagination. Page,
 search, or filter failures remain explicit instead of presenting one partial
 page as the whole collection. Routine internal Document IDs stay out of the
 paper list; exact Source navigation continues through the canonical paper

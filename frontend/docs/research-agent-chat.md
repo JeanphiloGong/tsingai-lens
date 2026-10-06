@@ -21,16 +21,28 @@ small, intent-matched set of collection, Source, Finding, Objective, or plan
 actions for each decision; it does not receive the whole capability catalogue.
 Collection screening stays separate from Source reading, and deriving a new
 Objective requires an explicit request. A Core write remains paused until the
-user approves the exact persisted arguments.
+user approves the exact persisted arguments by default. The collection Settings
+page controls the default for new collection Agent sessions with read-only, per-call
+confirmation, and automatic grants. An automatic grant can stay active until revoked or be
+limited to at most 24 hours. A select-all control can authorize
+the complete current write-action set. The session permission control remains a
+session-scoped override for one active conversation; changing the collection default
+never silently changes an active session. Branches continue to start with
+confirmation so a copied conversation cannot inherit automatic authority.
+Granting Evidence or Finding creation includes publishing its new analysis version. The control
+uses GET/PUT on the session's `/permissions` endpoint and an optimistic revision;
+conflicts require reload, never an automatic overwrite. Revoking during a turn
+blocks the next unclaimed write, not an operation already running. New sessions
+and branches default to confirmation.
 
 ## Product Boundary
 
 The Research Agent helps a materials researcher inspect a collection, ask what
 the published analysis supports, formulate a focused candidate question,
 review an existing published conclusion, and propose a new conclusion from
-eligible published Evidence through the same controls as the Finding
-workbench. It does not replace the comparison workspace or become a second
-scientific fact store.
+fixed PaperExperiment selections and optional comparison groups through the
+same authoring service as the Objective results workspace. It does not replace
+the comparison workspace or become a second scientific fact store.
 
 - Chat owns sessions, ordered messages, capability activity, and approval
   decisions.
@@ -52,9 +64,10 @@ scientific fact store.
 - A Finding review begins from the complete published Finding, linked Evidence,
   and exact Sources. Feedback and curation reuse `FindingFeedbackService` after
   exact user approval.
-- Finding authoring begins from the current published analysis and its complete
-  role-eligible Evidence. The Agent may propose exact Evidence roles, a bounded
-  conclusion, or an explicit evidence abstention. After exact user approval,
+- Finding authoring begins from the current published analysis and its
+  PaperExperiment selection graph. The Agent may propose canonical selection
+  IDs and optional comparison-group IDs; it cannot hand-write a conclusion or
+  use Evidence IDs as Finding inputs. After exact user approval,
   `FindingAuthoringService` publishes a new immutable analysis version. The
   Agent cannot alter the source version, parent Finding, Evidence, or Source
   identities.
@@ -89,6 +102,8 @@ POST /api/v1/chat-sessions/{session_id}/branches
 GET  /api/v1/chat-sessions/{session_id}/tree
 PUT  /api/v1/chat-sessions/{session_id}/messages/{message_id}/feedback
 POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
+GET  /api/v1/collections/{collection_id}/agent-permissions
+PUT  /api/v1/collections/{collection_id}/agent-permissions
 ```
 
 The composer also exposes an explicit PDF-paper upload action for the current
@@ -410,6 +425,30 @@ Evidence, and Source routes.
 
 ## Visible States
 
+### Inline source citations
+
+Source support is read in the answer where the claim is made. Each factual
+sentence, comparison-table value, or paper-specific limitation ends with a
+compact link such as `P006.pdf · Table 3 · p. 8`; opening it activates the
+matching paper and exact Source location in the reading area. The answer does
+not begin or end with a detached list of Source IDs, and users do not need to
+interpret backend locators to understand what supports a statement.
+
+The model's `[[cite:...]]` markers are converted to these labels only after the
+server verifies a complete exact Source read. Search results, headings, and
+truncated Source windows remain navigation previews and are never presented as
+supporting links. Internal `blk_doc_*`, `tbl_doc_*`, and `fig_doc_*` identities
+are retained only for audit and navigation; they are not visible in the label or
+ordinary answer prose. The same projection is applied when older trajectories
+are loaded, without rewriting their stored audit record.
+
+While a response is streaming, an unfinished citation marker is hidden from the
+transient text so an internal locator cannot flash in the UI. The completed
+`turn` response replaces that provisional text with the persisted answer and its
+inline links. A citation is therefore understood together with the sentence or
+table row it supports, while the activity disclosure remains available for the
+separate execution history.
+
 ### Empty and ordinary conversation
 
 The page offers realistic prompts for collection overview, published Findings,
@@ -573,13 +612,14 @@ chain-of-thought, prompts, JSON repair, or retry mechanics.
 ### Write approval
 
 For `start_research_process`, `create_objective_candidate`,
-`confirm_objective`, `start_objective_analysis`, `record_finding_feedback`, `curate_finding`,
-`create_finding_version`, `create_evidence_version`,
-`publish_agent_objective_analysis`, and `create_research_plan`, the page renders the exact persisted
+`confirm_objective`, `start_objective_analysis`, `record_finding_feedback`,
+`curate_finding`, `create_finding_version`, `create_evidence_version`,
+`publish_agent_objective_analysis`, `create_research_plan`, and
+`revise_research_plan`, the page renders the exact persisted
 arguments and exposes explicit Reject and Approve actions. Finding feedback and curation are
 separate writes against an existing published Finding. Finding authoring is a
-separate Evidence-to-conclusion decision that publishes a new immutable
-analysis version. Agent-authored Objective analysis is also distinct from the
+separate experiment-selection decision that publishes a new immutable analysis
+version. Agent-authored Objective analysis is also distinct from the
 automatic analysis command: it publishes the Agent's reviewed Evidence first
 and creates no Finding. While approval is pending:
 
@@ -602,7 +642,13 @@ inspected Sources, unread scope, technical failures, and scientific uncertainty.
 
 Provider, capability, and finalization failures remain visible and distinct from
 scientific absence. A successful capability that finds no published Evidence
-is not rendered as a technical error.
+is not rendered as a technical error. Model-service failures such as
+`model_unavailable`, `provider_timeout`, and `model_response_invalid` are shown
+as a service status message that directs the researcher to contact an
+administrator or try again later; retrieved research results remain available.
+Unknown internal failure codes are kept out of the browser message, while
+capability and Source read failures remain attached to their individual
+operations.
 
 ## Responsive And Accessibility Contract
 
@@ -644,8 +690,8 @@ The focused browser suite covers:
 14. exact published Finding and linked Evidence inspection before review;
 15. distinct feedback and curation approvals, including rejection without a
     write;
-16. exact Evidence roles and statement before approval publishes a new Finding
-    version.
+16. exact experiment selection and comparison-group arguments before approval
+    publishes a new Finding version.
 17. Agent-authored paper analysis shown as a separate approval, rejection, and
     completed Evidence publication state without changing the automatic
     Objective-analysis presentation.

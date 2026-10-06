@@ -26,7 +26,6 @@ const routes = [
 		`/collections/${collectionId}/objectives/${objectiveId}`,
 		'How does heat treatment affect LPBF 316L tensile strength?'
 	],
-	[`/collections/${collectionId}/comparisons`, 'Cross-paper findings'],
 	[`/collections/${collectionId}/graph`, 'Objective evidence map'],
 	[`/collections/${collectionId}/assistant`, 'Research Agent']
 ] as const;
@@ -591,11 +590,7 @@ test.describe('page interaction audit', () => {
 				);
 			});
 			await page.goto(`/collections/${collectionId}/documents`);
-			await page
-				.locator('.paper-row')
-				.filter({ hasText: papers[0].title })
-				.getByRole('link', { name: 'Open paper' })
-				.click();
+			await page.locator('.paper-row').filter({ hasText: papers[0].title }).click();
 			const paneA = page.locator('.reader-pane[data-document-id="doc_1"]');
 			const paneB = page.locator('.reader-pane[data-document-id="doc_2"]');
 			await expect(paneA.getByTestId('markdown-paper-reader')).toBeVisible();
@@ -607,11 +602,8 @@ test.describe('page interaction audit', () => {
 				.evaluate((node) => node.scrollTop);
 			expect(scrollA).toBeGreaterThan(500);
 			await page.locator('.library-link').click();
-			await page
-				.locator('.paper-row')
-				.filter({ hasText: papers[1].title })
-				.getByRole('link', { name: 'Open paper' })
-				.click();
+			await expect(page.locator('.document-workspace.expanded')).toHaveCount(0);
+			await page.locator('.paper-row').filter({ hasText: papers[1].title }).click();
 			const tabs = page.getByRole('tablist', { name: 'Open papers' });
 			await expect(tabs.getByRole('tab')).toHaveCount(2);
 			await expect(paneB.getByRole('alert')).toBeVisible();
@@ -948,132 +940,115 @@ test.describe('page interaction audit', () => {
 	});
 
 	for (const width of [320, 768, 1024, 1440]) {
-		test(`asks across selected papers in a persistent split workspace at ${width}px`, async ({
-			page
-		}) => {
+		test(`browses and filters collection papers at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });
-			const errors: string[] = [];
-			page.on('pageerror', (error) => errors.push(error.message));
-			let created = 0;
-			const turns = new Map<string, ReturnType<typeof agentMessage>[]>();
-			await page.route('**/api/v1/chat-sessions', (route) => {
-				created += 1;
-				expect(route.request().postDataJSON().collection_id).toBe(collectionId);
-				return route.fulfill(
-					json({
-						session_id: `split_${created}`,
-						collection_id: collectionId,
-						user_id: 'user_1',
-						created_at: now(),
-						updated_at: now()
-					})
-				);
-			});
-			await page.route('**/api/v1/chat-sessions/*/messages', (route) => {
-				const id = new URL(route.request().url()).pathname.split('/').at(-2)!;
-				if (route.request().method() === 'GET')
-					return route.fulfill(
-						json({ items: turns.get(id) ?? [], feedback: [], pending_approval: null })
-					);
-				const body = route.request().postDataJSON();
-				expect(body.message).toContain('/documents/doc_1');
-				expect(body.message).toContain('/documents/doc_26');
-				expect(body.message).not.toContain('/documents/doc_2)');
-				const messages = [
-					agentMessage('selected_user', 'user', body.message),
-					agentMessage(
-						'selected_answer',
-						'assistant',
-						'Compare the heat-treatment conditions before combining these measurements.'
-					)
-				];
-				turns.set(id, messages);
-				return route.fulfill(
-					sseTurn({
-						messages,
-						status: 'completed',
-						completion_reason: 'model_answer',
-						pending_approval: null,
-						error_code: null,
-						warnings: []
-					})
-				);
-			});
+			const requests: URL[] = [];
 			await page.route(`**/api/v1/collections/${collectionId}/documents/profiles?*`, (route) => {
-				const offset = Number(new URL(route.request().url()).searchParams.get('offset') ?? 0);
-				const items = Array.from({ length: offset ? 1 : 25 }, (_, index) => ({
-					...documentProfile(),
-					document_id: `doc_${offset + index + 1}`,
-					title: `LPBF heat-treatment study ${offset + index + 1}`
-				}));
+				const url = new URL(route.request().url());
+				requests.push(url);
+				const offset = Number(url.searchParams.get('offset') ?? 0);
+				const filtered = Boolean(url.searchParams.get('query') || url.searchParams.get('doc_type'));
+				const empty = url.searchParams.get('query') === 'missing';
+				const items = empty
+					? []
+					: Array.from({ length: filtered || offset ? 1 : 25 }, (_, index) => ({
+							...documentProfile(),
+							document_id: `doc_${offset + index + 1}`,
+							title: `LPBF heat-treatment study ${offset + index + 1}`
+						}));
 				return route.fulfill(
 					json({
 						...documentProfiles(),
 						items,
 						count: items.length,
-						total: 26,
+						total: empty ? 0 : filtered ? 1 : 26,
 						summary: { total_documents: 26, by_doc_type: {}, warnings: [] }
 					})
 				);
 			});
 			await page.goto(`/collections/${collectionId}/documents`);
-			await page
-				.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
-				.check();
+			await expect(page.locator('.paper-row')).toHaveCount(25);
+			await expect(page.locator('.paper-list-head')).toContainText('Paper');
+			await expect(page.locator('.paper-list-head')).toContainText('Parsing status');
+			await expect(page.locator('.paper-list-head')).toContainText('Pages');
+			await expect(page.locator('.papers-page input[type=checkbox]')).toHaveCount(0);
+			await expect(page.getByRole('button', { name: 'Apply filters', exact: true })).toHaveCount(0);
 			await page.getByRole('button', { name: 'Next', exact: true }).click();
-			await page.getByRole('checkbox', { name: 'Select this page', exact: true }).check();
-			await page.getByRole('button', { name: 'Previous', exact: true }).click();
-			await expect(
-				page.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
-			).toBeChecked();
-			await page.getByRole('button', { name: 'Ask research assistant', exact: true }).click();
-			const panel = page.locator('.agent-pane');
-			await expect(panel.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
-			await expect(panel.getByTestId('selected-paper-context')).toContainText('2 papers selected');
-			await sendAgentMessage(page, 'Compare these selected papers');
-			await expect(
-				panel.getByText(
-					'Compare the heat-treatment conditions before combining these measurements.',
-					{ exact: true }
-				)
-			).toBeVisible();
-			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
-			if (width > 820) {
-				await expect(page.locator('.document-pane')).toBeVisible();
-				const left = (await page.locator('.document-pane').boundingBox())!;
-				const right = (await panel.boundingBox())!;
-				expect(left.x + left.width).toBeLessThanOrEqual(right.x + 1);
-			}
-			expect(await visibleElementsFitViewport(page, '.agent-pane .composer')).toBe(true);
-			await expect(
-				panel.getByText(
-					'Compare the heat-treatment conditions before combining these measurements.',
-					{ exact: true }
-				)
-			).toBeInViewport();
-			await page.mouse.move(0, 0);
+			await expect(page.locator('.paper-row')).toHaveCount(1);
+			await expect(page.locator('.paper-row')).toContainText('study 26');
+			await page.locator('#paper-search').fill('LPBF');
+			await expect.poll(() => requests.at(-1)?.searchParams.get('query')).toBe('LPBF');
+			await expect(page.locator('.paper-row')).toContainText('study 1');
+			expect(requests.at(-1)?.searchParams.get('offset')).toBe('0');
+			await page.locator('#paper-type-filter').selectOption('review');
+			await expect.poll(() => requests.at(-1)?.searchParams.get('doc_type')).toBe('review');
+			expect(requests.at(-1)?.searchParams.get('query')).toBe('LPBF');
+			await page.locator('#paper-search').fill('missing');
+			await expect(page.getByRole('heading', { name: 'No matching papers' })).toBeVisible();
+			await page.locator('#paper-search').fill('');
+			await page.locator('#paper-type-filter').selectOption('');
+			await expect(page.locator('.paper-row')).toHaveCount(25);
+			expect(await visibleElementsFitViewport(page, '.paper-row, .paper-filters')).toBe(true);
 			if (screenshotDir)
-				await page.screenshot({ path: join(screenshotDir, `papers-agent-split-${width}.png`) });
-			await panel.getByRole('button', { name: 'Back to papers', exact: true }).click();
-			await expect(
-				page.getByRole('checkbox', { name: 'Select LPBF heat-treatment study 1', exact: true })
-			).toBeChecked();
-			await page.getByRole('button', { name: 'Ask research assistant', exact: true }).click();
-			await expect(
-				panel.getByText(
-					'Compare the heat-treatment conditions before combining these measurements.',
-					{ exact: true }
-				)
-			).toBeVisible();
-			expect(created).toBe(1);
-			await panel.getByRole('button', { name: 'New session', exact: true }).click();
-			await expect(panel.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
-			await expect(panel.getByTestId('user-message')).toHaveCount(0);
-			await expect(panel.getByTestId('selected-paper-context')).toContainText('2 papers selected');
-			expect(created).toBe(2);
-			expect(errors).toEqual([]);
+				await page.screenshot({ path: join(screenshotDir, `papers-browse-${width}.png`) });
+			await page.locator('.paper-row').first().focus();
+			await page.keyboard.press('Enter');
+			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents/doc_1$`));
+			await expect(page.locator('.document-reader-root')).toBeVisible();
+			await page.locator('.library-link').click();
+			await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/documents$`));
+			await expect(page.locator('.document-workspace.expanded')).toHaveCount(0);
+			await expect(page.locator('.site-header')).toBeVisible();
+			await page.locator('.agent-launcher').click();
+			await expect(page.locator('.agent-pane')).toBeVisible();
+			await page.getByRole('button', { name: 'Back to papers', exact: true }).click();
+			await expect(page.locator('.document-workspace.expanded')).toHaveCount(0);
+			await expect(page.locator('.paper-row')).toHaveCount(25);
 		});
 	}
+
+	test('keeps the latest paper search and retries its failed first page', async ({ page }) => {
+		let releaseOld: () => void = () => {};
+		const oldResponse = new Promise<void>((resolve) => {
+			releaseOld = resolve;
+		});
+		let fail = true;
+		await page.route(
+			`**/api/v1/collections/${collectionId}/documents/profiles?*`,
+			async (route) => {
+				const url = new URL(route.request().url());
+				const query = url.searchParams.get('query');
+				if (query === 'old') await oldResponse;
+				if (query === 'failed' && fail) return route.fulfill({ status: 503, body: 'Unavailable' });
+				const result = documentProfiles();
+				result.items[0].title = query || 'Paper A';
+				return route.fulfill(json(result));
+			}
+		);
+		await page.goto(`/collections/${collectionId}/documents`);
+		await expect(page.locator('.paper-row')).toHaveCount(1);
+		await page.locator('#paper-search').fill('old');
+		await page.waitForRequest(
+			(request) => new URL(request.url()).searchParams.get('query') === 'old'
+		);
+		await page.locator('#paper-search').fill('latest');
+		await expect(page.locator('.paper-row')).toContainText('latest');
+		const completedOld = page.waitForResponse(
+			(response) => new URL(response.url()).searchParams.get('query') === 'old'
+		);
+		releaseOld();
+		await completedOld;
+		await expect(page.locator('.paper-row')).toContainText('latest');
+		await page.locator('#paper-search').fill('failed');
+		await expect(page.locator('.papers-page [role=alert]')).toBeVisible();
+		fail = false;
+		const retry = page.waitForRequest(
+			(request) => new URL(request.url()).searchParams.get('query') === 'failed'
+		);
+		await page.locator('.papers-page').getByRole('button', { name: 'Retry', exact: true }).click();
+		expect(new URL((await retry).url()).searchParams.get('offset')).toBe('0');
+		await expect(page.locator('.paper-row')).toContainText('failed');
+	});
 
 	for (const width of [390, 1440]) {
 		test(`selects several source blocks and requests related passages at ${width}px`, async ({
@@ -2514,16 +2489,21 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('tab', { name: 'PDF Preview' })).toBeVisible();
 	});
 
-	test('published Finding comparison remains readable on mobile', async ({ page }) => {
+	test('collection navigation opens Finding review through research objectives', async ({
+		page
+	}) => {
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto(`/collections/${collectionId}/comparisons`);
-
-		await expect(page.getByRole('heading', { name: 'Cross-paper findings' })).toBeVisible();
-		await expect(
-			page.getByText('Annealing was associated with higher tensile strength.')
-		).toBeVisible();
-		await expect(page.getByRole('link', { name: 'Review finding evidence' })).toBeVisible();
-		expect(await visibleElementsFitViewport(page, '.finding-item')).toBe(true);
+		await page.goto(`/collections/${collectionId}/documents`);
+		await expect(page.locator(`a[href="/collections/${collectionId}/comparisons"]`)).toHaveCount(0);
+		await page.locator(`a[href="/collections/${collectionId}/objectives"]`).first().click();
+		await expect(page).toHaveURL(new RegExp(`/collections/${collectionId}/objectives$`));
+		await page
+			.locator(`a[href="/collections/${collectionId}/objectives/${objectiveId}"]`)
+			.first()
+			.click();
+		await expect(page.locator('.finding-list')).toContainText(
+			'Annealing was associated with higher tensile strength.'
+		);
 	});
 
 	test('shows aggregate preparation progress for active paper runs', async ({ page }) => {
@@ -3021,6 +3001,23 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence-map`) {
 			return route.fulfill(json(objectiveEvidenceMap()));
+		}
+		if (/^\/api\/v1\/chat-sessions\/[^/]+\/permissions$/.test(path)) {
+			if (method === 'PUT') {
+				const body = route.request().postDataJSON() as Record<string, unknown>;
+				return route.fulfill(
+					json({
+						mode: body.mode ?? 'confirm',
+						actions: body.actions ?? [],
+						expires_at: body.expires_at ?? null,
+						revision: Number(body.expected_revision ?? 0) + 1
+					})
+				);
+			}
+			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
+		}
+		if (/^\/api\/v1\/collections\/[^/]+\/agent-permissions$/.test(path)) {
+			return route.fulfill(json({ mode: 'confirm', actions: [], expires_at: null, revision: 0 }));
 		}
 		if (path === '/api/v1/chat-sessions') return route.fulfill(json(chatSession(), 201));
 		if (path === `/api/v1/chat-sessions/${sessionId}`) return route.fulfill(json(chatSession()));

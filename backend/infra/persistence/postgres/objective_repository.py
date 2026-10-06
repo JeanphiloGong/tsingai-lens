@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Any
-
-from application.repositories.objective_repository import StoredObjective
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from application.repositories.pipeline_run_repository import ExecutionStats
+from application.repositories.transaction import RepositoryTransaction
 from domain.core import (
     Finding,
-    ObjectiveAnalysis,
-    ObjectiveDocumentEvidence,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
@@ -22,13 +24,15 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from domain.pipeline import ExecutionStats
+from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.models.document_preparation import (
+    DocumentPreparationRow,
+)
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
     ObjectiveResearchRecord,
 )
-from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
-from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.transaction import database_session_scope
 
 
 class PostgresObjectiveRepository:
@@ -192,15 +196,11 @@ class PostgresObjectiveRepository:
             )
             if prior is not None:
                 existing = self._objective_from_row(prior)
-                existing_record = existing.to_record()
-                objective_record = objective.to_record()
-                existing_record["rank"] = None
-                objective_record["rank"] = None
                 if (
                     existing.collection_id != objective.collection_id
                     or existing.objective_id != objective.objective_id
                     or existing.created_by_user_id != created_by_user_id
-                    or existing_record != objective_record
+                    or replace(existing, rank=None) != replace(objective, rank=None)
                 ):
                     raise ValueError(
                         "authored candidate tool call already created a different objective"
@@ -274,11 +274,17 @@ class PostgresObjectiveRepository:
         origin: str = "system_generated",
         created_by_user_id: str | None = None,
         created_by_tool_call_id: str | None = None,
+        source_analysis_version: int | None = None,
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         now = datetime.now(timezone.utc)
         async with self.session_factory.begin() as session:
             row = await self._locked_objective(session, collection_id, objective_id)
             objective = self._objective_from_row(row)
+            if (
+                source_analysis_version is not None
+                and objective.published_analysis_version != source_analysis_version
+            ):
+                raise ValueError("source analysis version is stale")
             if objective.confirmation_status == "candidate":
                 objective = objective.confirm()
             active_row = await session.scalar(
@@ -299,6 +305,7 @@ class PostgresObjectiveRepository:
                     )
                 if (
                     active.origin != origin
+                    or active.source_analysis_version != source_analysis_version
                     or active.created_by_user_id != created_by_user_id
                     or active.created_by_tool_call_id != created_by_tool_call_id
                 ):
@@ -326,8 +333,14 @@ class PostgresObjectiveRepository:
                 progress_message="Objective analysis is queued.",
                 created_at=now,
                 origin=origin,
+                scientific_record_source=(
+                    "experiment_graph"
+                    if origin == "system_generated"
+                    else "authored_snapshot"
+                ),
                 created_by_user_id=created_by_user_id,
                 created_by_tool_call_id=created_by_tool_call_id,
+                source_analysis_version=source_analysis_version,
             )
             objective = objective.queue_analysis(version)
             self._write_objective(row, objective, now=now)
@@ -465,50 +478,6 @@ class PostgresObjectiveRepository:
                 self._write_analysis(row, analysis)
             return len(rows)
 
-    async def write_document_evidence(
-        self,
-        checkpoint: ObjectiveDocumentEvidence,
-    ) -> None:
-        now = datetime.now(timezone.utc)
-        async with self.session_factory.begin() as session:
-            row = await self._locked_analysis(
-                session,
-                checkpoint.collection_id,
-                checkpoint.objective_id,
-                checkpoint.analysis_version,
-            )
-            payload = dict(row.payload or {})
-            checkpoints = dict(payload.get("document_evidence_checkpoints") or {})
-            checkpoints[_checkpoint_storage_key(checkpoint)] = checkpoint.to_record()
-            payload["document_evidence_checkpoints"] = checkpoints
-            row.payload = payload
-            row.updated_at = now
-
-    async def read_document_evidence(
-        self,
-        collection_id: str,
-        objective_id: str,
-        document_id: str,
-        input_fingerprint: str,
-    ) -> ObjectiveDocumentEvidence | None:
-        async with self.session_factory() as session:
-            analysis_rows = tuple(
-                await session.scalars(
-                    select(ObjectiveAnalysisRecord).where(
-                        ObjectiveAnalysisRecord.collection_id == collection_id,
-                        ObjectiveAnalysisRecord.objective_id == objective_id,
-                    ).order_by(ObjectiveAnalysisRecord.analysis_version.desc())
-                )
-            )
-            key = f"{document_id}:{input_fingerprint}"
-            for analysis_row in analysis_rows:
-                checkpoint = (analysis_row.payload or {}).get(
-                    "document_evidence_checkpoints", {}
-                ).get(key)
-                if checkpoint is not None:
-                    return ObjectiveDocumentEvidence.from_mapping(checkpoint)
-            return None
-
     async def publish_analysis(
         self,
         collection_id: str,
@@ -546,13 +515,90 @@ class PostgresObjectiveRepository:
 
             self._write_contributions(analysis_row, contributions)
             self._write_result_records(analysis_row, evidence_records, findings)
+            analysis = replace(
+                analysis,
+                scientific_record_source=(
+                    "legacy_snapshot"
+                    if analysis.origin == "system_generated"
+                    else "authored_snapshot"
+                ),
+            )
             analysis = analysis.succeed(
                 completed_at=datetime.now(timezone.utc),
                 abstention_reason=abstention_reason,
                 abstention_note=abstention_note,
             )
             objective = self._objective_from_row(objective_row).publish_analysis(
-                analysis
+                collection_id=analysis.collection_id,
+                objective_id=analysis.objective_id,
+                analysis_version=analysis.analysis_version,
+                status=analysis.status,
+            )
+            self._write_analysis(analysis_row, analysis)
+            self._write_objective(
+                objective_row,
+                objective,
+                now=datetime.now(timezone.utc),
+            )
+            return objective, analysis
+
+    async def publish_experiment_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        contributions: tuple[PaperContribution, ...] = (),
+        abstention_reason: str | None = None,
+        abstention_note: str | None = None,
+        transaction: RepositoryTransaction | None = None,
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
+        """Publish the Objective lifecycle after experiment records are written.
+
+        PaperExperiment, selections, groups, and Findings own the scientific
+        records.  This transaction only advances the existing Objective
+        analysis state and deliberately does not copy legacy Evidence payloads.
+        """
+
+        async with database_session_scope(
+            self.session_factory, transaction, write=True
+        ) as session:
+            analysis_row = await self._locked_analysis(
+                session,
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            objective_row = await self._locked_objective(
+                session,
+                collection_id,
+                objective_id,
+            )
+            analysis = self._analysis_from_row(analysis_row)
+            if analysis.status != "running":
+                raise ValueError("only running objective analysis can be published")
+            if contributions:
+                input_documents = {item.document_id for item in analysis.document_inputs}
+                contribution_documents = {item.document_id for item in contributions}
+                if contribution_documents != input_documents:
+                    raise ValueError("paper contributions must cover every analysis input")
+                if any(item.key[:3] != (collection_id, objective_id, analysis_version) for item in contributions):
+                    raise ValueError("paper contribution belongs to another analysis")
+                self._write_contributions(analysis_row, contributions)
+            analysis = replace(
+                analysis,
+                scientific_record_source="experiment_graph",
+            )
+            analysis = analysis.succeed(
+                completed_at=datetime.now(timezone.utc),
+                abstention_reason=abstention_reason,
+                abstention_note=abstention_note,
+            )
+            objective = self._objective_from_row(objective_row).publish_analysis(
+                collection_id=analysis.collection_id,
+                objective_id=analysis.objective_id,
+                analysis_version=analysis.analysis_version,
+                status=analysis.status,
             )
             self._write_analysis(analysis_row, analysis)
             self._write_objective(
@@ -631,7 +677,12 @@ class PostgresObjectiveRepository:
             self._write_result_records(analysis_row, evidence_records, findings)
             session.add(analysis_row)
             objective = objective.queue_analysis(analysis.analysis_version)
-            objective = objective.publish_analysis(analysis)
+            objective = objective.publish_analysis(
+                collection_id=analysis.collection_id,
+                objective_id=analysis.objective_id,
+                analysis_version=analysis.analysis_version,
+                status=analysis.status,
+            )
             self._write_objective(objective_row, objective, now=now)
             return objective, analysis
 
@@ -819,7 +870,7 @@ class PostgresObjectiveRepository:
             rank=objective.rank or 1,
             origin=objective.origin,
             created_by_tool_call_id=objective.created_by_tool_call_id,
-            payload=objective.to_record(),
+            payload=PostgresObjectiveRepository._objective_payload(objective),
             created_at=now,
             updated_at=now,
         )
@@ -834,8 +885,15 @@ class PostgresObjectiveRepository:
         row.rank = objective.rank or row.rank
         row.origin = objective.origin
         row.created_by_tool_call_id = objective.created_by_tool_call_id
-        row.payload = objective.to_record()
+        row.payload = PostgresObjectiveRepository._objective_payload(objective)
         row.updated_at = now
+
+    @staticmethod
+    def _objective_payload(objective: ResearchObjective) -> dict[str, Any]:
+        return {
+            key: list(value) if isinstance(value, tuple) else value
+            for key, value in asdict(objective).items()
+        }
 
     @staticmethod
     def _new_analysis_row(
@@ -886,7 +944,6 @@ class PostgresObjectiveRepository:
         payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
         for key in (
             "paper_contributions",
-            "document_evidence_checkpoints",
             "evidence_records",
             "findings",
         ):
@@ -975,11 +1032,6 @@ class PostgresObjectiveRepository:
 
 
 __all__ = ["PostgresObjectiveRepository"]
-
-
-def _checkpoint_storage_key(checkpoint: ObjectiveDocumentEvidence) -> str:
-    return f"{checkpoint.document_id}:{checkpoint.input_fingerprint}"
-
 
 def _sorted_finding_records(values: Any) -> list[dict[str, Any]]:
     return sorted(

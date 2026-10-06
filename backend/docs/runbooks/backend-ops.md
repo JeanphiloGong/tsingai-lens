@@ -95,6 +95,9 @@ curl "$LLM_BASE_URL/models"
 
 If the configured Research Agent model is unavailable, the turn returns
 `model_unavailable` and no capability executes for that turn.
+Unexpected SDK or model-adapter exceptions are sanitized to the same stable
+`model_unavailable` turn error; the exception text is retained only in
+structured server logs and is never returned to the browser.
 If the provider returns an empty, reasoning-only, or structurally invalid
 streamed response, the runner retries up to five times when no user-visible
 text was received. A sixth invalid response returns `model_response_invalid`;
@@ -185,6 +188,14 @@ alembic current --check-heads
 For a fresh development database, run the same commands. Historical SQLite or
 JSON data is not imported by startup or by these migrations.
 
+Revision `20260924_0065` removes the retired Chat correction workflow: exact
+model-call records, cases, samples, reviews, datasets, and candidates. Back up
+those six tables before upgrading if their historical contents are needed.
+Ordinary Chat sessions, messages, usefulness feedback, and research artifacts
+are retained. Downgrading recreates the retired schema but cannot recover its
+deleted rows; data recovery requires the backup. Revisions `0060`-`0064` remain
+in migration history so existing databases can upgrade normally.
+
 Check the schema revision of an existing replay database before starting a
 real-model run. A missing `document_preparations` table with code at revision
 `20260908_0055` indicates an incomplete upgrade, not unavailable scientific
@@ -240,11 +251,33 @@ duplicate its destructive restore commands.
 
 ## Operational Notes
 
+The feedback sample Worker runs independently of HTTP requests:
+
+```bash
+./.venv/bin/python scripts/dataset_sample_worker.py
+```
+
+It initializes one application runtime per process and closes it on shutdown.
+Before polling, it backfills historical Collections and non-withdrawn cases in
+batches of 200. Restarting it repeats this idempotent backfill without replacing
+human revisions or duplicating sample jobs. Collection creation initializes
+the three fixed workbenches; analysis writes commit the case and all three
+sample queues atomically. Opening or refreshing the workbench does not enqueue
+work. Initialization and polling errors are logged and retried after the polling
+interval. `--once` initializes, backfills, handles at most one job, and exits.
+
+Each sample build is bounded to 600 seconds, or the remaining lease minus a
+five-second completion margin. The lease remains 900 seconds and is not renewed.
+Timeout cancels awaited model work and records `dataset_sample_build_timeout`;
+the sample becomes `build_failed` and can be retried. Recovery still returns
+expired builds to `pending`, and late results cannot overwrite a replacement
+lease. Source changes invalidate confirmation while retaining human revisions.
+
 - Application log timestamps use China Standard Time and include the explicit
   `+0800` offset. Persisted domain and runtime timestamps remain UTC.
 - Structured product state persists in PostgreSQL. `backend/data` holds
   immutable object bytes and disposable runtime scratch.
-- Document preparation creates Source runtime settings from the owning
+- Document preparation creates Source parser settings from the owning
   Document's stored bytes and environment variables; no `default.yaml` file is
   required in Docker volumes.
 - Public HTTP paths are split between `/api/*` for docs and static assets and

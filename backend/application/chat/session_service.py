@@ -3,21 +3,46 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import re
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
-import logging
 from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from application.chat.agent_runner import AgentRunResult, ResearchAgentRunner
-from application.chat.capabilities import AgentContext
-from application.core.objectives.evidence_authoring_service import (
-    normalize_source_text,
-    resolve_canonical_objective_source,
+from application.chat.agent_runner import (
+    AgentRunResult,
+    AgentRunStatus,
+    ResearchAgentRunner,
 )
+from application.chat.capabilities import AgentContext
+from application.chat.inline_citations import (
+    format_inline_citations,
+    format_message_citations,
+)
+from application.chat.intent_policy import _write_request_scope
+
+
+from application.repositories.analysis_job_repository import (
+    AnalysisJobRepository,
+    correction_signal_idempotency_key,
+    tool_failure_idempotency_key,
+)
+from application.repositories.chat_repository import (
+    ChatModelCall,
+    ChatRepository,
+    ChatResponseSnapshot,
+    ChatSessionBusyError,
+    ModelCallInput,
+    ModelCallObserver,
+    ModelCallOutcome,
+)
+from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -26,26 +51,133 @@ from domain.chat import (
     ChatToolCall,
     ChatToolResult,
     ToolCallStatus,
+    ToolPermissionMode,
     ToolResultStatus,
 )
-from application.repositories.source_artifact_repository import SourceArtifactRepository
-from application.repositories.chat_repository import ChatRepository, ChatResponseSnapshot, ChatSessionBusyError
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
-
+from domain.chat.permissions import permits_automatic
+from domain.feedback.correction_signal import CorrectionSignal, is_correction_challenge
+from domain.feedback.tool_failure import tool_result_digest
 
 logger = logging.getLogger(__name__)
 _HEARTBEAT_INTERVAL_SECONDS = 15
 _SNAPSHOT_INTERVAL_SECONDS = 0.25
 
 
+@dataclass(frozen=True)
+class _CanonicalObjectiveSource:
+    content: str
+    page: int | None
+    heading_path: str | None
+    grounding_source: dict[str, Any]
+
+
+def resolve_canonical_objective_source(
+    document: Any, *, source_kind: str, source_ref: str
+) -> _CanonicalObjectiveSource:
+    if source_kind == "text_window":
+        source = next(
+            (item for item in document.blocks if item.block_id == source_ref), None
+        )
+        if source is not None:
+            return _CanonicalObjectiveSource(
+                source.text,
+                source.page,
+                source.heading_path,
+                {
+                    "source_kind": source_kind,
+                    "text": source.text,
+                    "heading_path": source.heading_path,
+                },
+            )
+    elif source_kind == "table":
+        source = next(
+            (item for item in document.tables if item.table_id == source_ref), None
+        )
+        if source is not None:
+            record = source.to_record()
+            return _CanonicalObjectiveSource(
+                str(record["table_markdown"] or "").strip(),
+                source.page,
+                source.heading_path,
+                {**record, "source_kind": source_kind},
+            )
+    elif source_kind == "figure":
+        source = next(
+            (item for item in document.figures if item.figure_id == source_ref), None
+        )
+        if source is not None:
+            return _CanonicalObjectiveSource(
+                str(source.caption_text or ""),
+                source.page,
+                source.heading_path,
+                {
+                    "source_kind": source_kind,
+                    "caption_text": source.caption_text,
+                    "heading_path": source.heading_path,
+                },
+            )
+    else:
+        raise ValueError(f"unsupported objective source: {source_kind}")
+    raise FileNotFoundError("Source was not found in the requested document")
+
+
+def normalize_source_text(value: str) -> str:
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value)).strip()
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+class RepositoryModelCallObserver:
+    """Persist provider-call facts before and after the SDK submission."""
+
+    def __init__(self, repository: ChatRepository) -> None:
+        self.repository = repository
+        self._sessions: dict[str, str] = {}
+
+    async def start(self, call: ModelCallInput) -> str:
+        request = json.loads(json.dumps(call.request, ensure_ascii=False, separators=(",", ":")))
+        call_id = f"model_call_{uuid4().hex}"
+        digest = sha256(
+            json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        await self.repository.start_model_call(ChatModelCall(
+            call_id=call_id,
+            session_id=call.session_id,
+            trigger_message_id=call.trigger_message_id,
+            response_message_id=call.response_message_id,
+            purpose=call.purpose,
+            model=str(request.get("model") or "unknown"),
+            request=request,
+            request_digest=digest,
+            started_at=_now_iso(),
+        ))
+        self._sessions[call_id] = call.session_id
+        return call_id
+
+    async def finish(self, call_id: str, outcome: ModelCallOutcome) -> None:
+        session_id = self._sessions.get(call_id)
+        if session_id is None:
+            raise FileNotFoundError(f"chat model call not found: {call_id}")
+        await self.repository.finish_model_call(
+            session_id=session_id, call_id=call_id, outcome=outcome,
+        )
 
 
 class ChatSessionNotFoundError(FileNotFoundError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(f"chat session not found: {session_id}")
+
+
+class ChatFeedbackAnalysisEnqueueError(RuntimeError):
+    """Feedback is durable, but its asynchronous analysis could not be queued."""
+
+    def __init__(self, feedback_id: str) -> None:
+        self.feedback_id = feedback_id
+        super().__init__("feedback was saved; analysis can be retried")
 
 
 class ChatSourceContextError(ValueError):
@@ -76,11 +208,15 @@ class ChatSessionService:
         source_artifact_repository: SourceArtifactRepository,
         repository: ChatRepository,
         runner: ResearchAgentRunner,
+        analysis_job_repository: AnalysisJobRepository | None = None,
+        model_call_observer: ModelCallObserver | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.source_artifact_repository = source_artifact_repository
         self.repository = repository
         self.runner = runner
+        self.analysis_job_repository = analysis_job_repository
+        self.model_call_observer = model_call_observer
         self._active_stream_tasks: set[asyncio.Task[None]] = set()
 
     async def create_session(
@@ -97,8 +233,69 @@ class ChatSessionService:
             collection_id=str(collection["collection_id"]),
             created_at=now,
         )
+        # Collection settings are defaults for newly created conversations. A
+        # session stores its own revision so later collection changes cannot
+        # silently change an active conversation's authority.
+        read_default = getattr(
+            self.collection_service,
+            "get_agent_default_permission_for_user",
+            None,
+        )
+        default: dict[str, Any] = {}
+        mode = "confirm"
+        should_seed = False
+        if callable(read_default):
+            default = await read_default(collection_id, user_id)
+            mode = str(default.get("mode") or "confirm")
+            should_seed = mode == "read_only" or (
+                mode == "auto"
+                and any(
+                    permits_automatic(
+                        default,
+                        action,
+                        now=_now_iso(),
+                    )
+                    for action in default.get("actions") or ()
+                )
+            )
         await self.repository.add_session(session)
+        if should_seed:
+            await self.repository.set_permission(
+                session.session_id,
+                user_id,
+                mode=mode,
+                actions=list(default.get("actions") or ()),
+                expires_at=default.get("expires_at"),
+                expected_revision=0,
+            )
         return session
+
+    async def _effective_runner_permission_mode(
+        self,
+        session_id: str,
+        user_id: str,
+        requested: ToolPermissionMode | str,
+    ) -> ToolPermissionMode:
+        """Resolve the model-facing mode without granting an elevation.
+
+        A persisted automatic grant is represented as ``confirm`` for the
+        normal request path: the Runner must first produce an exact write
+        request, after which the repository atomically claims it against the
+        stored grant. A persisted read-only (or disabled) session setting is
+        stricter than a caller's default ``confirm`` value, so writes are
+        hidden before the model is called instead of being rejected after it
+        proposes them.
+        """
+        requested_mode = ToolPermissionMode(requested)
+        if requested_mode is not ToolPermissionMode.CONFIRM:
+            return requested_mode
+        permission = await self.repository.read_permission(session_id, user_id)
+        stored_mode = str(permission.get("mode") or ToolPermissionMode.CONFIRM)
+        if stored_mode == ToolPermissionMode.READ_ONLY.value:
+            return ToolPermissionMode.READ_ONLY
+        if stored_mode == ToolPermissionMode.NONE.value:
+            return ToolPermissionMode.NONE
+        return ToolPermissionMode.CONFIRM
 
     async def get_session_for_user(
         self, session_id: str, user_id: str
@@ -111,6 +308,22 @@ class ChatSessionService:
         )
         return session
 
+    async def list_sessions_for_user(
+        self,
+        *,
+        collection_id: str,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[ChatSession, ...]:
+        await self.collection_service.get_collection_for_user(collection_id, user_id)
+        return await self.repository.list_sessions(
+            user_id=user_id,
+            collection_id=collection_id,
+            limit=limit,
+            offset=offset,
+        )
+
     async def list_messages_for_user(
         self,
         session_id: str,
@@ -118,6 +331,18 @@ class ChatSessionService:
     ) -> tuple[ChatMessage, ...]:
         await self.get_session_for_user(session_id, user_id)
         return await self.repository.read_messages(session_id)
+
+    async def list_model_calls_for_user(
+        self, session_id: str, user_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatModelCall, ...]:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_model_calls(session_id, limit=limit, offset=offset)
+
+    async def get_model_call_for_user(
+        self, session_id: str, call_id: str, user_id: str
+    ) -> ChatModelCall | None:
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_model_call(session_id, call_id)
 
     async def get_pending_approval_for_user(
         self,
@@ -264,6 +489,7 @@ class ChatSessionService:
         for owner in family:
             trajectory = trajectories[owner.session_id]
             messages = trajectory["messages"]
+            visible_messages = format_message_citations(messages)
             positions = [index for index, item in enumerate(messages) if item.role.value == "user"]
             previous_id = None
             finished_calls = {item.tool_result.tool_call_id for item in messages
@@ -278,7 +504,7 @@ class ChatSessionService:
                     previous_id = node_id
                     continue
                 end = positions[turn_index + 1] if turn_index + 1 < len(positions) else len(messages)
-                answer = next((item.content for item in reversed(messages[position + 1:end])
+                answer = next((item.content for item in reversed(visible_messages[position + 1:end])
                                if item.role.value == "assistant" and not item.tool_calls and item.content.strip()), "")
                 status = "completed" if answer else "incomplete"
                 if end == len(messages):
@@ -290,7 +516,7 @@ class ChatSessionService:
                     elif response is not None:
                         status = response.status if response.status != "completed" or answer else "incomplete"
                     if response is not None and response.content:
-                        answer = response.content
+                        answer = format_inline_citations(response.content, messages=messages)
                 nodes.append({"message": message, "parent_message_id": previous_id,
                               "answer": answer, "status": status, "can_branch": not busy})
                 previous_id = node_id
@@ -354,9 +580,25 @@ class ChatSessionService:
         if rating is None:
             if reason is not None or comment is not None:
                 raise ValueError("withdrawn feedback cannot have a reason or comment")
+            current_feedback = next(
+                (
+                    item
+                    for item in await self.repository.read_feedback(session_id, user_id)
+                    if item.message_id == message_id
+                ),
+                None,
+            )
             await self.repository.delete_feedback(
                 session_id=session_id, message_id=message_id, user_id=user_id
             )
+            if current_feedback is not None and self.analysis_job_repository is not None:
+                try:
+                    await self.analysis_job_repository.cancel_feedback_analysis_jobs(
+                        feedback_id=current_feedback.feedback_id,
+                        finished_at=_now_iso(),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("feedback analysis cancellation failed after withdrawal")
             return None
         feedback = ChatMessageFeedback.for_answer(
             message=message,
@@ -367,7 +609,21 @@ class ChatSessionService:
             comment=comment,
             now=_now_iso(),
         )
-        return await self.repository.save_feedback(feedback)
+        saved = await self.repository.save_feedback(feedback)
+        if self.analysis_job_repository is not None:
+            idempotency_key = saved.analysis_version_key
+            try:
+                await self.analysis_job_repository.enqueue_feedback_analysis(
+                    feedback_id=saved.feedback_id,
+                    idempotency_key=idempotency_key,
+                    now=_now_iso(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("feedback analysis enqueue failed feedback_id=%s", saved.feedback_id)
+                # Keep the feedback visible while making the lost asynchronous
+                # hand-off explicit to the caller.
+                raise ChatFeedbackAnalysisEnqueueError(saved.feedback_id) from exc
+        return saved
 
     async def post_message_for_user(
         self,
@@ -377,6 +633,7 @@ class ChatSessionService:
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         branch_revision: bool = False,
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
         if branch_revision:
@@ -389,12 +646,33 @@ class ChatSessionService:
             if branch_revision and len(previous_messages) != session.fork_position:
                 raise ChatBranchAlreadyStartedError("this revision has already been sent")
             await self._ensure_turn_ready(previous_messages)
+            effective_permission_mode = await self._effective_runner_permission_mode(
+                session_id, user_id, permission_mode
+            )
             result = await self._run_response(
                 session,
                 previous_messages=previous_messages,
                 message=message,
                 source_contexts=source_contexts,
+                permission_mode=effective_permission_mode,
             )
+            if (
+                await self._enqueue_correction_signal_candidate(
+                    session,
+                    previous_messages=previous_messages,
+                    result=result,
+                )
+                is False
+            ):
+                result = replace(
+                    result,
+                    warnings=(*result.warnings, "correction_signal_enqueue_failed"),
+                )
+            if await self._enqueue_tool_failure_candidates(session, result=result) is False:
+                result = replace(
+                    result,
+                    warnings=(*result.warnings, "tool_failure_enqueue_failed"),
+                )
         return self._turn_record(result, previous_count=len(previous_messages))
 
     async def stream_message_for_user(
@@ -405,6 +683,7 @@ class ChatSessionService:
         message: str,
         source_contexts: tuple[ChatSourceContext, ...] = (),
         branch_revision: bool = False,
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> AsyncIterator[dict[str, Any]]:
         session = await self.get_session_for_user(session_id, user_id)
         if branch_revision:
@@ -436,9 +715,33 @@ class ChatSessionService:
                         if branch_revision and len(current_messages) != session.fork_position:
                             raise ChatBranchAlreadyStartedError("this revision has already been sent")
                         await self._ensure_turn_ready(current_messages)
+                        effective_permission_mode = await self._effective_runner_permission_mode(
+                            session_id, user_id, permission_mode
+                        )
                         result = await self._run_response(
                             session, previous_messages=current_messages, message=message,
                             source_contexts=source_contexts, emit=emit,
+                            permission_mode=effective_permission_mode,
+                        )
+                    if (
+                        await self._enqueue_correction_signal_candidate(
+                            session,
+                            previous_messages=current_messages,
+                            result=result,
+                        )
+                        is False
+                    ):
+                        result = replace(
+                            result,
+                            warnings=(
+                                *result.warnings,
+                                "correction_signal_enqueue_failed",
+                            ),
+                        )
+                    if await self._enqueue_tool_failure_candidates(session, result=result) is False:
+                        result = replace(
+                            result,
+                            warnings=(*result.warnings, "tool_failure_enqueue_failed"),
                         )
                     emit(
                         {
@@ -477,11 +780,163 @@ class ChatSessionService:
 
         return events()
 
+    async def _enqueue_correction_signal_candidate(
+        self,
+        session: ChatSession,
+        *,
+        previous_messages: tuple[ChatMessage, ...],
+        result: AgentRunResult,
+    ) -> bool | None:
+        """Queue only an adjacent, explicit challenge after a final answer.
+
+        ``None`` means the turn was ordinary Chat and produced no candidate;
+        ``True`` means a candidate was durably accepted or deduplicated;
+        ``False`` means the trigger was valid but the hand-off failed.  The
+        latter is surfaced as a warning while preserving the completed Chat
+        response, because this signal is auxiliary to the user conversation.
+        """
+
+        repository = self.analysis_job_repository
+        enqueue = getattr(repository, "enqueue_correction_signal_analysis", None)
+        if enqueue is None or not previous_messages:
+            return None
+        anchor = previous_messages[-1]
+        if (
+            anchor.session_id != session.session_id
+            or anchor.role.value != "assistant"
+            or not anchor.content.strip()
+            or anchor.tool_calls
+        ):
+            return None
+        messages = result.messages
+        if len(messages) <= len(previous_messages):
+            return None
+        if tuple(item.message_id for item in messages[: len(previous_messages)]) != tuple(
+            item.message_id for item in previous_messages
+        ):
+            return None
+        trigger = messages[len(previous_messages)]
+        if (
+            trigger.session_id != session.session_id
+            or trigger.role.value != "user"
+            or not trigger.content.strip()
+            or not is_correction_challenge(trigger.content)
+        ):
+            return None
+        # The new user message must be immediately after the anchor in the
+        # durable trajectory.  The worker repeats this check from storage.
+        signal = CorrectionSignal.from_message(
+            session_id=session.session_id,
+            anchor_message_id=anchor.message_id,
+            trigger_message_id=trigger.message_id,
+            content=trigger.content,
+            created_at=trigger.created_at,
+        )
+        key = correction_signal_idempotency_key(
+            session_id=session.session_id,
+            anchor_message_id=anchor.message_id,
+            trigger_message_id=trigger.message_id,
+            trigger_digest=signal.trigger_digest,
+        )
+        try:
+            await enqueue(
+                session_id=signal.session_id,
+                anchor_message_id=signal.anchor_message_id,
+                trigger_message_id=signal.trigger_message_id,
+                trigger_digest=signal.trigger_digest,
+                idempotency_key=key,
+                now=_now_iso(),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "correction signal enqueue failed session_id=%s trigger_message_id=%s",
+                session.session_id,
+                trigger.message_id,
+            )
+            return False
+        return True
+
+    async def _enqueue_tool_failure_candidates(
+        self,
+        session: ChatSession,
+        *,
+        result: AgentRunResult,
+    ) -> bool | None:
+        """Queue failed tool observations after their trajectory checkpoint."""
+
+        repository = self.analysis_job_repository
+        enqueue = getattr(repository, "enqueue_tool_failure_analysis", None)
+        if enqueue is None:
+            return None
+        calls = {call.tool_call_id: call for call in result.tool_calls}
+        messages = {message.message_id: message for message in result.messages}
+        result_messages = {
+            message.tool_call_id: message
+            for message in result.messages
+            if message.role.value == "tool"
+            and message.tool_result is not None
+            and message.tool_call_id
+        }
+        excluded_errors = {
+            "user_rejected",
+            "permission_write_denied",
+            "tool_permission_denied",
+            "current_request_prohibits_write",
+        }
+        queued = False
+        failed = False
+        for tool_result in result.tool_results:
+            if tool_result.status is not ToolResultStatus.FAILED:
+                continue
+            if tool_result.error_code in excluded_errors:
+                continue
+            call = calls.get(tool_result.tool_call_id)
+            result_message = result_messages.get(tool_result.tool_call_id)
+            if call is None or result_message is None:
+                continue
+            assistant = messages.get(call.assistant_message_id)
+            if (
+                assistant is None
+                or assistant.session_id != session.session_id
+                or result_message.session_id != session.session_id
+            ):
+                continue
+            digest = tool_result_digest(tool_result.to_record())
+            key = tool_failure_idempotency_key(
+                session_id=session.session_id,
+                tool_call_id=call.tool_call_id,
+                assistant_message_id=call.assistant_message_id,
+                result_message_id=result_message.message_id,
+                result_digest=digest,
+            )
+            queued = True
+            try:
+                await enqueue(
+                    session_id=session.session_id,
+                    tool_call_id=call.tool_call_id,
+                    assistant_message_id=call.assistant_message_id,
+                    result_message_id=result_message.message_id,
+                    result_digest=digest,
+                    idempotency_key=key,
+                    now=_now_iso(),
+                )
+            except Exception:  # noqa: BLE001
+                failed = True
+                logger.exception(
+                    "tool failure enqueue failed session_id=%s tool_call_id=%s",
+                    session.session_id,
+                    call.tool_call_id,
+                )
+        if failed:
+            return False
+        return True if queued else None
+
     async def _run_response(
         self, session: ChatSession, *, previous_messages: tuple[ChatMessage, ...],
         message: str | None = None, source_contexts: tuple[ChatSourceContext, ...] = (),
         claimed_call: ChatToolCall | None = None,
         emit: Callable[[dict[str, Any]], None] | None = None,
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> AgentRunResult:
         # The caller holds the execution lock through the final snapshot write.
         loop = asyncio.get_running_loop()
@@ -568,11 +1023,79 @@ class ChatSessionService:
                 "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
                 "text_delta_callback": emit_text_delta, "progress_callback": emit_progress,
                 "response_started_callback": start_response,
+                "model_call_observer": self.model_call_observer,
             }
             if claimed_call is not None:
                 result = await self.runner.resume_claimed_call(**arguments, claimed_call=claimed_call)
             else:
-                result = await self.runner.run_turn(**arguments, user_message=message, source_contexts=source_contexts)
+                result = await self.runner.run_turn(
+                    **arguments,
+                    user_message=message,
+                    source_contexts=source_contexts,
+                    permission_mode=permission_mode,
+                )
+            while result.pending_approval is not None:
+                pending = result.pending_approval
+                await self.get_session_for_user(session.session_id, session.user_id)
+                permission = await self.repository.read_permission(
+                    session.session_id, session.user_id
+                )
+                request = next(
+                    (
+                        item.content
+                        for item in reversed(result.messages)
+                        if item.role.value == "user"
+                    ),
+                    "",
+                )
+                _, forbidden = _write_request_scope(request)
+                if permission["mode"] == "read_only" or pending.name in forbidden:
+                    denied = await self.repository.decide_tool_call(
+                        session_id=session.session_id,
+                        user_id=session.user_id,
+                        tool_call_id=pending.tool_call_id,
+                        arguments_digest=pending.arguments_digest,
+                        decision="rejected",
+                        decided_at=_now_iso(),
+                    )
+                    observation = ChatToolResult(
+                        tool_call_id=denied.tool_call_id,
+                        status="failed",
+                        error_code="permission_write_denied",
+                        error_message=(
+                            "The current permission or request prohibits this write. "
+                            "No research record was changed."
+                        ),
+                    )
+                    messages = (*result.messages, ChatMessage.from_tool_result(
+                        message_id=f"msg_{uuid4().hex}",
+                        session_id=session.session_id,
+                        result=observation,
+                        created_at=_now_iso(),
+                    ))
+                    await arguments["checkpoint"](messages, (denied,), (observation,))
+                    result = replace(
+                        result,
+                        status=AgentRunStatus.FAILED,
+                        messages=messages,
+                        pending_approval=None,
+                        error_code="permission_write_denied",
+                        tool_calls=(*result.tool_calls[:-1], denied),
+                        tool_results=(*result.tool_results, observation),
+                    )
+                    break
+                automatic = await self.repository.claim_automatic_call(
+                    session_id=session.session_id,
+                    tool_call_id=pending.tool_call_id,
+                    user_id=session.user_id,
+                    started_at=_now_iso(),
+                )
+                if automatic is None:
+                    break
+                arguments["previous_messages"] = result.messages
+                result = await self.runner.resume_claimed_call(
+                    **arguments, claimed_call=automatic
+                )
             update_snapshot(
                 status=result.status.value, message_id=None, message_created_at=None, content="",
                 completion_reason=result.completion_reason.value if result.completion_reason else None,
@@ -718,6 +1241,20 @@ class ChatSessionService:
         decision: str,
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
+        if decision == "approved":
+            history = await self.repository.read_messages(session_id)
+            request = next(
+                (
+                    item.content
+                    for item in reversed(history)
+                    if item.role.value == "user"
+                ),
+                "",
+            )
+            _, forbidden = _write_request_scope(request)
+            requested = await self.repository.read_tool_call(tool_call_id)
+            if requested is not None and requested.name in forbidden:
+                raise ValueError("current_request_prohibits_write")
         existing = await self.repository.read_tool_call(tool_call_id)
         if existing is None or existing.session_id != session_id:
             raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
@@ -791,6 +1328,11 @@ class ChatSessionService:
                 previous_messages=previous_messages,
                 claimed_call=claimed,
             )
+            if await self._enqueue_tool_failure_candidates(session, result=run_result) is False:
+                run_result = replace(
+                    run_result,
+                    warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
+                )
         return self._turn_record(
             run_result,
             previous_count=len(previous_messages),

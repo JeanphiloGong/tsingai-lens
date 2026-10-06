@@ -13,6 +13,7 @@ from infra.persistence.postgres.models.evaluation import (
     FindingFeedbackRecord,
 )
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
 
 
 class PostgresFindingReviewRepository:
@@ -211,10 +212,19 @@ async def _require_finding(session: AsyncSession, value: object) -> None:
             value.analysis_version,
         ),
     )
-    if row is None or not any(
+    authored_finding = row is not None and any(
         item.get("finding_id") == value.finding_id
         for item in (row.payload or {}).get("findings", ())
-    ):
+    )
+    experiment_finding = await session.scalar(
+        select(ExperimentFindingRow).where(
+            ExperimentFindingRow.collection_id == value.collection_id,
+            ExperimentFindingRow.objective_id == value.objective_id,
+            ExperimentFindingRow.analysis_version == value.analysis_version,
+            ExperimentFindingRow.finding_id == value.finding_id,
+        )
+    )
+    if row is None or (not authored_finding and experiment_finding is None):
         raise ValueError(
             "finding does not exist in the requested objective analysis: "
             f"{value.collection_id}/{value.objective_id}/"

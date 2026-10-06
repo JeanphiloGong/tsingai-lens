@@ -124,10 +124,14 @@ Objective discovery
 
 ObjectiveAnalysis
   -> frozen document_id + preparation_fingerprint inputs
-  -> per-document Evidence checkpoints
-     -> PaperContribution
-     -> ObjectiveEvidence
+  -> PaperExperiment revision
+     -> ObjectiveExperimentSelection
+  -> optional ComparisonGroup
   -> Finding
+
+Human- or Agent-authored analysis versions keep their immutable authored
+Evidence/Finding snapshot; they do not participate in the automatic
+PaperExperiment write path.
 ```
 
 Collections only assemble Documents. Readiness and preparation failures belong
@@ -143,7 +147,7 @@ analysis of an explicitly selected ready subset.
   Objective analysis.
 - `application/chat/` owns conversation, capability trajectory, and approval;
   it references rather than duplicates scientific records.
-- `domain/` owns records and invariants.
+- `domain/` owns business objects, evidence, invariants, and business transitions.
 - [`application/repositories/`](../../application/repositories/README.md) owns
   storage contracts and repository-specific query results. Domain objects do
   not depend on those contracts.
@@ -151,6 +155,72 @@ analysis of an explicitly selected ready subset.
 
 PostgreSQL stores structured current state and analysis history. Object storage
 stores uploaded and extracted bytes. Local files are disposable runtime scratch.
+
+## Model Responsibilities
+
+Follow one complete research and feedback cycle when placing a field: the
+researcher selects prepared papers, confirms a question, inspects the resulting
+evidence, challenges an answer, then confirms a corrected training sample and
+exports a frozen revision. Objects describing those decisions and evidence are
+domain models. Run progress, database rows, and HTTP shapes support that cycle
+but have separate owners.
+
+| Model family | Domain responsibility | Execution, storage, or HTTP owner |
+| --- | --- | --- |
+| Source and Collection | Current paper membership, readable document structure, complete tables, source identities and preparation provenance | Repositories map ORM rows and artifact payloads; controllers own HTTP fields |
+| Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `application/repositories/objective_repository.py` |
+| Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `application/repositories/chat_repository.py` |
+| Feedback | Observed dissatisfaction/correction signals, evidence coverage, annotations, review decisions, sample revisions and export integrity | Jobs and leases live in `analysis_job_repository.py`; sample-build payloads and idempotency inputs live in `feedback_dataset_sample_repository.py` |
+| Goal | Authored experiment-plan content, immutable revision identity and revision-conflict rules | Repositories own record persistence; controllers validate requests and format responses |
+| Evaluation | Reference items, prediction snapshots, scores, failure judgments and expert Finding review | `evaluation_repository.py` owns persistence; controllers own review response schemas |
+| Pipeline | No scientific objects; a successful technical run is not scientific proof | `application/repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
+
+Repository-specific result types stay beside the contract that returns them.
+`StoredCollection` contains the existing `Collection`, record timestamps, and
+the current `StoredDocument` members. Each `StoredDocument` contains a `Document`
+plus its storage key, stored filename, and record timestamps. Content hashes,
+preparation fingerprints, and scientific analysis versions remain document
+provenance. The upload, preparation, and archive services consume these records
+directly; domain objects do not format storage or HTTP dictionaries.
+
+For example, `StoredDataset` contains the existing `Dataset` plus database record
+timestamps. `Dataset` itself has no `created_at`, `updated_at`, constructor input
+normalization, or HTTP encoder. Dataset creation validates names, task types,
+Collection access and public construction rules in the application service and
+request schema. The PostgreSQL implementation generates and reads record
+timestamps. No duplicate Dataset fields or generic conversion layer is needed.
+
+Small HTTP models used by one route file are declared in that file. Larger
+route-local families stay in the owning module (`controllers/chat/schemas.py`
+and the `task_dataset_schemas.py` / `research_objective_schemas.py` files beside
+their feedback and research-objective routes). Only models consumed by
+multiple route files belong in `controllers/schemas/`, including the shared
+Objective/Finding responses and Pipeline Run responses. Service-local results
+stay beside their service, and repository projections beside their contract.
+`ResearchObjective` owns scientific normalization and transitions; PostgreSQL
+encodes its persisted payload, and controllers format its HTTP response.
+
+Other timestamps are judged by their use. Chat message chronology, tool approval
+time, authored evidence/review time, confirmation time and preview expiry affect
+ordering, provenance or validity and remain explicit. Persisting such a value
+does not make it database-only bookkeeping. Field constraints such as string
+length belong at input boundaries; evidence links, disjoint supporting and
+contradicting claims, immutable revision digests and valid business transitions
+retain their domain checks.
+
+Controllers use response schemas to read attributes or compose stored metadata.
+Existing `to_record()`/`from_mapping()` methods that define canonical artifact,
+snapshot or digest inputs retain their exact formats; replacing those with
+unqualified `asdict()` would change omitted fields, defaults or digests.
+They are not a reason to add encoders to new domain objects. Frozen dataclasses
+preserve revision identities, but nested dictionaries are still mutable; copied
+input and output payloads isolate the snapshots from caller-owned dictionaries.
+
+Obsolete artifact-status, evidence-backbone and generic record-normalization
+models have been removed. Their former definitions and exports are not retained
+as compatibility paths. See the
+[repository index](../../application/repositories/README.md) for the current
+import locations.
 
 ## Concurrency And Reuse
 
@@ -166,13 +236,13 @@ stores uploaded and extracted bytes. Local files are disposable runtime scratch.
 - Objective analysis validates every frozen fingerprint before reading Source.
   A changed or re-prepared Document makes the old analysis input stale and the
   operation fails instead of mixing versions.
-- Evidence inspection runs independently for each selected Document with a
-  process-local limit of `4`. A matching succeeded checkpoint is reused across
-  analysis retries; failed or unfinished inspection is rerun. Findings are
-  synthesized once after the selected checkpoint set is assembled.
-- Inspection that finds no routable or comparable Evidence is completed
-  scientific work and remains reusable. Provider, parsing, and execution errors
-  are technical failure and remain retryable.
+- Source inspection and PaperExperiment reconstruction run independently for
+  each selected Document with a process-local limit of `4`. Each successful
+  analysis writes a fixed experiment revision and its explicit Objective
+  selection; there is no automatic per-document Evidence checkpoint.
+- A run with no recoverable experiment is a scientific abstention or failed
+  technical run according to the returned contribution. Provider, parsing, and
+  execution errors remain retryable.
 
 ## Restart Recovery And Scientific Versioning
 
@@ -198,12 +268,10 @@ Documents' current preparation fingerprints and the current scientific logic,
 then atomically replaces the published version only after the complete analysis
 succeeds.
 
-Per-Document Objective Evidence checkpoints are reusable only when their input
-fingerprint matches the Objective, Document preparation, model, extraction
-version, and the six scientific stages: paper framing, evidence routing, Source
-extraction, Source grounding, paper experiment reconstruction, and Evidence
-materialization. Changing any of those stage versions invalidates the cached
-Evidence for new analysis without making an older published result unreadable.
+PaperExperiment revisions are immutable. A later read or supplementary Source
+creates a successor revision and a new analysis selection; older Findings keep
+pointing at the revision they used. The retired per-document checkpoint payload
+is classified by migration `20260924_0075` and is not read by runtime code.
 
 ## Related Docs
 

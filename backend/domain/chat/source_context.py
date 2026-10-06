@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -95,7 +95,7 @@ class ChatSourceContext:
 
     def to_record(self) -> dict[str, Any]:
         return {
-            "resource_ref": self.resource_ref.to_record(),
+            "resource_ref": asdict(self.resource_ref),
             "collection_id": self.collection_id,
             "document_id": self.document_id,
             "document_title": self.document_title,

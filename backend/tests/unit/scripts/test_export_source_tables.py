@@ -4,11 +4,14 @@ from hashlib import sha256
 
 import pytest
 
+from application.repositories.collection_repository import (
+    StoredCollection,
+    StoredDocument,
+)
 from domain.source import Collection, Document
 from infra.persistence.file.object_store import FileObjectStore
 from infra.persistence.memory import MemoryCollectionRepository
 from scripts import export_source_tables as export_script
-
 
 pytestmark = pytest.mark.anyio
 
@@ -20,26 +23,33 @@ def anyio_backend() -> str:
 
 async def _repository_with_pdf(payload: bytes) -> MemoryCollectionRepository:
     repository = MemoryCollectionRepository()
-    collection = Collection.create(
-        collection_id="col_demo",
-        name="Demo",
-        description=None,
-        now_iso="2026-08-27T00:00:00+00:00",
+    collection = StoredCollection(
+        collection=Collection(
+            collection_id="col_demo",
+            name="Demo",
+            description=None,
+            owner_user_id="local-user",
+            status="idle",
+        ),
+        created_at="2026-08-27T00:00:00+00:00",
+        updated_at="2026-08-27T00:00:00+00:00",
     )
-    document = Document(
-        document_id="doc_1",
-        original_filename="paper.pdf",
+    document = StoredDocument(
+        document=Document(
+            document_id="doc_1",
+            original_filename="paper.pdf",
+            sha256=sha256(payload).hexdigest(),
+            media_type="application/pdf",
+            status="stored",
+            size_bytes=len(payload),
+        ),
         stored_filename="paper.pdf",
         storage_key="col_demo/input/paper.pdf",
-        sha256=sha256(payload).hexdigest(),
-        media_type="application/pdf",
-        status="stored",
-        size_bytes=len(payload),
         created_at="2026-08-27T00:00:00+00:00",
     )
     await repository.add_collection(collection)
     await repository.add_documents(
-        collection.collection_id,
+        collection.collection.collection_id,
         (document,),
         updated_at=document.created_at,
     )

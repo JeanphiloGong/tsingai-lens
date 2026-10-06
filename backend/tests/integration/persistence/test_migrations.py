@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,13 +23,79 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.engine import URL
+from sqlalchemy.dialects import postgresql
 
 from infra.persistence.postgres.base import Base
 import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260910_0058"
+HEAD_REVISION = "20260930_0085"
+POSTGRES_IDENTIFIER_LIMIT = 63
+
+
+def test_migration_and_orm_names_fit_postgres_identifier_limit() -> None:
+    violations: list[str] = []
+    migration_root = BACKEND_ROOT / "migrations" / "versions"
+    for path in sorted(migration_root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.keyword) or node.arg != "name":
+                continue
+            value = node.value.value if isinstance(node.value, ast.Constant) else None
+            if isinstance(value, str) and len(value) > POSTGRES_IDENTIFIER_LIMIT:
+                violations.append(f"{path.name}:{node.lineno}:{value}")
+
+    preparer = postgresql.dialect().identifier_preparer
+    for table in Base.metadata.tables.values():
+        for constraint in table.constraints:
+            if not constraint.name:
+                continue
+            rendered = preparer.format_constraint(constraint).strip('"')
+            if len(rendered) > POSTGRES_IDENTIFIER_LIMIT:
+                violations.append(f"orm:{table.name}:{rendered}")
+        for index in table.indexes:
+            if not index.name:
+                continue
+            rendered = preparer.format_index(index).strip('"')
+            if len(rendered) > POSTGRES_IDENTIFIER_LIMIT:
+                violations.append(f"orm:{table.name}:{rendered}")
+
+    assert violations == []
+
+
+def test_retired_chat_tables_upgrade_and_schema_downgrade(tmp_path) -> None:
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'retired-chat.sqlite'}")
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    # Model-call audits are reintroduced by the P1 feedback-analysis slice;
+    # only the retired correction workflow should remain absent at head.
+    retired = {
+        "chat_correction_cases", "chat_correction_samples",
+        "chat_correction_reviews", "chat_correction_datasets", "chat_correction_candidates",
+    }
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260923_0064")
+        before = set(inspect(connection).get_table_names())
+        assert retired <= before
+        command.upgrade(config, "20260924_0074")
+        before_irreversible = set(inspect(connection).get_table_names())
+        assert retired.isdisjoint(before_irreversible)
+        assert "chat_model_calls" in before_irreversible
+        assert "feedback_dataset_snapshots" in before_irreversible
+        command.downgrade(config, "20260923_0064")
+        after_downgrade = set(inspect(connection).get_table_names())
+        assert retired <= after_downgrade
+        assert "chat_model_calls" in after_downgrade
+        command.upgrade(config, "20260924_0074")
+        command.upgrade(config, "head")
+        final = set(inspect(connection).get_table_names())
+        assert retired.isdisjoint(final)
+        assert "chat_model_calls" in final
+        assert "feedback_dataset_snapshots" in final
+        with pytest.raises(RuntimeError, match="irreversible"):
+            command.downgrade(config, "20260924_0074")
+    engine.dispose()
 
 
 def test_ordered_chat_migration_preserves_scalar_history_and_refuses_loss(tmp_path) -> None:
@@ -192,6 +259,403 @@ def test_empty_database_upgrades_to_current_document_schema(tmp_path) -> None:
 
         with pytest.raises(RuntimeError, match="irreversible"):
             command.downgrade(config, "20260827_0037")
+
+    engine.dispose()
+
+
+def test_existing_paper_experiment_database_adds_binding_metadata(tmp_path) -> None:
+    """The V11 metadata migration upgrades old experiment tables in place."""
+
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "paper-experiment-binding-metadata.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260924_0066")
+        # Revision 0038 historically created PaperExperiment from the ORM
+        # snapshot that was current at that time.  The maintained ORM now
+        # contains the V11 fields, so an empty-database replay would otherwise
+        # make 0066 look already migrated.  Remove those fields here to model
+        # an actual pre-0078 database before exercising the migration.
+        for table_name, column_names in (
+            (
+                "experimental_variant",
+                (
+                    "identity_specificity",
+                    "missing_dimensions_json",
+                    "identity_evidence_json",
+                ),
+            ),
+            (
+                "test_condition",
+                (
+                    "protocol_specificity",
+                    "test_identity_status",
+                    "protocol_completeness",
+                    "missing_parameters_json",
+                    "method",
+                    "standard",
+                    "outcome_scope_json",
+                    "binding_source_refs_json",
+                    "protocol_evidence_json",
+                ),
+            ),
+        ):
+            for column_name in column_names:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{table_name}" DROP COLUMN "{column_name}"'
+                )
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.isdisjoint(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.isdisjoint(test_columns)
+
+        command.upgrade(config, "head")
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.issubset(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.issubset(test_columns)
+
+        command.downgrade(config, "20260925_0077")
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.isdisjoint(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.isdisjoint(test_columns)
+
+        # The logical V11 columns must be reproducible after a rollback.  This
+        # matters because the historical 0038 cutover can physically create
+        # them early from the current ORM metadata, while 0078 still owns the
+        # migration boundary for their persisted behavior.
+        command.upgrade(config, "head")
+        variant_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("experimental_variant")
+        }
+        test_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("test_condition")
+        }
+        assert {
+            "identity_specificity",
+            "missing_dimensions_json",
+            "identity_evidence_json",
+        }.issubset(variant_columns)
+        assert {
+            "protocol_specificity",
+            "test_identity_status",
+            "protocol_completeness",
+            "missing_parameters_json",
+            "method",
+            "standard",
+            "outcome_scope_json",
+            "binding_source_refs_json",
+            "protocol_evidence_json",
+        }.issubset(test_columns)
+
+    engine.dispose()
+
+
+def test_feedback_signal_migration_replays_without_changing_p1_result_identity(tmp_path) -> None:
+    """0076 adds the message-signal path while preserving the P1 table contract."""
+
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "feedback-signal-migration.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        # The historical 0038 cutover creates the then-current ORM metadata
+        # while rebuilding an empty database.  Round-trip from the real head
+        # so 0076's own downgrade removes those objects before replaying them.
+        command.upgrade(config, "head")
+        initial = inspect(connection)
+        old_result_columns = {
+            column["name"]: column["nullable"]
+            for column in initial.get_columns("feedback_analysis_results")
+        }
+        assert old_result_columns["feedback_id"] is False
+        assert "feedback_signal_analysis_results" in initial.get_table_names()
+        assert "signal_analysis_result_ids" in {
+            column["name"] for column in initial.get_columns("feedback_cases")
+        }
+        assert "tool_failure_analysis_results" in initial.get_table_names()
+        assert "tool_failure_analysis_result_ids" in {
+            column["name"] for column in initial.get_columns("feedback_cases")
+        }
+
+        command.downgrade(config, "20260924_0075")
+        after_downgrade = inspect(connection)
+        assert MigrationContext.configure(connection).get_current_revision() == (
+            "20260924_0075"
+        )
+        assert "feedback_signal_analysis_results" not in after_downgrade.get_table_names()
+        assert "signal_analysis_result_ids" not in {
+            column["name"]
+            for column in after_downgrade.get_columns("feedback_cases")
+        }
+        assert "tool_failure_analysis_results" not in after_downgrade.get_table_names()
+        assert "tool_failure_analysis_result_ids" not in {
+            column["name"]
+            for column in after_downgrade.get_columns("feedback_cases")
+        }
+        downgraded_result_columns = {
+            column["name"]: column["nullable"]
+            for column in after_downgrade.get_columns("feedback_analysis_results")
+        }
+        assert downgraded_result_columns == old_result_columns
+
+        command.upgrade(config, "head")
+        assert MigrationContext.configure(connection).get_current_revision() == HEAD_REVISION
+        replayed = inspect(connection)
+        assert "feedback_signal_analysis_results" in replayed.get_table_names()
+        assert "signal_analysis_result_ids" in {
+            column["name"] for column in replayed.get_columns("feedback_cases")
+        }
+        assert "tool_failure_analysis_results" in replayed.get_table_names()
+        assert "tool_failure_analysis_result_ids" in {
+            column["name"] for column in replayed.get_columns("feedback_cases")
+        }
+        replayed_result_columns = {
+            column["name"]: column["nullable"]
+            for column in replayed.get_columns("feedback_analysis_results")
+        }
+        assert replayed_result_columns == old_result_columns
+
+    engine.dispose()
+
+
+def test_legacy_objective_checkpoints_are_classified_with_sqlite_autoincrement(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "legacy-objective-checkpoints.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260924_0074")
+        analyses = Table(
+            "objective_analyses", MetaData(), autoload_with=connection
+        )
+        now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+        connection.execute(
+            analyses.insert().values(
+                collection_id="legacy-collection",
+                objective_id="legacy-objective",
+                analysis_version=1,
+                status="succeeded",
+                payload={
+                    "document_evidence_checkpoints": {
+                        "paper-1:fp-1": {
+                            "document_id": "paper-1",
+                            "input_fingerprint": "fp-1",
+                            "status": "succeeded",
+                            "contribution": {"document_id": "paper-1"},
+                        }
+                    },
+                    "other_metadata": {"preserve": True},
+                },
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+        command.upgrade(config, "head")
+
+        legacy = Table(
+            "objective_analysis_legacy_checkpoints",
+            MetaData(),
+            autoload_with=connection,
+        )
+        classified = connection.execute(select(legacy)).mappings().all()
+        assert len(classified) == 1
+        assert classified[0]["id"] == 1
+        assert classified[0]["classification"] == "manual_review_required"
+        assert len(classified[0]["payload_hash"]) == 64
+        current = connection.execute(select(analyses)).mappings().one()
+        assert "document_evidence_checkpoints" not in current["payload"]
+        assert current["payload"]["other_metadata"] == {"preserve": True}
+        assert current["payload"]["scientific_record_source"] == "legacy_snapshot"
+        assert current["updated_at"] != now
+
+        with pytest.raises(RuntimeError, match="irreversible"):
+            command.downgrade(config, "20260924_0074")
+
+    engine.dispose()
+
+
+def test_legacy_checkpoint_migration_handles_empty_and_malformed_payloads(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "legacy-objective-payload-shapes.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "20260924_0074")
+        analyses = Table("objective_analyses", MetaData(), autoload_with=connection)
+        now = datetime(2026, 9, 24, 12, tzinfo=timezone.utc)
+        connection.execute(
+            analyses.insert(),
+            [
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "empty-checkpoint",
+                    "analysis_version": 1,
+                    "status": "succeeded",
+                    "payload": {
+                        "document_evidence_checkpoints": {},
+                        "origin": "system_generated",
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "malformed-payload",
+                    "analysis_version": 1,
+                    "status": "succeeded",
+                    "payload": "legacy scalar payload",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "already-experiment-backed",
+                    "analysis_version": 1,
+                    "status": "succeeded",
+                    "payload": {
+                        "origin": "system_generated",
+                        "scientific_record_source": "experiment_graph",
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "collection_id": "legacy-collection",
+                    "objective_id": "authored-with-legacy-marker",
+                    "analysis_version": 2,
+                    "status": "succeeded",
+                    "payload": {
+                        "origin": "human_authored",
+                        "scientific_record_source": "legacy_snapshot",
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            ],
+        )
+
+        command.upgrade(config, "head")
+        empty = connection.execute(
+            select(analyses).where(analyses.c.objective_id == "empty-checkpoint")
+        ).mappings().one()
+        malformed = connection.execute(
+            select(analyses).where(analyses.c.objective_id == "malformed-payload")
+        ).mappings().one()
+        already_experiment_backed = connection.execute(
+            select(analyses).where(
+                analyses.c.objective_id == "already-experiment-backed"
+            )
+        ).mappings().one()
+        authored = connection.execute(
+            select(analyses).where(
+                analyses.c.objective_id == "authored-with-legacy-marker"
+            )
+        ).mappings().one()
+
+        assert empty["payload"] == {
+            "origin": "system_generated",
+            "scientific_record_source": "legacy_snapshot",
+        }
+        assert malformed["payload"] == {
+            "legacy_payload": "legacy scalar payload",
+            "scientific_record_source": "legacy_snapshot",
+        }
+        assert already_experiment_backed["payload"] == {
+            "origin": "system_generated",
+            "scientific_record_source": "experiment_graph",
+        }
+        assert authored["payload"] == {
+            "origin": "human_authored",
+            "scientific_record_source": "authored_snapshot",
+        }
 
     engine.dispose()
 

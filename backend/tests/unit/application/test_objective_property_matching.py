@@ -73,6 +73,125 @@ def test_broad_outcome_scope_matches_expanded_source_measurements(
     )
 
 
+def test_relative_density_test_context_accepts_source_named_density_with_normalization() -> None:
+    context = (
+        {
+            "name": "density measurement method",
+            "value": "Archimedes method",
+            "applies_to_outcomes": ["sample density"],
+        },
+        {
+            "name": "normalization density",
+            "value": 4.43,
+            "unit": "g/cm3",
+            "applies_to_outcomes": ["sample density"],
+        },
+    )
+
+    applicable = property_matching.applicable_test_context_attributes(
+        context,
+        "relative density",
+        reference_attributes=(
+            {
+                "name": "nominal Ti-6Al-4V density",
+                "value": 4.43,
+                "unit": "g/cm3",
+                "context_scope": "background",
+            },
+        ),
+    )
+
+    assert applicable == context
+
+
+def test_relative_density_requires_numeric_reference_density_relation() -> None:
+    method = {
+        "name": "sample density measurement method",
+        "value": "Archimedes method",
+        "applies_to_outcomes": ["sample density"],
+    }
+
+    assert property_matching.applicable_test_context_attributes(
+        (method,),
+        "relative density",
+        reference_attributes=(
+            {
+                "name": "density",
+                "value": 4.43,
+            },
+        ),
+    ) == ()
+    assert property_matching.applicable_test_context_attributes(
+        (method,),
+        "relative density",
+        reference_attributes=(
+            {
+                "name": "nominal Ti-6Al-4V density",
+                "value": "not reported",
+            },
+        ),
+    ) == ()
+
+
+def test_relative_density_test_context_does_not_accept_unrelated_density_or_method() -> None:
+    assert not property_matching.applicable_test_context_attributes(
+        (
+            {
+                "name": "porosity measurement method",
+                "value": "X-ray CT",
+                "applies_to_outcomes": ["porosity"],
+            },
+        ),
+        "relative density",
+    )
+    assert not property_matching.applicable_test_context_attributes(
+        (
+            {
+                "name": "density measurement method",
+                "value": "Archimedes method",
+                "applies_to_outcomes": ["sample density"],
+            },
+        ),
+        "relative density",
+    )
+
+
+def test_unscoped_test_context_keeps_one_method_with_its_conditions() -> None:
+    context = (
+        {"name": "test method", "value": "tensile test"},
+        {"name": "test temperature", "value": 25, "unit": "C"},
+    )
+
+    assert property_matching.applicable_test_context_attributes(
+        context,
+        "elongation",
+    ) == context
+
+
+def test_unscoped_test_context_ignores_narrative_metadata() -> None:
+    method = {"name": "method", "value": "X-ray computed tomography"}
+    context = (
+        method,
+        {"name": "details", "value": "Paper-specific summary."},
+        {"name": "methods", "value": "Paper-specific methods narrative."},
+    )
+
+    assert property_matching.applicable_test_context_attributes(
+        context,
+        "porosity",
+    ) == (method,)
+
+
+def test_unscoped_test_context_rejects_multiple_unassigned_methods() -> None:
+    assert property_matching.applicable_test_context_attributes(
+        (
+            {"name": "method", "value": "X-ray computed tomography"},
+            {"name": "measurement method", "value": "Archimedes method"},
+        ),
+        "relative density",
+    ) == ()
+
+
 @pytest.mark.parametrize(
     ("outcome", "requires_resolution"),
     (

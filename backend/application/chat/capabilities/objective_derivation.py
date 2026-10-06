@@ -38,7 +38,7 @@ class DerivedObjectiveDraftInput(ObjectiveDraftInput):
     )
 
 
-class DeriveObjectiveArguments(BaseModel):
+class DeriveObjectiveToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective_id: str = Field(min_length=1, max_length=240)
@@ -55,7 +55,7 @@ class DeriveObjectiveCapability:
             "basis. This does not persist or confirm an Objective."
         ),
         risk=ToolRisk.DRAFT,
-        input_model=DeriveObjectiveArguments,
+        input_model=DeriveObjectiveToolRequest,
     )
 
     def __init__(
@@ -70,7 +70,7 @@ class DeriveObjectiveCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: DeriveObjectiveArguments,
+        arguments: DeriveObjectiveToolRequest,
     ) -> ChatToolResult:
         await self.collection_service.get_collection_for_user(
             context.collection_id,
@@ -409,7 +409,7 @@ def _deduplicate_refs(refs: list[ChatResourceRef]) -> tuple[ChatResourceRef, ...
 
 __all__ = [
     "DerivedObjectiveDraftInput",
-    "DeriveObjectiveArguments",
+    "DeriveObjectiveToolRequest",
     "DeriveObjectiveCapability",
     "ObjectiveDerivationBasis",
 ]

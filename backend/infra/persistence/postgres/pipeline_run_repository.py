@@ -5,16 +5,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from application.repositories.pipeline_run_repository import PipelineRunSummary
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from domain.pipeline import PipelineRun
+from application.repositories.pipeline_run_repository import (
+    PipelineRun,
+    PipelineRunSummary,
+)
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
-
 
 _ACTIVE_STATUSES = ("queued", "running")
 _SUCCESS_STATUSES = ("completed", "partial_success")

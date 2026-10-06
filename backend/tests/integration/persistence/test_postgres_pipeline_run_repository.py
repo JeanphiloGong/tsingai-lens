@@ -4,12 +4,14 @@ from dataclasses import replace
 
 import pytest
 
-from domain.pipeline import PipelineRun, PipelineRunStatus
+from application.repositories.pipeline_run_repository import (
+    PipelineRun,
+    PipelineRunStatus,
+)
 from infra.persistence.postgres.pipeline_run_repository import (
     PostgresPipelineRunRepository,
 )
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
-
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio

@@ -48,38 +48,3 @@ def test_text_unit_final_columns_only_expose_minimal_source_handoff():
         "n_tokens",
         "document_ids",
     ]
-
-
-def test_pipeline_factory_defaults_to_minimal_source_handoff():
-    backend_root = Path(__file__).resolve().parents[3]
-    factory_path = (
-        backend_root / "infra" / "source" / "runtime" / "workflows" / "factory.py"
-    )
-    source = factory_path.read_text(encoding="utf-8")
-    assignments = _assignments_by_name(factory_path)
-
-    workflows = ast.literal_eval(assignments["_DEFAULT_SOURCE_WORKFLOWS"])
-    assert workflows == [
-        "load_input_documents",
-        "create_source_artifacts",
-    ]
-    assert "IndexingMethod" not in source
-    assert "register_pipeline" not in source
-
-
-def test_create_final_text_units_no_longer_loads_legacy_graph_artifacts():
-    backend_root = Path(__file__).resolve().parents[3]
-    workflow_path = (
-        backend_root
-        / "infra"
-        / "source"
-        / "runtime"
-        / "workflows"
-        / "create_final_text_units.py"
-    )
-    source = workflow_path.read_text(encoding="utf-8")
-
-    assert '"entities"' not in source
-    assert '"relationships"' not in source
-    assert '"covariates"' not in source
-    assert "storage_has_table" not in source

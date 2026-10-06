@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from asyncio import (
     CancelledError,
     Lock,
@@ -10,16 +11,25 @@ from asyncio import (
     run_coroutine_threadsafe,
     to_thread,
 )
-from collections.abc import Coroutine
+from collections.abc import AsyncIterator, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import replace
-import logging
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from application.core.document_profiles.service import DocumentProfileService
+from application.core.objectives.analysis.analysis_record_source import (
+    should_read_experiment_projection,
+)
 from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
     record_analysis_failure,
+)
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriter,
+)
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
 )
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
@@ -29,14 +39,20 @@ from application.core.objectives.finding_summary import (
     summarize_finding_evidence,
 )
 from application.core.objectives.objective_analysis_service import (
-    ObjectiveAnalysisArtifacts,
-    ObjectiveEvidenceAnalysisService,
+    ObjectiveExperimentAnalysisArtifacts,
+    ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
-from domain.core import ObjectiveAnalysis, ResearchObjective
-from application.repositories.objective_repository import ObjectiveRepository
+from application.repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveRepository,
+)
+from application.repositories.transaction import (
+    RepositoryTransaction,
+    RepositoryTransactionFactory,
+)
+from domain.core import ResearchObjective
 from infra.llm.usage import capture_llm_usage
-
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +61,19 @@ _ANALYSIS_MAX_CONCURRENCY = 4
 
 
 _EVIDENCE_REVIEW_GAP_LIMIT = 200
+
+
+@asynccontextmanager
+async def _analysis_transaction(
+    factory: RepositoryTransactionFactory | None,
+) -> AsyncIterator[RepositoryTransaction | None]:
+    """Keep experiment records and Objective publication in one write scope."""
+
+    if factory is None:
+        yield None
+        return
+    async with factory.begin() as transaction:
+        yield transaction
 
 
 def _evidence_review_summary(
@@ -63,32 +92,38 @@ def _evidence_review_summary(
     result_count = 0
     gaps: list[dict[str, Any]] = []
     for evidence in evidence_records:
-        status = str(getattr(evidence, "evidence_status", "") or "unknown")
+        status = str(
+            _record_value(evidence, "evidence_status")
+            or _record_value(evidence, "resolution_status")
+            or "unknown"
+        )
         status_counts[status] = status_counts.get(status, 0) + 1
-        if getattr(evidence, "reported_result", None) is not None:
+        if _record_value(evidence, "reported_result") is not None:
             result_count += 1
         if status == "comparable":
             continue
         result = getattr(evidence, "reported_result", None)
+        if isinstance(evidence, dict):
+            result = evidence.get("reported_result")
         gaps.append(
             {
-                "evidence_id": str(getattr(evidence, "evidence_id", "") or ""),
-                "document_id": str(getattr(evidence, "document_id", "") or ""),
-                "source_kind": str(getattr(evidence, "source_kind", "") or ""),
-                "source_ref": str(getattr(evidence, "source_ref", "") or ""),
-                "page_numbers": list(getattr(evidence, "page_numbers", ()) or ()),
+                "evidence_id": str(_record_value(evidence, "evidence_id") or ""),
+                "document_id": str(_record_value(evidence, "document_id") or ""),
+                "source_kind": str(_record_value(evidence, "source_kind") or ""),
+                "source_ref": str(_record_value(evidence, "source_ref") or ""),
+                "page_numbers": list(_record_value(evidence, "page_numbers") or ()),
                 "evidence_status": status,
                 "reason": str(
-                    getattr(evidence, "evidence_status_reason", "")
+                    _record_value(evidence, "evidence_status_reason")
                     or "Evidence is not ready for a strict cross-paper comparison."
                 ),
                 "outcome": (
-                    str(getattr(result, "outcome", "") or "")
+                    str(_record_value(result, "outcome") or "")
                     if result is not None
                     else None
                 ),
                 "source_excerpt": str(
-                    getattr(evidence, "source_excerpt", "") or ""
+                    _record_value(evidence, "source_excerpt") or ""
                 )[:1200],
             }
         )
@@ -112,55 +147,72 @@ def _evidence_review_summary(
     }
 
 
-def _scientific_abstention(
-    artifacts: ObjectiveAnalysisArtifacts,
-) -> tuple[str | None, str | None]:
-    """Explain a successful analysis with evidence but no defensible Finding.
+def _record_value(record: Any, name: str) -> Any:
+    """Read a legacy domain object or a compatibility projection mapping."""
 
-    A researcher distinguishes a paper that reports an observation from a
-    comparison that supports an attributed conclusion.  Preserve that
-    distinction in the published analysis instead of exposing ``findings=[]``
-    as if the analysis had no useful result or had silently failed.
-    """
+    if isinstance(record, Mapping):
+        return record.get(name)
+    return getattr(record, name, None)
 
-    if artifacts.findings:
+
+def _record_dict(record: Any) -> dict[str, Any]:
+    if isinstance(record, Mapping):
+        return dict(record)
+    return record.to_record()
+
+
+def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
+    """Explain a successful experiment analysis with no published Finding."""
+
+    findings = tuple(getattr(result, "findings", ()) or ())
+    selections = tuple(getattr(result, "selections", ()) or ())
+    if findings:
         return None, None
-
-    evidence = tuple(artifacts.evidence_records)
-    status_counts: dict[str, int] = {}
-    for record in evidence:
-        status = record.evidence_status
-        status_counts[status] = status_counts.get(status, 0) + 1
-    status_note = "; ".join(
-        f"{status}={count}" for status, count in sorted(status_counts.items())
-    ) or "none"
-
-    if not evidence:
+    if not selections:
+        # A partial archive is intentionally written without an Objective
+        # selection: its bindings are not strong enough for a Finding.  It is
+        # still source-grounded research state, so reporting it as
+        # ``no_grounded_evidence`` would erase the distinction between
+        # "nothing was recovered" and "something was recovered but needs
+        # context".
+        revisions = tuple(getattr(result, "revisions", ()) or ())
+        if any(
+            getattr(
+                getattr(revision, "revision", revision),
+                "measurements",
+                (),
+            )
+            or getattr(
+                getattr(revision, "revision", revision),
+                "comparisons",
+                (),
+            )
+            or getattr(
+                getattr(revision, "revision", revision),
+                "reported_interpretations",
+                (),
+            )
+            for revision in revisions
+        ):
+            return (
+                "insufficient_evidence",
+                "Source-grounded experiment content was archived, but its partial bindings were not sufficient for an Objective selection or Finding.",
+            )
         return (
             "no_grounded_evidence",
-            "No source-backed Evidence was retained, so the Objective cannot support a scientific conclusion.",
+            "No Objective-relevant experiment selection was recovered from the prepared Sources.",
         )
-
-    reported_results = tuple(
-        record
-        for record in evidence
-        if record.selection_status == "extracted" and record.reported_result is not None
+    comparison_count = sum(
+        bool(getattr(selection, "comparison_keys", ())) for selection in selections
     )
-    if reported_results:
+    if comparison_count:
         return (
             "insufficient_evidence",
-            f"{len(reported_results)} source-backed result(s) were retained, but none satisfied the comparison conditions for a Finding. Evidence status counts: {status_note}.",
+            "Source-grounded experiment selections were retained, but none supported a defensible Finding under the recorded comparison conditions.",
         )
-
-    if all(record.evidence_status == "extraction_failed" for record in evidence):
-        return (
-            "no_grounded_evidence",
-            f"{len(evidence)} Evidence item(s) were retained, but all failed technical extraction before a source-backed result could be established. Evidence status counts: {status_note}.",
-        )
-
     return (
         "no_comparable_evidence",
-        f"{len(evidence)} Evidence item(s) were retained, but none contained a source-backed reported result that could be compared for this Objective. Evidence status counts: {status_note}.",
+        "Source-grounded measurements were retained, but no paper-internal comparison was available for this Objective.",
     )
 
 
@@ -188,18 +240,28 @@ class ObjectiveAnalysisService:
         self,
         *,
         objective_repository: ObjectiveRepository,
-        evidence_analysis_service: ObjectiveEvidenceAnalysisService,
+        experiment_analysis_service: ObjectiveExperimentAnalysisService,
         objective_input_service: ObjectiveInputService,
         document_profile_service: DocumentProfileService,
+        experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
+        experiment_analysis_transaction_factory: RepositoryTransactionFactory
+        | None = None,
+        experiment_compatibility_projection: ExperimentCompatibilityProjection
+        | None = None,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
         task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("objective analysis concurrency must be positive")
         self.objective_repository = objective_repository
-        self.evidence_analysis_service = evidence_analysis_service
+        self.experiment_analysis_service = experiment_analysis_service
         self.objective_input_service = objective_input_service
         self.document_profile_service = document_profile_service
+        self.experiment_analysis_writer = experiment_analysis_writer
+        self.experiment_analysis_transaction_factory = (
+            experiment_analysis_transaction_factory
+        )
+        self.experiment_compatibility_projection = experiment_compatibility_projection
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
         self._analysis_tasks: set[Any] = set()
@@ -376,18 +438,29 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        findings, total = await self.objective_repository.list_findings(
-            collection_id,
-            objective_id,
-            version,
-            offset=offset,
-            limit=limit,
-        )
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
+            findings, total = await self.experiment_compatibility_projection.list_findings(
+                collection_id,
+                objective_id,
+                version,
+                offset=offset,
+                limit=limit,
+            )
+        else:
+            findings, total = await self.objective_repository.list_findings(
+                collection_id,
+                objective_id,
+                version,
+                offset=offset,
+                limit=limit,
+            )
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": version,
-            "items": [finding.to_record() for finding in findings],
+            "items": [_record_dict(finding) for finding in findings],
             "evidence_reviews": await self._finding_evidence_reviews(
                 collection_id, objective_id, version, findings
             ),
@@ -409,12 +482,22 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        finding = await self.objective_repository.read_finding(
-            collection_id,
-            objective_id,
-            version,
-            finding_id,
-        )
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
+            finding = await self.experiment_compatibility_projection.read_finding(
+                collection_id,
+                objective_id,
+                version,
+                finding_id,
+            )
+        else:
+            finding = await self.objective_repository.read_finding(
+                collection_id,
+                objective_id,
+                version,
+                finding_id,
+            )
         if finding is None:
             raise FileNotFoundError(
                 f"finding not found: {objective_id}/v{version}/{finding_id}"
@@ -423,10 +506,10 @@ class ObjectiveAnalysisService:
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": version,
-            "finding": finding.to_record(),
+            "finding": _record_dict(finding),
             "evidence_review": (await self._finding_evidence_reviews(
                 collection_id, objective_id, version, (finding,)
-            ))[finding.finding_id],
+            ))[_record_value(finding, "finding_id")],
         }
 
     async def _finding_evidence_reviews(
@@ -436,11 +519,18 @@ class ObjectiveAnalysisService:
         if not findings:
             return {}
         evidence = await self._all_published_evidence(collection_id, objective_id, version)
-        evidence_by_id = {item.evidence_id: item for item in evidence}
+        evidence_by_id = {
+            str(_record_value(item, "evidence_id") or ""): item for item in evidence
+        }
         reviews = {}
         for finding in findings:
-            replacements = finding.evidence_replacements(evidence_by_id)
-            reviews[finding.finding_id] = {
+            if isinstance(finding, Mapping):
+                finding_id = str(finding.get("finding_id") or "")
+                replacements = {}
+            else:
+                finding_id = finding.finding_id
+                replacements = finding.evidence_replacements(evidence_by_id)
+            reviews[finding_id] = {
                 "needs_review": bool(replacements),
                 "evidence_replacements": replacements,
             }
@@ -458,20 +548,32 @@ class ObjectiveAnalysisService:
         detail = await self.get_finding(
             collection_id, objective_id, finding_id, analysis_version=analysis_version
         )
-        records, total = await self.objective_repository.list_evidence(
-            collection_id,
-            objective_id,
-            analysis_version,
-            finding_id=finding_id,
-            offset=0,
-            limit=MAX_SUMMARY_EVIDENCE,
-        )
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
+            records, total = await self.experiment_compatibility_projection.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding_id=finding_id,
+                offset=0,
+                limit=MAX_SUMMARY_EVIDENCE,
+            )
+        else:
+            records, total = await self.objective_repository.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding_id=finding_id,
+                offset=0,
+                limit=MAX_SUMMARY_EVIDENCE,
+            )
         if total > MAX_SUMMARY_EVIDENCE:
             raise FindingSummaryUnavailable("summary_input_too_large")
         result = await to_thread(
             summarize_finding_evidence,
             finding=detail["finding"],
-            evidence=[item.to_record() for item in records],
+            evidence=[_record_dict(item) for item in records],
             language=language,
         )
         await self._published_version(collection_id, objective_id, analysis_version)
@@ -492,14 +594,26 @@ class ObjectiveAnalysisService:
             objective_id,
             analysis_version,
         )
-        evidence, total = await self.objective_repository.list_evidence(
-            collection_id,
-            objective_id,
-            version,
-            finding_id=finding_id,
-            offset=offset,
-            limit=limit,
-        )
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
+            evidence, total = await self.experiment_compatibility_projection.list_evidence(
+                collection_id,
+                objective_id,
+                version,
+                finding_id=finding_id,
+                offset=offset,
+                limit=limit,
+            )
+        else:
+            evidence, total = await self.objective_repository.list_evidence(
+                collection_id,
+                objective_id,
+                version,
+                finding_id=finding_id,
+                offset=offset,
+                limit=limit,
+            )
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -507,9 +621,17 @@ class ObjectiveAnalysisService:
             "finding_id": finding_id,
             "items": [
                 {
-                    **item.to_record(),
-                    "supports_finding": item.supports_finding,
-                    "eligible_for_finding_authoring": item.eligible_for_finding_authoring,
+                    **_record_dict(item),
+                    "supports_finding": (
+                        item.get("supports_finding")
+                        if isinstance(item, Mapping)
+                        else item.supports_finding
+                    ),
+                    "eligible_for_finding_authoring": (
+                        item.get("eligible_for_finding_authoring")
+                        if isinstance(item, Mapping)
+                        else item.eligible_for_finding_authoring
+                    ),
                 }
                 for item in evidence
             ],
@@ -546,6 +668,14 @@ class ObjectiveAnalysisService:
             collection_id,
             tuple(item.document_id for item in analysis.document_inputs),
         )
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, version
+        ):
+            return await self.experiment_compatibility_projection.build_evidence_map(
+                objective=objective,
+                analysis=analysis,
+                profiles=profiles,
+            )
         return build_objective_evidence_map(
             objective=objective,
             analysis=analysis,
@@ -565,6 +695,17 @@ class ObjectiveAnalysisService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Any, ...]:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
+            findings, _ = await self.experiment_compatibility_projection.list_findings(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=0,
+                limit=200,
+            )
+            return tuple(findings)
         records: list[Any] = []
         offset = 0
         while True:
@@ -586,6 +727,17 @@ class ObjectiveAnalysisService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Any, ...]:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
+            evidence, _ = await self.experiment_compatibility_projection.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=0,
+                limit=500,
+            )
+            return tuple(evidence)
         records: list[Any] = []
         offset = 0
         while True:
@@ -622,10 +774,10 @@ class ObjectiveAnalysisService:
                 capture_llm_usage() as usage,
                 capture_analysis_diagnostics() as diagnostics,
             ):
-                artifacts: ObjectiveAnalysisArtifacts | None = None
+                artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
                 try:
                     artifacts = (
-                        await self.evidence_analysis_service.generate_objective_analysis_artifacts(
+                        await self.experiment_analysis_service.generate_experiment_analysis_artifacts(
                             collection_id,
                             claimed,
                             progress_callback=progress_callback,
@@ -659,17 +811,50 @@ class ObjectiveAnalysisService:
                         prompt_versions=usage.prompt_versions,
                         diagnostics=diagnostics.records,
                     )
-            abstention_reason, abstention_note = _scientific_abstention(artifacts)
-            objective, completed = await self.objective_repository.publish_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-                contributions=artifacts.contributions,
-                evidence_records=artifacts.evidence_records,
-                findings=artifacts.findings,
-                abstention_reason=abstention_reason,
-                abstention_note=abstention_note,
+            if self.experiment_analysis_writer is None:
+                raise RuntimeError(
+                    "experiment analysis writer is required for objective publication"
+                )
+            native_writer = getattr(
+                self.experiment_analysis_writer,
+                "write_experiment_analysis",
+                None,
             )
+            if not callable(native_writer):
+                raise RuntimeError(
+                    "experiment analysis writer does not implement native publication"
+                )
+            async with _analysis_transaction(
+                self.experiment_analysis_transaction_factory
+            ) as transaction:
+                writer_kwargs: dict[str, Any] = {
+                    "collection_id": collection_id,
+                    "objective": objective,
+                    "analysis": claimed,
+                    "experiment_outputs": artifacts.experiment_outputs,
+                    "partial_experiment_outputs": artifacts.partial_experiment_outputs,
+                }
+                if transaction is not None:
+                    writer_kwargs["transaction"] = transaction
+                native_result = await native_writer(**writer_kwargs)
+                abstention_reason, abstention_note = _experiment_abstention(
+                    native_result
+                )
+                publish_kwargs: dict[str, Any] = {
+                    "contributions": artifacts.contributions,
+                    "abstention_reason": abstention_reason,
+                    "abstention_note": abstention_note,
+                }
+                if transaction is not None:
+                    publish_kwargs["transaction"] = transaction
+                objective, completed = (
+                    await self.objective_repository.publish_experiment_analysis(
+                        collection_id,
+                        objective_id,
+                        analysis_version,
+                        **publish_kwargs,
+                    )
+                )
             return await self._result(collection_id, objective.objective_id, analysis=completed)
         except Exception as exc:  # noqa: BLE001
             record_analysis_failure(
@@ -724,7 +909,9 @@ class ObjectiveAnalysisService:
             logger.exception("Objective analysis crashed after service scheduling")
 
     @staticmethod
-    def _validate_artifacts(artifacts: ObjectiveAnalysisArtifacts) -> None:
+    def _validate_artifacts(
+        artifacts: ObjectiveExperimentAnalysisArtifacts,
+    ) -> None:
         if not artifacts.contributions:
             raise RuntimeError("objective analysis produced no paper contributions")
         relevant_contributions = tuple(
@@ -784,70 +971,87 @@ class ObjectiveAnalysisService:
         evidence_records = ()
         warnings: list[str] = []
         if published is not None:
-            paper_contributions = await self.objective_repository.list_contributions(
-                collection_id,
-                objective.objective_id,
-                published.analysis_version,
-            )
-            findings, finding_total = await self.objective_repository.list_findings(
-                collection_id,
-                objective.objective_id,
-                published.analysis_version,
-                offset=0,
-                limit=50,
-            )
-            evidence_records = await self._all_published_evidence(
-                collection_id,
-                objective.objective_id,
-                published.analysis_version,
-            )
+            if (
+                published.uses_experiment_records
+                and self.experiment_compatibility_projection is not None
+            ):
+                paper_contributions = (
+                    await self.experiment_compatibility_projection.list_contributions(
+                        collection_id,
+                        objective.objective_id,
+                        published.analysis_version,
+                    )
+                )
+                findings, finding_total = (
+                    await self.experiment_compatibility_projection.list_findings(
+                        collection_id,
+                        objective.objective_id,
+                        published.analysis_version,
+                        offset=0,
+                        limit=50,
+                    )
+                )
+                evidence_records = await self._all_published_evidence(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                )
+            else:
+                paper_contributions = await self.objective_repository.list_contributions(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                )
+                findings, finding_total = await self.objective_repository.list_findings(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                    offset=0,
+                    limit=50,
+                )
+                evidence_records = await self._all_published_evidence(
+                    collection_id,
+                    objective.objective_id,
+                    published.analysis_version,
+                )
             seen_warnings: set[str] = set()
             for contribution in paper_contributions:
-                for warning in contribution.warnings:
-                    scoped_warning = f"{contribution.document_id}: {warning}"
+                document_id = str(_record_value(contribution, "document_id") or "")
+                for warning in (_record_value(contribution, "warnings") or ()):
+                    scoped_warning = f"{document_id}: {warning}"
                     if scoped_warning in seen_warnings:
                         continue
                     seen_warnings.add(scoped_warning)
                     warnings.append(scoped_warning)
-                for status, count in contribution.evidence_status_counts:
+                status_counts = _record_value(contribution, "evidence_status_counts") or {}
+                if isinstance(status_counts, Mapping):
+                    status_counts = tuple(status_counts.items())
+                for status, count in status_counts:
                     if status == "comparable" or count <= 0:
                         continue
                     scoped_status = (
-                        f"{contribution.document_id}: {count} Evidence item(s) "
+                        f"{document_id}: {count} Evidence item(s) "
                         f"classified as {status}."
                     )
                     if scoped_status in seen_warnings:
                         continue
                     seen_warnings.add(scoped_status)
                     warnings.append(scoped_status)
-                if (
-                    contribution.evidence_disposition
-                    in {
-                        "no_routable_evidence",
-                        "no_comparable_evidence",
-                        "extraction_failed",
-                    }
-                    and contribution.evidence_disposition_reason
-                ):
-                    scoped_reason = (
-                        f"{contribution.document_id}: "
-                        f"{contribution.evidence_disposition_reason}"
-                    )
-                    if scoped_reason not in seen_warnings:
-                        seen_warnings.add(scoped_reason)
-                        warnings.append(scoped_reason)
             for evidence in evidence_records:
-                for warning in evidence.warnings:
+                for warning in (_record_value(evidence, "warnings") or ()):
                     scoped_warning = (
-                        f"{evidence.document_id}/{evidence.source_ref}: {warning}"
+                        f"{_record_value(evidence, 'document_id')}/"
+                        f"{_record_value(evidence, 'source_ref')}: {warning}"
                     )
                     if scoped_warning in seen_warnings:
                         continue
                     seen_warnings.add(scoped_warning)
                     warnings.append(scoped_warning)
             for finding in findings:
-                for warning in finding.warnings:
-                    scoped_warning = f"Finding {finding.finding_id}: {warning}"
+                for warning in (_record_value(finding, "warnings") or ()):
+                    scoped_warning = (
+                        f"Finding {_record_value(finding, 'finding_id')}: {warning}"
+                    )
                     if scoped_warning in seen_warnings:
                         continue
                     seen_warnings.add(scoped_warning)
@@ -892,6 +1096,29 @@ class ObjectiveAnalysisService:
         if requested_version is not None and requested_version != published_version:
             raise ValueError("requested analysis version is not published")
         return published_version
+
+    async def _should_use_experiment_projection(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> bool:
+        """Select the scientific read owner for one fixed analysis version.
+
+        The production runtime always supplies the projection for automatic
+        analyses.  The ``None`` case remains usable for authored-only test and
+        memory runtimes; it must never make an automatic production analysis
+        silently switch its persisted scientific source because runtime
+        construction rejects that configuration.
+        """
+
+        return await should_read_experiment_projection(
+            objective_repository=self.objective_repository,
+            experiment_projection=self.experiment_compatibility_projection,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+        )
 
     def _build_progress_callback(
         self,

@@ -13,6 +13,7 @@ from application.chat import (
     AgentContext,
     AgentRunLimits,
     CapabilityRegistry,
+    ModelResponseError,
     ModelToolCall,
     ModelTurn,
     ModelUsage,
@@ -21,6 +22,7 @@ from application.chat import (
 )
 from application.chat.session_service import (
     ChatApprovalPendingError,
+    ChatFeedbackAnalysisEnqueueError,
     ChatSessionNotFoundError,
     ChatSessionService,
     ChatSourceContextError,
@@ -39,6 +41,7 @@ from domain.chat import (
 )
 from domain.source import SourceBlock, SourceDocument
 from tests.unit.application.test_research_agent_runner import _Model
+from tests.support.chat_repository import MemoryChatRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -124,8 +127,9 @@ class _SourceArtifactRepository:
         return None
 
 
-class _Repository:
+class _Repository(MemoryChatRepository):
     def __init__(self) -> None:
+        super().__init__()
         self.sessions: dict[str, ChatSession] = {}
         self.active_sessions: set[str] = set()
         self.response_snapshots: dict[str, ChatResponseSnapshot] = {}
@@ -184,6 +188,8 @@ class _Repository:
     ) -> None:
         self.sessions[session.session_id] = session
         self.messages[session.session_id] = messages
+        for call in tool_calls:
+            self.proposed_revisions.setdefault(call.tool_call_id, 0)
         self.calls.update((item.tool_call_id, item) for item in tool_calls)
         self.results.update((item.tool_call_id, item) for item in tool_results)
         self.trajectory_snapshots.append(
@@ -281,6 +287,56 @@ async def test_chat_session_service_persists_ordinary_conversation() -> None:
     assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
     with pytest.raises(ChatSessionNotFoundError):
         await service.get_session_for_user(session.session_id, "user-2")
+
+
+class _FailingAnalysisJobs:
+    async def enqueue_feedback_analysis(self, **kwargs):
+        raise RuntimeError("database unavailable")
+
+
+async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable() -> None:
+    repository = _Repository()
+    service = ChatSessionService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=_SourceArtifactRepository(),
+        repository=repository,
+        runner=ResearchAgentRunner(
+            model=_Model(ModelTurn(content="answer")),
+            capabilities=CapabilityRegistry(()),
+        ),
+        analysis_job_repository=_FailingAnalysisJobs(),
+    )
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    await repository.save_trajectory(
+        session=session,
+        messages=(
+            ChatMessage.user(
+                message_id="question-1",
+                session_id=session.session_id,
+                content="question",
+                created_at="2026-09-24T00:00:00+00:00",
+            ),
+            ChatMessage.assistant(
+                message_id="answer-1",
+                session_id=session.session_id,
+                content="answer",
+                created_at="2026-09-24T00:00:01+00:00",
+            ),
+        ),
+        tool_calls=(),
+        tool_results=(),
+    )
+
+    with pytest.raises(ChatFeedbackAnalysisEnqueueError):
+        await service.set_message_feedback_for_user(
+            session.session_id,
+            "answer-1",
+            "user-1",
+            rating="not_helpful",
+            reason="incorrect",
+        )
+
+    assert len(repository.feedback) == 1
 
 
 async def test_chat_session_service_persists_selected_source_with_user_message() -> None:
@@ -745,6 +801,55 @@ async def test_approved_continuation_captures_text_without_repeating_the_write()
         model.continue_response.set()
         model.finish_response.set()
         await decision
+
+
+async def test_approved_write_response_failure_is_a_completed_session_turn() -> None:
+    repository = _Repository()
+    capability = _WriteCapability()
+    service = _service(
+        _Model(ModelTurn(tool_calls=(ModelToolCall(
+            name=capability.spec.name,
+            arguments={"question": "Record the reconstructed tensile experiment."},
+        ),))),
+        repository,
+        capability,
+    )
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    proposed = await service.post_message_for_user(
+        session.session_id,
+        "user-1",
+        message="保存已重建的拉伸实验。",
+    )
+    pending = proposed["pending_approval"]
+    assert pending is not None
+    service.runner.model = _Model(ModelResponseError(
+        "Model request exceeds its context window.",
+        reason="context_window_exceeded",
+        retryable=False,
+    ))
+
+    completed = await service.decide_tool_call_for_user(
+        session.session_id,
+        pending.tool_call_id,
+        "user-1",
+        arguments_digest=pending.arguments_digest,
+        decision="approved",
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["completion_reason"] == "model_answer"
+    assert completed["error_code"] is None
+    assert completed["warnings"]
+    assert completed["messages"][-1].content == (
+        "已批准的操作已完成并保存。详细回复暂时无法生成；请以已保存的结果为准。"
+    )
+    assert len(capability.executed) == 1
+    assert repository.calls[pending.tool_call_id].status is ToolCallStatus.SUCCEEDED
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot is not None
+    assert snapshot.status == "completed"
+    assert snapshot.error_code is None
+    assert snapshot.warnings == completed["warnings"]
 
 
 async def test_chat_session_service_checkpoints_every_agent_step() -> None:

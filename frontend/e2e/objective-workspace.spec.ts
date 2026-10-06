@@ -58,6 +58,8 @@ const finding = {
 	objective_id: objectiveId,
 	analysis_version: 1,
 	finding_id: 'finding-1',
+	selection_ids: ['selection-1'],
+	comparison_group_ids: [],
 	statement: 'Annealing was associated with higher tensile strength.',
 	factors: ['heat treatment'],
 	outcome: 'tensile strength',
@@ -214,6 +216,109 @@ const mechanismEvidence = {
 	attribution_scope: 'not_attributable'
 };
 
+const experimentProjection = {
+	selections: [
+		{
+			selection_id: 'selection-1',
+			experiment_id: 'experiment-1',
+			experiment_version: 1,
+			outcome: 'tensile strength',
+			measurement_keys: ['measurement-before', 'measurement-after'],
+			comparison_keys: ['comparison-1'],
+			missing_context: []
+		}
+	],
+	comparison_groups: [],
+	experiments: [
+		{
+			experiment_id: 'experiment-1',
+			experiment_version: 1,
+			document_id: documentId,
+			label: 'As-built and annealed tensile test',
+			scope_description: 'LPBF 316L tensile strength before and after annealing.',
+			variants: [
+				{
+					variant_key: 'as-built',
+					variant_label: 'as-built',
+					subject_attributes: [],
+					intervention_attributes: [],
+					state: []
+				},
+				{
+					variant_key: 'annealed',
+					variant_label: 'annealed',
+					subject_attributes: [],
+					intervention_attributes: [],
+					state: []
+				}
+			],
+			test_conditions: [
+				{
+					test_key: 'tensile-test',
+					test_type: 'tensile test',
+					parameters: [],
+					missing_parameters: []
+				}
+			],
+			measurements: [
+				{
+					measurement_key: 'measurement-before',
+					outcome: 'tensile strength',
+					variant_key: 'as-built',
+					test_key: 'tensile-test',
+					value: 580,
+					unit: 'MPa',
+					result_text: '580 MPa',
+					statistics: {},
+					result_kind: 'measured',
+					binding_status: 'direct',
+					source_refs: []
+				},
+				{
+					measurement_key: 'measurement-after',
+					outcome: 'tensile strength',
+					variant_key: 'annealed',
+					test_key: 'tensile-test',
+					value: 620,
+					unit: 'MPa',
+					result_text: '620 MPa',
+					statistics: {},
+					result_kind: 'measured',
+					binding_status: 'direct',
+					source_refs: []
+				}
+			],
+			comparisons: [
+				{
+					comparison_key: 'comparison-1',
+					baseline_variant_key: 'as-built',
+					target_variant_key: 'annealed',
+					outcome: 'tensile strength',
+					baseline_measurement_keys: ['measurement-before'],
+					target_measurement_keys: ['measurement-after'],
+					changed_variables: [
+						{
+							name: 'heat treatment',
+							baseline_value: 'as-built',
+							target_value: 'annealed',
+							unit: null
+						}
+					],
+					matched_conditions: [],
+					basis: 'Within-paper comparison',
+					direction: 'increase',
+					reported_statement: 'Tensile strength increased after annealing.',
+					status: 'ready',
+					relation_status: 'direct',
+					reasons: [],
+					source_refs: []
+				}
+			]
+		}
+	],
+	findings: [finding]
+};
+
 function documentContent() {
 	return {
 		collection_id: collectionId,
@@ -325,6 +430,11 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
+		if (
+			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/experiment-analysis`
+		) {
+			return route.fulfill(json(experimentProjection));
+		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings`) {
 			return route.fulfill(
 				json({
@@ -371,7 +481,7 @@ async function mockApis(page: Page) {
 }
 
 for (const width of [320, 768, 1024, 1440]) {
-	test(`prioritizes Finding results over coverage details at ${width}px`, async ({ page }) => {
+	test(`keeps the results overview and selected Finding usable at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 900 });
 		await mockApis(page);
 		const pageErrors: string[] = [];
@@ -426,33 +536,15 @@ for (const width of [320, 768, 1024, 1440]) {
 				})
 			)
 		);
-		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`);
-		const result = page.getByRole('heading', { name: finding.statement, exact: true });
-		await expect(result).toBeVisible();
-		const coverage = page.getByRole('group', { name: 'Evidence coverage', exact: true });
+		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
+		await expect(page.getByRole('heading', { name: /Research findings|研究发现/ })).toBeVisible();
+		const coverage = page.locator('details.coverage');
+		await expect(coverage).toBeVisible();
 		await expect(coverage).not.toHaveAttribute('open');
-		await expect(coverage.locator('summary')).toContainText('20 to review');
+		await expect(coverage.locator('summary')).toContainText(/20 to review|20 条待核查/);
 		expect((await coverage.boundingBox())!.height).toBeLessThanOrEqual(60);
-		await expect(coverage.locator('.evidence-gap')).toHaveCount(20);
-		await expect(coverage.locator('.evidence-gap').first()).not.toBeVisible();
-		await expect(page.getByText('分析完成', { exact: true })).not.toBeVisible();
-		const resultBox = (await result.boundingBox())!;
-		await page.screenshot({ path: `test-results/finding-results-first-${width}.png` });
-		const layout = await page.evaluate(() =>
-			Object.fromEntries(
-				[
-					'.site-header',
-					'.collection-header',
-					'.collection-tabs',
-					'.objective-header',
-					'.findings-sidebar'
-				].map((selector) => {
-					const bounds = document.querySelector(selector)?.getBoundingClientRect();
-					return [selector, bounds && { y: bounds.y, height: bounds.height }];
-				})
-			)
-		);
-		expect(resultBox.y + resultBox.height, JSON.stringify(layout)).toBeLessThanOrEqual(900);
+		await expect(coverage.locator('article')).toHaveCount(20);
+		await expect(coverage.locator('article').first()).not.toBeVisible();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
 			true
 		);
@@ -470,40 +562,28 @@ for (const width of [320, 768, 1024, 1440]) {
 		await summary.focus();
 		await page.keyboard.press('Enter');
 		await expect(coverage).not.toHaveAttribute('open');
-		if (width <= 1000) {
-			await page.getByRole('combobox', { name: 'Select Finding' }).selectOption('finding-2');
-		} else {
-			await page.getByRole('button', { name: new RegExp(findings[1].statement) }).click();
-		}
+		await page.getByRole('button', { name: new RegExp(findings[1].statement) }).click();
 		await expect(
 			page.getByRole('heading', { name: findings[1].statement, exact: true })
 		).toBeVisible();
+		await expect(page.getByRole('heading', { name: /Supporting data|支持数据/ })).toBeVisible();
+		await expect(page.locator('details.coverage')).toHaveCount(0);
 		await expect(page).toHaveURL(/finding_id=finding-2/);
 		expect(pageErrors).toEqual([]);
 	});
 }
 
-test('wraps unavailable review details and retries without losing the Finding', async ({
-	page
-}) => {
+test('keeps the selected Finding read-only and responsive', async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await mockApis(page);
-	let unavailable = true;
-	const message = `Review unavailable: /collections/${collectionId}/objectives/${objectiveId}/findings/${'finding_'.repeat(20)}`;
-	await page.route('**/findings/finding-1/feedback?*', (route) =>
-		route.fulfill(unavailable ? json({ detail: message }, 404) : json({ items: [] }))
-	);
-	await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
-	const review = page.locator('.saved-review');
-	await expect(review.getByRole('alert')).toContainText(message);
+	await page.goto(`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`);
+	await expect(page.getByRole('heading', { name: finding.statement, exact: true })).toBeVisible();
+	await expect(page.locator('.saved-review')).toHaveCount(0);
+	await expect(page.getByRole('button', { name: '反馈' })).toHaveCount(0);
 	const fits = await page
 		.locator('.finding-detail')
 		.evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
 	expect(fits).toBe(true);
-	unavailable = false;
-	await review.getByRole('button').click();
-	await expect(review.getByRole('alert')).toHaveCount(0);
-	await expect(page.getByRole('heading', { name: finding.statement, exact: true })).toBeVisible();
 });
 
 for (const viewport of [
@@ -525,24 +605,26 @@ for (const viewport of [
 		});
 		await page.setViewportSize({ width: viewport.width, height: viewport.height });
 		await mockApis(page);
-		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
+		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`);
 
 		await expect(page.getByText('Evidence analysis did not complete.')).toBeVisible();
-		await expect(page.getByText('正在显示已发布的 v1；重试 v2 失败。')).toBeVisible();
+		await expect(
+			page.getByText(/Published results remain available|新分析进行期间保留已发布结果/)
+		).toBeVisible();
 		await expect(page.getByRole('heading', { name: finding.statement, exact: true })).toBeVisible();
 		await expect(page.getByText('相关联', { exact: true })).toBeVisible();
-		await expect(page.getByRole('heading', { name: '证据对比' })).toBeVisible();
-		await expect(
-			page.getByRole('cell', { name: 'tensile strength: 580 MPa → 620 MPa' })
-		).toBeVisible();
+		await expect(page.getByRole('heading', { name: /Supporting data|支持数据/ })).toBeVisible();
+		await expect(page.getByRole('cell', { name: '580 MPa' })).toBeVisible();
+		await expect(page.getByRole('cell', { name: '620 MPa' })).toBeVisible();
+		await expect(page.getByRole('cell', { name: '+40 MPa' })).toBeVisible();
+		await page.getByText(/Source evidence and paper contributions|原文证据与文献贡献/).click();
 		await expect(page.getByRole('link', { name: 'LPBF 316L tensile study · p.7' })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'LPBF 316L tensile study · p.8' })).toBeVisible();
 		await expect(
 			page.getByText('另有 1 篇文献未形成可审计 Evidence：分析失败 1 篇。')
 		).toBeVisible();
 		await expect(page.getByText('文献 2', { exact: true })).toHaveCount(0);
-		await expect(page.getByText('tensile strength', { exact: true }).first()).toBeVisible();
-		await expect(page.getByRole('button', { name: '反馈' })).toBeVisible();
+		await expect(page.getByRole('button', { name: '反馈' })).toHaveCount(0);
 		await expect(page.getByText('Single paper only.')).toBeVisible();
 		const evidenceScope = page.getByRole('group', { name: '证据范围' });
 		await expect(evidenceScope).toContainText('1篇直接文献');
@@ -563,9 +645,6 @@ for (const viewport of [
 		await annealedRow.getByText('查看摘录', { exact: true }).click();
 		await expect(annealedRow.locator('blockquote')).toHaveText(evidence.source_excerpt);
 		const layout = await page.evaluate(() => {
-			const list = document
-				.querySelector<HTMLElement>('.findings-sidebar')
-				?.getBoundingClientRect();
 			const detailElement = document.querySelector<HTMLElement>('.finding-workspace');
 			const findingElement = document.querySelector<HTMLElement>('.finding-detail');
 			const detail = detailElement?.getBoundingClientRect();
@@ -576,20 +655,13 @@ for (const viewport of [
 					!!detailElement &&
 					!!findingElement &&
 					findingElement.scrollWidth <= detailElement.clientWidth + 1,
-				list: list && { x: list.x, y: list.y, width: list.width, height: list.height },
 				detail: detail && { x: detail.x, y: detail.y, width: detail.width, height: detail.height }
 			};
 		});
 		expect(layout.pageFitsViewport).toBe(true);
 		expect(layout.detailContentFits).toBe(true);
-		expect(layout.list).toBeTruthy();
 		expect(layout.detail).toBeTruthy();
 		expect(layout.detail!.x + layout.detail!.width).toBeLessThanOrEqual(layout.viewportWidth + 1);
-		if (viewport.name === 'desktop') {
-			expect(layout.list!.x + layout.list!.width).toBeLessThanOrEqual(layout.detail!.x);
-		} else {
-			expect(layout.list!.y + layout.list!.height).toBeLessThanOrEqual(layout.detail!.y);
-		}
 		const sourceLink = annealedRow.getByRole('link', { name: /打开原文|Open source/ });
 		await expect(sourceLink).toHaveAttribute(
 			'href',
@@ -599,31 +671,6 @@ for (const viewport of [
 			path: `test-results/objective-finding-workspace-${viewport.name}.png`,
 			fullPage: true
 		});
-
-		await page.getByRole('button', { name: '新建 Finding' }).click();
-		await expect(page.getByRole('heading', { name: '创建 Finding' })).toBeVisible();
-		await expect(page.getByText('0 条支持证据 · 4 条可用 Evidence')).toBeVisible();
-		await page.getByLabel('结论').fill('Annealing is associated with higher tensile strength.');
-		await page.getByLabel('在 Finding 中的作用').first().selectOption('supporting');
-		await expect(page.getByText('1 条支持证据 · 4 条可用 Evidence')).toBeVisible();
-		const authoringLayout = await page.evaluate(() => {
-			const workspace = document.querySelector<HTMLElement>('.finding-workspace');
-			return {
-				pageFitsViewport: document.documentElement.scrollWidth <= window.innerWidth + 1,
-				workspaceFits:
-					!!workspace && workspace.scrollWidth <= workspace.getBoundingClientRect().width + 1
-			};
-		});
-		expect(authoringLayout.pageFitsViewport).toBe(true);
-		expect(authoringLayout.workspaceFits).toBe(true);
-		await page.screenshot({
-			path: `test-results/objective-finding-authoring-${viewport.name}.png`,
-			fullPage: true
-		});
-		await page.getByRole('button', { name: '取消' }).click();
-		await expect(tableSource).not.toHaveAttribute('open');
-		await tableSource.getByText('表格来源 · p.7', { exact: true }).click();
-		await expect(tableSource).toHaveAttribute('open');
 
 		const sourceApiPaths: string[] = [];
 		page.on('request', (request) => {

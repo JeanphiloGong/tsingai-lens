@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from openai import AsyncOpenAI
@@ -12,17 +14,17 @@ from openai import AsyncOpenAI
 from application.chat.capabilities import ToolSpec
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat.model import (
+    RESEARCH_AGENT_PROMPT_VERSION,
+    RESEARCH_AGENT_SYSTEM_PROMPT,
+    RESEARCH_COMPACTION_SYSTEM_PROMPT,
     ModelResponseError,
     ModelToolCall,
     ModelTurn,
     ModelUsage,
-    RESEARCH_AGENT_PROMPT_VERSION,
-    RESEARCH_AGENT_SYSTEM_PROMPT,
-    RESEARCH_COMPACTION_SYSTEM_PROMPT,
 )
+from application.repositories.chat_repository import ModelCallInput, ModelCallOutcome
 from domain.chat import ToolRisk
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
-
 
 logger = logging.getLogger(__name__)
 
@@ -88,65 +90,131 @@ class OpenAIChatModel:
         if request_tokens + max_output_tokens + 1024 > context.max_context_tokens:
             raise ModelResponseError("Model request exceeds its context window.",
                                      reason="context_window_exceeded", retryable=False)
-        if text_delta_callback is not None:
-            chunks = await self.client.chat.completions.create(
-                **request,
-                stream=True,
-                stream_options={"include_usage": True},
-            )
-            try:
-                return await self._stream_turn(chunks, text_delta_callback)
-            finally:
-                await chunks.close()
+        provider_request = dict(request)
+        streaming = text_delta_callback is not None
+        if streaming:
+            provider_request.update(stream=True, stream_options={"include_usage": True})
 
-        completion = await self.client.chat.completions.create(**request)
-        record_llm_prompt_version(
-            "research_agent", RESEARCH_AGENT_PROMPT_VERSION,
-        )
-        record_llm_completion(completion, requested_model=self.model)
-        usage = _model_usage(getattr(completion, "usage", None))
-        if not getattr(completion, "choices", None):
-            raise _invalid_response(
-                "research model returned no choices",
-                reason="empty_response",
-                usage=usage,
+        observer = context.model_call_observer
+        call_id: str | None = None
+        call_finished = False
+        if observer is not None:
+            session_id = context.model_call_session_id or next(
+                (message.session_id for message in context.messages), ""
             )
-        message = completion.choices[0].message
-        tool_calls = tuple(getattr(message, "tool_calls", None) or ())
-        content = str(getattr(message, "content", None) or "").strip()
-        if not content and not tool_calls:
-            finish = getattr(completion.choices[0], "finish_reason", None)
-            logger.warning(
-                "Research model returned no answer or calls model=%s finish=%s "
-                "reasoning_present=%s completion_tokens=%s required_tool=%s",
-                self.model,
-                finish if finish in {"stop", "length", "tool_calls", "content_filter"} else "unknown",
-                bool(getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)),
-                usage.completion_tokens if usage else None,
-                context.require_tool_call,
-            )
-        if getattr(completion.choices[0], "finish_reason", None) == "length":
-            raise _invalid_response(
-                "research model exhausted its output allowance",
-                reason="output_token_limit", retryable=False,
-                partial_content=bool(content), usage=usage,
-            )
-        if not tool_calls:
+            if not session_id:
+                raise ModelResponseError(
+                    "The model call has no conversation identity.",
+                    reason="model_call_identity_missing",
+                    retryable=False,
+                )
+            request_snapshot = _json_snapshot(provider_request)
+            call_id = await observer.start(ModelCallInput(
+                session_id=session_id,
+                trigger_message_id=context.active_user_message_id,
+                response_message_id=context.model_call_response_message_id,
+                purpose=context.model_call_purpose,
+                request=request_snapshot,
+            ))
+
+        async def finish(
+            status: str,
+            *,
+            error_code: str | None = None,
+            usage: ModelUsage | None = None,
+        ) -> None:
+            nonlocal call_finished
+            if observer is None or call_id is None or call_finished:
+                return
             try:
-                return ModelTurn(content=content, usage=usage)
-            except ValueError as exc:
-                raise _invalid_response(
-                    "research model returned no usable content",
-                    reason=(
-                        "reasoning_only_response"
-                        if getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)
-                        else "empty_response"
-                    ),
-                    usage=usage,
+                await observer.finish(call_id, ModelCallOutcome(
+                    status=status,
+                    finished_at=datetime.now(timezone.utc).isoformat(),
+                    error_code=error_code,
+                    prompt_tokens=usage.prompt_tokens if usage else None,
+                    completion_tokens=usage.completion_tokens if usage else None,
+                    total_tokens=usage.total_tokens if usage else None,
+                ))
+            except Exception as exc:  # noqa: BLE001
+                raise ModelResponseError(
+                    "The model call could not be saved.",
+                    reason="model_call_persistence_failed",
+                    retryable=False,
                 ) from exc
+            call_finished = True
 
-        parsed = []
+        if streaming:
+            usage: ModelUsage | None = None
+            try:
+                chunks = await self.client.chat.completions.create(**provider_request)
+                try:
+                    turn = await self._stream_turn(chunks, text_delta_callback)
+                    usage = turn.usage
+                finally:
+                    await chunks.close()
+                await finish("provider_succeeded", usage=usage)
+                return turn
+            except ModelResponseError as exc:
+                await finish("response_invalid", error_code=exc.reason, usage=exc.usage)
+                raise
+            except asyncio.CancelledError:
+                await finish("cancelled", error_code="request_cancelled", usage=usage)
+                raise
+            except Exception as exc:  # noqa: BLE001
+                await finish("provider_failed", error_code=_provider_error_code(exc), usage=usage)
+                raise
+
+        usage = None
         try:
+            completion = await self.client.chat.completions.create(**provider_request)
+            record_llm_prompt_version(
+                "research_agent", RESEARCH_AGENT_PROMPT_VERSION,
+            )
+            record_llm_completion(completion, requested_model=self.model)
+            usage = _model_usage(getattr(completion, "usage", None))
+            if not getattr(completion, "choices", None):
+                raise _invalid_response(
+                    "research model returned no choices",
+                    reason="empty_response",
+                    usage=usage,
+                )
+            message = completion.choices[0].message
+            tool_calls = tuple(getattr(message, "tool_calls", None) or ())
+            content = str(getattr(message, "content", None) or "").strip()
+            if not content and not tool_calls:
+                finish_reason = getattr(completion.choices[0], "finish_reason", None)
+                logger.warning(
+                    "Research model returned no answer or calls model=%s finish=%s "
+                    "reasoning_present=%s completion_tokens=%s required_tool=%s",
+                    self.model,
+                    finish_reason if finish_reason in {"stop", "length", "tool_calls", "content_filter"} else "unknown",
+                    bool(getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)),
+                    usage.completion_tokens if usage else None,
+                    context.require_tool_call,
+                )
+            if getattr(completion.choices[0], "finish_reason", None) == "length":
+                raise _invalid_response(
+                    "research model exhausted its output allowance",
+                    reason="output_token_limit", retryable=False,
+                    partial_content=bool(content), usage=usage,
+                )
+            if not tool_calls:
+                try:
+                    turn = ModelTurn(content=content, usage=usage)
+                except ValueError as exc:
+                    raise _invalid_response(
+                        "research model returned no usable content",
+                        reason=(
+                            "reasoning_only_response"
+                            if getattr(message, "reasoning_content", None) or getattr(message, "reasoning", None)
+                            else "empty_response"
+                        ),
+                        usage=usage,
+                    ) from exc
+                await finish("provider_succeeded", usage=usage)
+                return turn
+
+            parsed = []
             for raw_call in tool_calls:
                 if getattr(raw_call, "type", "function") != "function":
                     raise _invalid_response("unsupported tool call", reason="unsupported_tool_call", partial_content=bool(content))
@@ -156,10 +224,18 @@ class OpenAIChatModel:
                     str(getattr(function, "arguments", None) or "{}"),
                     partial_content=bool(content),
                 ))
+            turn = ModelTurn(content=content, tool_calls=tuple(parsed), usage=usage)
+            await finish("provider_succeeded", usage=usage)
+            return turn
         except ModelResponseError as exc:
-            exc.usage = usage
+            await finish("response_invalid", error_code=exc.reason, usage=exc.usage)
             raise
-        return ModelTurn(content=content, tool_calls=tuple(parsed), usage=usage)
+        except asyncio.CancelledError:
+            await finish("cancelled", error_code="request_cancelled", usage=usage)
+            raise
+        except Exception as exc:  # noqa: BLE001
+            await finish("provider_failed", error_code=_provider_error_code(exc), usage=usage)
+            raise
 
     async def _stream_turn(
         self,
@@ -286,6 +362,30 @@ def _model_usage(raw_usage: Any) -> ModelUsage | None:
     completion = int(getattr(raw_usage, "completion_tokens", 0) or 0)
     total = int(getattr(raw_usage, "total_tokens", 0) or 0)
     return ModelUsage(prompt, completion, max(total, prompt + completion))
+
+
+def _json_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Freeze the exact JSON-compatible request before it reaches the SDK."""
+    try:
+        return json.loads(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    except (TypeError, ValueError) as exc:
+        raise ModelResponseError(
+            "The model request could not be serialized for audit.",
+            reason="model_request_not_serializable",
+            retryable=False,
+        ) from exc
+
+
+def _provider_error_code(exc: BaseException) -> str:
+    """Persist a stable transport class without provider bodies or credentials."""
+    name = type(exc).__name__.lower()
+    if "timeout" in name:
+        return "provider_timeout"
+    if "rate" in name or "429" in str(getattr(exc, "status_code", "")):
+        return "provider_rate_limited"
+    if "connection" in name:
+        return "provider_connection_error"
+    return "provider_error"
 
 
 def _invalid_response(

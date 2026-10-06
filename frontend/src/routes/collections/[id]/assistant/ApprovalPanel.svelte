@@ -1,12 +1,61 @@
 <script lang="ts">
+	import { Check, X, FileCheck2, ChevronDown } from '@lucide/svelte';
 	import { t } from '../../../_shared/i18n';
 	import type { ChatToolCall } from '../../../_shared/chatSessions';
+	import { fetchCollectionObjectives } from '../../../_shared/researchView';
 	import { capabilityName, formatValue } from './capabilityPresentation';
 	export let call: ChatToolCall;
+	export let collectionId = '';
 	export let deciding = false;
 	export let onDecide: (decision: 'approved' | 'rejected') => void;
+	let loadedObjectiveId = '';
+	let objectiveQuestion = '';
+	const reviewFields = [
+		'statement',
+		'question',
+		'reported_result',
+		'authoring_note',
+		'limitations',
+		'source_excerpt'
+	];
+	$: review = reviewFields.filter(
+		(key) => call.arguments[key] != null && formatValue(call.arguments[key]) !== ''
+	);
 	function approvalArguments(call: ChatToolCall) {
-		return Object.entries(call.arguments);
+		return Object.entries(call.arguments).filter(
+			([key]) => !review.includes(key) && !isInternalReferenceKey(key)
+		);
+	}
+
+	function isInternalReferenceKey(key: string) {
+		return (
+			key === 'objective_id' ||
+			key === 'source_ref' ||
+			key === 'source_refs' ||
+			key === 'tool_call_id' ||
+			key === 'call_id' ||
+			key.endsWith('_id') ||
+			key.endsWith('_ids')
+		);
+	}
+
+	$: approvalObjectiveId =
+		typeof call.arguments.objective_id === 'string' ? call.arguments.objective_id.trim() : '';
+	$: if (approvalObjectiveId && collectionId && approvalObjectiveId !== loadedObjectiveId) {
+		loadedObjectiveId = approvalObjectiveId;
+		void loadObjectiveQuestion(approvalObjectiveId, collectionId);
+	}
+
+	async function loadObjectiveQuestion(objectiveId: string, ownerCollectionId: string) {
+		try {
+			const result = await fetchCollectionObjectives(ownerCollectionId);
+			if (objectiveId !== approvalObjectiveId || ownerCollectionId !== collectionId) return;
+			objectiveQuestion =
+				result.objectives.find((objective) => objective.objective_id === objectiveId)?.question ??
+				'';
+		} catch {
+			objectiveQuestion = '';
+		}
 	}
 
 	function approvalBody(call: ChatToolCall) {
@@ -30,14 +79,11 @@
 				? $t('researchAgent.approval.findingAbstentionBody')
 				: $t('researchAgent.approval.findingAuthoringBody');
 		}
-		if (call.name === 'create_evidence_version') {
-			return $t('researchAgent.approval.evidenceAuthoringBody');
+		if (call.name === 'create_paper_experiment_revision') {
+			return $t('researchAgent.approval.paperExperimentRevisionBody');
 		}
 		if (call.name === 'create_research_plan') {
 			return $t('researchAgent.approval.researchPlanBody');
-		}
-		if (call.name === 'publish_agent_objective_analysis') {
-			return $t('researchAgent.approval.agentObjectiveAnalysisBody');
 		}
 		return $t('researchAgent.approval.body');
 	}
@@ -63,14 +109,11 @@
 				? $t('researchAgent.approval.publishAbstention')
 				: $t('researchAgent.approval.publishFinding');
 		}
-		if (call.name === 'create_evidence_version') {
-			return $t('researchAgent.approval.publishEvidence');
+		if (call.name === 'create_paper_experiment_revision') {
+			return $t('researchAgent.approval.publishPaperExperimentRevision');
 		}
 		if (call.name === 'create_research_plan') {
 			return $t('researchAgent.approval.publishResearchPlan');
-		}
-		if (call.name === 'publish_agent_objective_analysis') {
-			return $t('researchAgent.approval.publishAgentAnalysis');
 		}
 		return $t('researchAgent.approval.approve');
 	}
@@ -79,7 +122,7 @@
 <section class="approval" aria-labelledby="approval-title">
 	<header>
 		<div>
-			<h3 id="approval-title">{$t('researchAgent.approval.title')}</h3>
+			<h3 id="approval-title"><FileCheck2 size={18} />{$t('researchAgent.approval.title')}</h3>
 			<p>{approvalBody(call)}</p>
 		</div>
 		<div class="approval-header-meta">
@@ -87,28 +130,94 @@
 			<strong>{capabilityName(call.name, $t)}</strong>
 		</div>
 	</header>
-	{#if approvalArguments(call).length}
-		<h4>{$t('researchAgent.approval.arguments')}</h4>
-		<dl>
-			{#each approvalArguments(call) as [key, value] (key)}
-				<div>
-					<dt>{key.replaceAll('_', ' ')}</dt>
-					<dd>{formatValue(value)}</dd>
+	{#if review.length}
+		<div class="review-content">
+			{#each review as key (key)}
+				<div class:source={key === 'source_excerpt'}>
+					<h4>{$t(`agentReview.${key}`)}</h4>
+					<p>{formatValue(call.arguments[key])}</p>
 				</div>
 			{/each}
-		</dl>
+		</div>
+	{/if}
+	{#if approvalObjectiveId}
+		<div class="review-content">
+			<div>
+				<h4>{$t('agentReview.researchObjective')}</h4>
+				<p>{objectiveQuestion || $t('researchAgent.approval.selectedObjective')}</p>
+			</div>
+		</div>
+	{/if}
+	{#if approvalArguments(call).length}
+		<details class="exact-arguments" open={!review.length}>
+			<summary><ChevronDown size={14} />{$t('agentReview.details')}</summary>
+			<dl>
+				{#each approvalArguments(call) as [key, value] (key)}
+					<div>
+						<dt>{key.replaceAll('_', ' ')}</dt>
+						<dd>{formatValue(value)}</dd>
+					</div>
+				{/each}
+			</dl>
+		</details>
 	{/if}
 	<div class="approval-actions">
 		<button class="reject" type="button" disabled={deciding} on:click={() => onDecide('rejected')}>
-			{$t('researchAgent.approval.reject')}
+			<X size={15} />{$t('researchAgent.approval.reject')}
 		</button>
 		<button class="approve" type="button" disabled={deciding} on:click={() => onDecide('approved')}>
-			{deciding ? $t('researchAgent.approval.processing') : approvalAction(call)}
+			<Check size={15} />{deciding ? $t('researchAgent.approval.processing') : approvalAction(call)}
 		</button>
 	</div>
 </section>
 
 <style>
+	.approval h3 {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.review-content {
+		display: grid;
+		gap: 16px;
+		margin: 20px 0;
+	}
+	.review-content p {
+		margin-top: 6px;
+		font-size: 14px;
+		line-height: 1.7;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	.review-content h4 {
+		margin: 0;
+		color: var(--text-secondary);
+		font-weight: 500;
+	}
+	.review-content .source {
+		border-left: 2px solid var(--border-strong);
+		padding-left: 14px;
+		color: var(--text-secondary);
+	}
+	.exact-arguments {
+		margin-top: 16px;
+	}
+	.exact-arguments summary {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		cursor: pointer;
+		font-size: 12px;
+		color: var(--text-secondary);
+		list-style: none;
+	}
+	.exact-arguments summary::-webkit-details-marker {
+		display: none;
+	}
+	.exact-arguments summary:focus-visible {
+		outline: 2px solid var(--brand-primary);
+		outline-offset: 4px;
+	}
 	.approve:hover:not(:disabled) {
 		border-color: var(--brand-primary-hover);
 		background: var(--brand-primary-hover);
@@ -128,9 +237,9 @@
 	.approval {
 		margin: 8px 0 24px 48px;
 		padding: 18px;
-		border: 1px solid var(--warning-border);
+		border: 1px solid var(--border-default);
 		border-radius: 8px;
-		background: var(--warning-bg);
+		background: var(--surface-card);
 	}
 
 	.approval > header {
@@ -222,6 +331,10 @@
 	}
 
 	.approval-actions button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
 		min-height: 38px;
 		padding: 0 14px;
 		border-radius: 6px;
@@ -250,6 +363,12 @@
 		.approval dl div {
 			grid-template-columns: 1fr;
 			flex-direction: column;
+		}
+		.approval-actions {
+			flex-wrap: wrap;
+		}
+		.approval-header-meta {
+			justify-items: start;
 		}
 	}
 </style>

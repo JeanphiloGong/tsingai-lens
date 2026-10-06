@@ -77,8 +77,6 @@
 		const activeTitle =
 			active && typeof active === 'object' && 'title' in active && String(active.title).trim()
 				? String(active.title).trim()
-				: active && typeof active === 'object' && 'document_id' in active
-					? String(active.document_id).trim()
 					: '';
 		if (progress && typeof progress === 'object' && 'current' in progress && 'total' in progress) {
 			return $t('researchAgent.researchProcess.documentProgress', {
@@ -114,14 +112,22 @@
 			const formatted = formatValue(value);
 			if (formatted !== '--') details.push({ label, value: formatted });
 		};
-		if (draft.source_ref) add($t('researchAgent.capability.sourceReference'), draft.source_ref);
 		if (draft.source_kind) add($t('researchAgent.capability.sourceKind'), draft.source_kind);
+		const location = [draft.heading_path, draft.page ? `p. ${String(draft.page)}` : '']
+			.filter(Boolean)
+			.join(' · ');
+		if (location) add($t('researchAgent.capability.sourceReference'), location);
 		if (draft.evidence_role) add($t('researchAgent.capability.evidenceRole'), draft.evidence_role);
 		if (draft.statement) add($t('researchAgent.capability.findingStatement'), draft.statement);
 		if (draft.assertion_strength)
 			add($t('researchAgent.capability.assertionStrength'), draft.assertion_strength);
-		if (draft.supporting_evidence_ids)
-			add($t('researchAgent.capability.supportingEvidence'), draft.supporting_evidence_ids);
+		if (Array.isArray(draft.supporting_evidence_ids))
+			add(
+				$t('researchAgent.capability.supportingEvidence'),
+				$t('researchAgent.capability.supportingEvidenceCount', {
+					count: draft.supporting_evidence_ids.length
+				})
+			);
 		if (draft.source_excerpt)
 			add($t('researchAgent.capability.sourceExcerpt'), draft.source_excerpt);
 		if (draft.authoring_note)
@@ -131,8 +137,8 @@
 
 	function draftReviewNote(toolName: string | null) {
 		switch (toolName) {
-			case 'create_evidence_draft':
-				return $t('researchAgent.capability.evidenceDraftTransient');
+			case 'propose_paper_experiment_draft':
+				return $t('researchAgent.capability.paperExperimentDraftReady');
 			case 'create_finding_draft':
 				return $t('researchAgent.capability.findingDraftTransient');
 			default:
@@ -207,6 +213,13 @@
 					Boolean(item && typeof item === 'object' && !Array.isArray(item))
 				)
 			: [];
+	}
+
+	function sourceMatchLabel(match: Record<string, unknown>) {
+		for (const key of ['document_title', 'title', 'heading_path', 'source_kind']) {
+			if (typeof match[key] === 'string' && match[key].trim()) return match[key].trim();
+		}
+		return $t('researchAgent.capability.sourcePassage');
 	}
 
 	function resultQuality(message: ChatMessage) {
@@ -357,7 +370,7 @@
 			<ul class="source-match-list">
 				{#each resultSourceMatches(artifact.resultMessage) as match, matchIndex (String(match.source_ref ?? matchIndex))}
 					<li>
-						<strong>{String(match.source_ref ?? '')}</strong>
+						<strong>{sourceMatchLabel(match)}</strong>
 						{#if match.content}<span>{String(match.content)}</span>{/if}
 					</li>
 				{/each}

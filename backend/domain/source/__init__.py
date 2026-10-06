@@ -1,6 +1,5 @@
 """Source-domain records and status semantics."""
 
-from domain.source.artifact_status import ArtifactStatusRecord
 from domain.source.artifacts import (
     SourceBlock,
     SourceBlockType,
@@ -40,7 +39,6 @@ from domain.source.artifacts import (
 from domain.source.collection import Collection, Document
 
 __all__ = [
-    "ArtifactStatusRecord",
     "Collection",
     "Document",
     "SourceBlock",

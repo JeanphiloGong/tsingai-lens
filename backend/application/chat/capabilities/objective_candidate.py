@@ -21,7 +21,7 @@ from application.chat.capabilities.objective_derivation import (
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-class CreateObjectiveCandidateArguments(ObjectiveDraftInput):
+class CreateObjectiveCandidateToolRequest(ObjectiveDraftInput):
     model_config = ConfigDict(extra="forbid")
 
     seed_document_ids: list[ShortText] = Field(default_factory=list, max_length=24)
@@ -39,7 +39,7 @@ class CreateObjectiveCandidateArguments(ObjectiveDraftInput):
         return normalize_terms(values)
 
     @model_validator(mode="after")
-    def _validate_derivation_lineage(self) -> "CreateObjectiveCandidateArguments":
+    def _validate_derivation_lineage(self) -> "CreateObjectiveCandidateToolRequest":
         if (self.parent_objective_id is None) != (
             self.parent_analysis_version is None
         ):
@@ -67,7 +67,7 @@ class CreateObjectiveCandidateCapability:
             "analysis version, and derivation basis returned by `derive_objective`."
         ),
         risk=ToolRisk.WRITE,
-        input_model=CreateObjectiveCandidateArguments,
+        input_model=CreateObjectiveCandidateToolRequest,
     )
 
     def __init__(self, *, objective_authoring_service: Any) -> None:
@@ -76,7 +76,7 @@ class CreateObjectiveCandidateCapability:
     async def execute(
         self,
         context: CapabilityExecutionContext,
-        arguments: CreateObjectiveCandidateArguments,
+        arguments: CreateObjectiveCandidateToolRequest,
     ) -> ChatToolResult:
         objective = await self.objective_authoring_service.create_chat_assisted_candidate(
             collection_id=context.collection_id,
@@ -108,6 +108,6 @@ class CreateObjectiveCandidateCapability:
 
 
 __all__ = [
-    "CreateObjectiveCandidateArguments",
+    "CreateObjectiveCandidateToolRequest",
     "CreateObjectiveCandidateCapability",
 ]

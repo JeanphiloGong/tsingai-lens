@@ -29,7 +29,7 @@
 			{$t('researchAgent.backToWorkspace')}
 		</a>
 		<div class="brand">
-			<span class="brand-mark" aria-hidden="true">L</span>
+			<img class="brand-mark brand-mark--image" src="/lens-mark-a2.svg" alt="" />
 			<h1>{$t('researchAgent.title')}</h1>
 		</div>
 	</div>
@@ -166,6 +166,13 @@
 		background: var(--surface-card);
 		color: var(--brand-primary);
 		font-weight: 800;
+	}
+
+	.brand-mark--image {
+		border: 0;
+		border-radius: 0;
+		background: transparent;
+		object-fit: contain;
 	}
 
 	.brand h1 {

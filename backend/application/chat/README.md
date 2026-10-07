@@ -315,7 +315,10 @@ connection failures receive up to five retries with exponential jittered
 backoff; authentication, malformed requests, exhausted quota and unclassified
 errors stop visibly. Successful tool observations remain in the trajectory
 during retries. Trace records contain normalized reasons, status, attempt and
-delay, never exception messages, response bodies or tracebacks.
+delay. Failure logs may add a bounded message only for low-risk structural
+exceptions, plus a message fingerprint, exception-chain types and the final
+source location; provider messages, response bodies, prompt text, credentials
+and full tracebacks are never retained.
 Model requests recheck the remaining output allowance after context preparation;
 an exhausted optional cumulative allowance cannot produce a zero or negative
 provider output limit.
@@ -522,8 +525,10 @@ The handler calls the owning Source, Core, or Goal service. The Runner does not
 need a branch for each new capability. A read or draft returns an observation;
 an approved write may persist a scientific resource through its existing owner.
 
-Provider and capability exception logs contain sanitized metadata only, without
-exception text or tracebacks. Model failure, invalid tool arguments, rejected approval, and incomplete work
+Provider and capability exception logs contain sanitized metadata only. Provider
+and capability messages, response bodies and tracebacks are omitted; low-risk
+structural model errors may retain a bounded message and source location for
+diagnosis. Model failure, invalid tool arguments, rejected approval, and incomplete work
 are recorded in the trajectory. They never become Evidence or a negative
 scientific answer. After a turn stops, the next user message or exact approval
 decision starts its continuation through `ChatSessionService`.

@@ -172,17 +172,77 @@ class OpenAIChatModel:
             )
             record_llm_completion(completion, requested_model=self.model)
             usage = _model_usage(getattr(completion, "usage", None))
-            if not getattr(completion, "choices", None):
+            choices = getattr(completion, "choices", None)
+            if not choices:
+                logger.warning(
+                    "Research model response shape invalid model=%s reason=%s "
+                    "message=%s response_type=%s choices_type=%s choices_count=%s "
+                    "response_fields=%s usage_present=%s",
+                    self.model,
+                    "empty_response",
+                    "research model returned no choices",
+                    type(completion).__name__,
+                    type(choices).__name__,
+                    _safe_length(choices),
+                    _safe_shape_fields(completion),
+                    usage is not None,
+                )
                 raise _invalid_response(
                     "research model returned no choices",
                     reason="empty_response",
                     usage=usage,
                 )
-            message = completion.choices[0].message
+            try:
+                choice = choices[0]
+            except (AttributeError, IndexError, KeyError, TypeError) as exc:
+                logger.warning(
+                    "Research model response shape invalid model=%s reason=%s "
+                    "message=%s response_type=%s choices_type=%s choices_count=%s "
+                    "response_fields=%s",
+                    self.model,
+                    "invalid_response_shape",
+                    "research model returned an invalid response shape",
+                    type(completion).__name__,
+                    type(choices).__name__,
+                    _safe_length(choices),
+                    _safe_shape_fields(completion),
+                )
+                raise _invalid_response(
+                    "research model returned an invalid response shape",
+                    reason="invalid_response_shape",
+                    usage=usage,
+                ) from exc
+            message = getattr(choice, "message", None)
+            if message is None:
+                logger.warning(
+                    "Research model response shape invalid model=%s reason=%s "
+                    "message=%s missing_field=message response_type=%s "
+                    "choices_type=%s choices_count=%s choice_type=%s choice_fields=%s "
+                    "message_attribute_present=%s message_is_none=%s finish_reason=%s "
+                    "response_fields=%s usage_present=%s",
+                    self.model,
+                    "invalid_response_shape",
+                    "research model returned an invalid response shape",
+                    type(completion).__name__,
+                    type(choices).__name__,
+                    _safe_length(choices),
+                    type(choice).__name__,
+                    _safe_shape_fields(choice),
+                    _safe_has_field(choice, "message"),
+                    message is None,
+                    _safe_finish_reason(getattr(choice, "finish_reason", None)),
+                    _safe_shape_fields(completion),
+                    usage is not None,
+                )
+                raise _invalid_response(
+                    "research model returned an invalid response shape",
+                    reason="invalid_response_shape",
+                    usage=usage,
+                )
             tool_calls = tuple(getattr(message, "tool_calls", None) or ())
             content = str(getattr(message, "content", None) or "").strip()
             if not content and not tool_calls:
-                finish_reason = getattr(completion.choices[0], "finish_reason", None)
+                finish_reason = getattr(choice, "finish_reason", None)
                 logger.warning(
                     "Research model returned no answer or calls model=%s finish=%s "
                     "reasoning_present=%s completion_tokens=%s required_tool=%s",
@@ -192,7 +252,7 @@ class OpenAIChatModel:
                     usage.completion_tokens if usage else None,
                     context.require_tool_call,
                 )
-            if getattr(completion.choices[0], "finish_reason", None) == "length":
+            if getattr(choice, "finish_reason", None) == "length":
                 raise _invalid_response(
                     "research model exhausted its output allowance",
                     reason="output_token_limit", retryable=False,
@@ -256,8 +316,53 @@ class OpenAIChatModel:
                 choices = tuple(getattr(chunk, "choices", None) or ())
                 if not choices:
                     continue
-                finish_reason = getattr(choices[0], "finish_reason", None) or finish_reason
-                delta = choices[0].delta
+                try:
+                    choice = choices[0]
+                    finish_reason = getattr(choice, "finish_reason", None) or finish_reason
+                    delta = getattr(choice, "delta", None)
+                except (AttributeError, IndexError, KeyError, TypeError) as exc:
+                    logger.warning(
+                        "Research model stream response shape invalid model=%s reason=%s "
+                        "message=%s chunk_type=%s choices_type=%s choices_count=%s "
+                        "chunk_fields=%s",
+                        self.model,
+                        "invalid_stream",
+                        "research model returned an invalid streamed response",
+                        type(chunk).__name__,
+                        type(getattr(chunk, "choices", None)).__name__,
+                        _safe_length(getattr(chunk, "choices", None)),
+                        _safe_shape_fields(chunk),
+                    )
+                    raise _invalid_response(
+                        "research model returned an invalid streamed response",
+                        reason="invalid_stream",
+                        partial_content=bool(content_parts),
+                        usage=usage,
+                    ) from exc
+                if delta is None:
+                    logger.warning(
+                        "Research model stream response shape invalid model=%s reason=%s "
+                        "message=%s missing_field=delta chunk_type=%s choices_type=%s "
+                        "choices_count=%s choice_type=%s choice_fields=%s finish_reason=%s "
+                        "chunk_fields=%s usage_present=%s",
+                        self.model,
+                        "invalid_stream",
+                        "research model returned an invalid streamed response",
+                        type(chunk).__name__,
+                        type(getattr(chunk, "choices", None)).__name__,
+                        _safe_length(getattr(chunk, "choices", None)),
+                        type(choice).__name__,
+                        _safe_shape_fields(choice),
+                        _safe_finish_reason(getattr(choice, "finish_reason", None)),
+                        _safe_shape_fields(chunk),
+                        usage is not None,
+                    )
+                    raise _invalid_response(
+                        "research model returned an invalid streamed response",
+                        reason="invalid_stream",
+                        partial_content=bool(content_parts),
+                        usage=usage,
+                    )
                 content = str(getattr(delta, "content", None) or "")
                 if content:
                     content_parts.append(content)
@@ -290,7 +395,7 @@ class OpenAIChatModel:
         except ModelResponseError as exc:
             exc.usage = usage
             raise
-        except (TypeError, ValueError) as exc:
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
             raise _invalid_response(
                 "research model returned an invalid streamed response",
                 reason="invalid_stream",
@@ -362,6 +467,48 @@ def _model_usage(raw_usage: Any) -> ModelUsage | None:
     completion = int(getattr(raw_usage, "completion_tokens", 0) or 0)
     total = int(getattr(raw_usage, "total_tokens", 0) or 0)
     return ModelUsage(prompt, completion, max(total, prompt + completion))
+
+
+def _safe_length(value: Any) -> int | None:
+    try:
+        return len(value)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _safe_shape_fields(value: Any) -> str:
+    if isinstance(value, Mapping):
+        raw_names = value.keys()
+    else:
+        try:
+            raw_names = vars(value).keys()
+        except Exception:  # noqa: BLE001
+            return "unknown"
+    names: set[str] = set()
+    for raw_name in raw_names:
+        name = str(raw_name)[:40]
+        sanitized = "".join(
+            character if character.isascii() and (character.isalnum() or character in "_.-") else "_"
+            for character in name
+        )
+        if sanitized:
+            names.add(sanitized)
+    return ",".join(sorted(names)[:16]) or "none"
+
+
+def _safe_has_field(value: Any, name: str) -> bool:
+    try:
+        if isinstance(value, Mapping):
+            return name in value
+        return hasattr(value, name)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _safe_finish_reason(value: Any) -> str:
+    return value if isinstance(value, str) and value in {
+        "stop", "length", "tool_calls", "content_filter",
+    } else "unknown"
 
 
 def _json_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:

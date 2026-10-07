@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from application.chat import ChatModelContext
 
-from types import SimpleNamespace
 import asyncio
+import logging
+from types import SimpleNamespace
 
 import httpx
 from openai import AsyncOpenAI
@@ -244,6 +245,48 @@ async def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> N
     assert request["messages"][0]["role"] == "system"
     assert request["messages"][1] == {"role": "user", "content": "你好"}
     assert "tools" not in request
+
+
+async def test_missing_provider_message_is_reported_as_invalid_response_shape(caplog) -> None:
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(
+            finish_reason="stop",
+            provider_payload="private-provider-content",
+        )],
+        model="test-model",
+        usage=None,
+    )
+    client, _ = _client(response)
+
+    caplog.set_level(logging.WARNING, logger="infra.llm.chat_model")
+    with pytest.raises(ModelResponseError) as caught:
+        await OpenAIChatModel(client=client, model="test-model").respond(
+            context=ChatModelContext((_message(),)), tool_specs=(),
+        )
+
+    assert caught.value.reason == "invalid_response_shape"
+    assert "missing_field=message" in caplog.text
+    assert "choice_fields=finish_reason,provider_payload" in caplog.text
+    assert "message_attribute_present=False message_is_none=True" in caplog.text
+    assert "response_fields=choices,model,usage" in caplog.text
+    assert "message=research model returned an invalid response shape" in caplog.text
+    assert "private-provider-content" not in caplog.text
+
+
+async def test_missing_stream_delta_is_reported_as_invalid_stream(caplog) -> None:
+    response = [SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop")], usage=None)]
+    client, _ = _client(response)
+
+    caplog.set_level(logging.WARNING, logger="infra.llm.chat_model")
+    with pytest.raises(ModelResponseError) as caught:
+        await OpenAIChatModel(client=client, model="test-model").respond(
+            context=ChatModelContext((_message(),)), tool_specs=(),
+            text_delta_callback=lambda _text: None,
+        )
+
+    assert caught.value.reason == "invalid_stream"
+    assert "missing_field=delta" in caplog.text
+    assert "choice_fields=finish_reason" in caplog.text
 
 
 @pytest.mark.parametrize("required", [False, True])

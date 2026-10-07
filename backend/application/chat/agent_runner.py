@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass, field, replace
@@ -91,10 +92,47 @@ _TrajectoryCheckpoint = Callable[
 
 _MODEL_RESPONSE_RETRY_LIMIT = 5
 _MAX_TOOL_CALLS_PER_RESPONSE = 32
+_SAFE_DIAGNOSTIC_EXCEPTION_TYPES = (
+    AttributeError,
+    IndexError,
+    KeyError,
+)
+_MAX_SAFE_EXCEPTION_MESSAGE_LENGTH = 240
+
+
+def _exception_text(exc: BaseException) -> str:
+    try:
+        return " ".join(str(exc).split())
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _safe_exception_message(exc: BaseException) -> str | None:
+    """Keep a short structural error hint without provider or credential text."""
+    if not isinstance(exc, _SAFE_DIAGNOSTIC_EXCEPTION_TYPES):
+        return None
+    message = _exception_text(exc)
+    normalized = message.casefold()
+    if (
+        not message
+        or any(marker in normalized for marker in _SENSITIVE_ERROR_MARKERS)
+        or "http://" in normalized
+        or "https://" in normalized
+    ):
+        return None
+    return message[:_MAX_SAFE_EXCEPTION_MESSAGE_LENGTH]
+
+
+def _failure_site(exc: BaseException) -> str | None:
+    if exc.__traceback__ is None:
+        return None
+    frame = traceback.extract_tb(exc.__traceback__)[-1]
+    filename = frame.filename.rsplit("/", 1)[-1]
+    return f"{filename}:{frame.lineno}:{frame.name}"
 
 
 def _provider_failure_details(exc: BaseException) -> dict[str, Any]:
-    """Classify SDK/transport failures without retaining provider messages or bodies."""
+    """Classify failures with bounded diagnostics and no provider bodies."""
     chain: list[BaseException] = []
     current: BaseException | None = exc
     while current is not None and all(current is not item for item in chain):
@@ -130,8 +168,20 @@ def _provider_failure_details(exc: BaseException) -> dict[str, Any]:
         retryable, reason = True, "transient_provider_error"
     else:
         retryable, reason = False, "unclassified_provider_error"
-    return {"exception_type": type(exc).__name__, "http_status": status,
-            "retryable": retryable, "reason": reason}
+    raw_message = _exception_text(exc)
+    fingerprint = sha256(
+        f"{type(exc).__name__}\x00{raw_message}".encode("utf-8", "replace")
+    ).hexdigest()[:16]
+    return {
+        "exception_type": type(exc).__name__,
+        "exception_chain": [type(item).__name__ for item in chain],
+        "failure_site": _failure_site(exc),
+        "message": _safe_exception_message(exc),
+        "message_fingerprint": fingerprint,
+        "http_status": status,
+        "retryable": retryable,
+        "reason": reason,
+    }
 _FINAL_ANSWER_INSTRUCTION = (
     "The bounded research-reading budget is now exhausted. Give the researcher "
     "the best useful final answer supported by the completed trajectory. State "

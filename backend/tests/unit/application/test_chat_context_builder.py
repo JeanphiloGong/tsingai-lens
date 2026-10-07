@@ -428,12 +428,23 @@ def test_rollover_keeps_lineage_without_source_text_or_errors() -> None:
         "next_offset": 2000, "content": "secret-source-text" * 500,
         "error_message": "private-provider-error", "api_key": "private-key",
     })
+    resource_ref = ChatResourceRef(
+        resource_type="source",
+        resource_id="paper-1:methods-3",
+        href="/collections/col-1/documents/paper-1?source_ref=methods-3",
+    )
+    assert result.tool_result is not None
+    result = replace(
+        result,
+        tool_result=replace(result.tool_result, resource_refs=(resource_ref,)),
+    )
     active = _user("active", "Compare Methods and Results, retaining uncertainty.")
     builder = ChatContextBuilder(max_chars=1500, max_summary_chars=650)
     view = builder.for_model((active, call, result))
     assert view.messages == (active,)
     assert "methods-3" in view.rollover_summary
     assert "paper-1" in view.rollover_summary
+    assert "paper-1:methods-3" in view.rollover_summary
     assert "next_offset" in view.rollover_summary
     assert all(text not in view.rollover_summary for text in ("secret-source-text", "private-provider-error", "private-key"))
     assert json.loads(view.rollover_summary)["entries"]

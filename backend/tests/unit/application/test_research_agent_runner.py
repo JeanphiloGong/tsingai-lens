@@ -649,6 +649,46 @@ def test_generic_provider_errors_use_structured_status(status, retryable):
     assert "private provider request" not in json.dumps(details)
 
 
+def test_provider_failure_details_keep_safe_message_and_fingerprint_only() -> None:
+    error = AttributeError("response has no attribute message")
+
+    details = agent_runner_module._provider_failure_details(error)
+
+    assert details["message"] == "response has no attribute message"
+    assert len(details["message_fingerprint"]) == 16
+    assert details["exception_chain"] == ["AttributeError"]
+
+
+def test_provider_failure_details_do_not_keep_provider_error_message() -> None:
+    error = RuntimeError("provider response contained private-token-value")
+
+    details = agent_runner_module._provider_failure_details(error)
+
+    assert details["message"] is None
+    assert details["message_fingerprint"]
+    assert "private-token-value" not in json.dumps(details)
+
+
+@pytest.mark.parametrize("error", [
+    TypeError("provider parameter contained private-value"),
+    ValueError("provider response contained private-value"),
+])
+def test_provider_failure_details_do_not_keep_argument_error_text(error: Exception) -> None:
+    details = agent_runner_module._provider_failure_details(error)
+
+    assert details["message"] is None
+    assert "private-value" not in json.dumps(details)
+
+
+def test_provider_failure_details_redact_sensitive_structural_message() -> None:
+    details = agent_runner_module._provider_failure_details(
+        AttributeError("api_key=private-key-value")
+    )
+
+    assert details["message"] is None
+    assert "private-key-value" not in json.dumps(details)
+
+
 def test_provider_error_cause_and_permanent_quota_are_distinguished():
     import httpx
 
@@ -3935,9 +3975,14 @@ async def test_unexpected_model_failure_remains_model_unavailable(exception: Exc
 
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "model_unavailable"
-    assert str(exception) not in caplog.text
+    if isinstance(exception, AttributeError):
+        assert str(exception) in caplog.text
+    else:
+        assert str(exception) not in caplog.text
     record = next(record for record in caplog.records if "Research Agent model call failed" in record.message)
-    assert json.loads(record.message.split("details=", 1)[1]) == {
-        "exception_type": type(exception).__name__, "http_status": None,
-        "retryable": False, "reason": "unclassified_provider_error",
-    }
+    details = json.loads(record.message.split("details=", 1)[1])
+    assert details["exception_type"] == type(exception).__name__
+    assert details["http_status"] is None
+    assert details["retryable"] is False
+    assert details["reason"] == "unclassified_provider_error"
+    assert details["message_fingerprint"]

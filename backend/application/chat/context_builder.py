@@ -257,7 +257,7 @@ class ChatContextBuilder:
                 result = message.tool_result
                 for ref in result.resource_refs:
                     entries.append({
-                        "tool_call_id": result.tool_call_id, "resource": ref.to_record(),
+                        "tool_call_id": result.tool_call_id, "resource": asdict(ref),
                     })
                 entries.append({
                     "tool_call_id": result.tool_call_id, "status": result.status.value,

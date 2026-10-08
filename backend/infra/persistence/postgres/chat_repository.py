@@ -663,12 +663,17 @@ def _update_call_row(row: ChatToolCallRow, call: ChatToolCall) -> None:
 
 
 def _session_record(row: ChatSessionRow) -> ChatSession:
+    snapshot_status = (row.response_snapshot or {}).get("status")
+    status = "approval" if snapshot_status == "approval_required" else (
+        "running" if snapshot_status == "running" else "idle"
+    )
     return ChatSession(
         session_id=row.session_id,
         user_id=row.user_id,
         collection_id=row.collection_id,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+        status=status,
         root_session_id=row.root_session_id,
         parent_session_id=row.parent_session_id,
         fork_message_id=row.fork_message_id,

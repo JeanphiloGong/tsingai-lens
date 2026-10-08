@@ -97,6 +97,7 @@
 		title: string;
 		created_at: string;
 		updated_at: string;
+		status: ChatSessionActivity;
 	};
 
 	let session: ChatSession | null = null;
@@ -278,7 +279,11 @@
 					created_at:
 						typeof item.created_at === 'string' ? item.created_at : new Date().toISOString(),
 					updated_at:
-						typeof item.updated_at === 'string' ? item.updated_at : new Date().toISOString()
+						typeof item.updated_at === 'string' ? item.updated_at : new Date().toISOString(),
+					status:
+						item.status === 'running' || item.status === 'approval'
+							? item.status
+							: 'idle'
 				}))
 				.slice(0, 12);
 		} catch {
@@ -312,7 +317,8 @@
 						? titleFromMessages(messages)
 						: previous?.title || $t('researchAgent.untitledSession')),
 				created_at: nextSession.created_at,
-				updated_at: nextSession.updated_at
+				updated_at: nextSession.updated_at,
+				status: nextSession.status
 			},
 			...existing
 		]);
@@ -325,30 +331,29 @@
 				signal: sessionController?.signal
 			});
 			const stored = readHistory();
-			const serverHistory = await Promise.all(
-				response.items.map(async (item) => {
-					let items: ChatMessage[] = [];
-					if (item.session_id === session?.session_id) {
-						items = messages;
-					} else {
-						try {
-							items = (await fetchChatTrajectory(item.session_id, sessionController?.signal)).items;
-						} catch {
-							// Keep a server session visible even when its activity check is temporarily unavailable.
-						}
-					}
-					const previous = stored.find((entry) => entry.session_id === item.session_id);
-					return {
-						session_id: item.session_id,
-						title: items.length
-							? titleFromMessages(items)
-							: previous?.title || $t('researchAgent.untitledSession'),
-						created_at: item.created_at,
-						updated_at: item.updated_at
-					};
-				})
-			);
+			// The list is a navigation index. Do not download every trajectory just
+			// to derive sidebar titles; a trajectory is loaded when selected.
+			const serverHistory = response.items.map((item) => {
+				const previous = stored.find((entry) => entry.session_id === item.session_id);
+				const status: ChatSessionActivity =
+					item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
+				const title =
+					item.session_id === session?.session_id && messages.length
+						? titleFromMessages(messages)
+						: previous?.title || $t('researchAgent.untitledSession');
+				return {
+					session_id: item.session_id,
+					title,
+					created_at: item.created_at,
+					updated_at: item.updated_at,
+					status
+				};
+			});
 			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			sessionActivities = {
+				...sessionActivities,
+				...Object.fromEntries(serverHistory.map((item) => [item.session_id, item.status]))
+			};
 			const serverIds = new Set(serverHistory.map((entry) => entry.session_id));
 			writeHistory([
 				...serverHistory,
@@ -359,7 +364,7 @@
 		}
 	}
 
-	async function refreshHistoryActivities(all = false) {
+	async function refreshHistoryActivities() {
 		if (!session || loading || historyLoading || destroyed) return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
@@ -369,10 +374,7 @@
 		const candidates = history.filter(
 			(item) =>
 				item.session_id !== session?.session_id &&
-				(all ||
-					['running', 'approval', 'recovering', 'unavailable'].includes(
-						sessionActivities[item.session_id]
-					))
+				['running', 'approval', 'recovering'].includes(sessionActivities[item.session_id])
 		);
 		await Promise.all(
 			candidates.map(async (item) => {
@@ -512,7 +514,7 @@
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) {
 				loading = false;
-				void refreshHistoryActivities(true);
+				void refreshHistoryActivities();
 			}
 		}
 	}
@@ -1102,7 +1104,7 @@
 			case 'history':
 				if (embedded) {
 					showHistory = !showHistory;
-					if (showHistory) void refreshHistoryActivities(true);
+					if (showHistory) void refreshHistoryActivities();
 				} else {
 					notice = $t('researchAgent.commands.historySidebar');
 				}
@@ -1243,9 +1245,9 @@
 </script>
 
 <svelte:window
-	on:focus={() => void refreshHistoryActivities(true)}
+	on:focus={() => void refreshHistoryActivities()}
 	on:storage={(event) => {
-		if (event.key === historyStorageKey()) void refreshHistoryActivities(true);
+		if (event.key === historyStorageKey()) void refreshHistoryActivities();
 	}}
 />
 
@@ -1283,7 +1285,7 @@
 					pressed={showHistory}
 					onClick={() => {
 						showHistory = !showHistory;
-						if (showHistory) void refreshHistoryActivities(true);
+						if (showHistory) void refreshHistoryActivities();
 					}}><History size={16} /></IconButton
 				>
 				<span title={conversationTitle}

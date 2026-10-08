@@ -55,6 +55,7 @@ export type ChatSession = {
 	collection_id: string;
 	created_at: string;
 	updated_at: string;
+	status: 'idle' | 'running' | 'approval';
 	root_session_id?: string | null;
 	parent_session_id?: string | null;
 	fork_message_id?: string | null;

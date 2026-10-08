@@ -8,6 +8,7 @@ from application.repositories.chat_repository import (
     ChatResponseSnapshot,
     ChatSessionSummary,
     ChatSessionBusyError,
+    ChatSessionHasBranchesError,
     ModelCallOutcome,
 )
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
@@ -122,6 +123,9 @@ class MemoryChatRepository:
             raise FileNotFoundError("chat session not found")
         if session_id in self.active_sessions:
             raise ChatSessionBusyError()
+        if any(item.parent_session_id == session_id or item.root_session_id == session_id
+               for item in self.sessions.values()):
+            raise ChatSessionHasBranchesError()
         self.sessions.pop(session_id, None)
         self.messages.pop(session_id, None)
         self.response_snapshots.pop(session_id, None)

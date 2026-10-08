@@ -287,6 +287,46 @@ async def test_alternatives_and_nested_edits_keep_separate_version_groups(branch
     assert original["branches"][1]["session_ids"] == ["original", first["session_id"], second["session_id"]]
 
 
+async def test_deleting_ancestor_does_not_break_saved_branch_sources(branch_app):
+    app = branch_app
+    branch = await _branch(app)
+    deletion = await app.client.delete(f"{BASE}/original")
+    trajectory = await app.client.get(f"{BASE}/{branch['session_id']}/messages")
+    assert trajectory.status_code == 200, trajectory.text
+    assert trajectory.json()["branch_draft"]["source_contexts"][0]["quote"] == QUOTE
+    assert deletion.status_code == 409
+    assert deletion.json()["detail"]["code"] == "chat_session_has_branches"
+    await _send(app, branch)
+    followup = await app.client.post(f"{BASE}/{branch['session_id']}/messages", json={
+        "message": "Which specimen orientation was used?",
+    })
+    assert followup.status_code == 200
+    question = (await app.repository.read_messages(branch["session_id"]))[-2]
+    nested = await _branch(app, branch["session_id"], question.message_id, "Verify build orientation before comparing strengths.")
+    assert nested["parent_session_id"] == branch["session_id"]
+    assert (await app.client.delete(f"{BASE}/{branch['session_id']}")).status_code == 409
+    await _send(app, nested)
+    assert (await app.client.get(f"{BASE}/{nested['session_id']}/tree")).status_code == 200
+    assert (await app.client.delete(f"{BASE}/{nested['session_id']}")).status_code == 204
+    assert (await app.client.get(f"{BASE}/{branch['session_id']}/tree")).status_code == 200
+    assert (await app.client.delete(f"{BASE}/{branch['session_id']}")).status_code == 204
+    assert (await app.client.get(f"{BASE}/original/messages")).status_code == 200
+    assert (await app.client.delete(f"{BASE}/original")).status_code == 204
+
+
+async def test_deletion_checks_ownership_execution_and_repeated_requests(branch_app):
+    app = branch_app
+    app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
+    assert (await app.client.delete(f"{BASE}/original")).status_code == 404
+    app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[0])
+    async with app.repository.session_execution("original"):
+        assert (await app.client.delete(f"{BASE}/original")).status_code == 409
+    assert (await app.client.get(f"{BASE}/original/messages")).status_code == 200
+    assert (await app.client.delete(f"{BASE}/original")).status_code == 204
+    assert (await app.client.delete(f"{BASE}/original")).status_code == 404
+    assert (await app.client.get(BASE, params={"collection_id": "collection"})).json()["items"] == []
+
+
 async def test_branch_authorization_busy_worker_and_message_boundaries(branch_app):
     app = branch_app
     payload = {"message_id": "question", "request_id": str(uuid4())}

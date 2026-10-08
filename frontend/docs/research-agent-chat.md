@@ -151,7 +151,9 @@ latest 12 sessions, removing entries deleted elsewhere. Index failures retain
 the cache. Returning focus to the window, opening embedded history, and polling
 background activity refresh the index so remote conversations and status
 changes become visible without loading idle trajectories. A failed background
-trajectory read is retried while recovery is needed.
+trajectory read is retried while recovery is needed. Deletion conflicts retain
+the current conversation and explain whether execution is running or dependent
+conversation versions must be deleted first.
 
 The selected session ID and a small presentation-only history are stored under:
 

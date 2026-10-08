@@ -206,6 +206,14 @@ list item also includes `title`, the trimmed first line of the first user questi
 (up to 160 characters), or `null` for an empty conversation. A client can render
 history without loading every trajectory or relying on a local title cache.
 
+Deleting an owned idle session returns 204 and removes its trajectory. Execution
+conflicts return 409 `chat_session_busy`. A session still referenced by another
+session's `parent_session_id` or `root_session_id` returns 409
+`chat_session_has_branches`; delete the dependent versions first. This preserves
+their saved questions, Source attachments, and tree checkpoints. Missing or
+unowned sessions return 404 `chat_session_not_found`. Deletion and branch copying
+serialize on the source session row so a concurrent branch cannot lose its source.
+
 Message editing and answer regeneration preserve the original trajectory.
 `POST /chat-sessions/{session_id}/branches` accepts a saved user `message_id`,
 a UUID `request_id`, and optional revised `message` (1-12000 non-whitespace

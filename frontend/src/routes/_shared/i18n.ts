@@ -3341,7 +3341,10 @@ const translations: Record<Language, Translations> = {
 			graphNotReady:
 				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
 			communityNotFound: 'The requested community filter could not be found for this collection.',
-			chatSessionBusy: 'This conversation is still running. Try deleting it again when it finishes.',
+			chatSessionBusy:
+				'This conversation is still running. Try deleting it again when it finishes.',
+			chatSessionHasBranches:
+				'This conversation is the source of other conversation versions. Delete those versions first.',
 			uploadTooLarge: 'This file is larger than the 256 MiB upload limit.'
 		}
 	},
@@ -6534,6 +6537,7 @@ const translations: Record<Language, Translations> = {
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
 			communityNotFound: '当前集合中找不到指定的社区过滤条件。',
 			chatSessionBusy: '该对话仍在运行，请等待完成后再删除。',
+			chatSessionHasBranches: '该对话是其他对话版本的来源，请先删除这些版本。',
 			uploadTooLarge: '文件超过 256 MiB 上传限制。'
 		}
 	}

@@ -17,6 +17,7 @@ from application.repositories.chat_repository import (
     ChatResponseSnapshot,
     ChatSessionSummary,
     ChatSessionBusyError,
+    ChatSessionHasBranchesError,
     ModelCallOutcome,
 )
 from domain.chat import (
@@ -172,11 +173,16 @@ class PostgresChatRepository:
                 raise ValueError("branch history has unresolved tool results")
             database.add(
                 ChatSessionRow(
-                    **{
-                        **asdict(session),
-                        "created_at": _datetime(session.created_at),
-                        "updated_at": _datetime(session.updated_at),
-                    }
+                    session_id=session.session_id,
+                    user_id=session.user_id,
+                    collection_id=session.collection_id,
+                    created_at=_datetime(session.created_at),
+                    updated_at=_datetime(session.updated_at),
+                    root_session_id=session.root_session_id,
+                    parent_session_id=session.parent_session_id,
+                    fork_message_id=session.fork_message_id,
+                    fork_position=session.fork_position,
+                    fork_content=session.fork_content,
                 )
             )
             await database.flush()
@@ -230,6 +236,14 @@ class PostgresChatRepository:
             row = await database.get(ChatSessionRow, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
+            dependent = await database.scalar(select(ChatSessionRow.session_id).where(
+                ChatSessionRow.user_id == user_id,
+                ChatSessionRow.collection_id == row.collection_id,
+                or_(ChatSessionRow.parent_session_id == session_id,
+                    ChatSessionRow.root_session_id == session_id),
+            ).limit(1))
+            if dependent is not None:
+                raise ChatSessionHasBranchesError()
             await database.delete(row)
 
     async def list_sessions(

@@ -834,6 +834,37 @@ describe('collections/[id]/assistant Research Agent', () => {
 		]);
 	});
 
+	it('explains why a conversation with saved versions cannot be deleted', async () => {
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestMethod(input, init) === 'DELETE') {
+				return Promise.resolve(
+					jsonResponse({ detail: { code: 'chat_session_has_branches' } }, 409)
+				);
+			}
+			return original(input, init);
+		});
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+		try {
+			await renderReady();
+			if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history' }).click();
+			await browserPage.getByRole('button', { name: 'Delete conversation' }).click();
+			await expect
+				.element(browserPage.getByRole('alert'))
+				.toHaveTextContent('Delete those versions first.');
+			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
+				session.session_id
+			);
+			expect(
+				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+			).toHaveLength(1);
+		} finally {
+			confirm.mockRestore();
+		}
+	});
+
 	it.each(['manual', 'automatic', 'read failure'])(
 		'keeps an in-flight approval recoverable until its result arrives: %s',
 		async (mode) => {

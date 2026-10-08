@@ -47,6 +47,11 @@ class ChatSessionBusyError(RuntimeError):
         super().__init__("the research response is still running; retry when it finishes")
 
 
+class ChatSessionHasBranchesError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("delete this conversation's branches before deleting their source")
+
+
 @dataclass(frozen=True)
 class ChatModelCall:
     call_id: str

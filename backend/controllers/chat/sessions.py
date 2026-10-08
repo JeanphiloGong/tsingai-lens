@@ -18,7 +18,10 @@ from application.chat.session_service import (
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
-from application.repositories.chat_repository import ChatSessionBusyError
+from application.repositories.chat_repository import (
+    ChatSessionBusyError,
+    ChatSessionHasBranchesError,
+)
 from controllers.chat.schemas import (
     ChatBranchRequest,
     ChatMessageFeedbackRequest,
@@ -174,12 +177,22 @@ async def delete_chat_session(session_id: str, request: Request) -> None:
         await request.app.state.chat_session_service.delete_session_for_user(
             session_id, await current_user_id(request)
         )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except (ChatSessionNotFoundError, FileNotFoundError) as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=_session_not_found(
+                exc if isinstance(exc, ChatSessionNotFoundError) else ChatSessionNotFoundError(session_id)
+            ),
+        ) from exc
     except ChatSessionBusyError as exc:
         raise HTTPException(
             status_code=409,
             detail={"code": "chat_session_busy", "message": str(exc)},
+        ) from exc
+    except ChatSessionHasBranchesError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "chat_session_has_branches", "message": str(exc)},
         ) from exc
 
 

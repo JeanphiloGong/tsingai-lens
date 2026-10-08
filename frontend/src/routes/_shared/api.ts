@@ -7,7 +7,8 @@ const ERROR_CODE_TRANSLATIONS = {
 	collection_not_found: 'error.collectionNotFound',
 	graph_not_ready: 'error.graphNotReady',
 	community_not_found: 'error.communityNotFound',
-	chat_session_busy: 'error.chatSessionBusy'
+	chat_session_busy: 'error.chatSessionBusy',
+	chat_session_has_branches: 'error.chatSessionHasBranches'
 } as const;
 
 export class ApiError extends Error {

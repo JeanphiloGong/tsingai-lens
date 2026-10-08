@@ -162,6 +162,25 @@ async def get_chat_session(
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
+@router.delete(
+    "/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete one owned Research Agent Chat session",
+)
+async def delete_chat_session(session_id: str, request: Request) -> None:
+    try:
+        await request.app.state.chat_session_service.delete_session_for_user(
+            session_id, await current_user_id(request)
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ChatSessionBusyError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "chat_session_busy", "message": str(exc)},
+        ) from exc
+
+
 @router.post("/{session_id}/branches", response_model=ChatSessionResponse, status_code=201)
 async def branch_chat_message(
     session_id: str, payload: ChatBranchRequest, request: Request,

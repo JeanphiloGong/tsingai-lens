@@ -219,6 +219,18 @@ class PostgresChatRepository:
             row = await session.get(ChatSessionRow, session_id)
             return _session_record(row) if row is not None else None
 
+    async def delete_session(self, *, session_id: str, user_id: str) -> None:
+        async with self.session_factory.begin() as database:
+            acquired = await database.scalar(select(func.pg_try_advisory_xact_lock(
+                func.hashtextextended(f"chat-execution:{session_id}", 0),
+            )))
+            if not acquired:
+                raise ChatSessionBusyError()
+            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+            if row is None or row.user_id != user_id:
+                raise FileNotFoundError("chat session not found")
+            await database.delete(row)
+
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSession, ...]:
@@ -651,12 +663,17 @@ def _update_call_row(row: ChatToolCallRow, call: ChatToolCall) -> None:
 
 
 def _session_record(row: ChatSessionRow) -> ChatSession:
+    snapshot_status = (row.response_snapshot or {}).get("status")
+    status = "approval" if snapshot_status == "approval_required" else (
+        "running" if snapshot_status == "running" else "idle"
+    )
     return ChatSession(
         session_id=row.session_id,
         user_id=row.user_id,
         collection_id=row.collection_id,
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
+        status=status,
         root_session_id=row.root_session_id,
         parent_session_id=row.parent_session_id,
         fork_message_id=row.fork_message_id,

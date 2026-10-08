@@ -183,6 +183,7 @@ list.
 - `POST /api/v1/chat-sessions`
 - `GET /api/v1/chat-sessions?collection_id={collection_id}`
 - `GET /api/v1/chat-sessions/{session_id}`
+- `DELETE /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/branches`

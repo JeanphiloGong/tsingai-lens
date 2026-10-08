@@ -88,6 +88,29 @@ class MemoryChatRepository:
     async def read_session(self, session_id: str) -> ChatSession | None:
         return self.sessions.get(session_id)
 
+    async def delete_session(self, *, session_id: str, user_id: str) -> None:
+        session = self.sessions.get(session_id)
+        if session is None or session.user_id != user_id:
+            raise FileNotFoundError("chat session not found")
+        if session_id in self.active_sessions:
+            raise ChatSessionBusyError()
+        self.sessions.pop(session_id, None)
+        self.messages.pop(session_id, None)
+        self.response_snapshots.pop(session_id, None)
+        self.permissions.pop(session_id, None)
+        call_ids = {
+            key for key, item in self.calls.items()
+            if getattr(item, "session_id", None) == session_id
+        }
+        for mapping in (self.calls, self.feedback, self.model_calls):
+            for key, item in tuple(mapping.items()):
+                if getattr(item, "session_id", None) == session_id:
+                    mapping.pop(key, None)
+        for key in call_ids:
+            self.results.pop(key, None)
+        for key in call_ids:
+            self.proposed_revisions.pop(key, None)
+
     async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
         return self.messages.get(session_id, ())
 

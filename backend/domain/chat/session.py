@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
+
+
+ChatSessionStatus = Literal["idle", "running", "approval"]
 
 
 def _required_text(value: Any, field_name: str) -> str:
@@ -30,6 +33,7 @@ class ChatSession:
     collection_id: str
     created_at: str
     updated_at: str
+    status: ChatSessionStatus = "idle"
     root_session_id: str | None = None
     parent_session_id: str | None = None
     fork_message_id: str | None = None
@@ -78,6 +82,7 @@ class ChatSession:
             collection_id=collection_id,
             created_at=created_at,
             updated_at=created_at,
+            status="idle",
         )
 
     @classmethod
@@ -93,6 +98,7 @@ class ChatSession:
             fork_message_id=payload.get("fork_message_id"),
             fork_position=payload.get("fork_position"),
             fork_content=payload.get("fork_content"),
+            status=payload.get("status", "idle"),
         )
 
     def update(
@@ -107,4 +113,4 @@ class ChatSession:
         return replace(self, updated_at=updated_at)
 
 
-__all__ = ["ChatSession"]
+__all__ = ["ChatSession", "ChatSessionStatus"]

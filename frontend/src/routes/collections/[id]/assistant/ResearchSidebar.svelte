@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import { LoaderCircle, Clock3, CircleAlert } from '@lucide/svelte';
+	import { LoaderCircle, Clock3, CircleAlert, Trash2 } from '@lucide/svelte';
 	import type { ChatSessionActivity } from './conversationPresentation';
 
 	type SessionSummary = {
@@ -18,6 +18,7 @@
 	export let disabled = false;
 	export let onNewSession: () => void = () => {};
 	export let onSwitchSession: (sessionId: string) => void = () => {};
+	export let onDeleteSession: (sessionId: string) => void = () => {};
 	export let formatHistoryTime: (value: string) => string = () => '';
 	let mobileHistoryOpen = false;
 </script>
@@ -63,30 +64,40 @@
 		<div class="history-list">
 			{#each history as item (item.session_id)}
 				{@const activity = sessionActivities[item.session_id]}
-				<button
-					class="history-item"
-					class:active={item.session_id === activeSessionId}
-					type="button"
-					{disabled}
-					on:click={() => {
-						mobileHistoryOpen = false;
-						onSwitchSession(item.session_id);
-					}}
-				>
-					<span class="history-title">{item.title}</span>
-					{#if activity && activity !== 'idle'}
-						<span class="session-state" data-state={activity}>
-							{#if activity === 'running'}<LoaderCircle
+				<div class="history-item" class:active={item.session_id === activeSessionId}>
+					<button
+						class="history-select"
+						type="button"
+						{disabled}
+						on:click={() => {
+							mobileHistoryOpen = false;
+							onSwitchSession(item.session_id);
+						}}
+					>
+						<span class="history-title">{item.title}</span>
+						{#if activity && activity !== 'idle'}
+							<span class="session-state" data-state={activity}>
+								{#if activity === 'running'}<LoaderCircle
 									size={12}
 								/>{:else if activity === 'unavailable'}<CircleAlert size={12} />{:else}<Clock3
 									size={12}
 								/>{/if}
-							<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
-						</span>
-					{:else}
-						<time>{formatHistoryTime(item.updated_at)}</time>
-					{/if}
-				</button>
+								<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
+							</span>
+						{:else}
+							<time>{formatHistoryTime(item.updated_at)}</time>
+						{/if}
+					</button>
+					<button
+						class="delete-session"
+						type="button"
+						{disabled}
+						aria-label={$t('researchAgent.deleteSession')}
+						title={$t('researchAgent.deleteSession')}
+						on:click|stopPropagation={() => onDeleteSession(item.session_id)}
+						><Trash2 size={14} aria-hidden="true" /></button
+					>
+				</div>
 			{:else}
 				<p class="empty-history">{$t('researchAgent.emptyHistory')}</p>
 			{/each}
@@ -292,6 +303,40 @@
 		transition:
 			background-color 140ms ease,
 			border-color 140ms ease;
+	}
+
+	.history-select {
+		display: grid;
+		width: 100%;
+		min-width: 0;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 8px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.delete-session {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		border: 0;
+		border-radius: 7px;
+		background: transparent;
+		color: var(--text-tertiary);
+		cursor: pointer;
+	}
+
+	.delete-session:hover:not(:disabled),
+	.delete-session:focus-visible {
+		background: var(--surface-card);
+		color: var(--danger, #b42318);
 	}
 
 	.history-item:hover,

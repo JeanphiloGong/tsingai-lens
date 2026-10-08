@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from application.repositories.chat_repository import (
     ChatModelCall,
     ChatResponseSnapshot,
+    ChatSessionSummary,
     ChatSessionBusyError,
     ModelCallOutcome,
 )
@@ -233,10 +234,20 @@ class PostgresChatRepository:
 
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
-    ) -> tuple[ChatSession, ...]:
+    ) -> tuple[ChatSessionSummary, ...]:
         async with self.session_factory() as session:
-            rows = await session.scalars(
-                select(ChatSessionRow)
+            first_user_message = (
+                select(ChatMessageRow.content)
+                .where(
+                    ChatMessageRow.session_id == ChatSessionRow.session_id,
+                    ChatMessageRow.role == "user",
+                )
+                .order_by(ChatMessageRow.position)
+                .limit(1)
+                .scalar_subquery()
+            )
+            rows = await session.execute(
+                select(ChatSessionRow, first_user_message.label("title"))
                 .where(
                     ChatSessionRow.user_id == user_id,
                     ChatSessionRow.collection_id == collection_id,
@@ -245,7 +256,10 @@ class PostgresChatRepository:
                 .limit(limit)
                 .offset(offset)
             )
-            return tuple(_session_record(row) for row in rows)
+            return tuple(
+                ChatSessionSummary(session=_session_record(row), title=title)
+                for row, title in rows.all()
+            )
 
     async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
         async with self.session_factory() as session:

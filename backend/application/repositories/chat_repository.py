@@ -84,6 +84,18 @@ class ChatResponseSnapshot:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ChatSessionSummary:
+    """A session plus the first-question projection used by history indexes."""
+
+    session: ChatSession
+    title: str | None = None
+
+    def __post_init__(self) -> None:
+        first_line = (self.title or "").strip().split("\n", 1)[0].strip()
+        object.__setattr__(self, "title", first_line[:160] or None)
+
+
 class ChatRepository(Protocol):
     async def read_permission(self, session_id: str, user_id: str) -> dict[str, Any]: ...
 
@@ -114,7 +126,7 @@ class ChatRepository(Protocol):
 
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
-    ) -> tuple[ChatSession, ...]: ...
+    ) -> tuple[ChatSessionSummary, ...]: ...
 
     async def read_messages(
         self, session_id: str

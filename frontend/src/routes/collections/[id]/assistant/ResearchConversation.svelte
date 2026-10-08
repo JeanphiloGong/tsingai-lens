@@ -297,11 +297,16 @@
 		window.localStorage.setItem(historyStorageKey(), JSON.stringify(history));
 	}
 
+	function titleFromText(text: string) {
+		const firstLine = text.trim().split('\n')[0]?.trim() ?? '';
+		if (!firstLine) return $t('researchAgent.untitledSession');
+		return firstLine.length > 38 ? `${firstLine.slice(0, 38)}...` : firstLine;
+	}
+
 	function titleFromMessages(nextMessages: ChatMessage[]) {
 		const firstUserMessage = nextMessages.find((message) => message.role === 'user');
-		const text = firstUserMessage?.content.trim() ?? '';
-		if (!text) return $t('researchAgent.untitledSession');
-		return text.length > 38 ? `${text.slice(0, 38)}...` : text;
+		const text = firstUserMessage?.content ?? '';
+		return titleFromText(text);
 	}
 
 	function upsertHistory(nextSession: ChatSession, title = '') {
@@ -340,7 +345,9 @@
 				const title =
 					item.session_id === session?.session_id && messages.length
 						? titleFromMessages(messages)
-						: previous?.title || $t('researchAgent.untitledSession');
+						: item.title?.trim()
+							? titleFromText(item.title)
+							: previous?.title || $t('researchAgent.untitledSession');
 				return {
 					session_id: item.session_id,
 					title,

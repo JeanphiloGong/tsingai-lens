@@ -201,7 +201,10 @@ Analysis records.
 The collection-scoped list returns the authenticated user's saved sessions,
 ordered by most recently updated, with `limit` and `offset` pagination. It is
 the source for restoring Chat history on another device; browser local storage
-may remember the active session but is not the authoritative history index.
+may remember the active session but is not the authoritative history index. Each
+list item also includes `title`, the trimmed first line of the first user question
+(up to 160 characters), or `null` for an empty conversation. A client can render
+history without loading every trajectory or relying on a local title cache.
 
 Message editing and answer regeneration preserve the original trajectory.
 `POST /chat-sessions/{session_id}/branches` accepts a saved user `message_id`,

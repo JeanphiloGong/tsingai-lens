@@ -169,10 +169,12 @@ An unavailable session read preserves its history entry and offers a retry of
 that exact session. Only an explicit `404` removes the missing session and
 creates a replacement; network errors and other HTTP failures remain visible.
 
-The server trajectory is authoritative. Browser storage remembers which
-session to load, how to label it in the local history list, and up to 12 pending
-Source blocks from the document reader. Pending blocks are shown above the
-composer and can be removed individually. They are cleared after the complete persisted turn
+The server trajectory is authoritative. The collection session list supplies
+each saved conversation's first-question title, so history labels remain
+available on a new browser or after local storage is cleared. Browser storage
+remembers which session to load and up to 12 pending Source blocks from the
+document reader. Pending blocks are shown above the composer and can be removed
+individually. They are cleared after the complete persisted turn
 returns, or when recovery after an interrupted stream confirms that the sent
 message and its Source locators were persisted. If persistence cannot be
 confirmed, the pending Source remains available for retry. This check also runs

@@ -44,6 +44,7 @@ class ChatSessionResponse(BaseModel):
     collection_id: str
     created_at: str
     updated_at: str
+    title: str | None = None
     status: Literal["idle", "running", "approval"] = "idle"
     root_session_id: str | None = None
     parent_session_id: str | None = None

@@ -17,6 +17,7 @@ from application.chat.session_service import (
     ChatSourceContextError,
 )
 from application.pipeline import PipelineRunService
+from application.repositories.chat_repository import ChatSessionSummary
 from controllers.chat import sessions as sessions_controller
 from controllers.chat.schemas import (
     ChatSessionCreateRequest,
@@ -99,7 +100,10 @@ class _Service:
     ):
         assert collection_id == "col-1"
         assert user_id == "user-1"
-        return (self.session,)
+        return (ChatSessionSummary(
+            session=self.session,
+            title=self.messages[0].content if self.messages else None,
+        ),)
 
     async def list_messages_for_user(self, session_id: str, user_id: str):
         await self.get_session_for_user(session_id, user_id)
@@ -245,6 +249,34 @@ def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
     assert isinstance(response, ChatSessionListResponse)
     assert response.limit == 12
     assert [item.session_id for item in response.items] == ["chat-1"]
+    assert response.items[0].title == "你好"
+
+
+@pytest.mark.parametrize(
+    ("question", "title"),
+    [
+        (
+            "  Compare matched LPBF tensile conditions\nKeep heat treatments separate.",
+            "Compare matched LPBF tensile conditions",
+        ),
+        ("x" * 200, "x" * 160),
+        (None, None),
+    ],
+)
+def test_chat_history_title_is_a_bounded_first_question(
+    question: str | None, title: str | None,
+) -> None:
+    service = _Service()
+    service.messages = () if question is None else (
+        ChatMessage.user(
+            message_id="question", session_id=service.session.session_id,
+            content=question, created_at="2026-08-19T00:00:01+00:00",
+        ),
+    )
+    response = asyncio.run(sessions_controller.list_chat_sessions(
+        _request(service), collection_id="col-1", limit=12, offset=0,
+    ))
+    assert response.items[0].title == title
 
 
 def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:

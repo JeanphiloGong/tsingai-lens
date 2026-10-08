@@ -58,6 +58,13 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         created_at="2026-08-19T00:00:00+00:00",
     )
     await repository.add_session(chat)
+    empty_chat = ChatSession.create(
+        session_id="chat-empty",
+        user_id=chat.user_id,
+        collection_id=chat.collection_id,
+        created_at=chat.created_at,
+    )
+    await repository.add_session(empty_chat)
 
     user_message = ChatMessage.user(
         message_id="msg-1",
@@ -137,6 +144,16 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     stored_chat = await repository.read_session(chat.session_id)
     assert stored_chat is not None
     assert stored_chat.collection_id == chat.collection_id
+    history = await repository.list_sessions(
+        user_id=chat.user_id, collection_id=chat.collection_id,
+    )
+    assert [(item.session.session_id, item.title) for item in history] == [
+        (chat.session_id, user_message.content),
+        (empty_chat.session_id, None),
+    ]
+    assert (await repository.list_sessions(
+        user_id=chat.user_id, collection_id=chat.collection_id, limit=1, offset=1,
+    )) == (history[1],)
     assert await repository.read_messages(chat.session_id) == (
         user_message,
         assistant_call,

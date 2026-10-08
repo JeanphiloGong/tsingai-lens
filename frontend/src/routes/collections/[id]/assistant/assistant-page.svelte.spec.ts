@@ -638,6 +638,85 @@ describe('collections/[id]/assistant Research Agent', () => {
 		);
 	});
 
+	it.each([null, 'New conversation'])(
+		'restores server history titles and the selected session with cached title %s',
+		async (cachedTitle) => {
+			const oldSession = { ...session, session_id: 'chat_old' };
+			const newSession = { ...session, session_id: 'chat_new', status: 'idle' };
+			const question = 'Compare LPBF tensile conditions';
+			const oldQuestion = message('old-question', 'user', question, {
+				session_id: oldSession.session_id
+			});
+			if (cachedTitle) {
+				localStorage.setItem(
+					'lens.chatSessionHistory.researcher_1:col_123',
+					JSON.stringify([{ ...oldSession, title: cachedTitle }])
+				);
+			}
+			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				const method = requestMethod(input, init);
+				if (path === '/api/v1/chat-sessions' && method === 'GET') {
+					return jsonResponse({
+						items: [
+							{ ...oldSession, title: question, status: 'idle' },
+							{ ...newSession, title: null }
+						],
+						limit: 12,
+						offset: 0
+					});
+				}
+				if (path === '/api/v1/chat-sessions' && method === 'POST') {
+					return jsonResponse(newSession, 201);
+				}
+				if (path === `/api/v1/chat-sessions/${oldSession.session_id}` && method === 'GET') {
+					return jsonResponse({
+						...oldSession,
+						title: question,
+						status: 'idle'
+					});
+				}
+				if (
+					path === `/api/v1/chat-sessions/${oldSession.session_id}/messages` &&
+					method === 'GET'
+				) {
+					return jsonResponse({
+						items: [oldQuestion],
+						feedback: [],
+						pending_approval: null,
+						running: false
+					});
+				}
+				return jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500);
+			});
+
+			await renderReady();
+			if (window.innerWidth <= 820) {
+				await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+			}
+			const oldConversation = browserPage.getByRole('button', { name: new RegExp(question) });
+			await expect.element(oldConversation).toBeVisible();
+			expect(
+				fetchMock.mock.calls.filter(([input]) => requestPath(input).endsWith('/messages'))
+			).toHaveLength(0);
+			await oldConversation.click();
+			await expect.element(browserPage.getByTestId('user-message')).toHaveTextContent(question);
+			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
+				oldSession.session_id
+			);
+			expect(
+				fetchMock.mock.calls.filter(([input, init]) => requestMethod(input, init) === 'POST')
+			).toHaveLength(1);
+			expect(
+				fetchMock.mock.calls.some(
+					([input, requestInit]) =>
+						requestPath(input) === `/api/v1/chat-sessions/${oldSession.session_id}/messages` &&
+						requestMethod(input, requestInit) === 'GET'
+				)
+			).toBe(true);
+		}
+	);
+
 	it.each(['manual', 'automatic', 'read failure'])(
 		'keeps an in-flight approval recoverable until its result arrives: %s',
 		async (mode) => {

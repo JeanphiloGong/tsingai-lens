@@ -115,7 +115,9 @@ async def list_chat_sessions(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ChatSessionListResponse(
         items=[
-            ChatSessionResponse.model_validate(item, from_attributes=True)
+            ChatSessionResponse.model_validate(item.session, from_attributes=True).model_copy(
+                update={"title": item.title}
+            )
             for item in sessions
         ],
         limit=limit,

@@ -6,6 +6,7 @@ from dataclasses import replace
 from application.repositories.chat_repository import (
     ChatModelCall,
     ChatResponseSnapshot,
+    ChatSessionSummary,
     ChatSessionBusyError,
     ModelCallOutcome,
 )
@@ -87,6 +88,33 @@ class MemoryChatRepository:
 
     async def read_session(self, session_id: str) -> ChatSession | None:
         return self.sessions.get(session_id)
+
+    async def list_sessions(
+        self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatSessionSummary, ...]:
+        sessions = sorted(
+            (
+                session
+                for session in self.sessions.values()
+                if session.user_id == user_id and session.collection_id == collection_id
+            ),
+            key=lambda session: (session.updated_at, session.session_id),
+            reverse=True,
+        )
+        return tuple(
+            ChatSessionSummary(
+                session=session,
+                title=next(
+                    (
+                        message.content
+                        for message in self.messages.get(session.session_id, ())
+                        if message.role.value == "user"
+                    ),
+                    None,
+                ),
+            )
+            for session in sessions[offset : offset + limit]
+        )
 
     async def delete_session(self, *, session_id: str, user_id: str) -> None:
         session = self.sessions.get(session_id)

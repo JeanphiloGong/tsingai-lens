@@ -38,6 +38,7 @@ from application.repositories.chat_repository import (
     ChatRepository,
     ChatResponseSnapshot,
     ChatSessionBusyError,
+    ChatSessionSummary,
     ModelCallInput,
     ModelCallObserver,
     ModelCallOutcome,
@@ -315,7 +316,7 @@ class ChatSessionService:
         user_id: str,
         limit: int = 50,
         offset: int = 0,
-    ) -> tuple[ChatSession, ...]:
+    ) -> tuple[ChatSessionSummary, ...]:
         await self.collection_service.get_collection_for_user(collection_id, user_id)
         return await self.repository.list_sessions(
             user_id=user_id,

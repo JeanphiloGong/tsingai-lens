@@ -146,6 +146,13 @@ stays disabled while that result is unconfirmed, and recovery never resubmits a
 write. Leaving the session or account cancels its timer and request and ignores
 late results.
 
+Successful history-index requests replace the cached list with the server's
+latest 12 sessions, removing entries deleted elsewhere. Index failures retain
+the cache. Returning focus to the window, opening embedded history, and polling
+background activity refresh the index so remote conversations and status
+changes become visible without loading idle trajectories. A failed background
+trajectory read is retried while recovery is needed.
+
 The selected session ID and a small presentation-only history are stored under:
 
 ```text

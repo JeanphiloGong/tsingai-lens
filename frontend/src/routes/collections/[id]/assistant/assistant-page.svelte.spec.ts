@@ -192,7 +192,7 @@ function installApi({
 		const path = requestPath(input);
 		const method = requestMethod(input, init);
 		if (path === '/api/v1/chat-sessions' && method === 'GET') {
-			return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
+			return Promise.resolve(jsonResponse({ items: [session], limit: 12, offset: 0 }));
 		}
 		if (path === '/api/v1/collections/col_123/objectives' && method === 'GET') {
 			return Promise.resolve(
@@ -515,7 +515,16 @@ describe('collections/[id]/assistant Research Agent', () => {
 				const path = requestPath(input);
 				const method = requestMethod(input, init);
 				if (path === '/api/v1/chat-sessions' && method === 'GET') {
-					return jsonResponse({ items: [], limit: 12, offset: 0 });
+					return jsonResponse({
+						items: Array.from({ length: created }, (_, index) => ({
+							...session,
+							session_id: `chat_${index + 1}`,
+							title: index === 0 ? originalQuestion.content : 'Check specimen counts',
+							status: index === 0 && !completed ? 'running' : 'idle'
+						})).reverse(),
+						limit: 12,
+						offset: 0
+					});
 				}
 				if (path === '/api/v1/chat-sessions' && method === 'POST') {
 					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
@@ -716,6 +725,114 @@ describe('collections/[id]/assistant Research Agent', () => {
 			).toBe(true);
 		}
 	);
+
+	it('removes server-deleted conversations from cached history', async () => {
+		const deleted = { ...session, session_id: 'chat_deleted', title: 'Deleted comparison' };
+		localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify([deleted]));
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				return Promise.resolve(jsonResponse({ items: [session], limit: 12, offset: 0 }));
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		expect(
+			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+		).toEqual([expect.objectContaining({ session_id: session.session_id })]);
+		expect(
+			fetchMock.mock.calls.some(([input]) => requestPath(input).includes('chat_deleted'))
+		).toBe(false);
+	});
+
+	it.each(['focus', 'embedded history'])(
+		'refreshes remote conversation additions, deletions, and status on %s',
+		async (trigger) => {
+			const remote = {
+				...session,
+				session_id: 'chat_remote',
+				title: 'Compare tensile conditions',
+				status: 'idle'
+			};
+			let items: Array<Record<string, unknown>> = [session];
+			installApi();
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+					return Promise.resolve(jsonResponse({ items, limit: 12, offset: 0 }));
+				}
+				if (path === '/api/v1/chat-sessions/chat_remote/messages') {
+					return Promise.resolve(
+						jsonResponse({ items: [], feedback: [], pending_approval: null, running: true })
+					);
+				}
+				return original(input, init);
+			});
+			render(Conversation, { embedded: trigger === 'embedded history' });
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			const refresh = async () => {
+				if (trigger === 'focus') window.dispatchEvent(new Event('focus'));
+				else await browserPage.getByRole('button', { name: 'Conversation history' }).click();
+			};
+			items = [session, remote];
+			await refresh();
+			await vi.waitFor(() =>
+				expect(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+				).toHaveLength(2)
+			);
+			expect(fetchMock.mock.calls.some(([input]) => requestPath(input).endsWith('/messages'))).toBe(
+				false
+			);
+			if (trigger === 'embedded history') await refresh();
+			items = [session, { ...remote, status: 'running' }];
+			await refresh();
+			await vi.waitFor(() =>
+				expect(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[1]
+						.status
+				).toBe('running')
+			);
+			if (trigger === 'embedded history') await refresh();
+			items = [session];
+			await refresh();
+			await vi.waitFor(() =>
+				expect(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+				).toHaveLength(1)
+			);
+			expect(
+				localStorage.getItem(
+					`lens.chatSession.researcher_1:col_123${trigger === 'embedded history' ? ':documents' : ''}`
+				)
+			).toBe(session.session_id);
+			expect(
+				fetchMock.mock.calls.filter(([input, init]) => requestMethod(input, init) === 'POST')
+			).toHaveLength(1);
+		}
+	);
+
+	it('keeps cached history when the server index is unavailable', async () => {
+		const cached = { ...session, session_id: 'chat_cached', title: 'Compare specimen orientation' };
+		localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify([cached]));
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				return Promise.resolve(jsonResponse({ detail: 'Temporarily unavailable' }, 503));
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		expect(
+			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+		).toEqual([
+			expect.objectContaining({ session_id: session.session_id }),
+			expect.objectContaining({ session_id: cached.session_id, title: cached.title })
+		]);
+	});
 
 	it.each(['manual', 'automatic', 'read failure'])(
 		'keeps an in-flight approval recoverable until its result arrives: %s',

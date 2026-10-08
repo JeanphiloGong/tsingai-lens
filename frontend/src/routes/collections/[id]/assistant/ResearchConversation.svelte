@@ -114,6 +114,7 @@
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
 	let historyTimer: ReturnType<typeof setTimeout> | undefined;
 	let historyLoading = false;
+	let historyGeneration = 0;
 	let loading = false;
 	let sending = false;
 	let submitting = false;
@@ -330,11 +331,17 @@
 	}
 
 	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
+		const historyRequest = ++historyGeneration;
 		try {
 			const response = await listChatSessions(ownerCollectionId, {
 				limit: 12,
 				signal: sessionController?.signal
 			});
+			if (
+				!isCurrentSession(generation, ownerCollectionId) ||
+				historyRequest !== historyGeneration
+			)
+				return;
 			const stored = readHistory();
 			// The list is a navigation index. Do not download every trajectory just
 			// to derive sidebar titles; a trajectory is loaded when selected.
@@ -361,27 +368,27 @@
 				...sessionActivities,
 				...Object.fromEntries(serverHistory.map((item) => [item.session_id, item.status]))
 			};
-			const serverIds = new Set(serverHistory.map((entry) => entry.session_id));
-			writeHistory([
-				...serverHistory,
-				...stored.filter((entry) => !serverIds.has(entry.session_id))
-			]);
+			writeHistory(serverHistory);
 		} catch {
 			// The existing local history remains usable when the list request is unavailable.
 		}
 	}
 
-	async function refreshHistoryActivities() {
-		if (!session || loading || historyLoading || destroyed) return;
+	async function refreshHistoryActivities(refreshIndex = true) {
+		if (!session || loading || historyLoading || destroyed || deletingSessionId) return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		clearTimeout(historyTimer);
 		historyLoading = true;
 		history = readHistory();
+		if (refreshIndex) await refreshServerHistory(generation, ownerCollectionId);
+		if (!isCurrentSession(generation, ownerCollectionId)) return;
 		const candidates = history.filter(
 			(item) =>
 				item.session_id !== session?.session_id &&
-				['running', 'approval', 'recovering'].includes(sessionActivities[item.session_id])
+				['running', 'approval', 'recovering', 'unavailable'].includes(
+					sessionActivities[item.session_id]
+				)
 		);
 		await Promise.all(
 			candidates.map(async (item) => {
@@ -521,7 +528,7 @@
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) {
 				loading = false;
-				void refreshHistoryActivities();
+				void refreshHistoryActivities(false);
 			}
 		}
 	}
@@ -742,6 +749,7 @@
 		error = '';
 		try {
 			await deleteChatSession(sessionId, sessionController?.signal);
+			historyGeneration += 1;
 			const remaining = history.filter((entry) => entry.session_id !== sessionId);
 			writeHistory(remaining);
 			if (sessionId !== activeSessionId) return;

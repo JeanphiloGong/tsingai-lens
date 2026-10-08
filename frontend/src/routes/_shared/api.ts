@@ -6,7 +6,8 @@ const ERROR_CODE_TRANSLATIONS = {
 	invalid_credentials: 'auth.invalidCredentials',
 	collection_not_found: 'error.collectionNotFound',
 	graph_not_ready: 'error.graphNotReady',
-	community_not_found: 'error.communityNotFound'
+	community_not_found: 'error.communityNotFound',
+	chat_session_busy: 'error.chatSessionBusy'
 } as const;
 
 export class ApiError extends Error {

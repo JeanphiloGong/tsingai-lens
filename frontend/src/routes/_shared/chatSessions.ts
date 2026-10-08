@@ -256,6 +256,10 @@ export async function fetchChatSession(sessionId: string, signal?: AbortSignal) 
 	})) as ChatSession;
 }
 
+export async function deleteChatSession(sessionId: string, signal?: AbortSignal) {
+	await requestJson(chatSessionPath(sessionId), { signal, method: 'DELETE' });
+}
+
 export type AgentPermission = {
 	mode: 'read_only' | 'confirm' | 'auto';
 	actions: string[];

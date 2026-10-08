@@ -324,6 +324,12 @@ class ChatSessionService:
             offset=offset,
         )
 
+    async def delete_session_for_user(self, session_id: str, user_id: str) -> None:
+        await self.get_session_for_user(session_id, user_id)
+        if await self.repository.is_session_running(session_id):
+            raise ChatSessionBusyError()
+        await self.repository.delete_session(session_id=session_id, user_id=user_id)
+
     async def list_messages_for_user(
         self,
         session_id: str,

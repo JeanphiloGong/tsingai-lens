@@ -481,6 +481,8 @@ const translations: Record<Language, Translations> = {
 			earlierMessages: 'Earlier messages',
 			latestMessage: 'Latest message',
 			emptyHistory: 'No conversations yet',
+			deleteSession: 'Delete conversation',
+			deleteSessionConfirm: 'Delete conversation "{title}"? This cannot be undone.',
 			untitledSession: 'New conversation',
 			currentCollection: 'Current collection',
 			backToWorkspace: 'Back to workspace',
@@ -3339,6 +3341,7 @@ const translations: Record<Language, Translations> = {
 			graphNotReady:
 				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
 			communityNotFound: 'The requested community filter could not be found for this collection.',
+			chatSessionBusy: 'This conversation is still running. Try deleting it again when it finishes.',
 			uploadTooLarge: 'This file is larger than the 256 MiB upload limit.'
 		}
 	},
@@ -3802,6 +3805,8 @@ const translations: Record<Language, Translations> = {
 			earlierMessages: '更早的消息',
 			latestMessage: '最新消息',
 			emptyHistory: '暂无历史会话',
+			deleteSession: '删除对话',
+			deleteSessionConfirm: '确定删除“{title}”吗？删除后无法恢复。',
 			untitledSession: '新建会话',
 			currentCollection: '当前集合',
 			backToWorkspace: '返回工作区',
@@ -6528,6 +6533,7 @@ const translations: Record<Language, Translations> = {
 			collectionNotFound: '该集合不存在。',
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
 			communityNotFound: '当前集合中找不到指定的社区过滤条件。',
+			chatSessionBusy: '该对话仍在运行，请等待完成后再删除。',
 			uploadTooLarge: '文件超过 256 MiB 上传限制。'
 		}
 	}

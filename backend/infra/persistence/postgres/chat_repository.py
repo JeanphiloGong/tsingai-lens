@@ -219,6 +219,18 @@ class PostgresChatRepository:
             row = await session.get(ChatSessionRow, session_id)
             return _session_record(row) if row is not None else None
 
+    async def delete_session(self, *, session_id: str, user_id: str) -> None:
+        async with self.session_factory.begin() as database:
+            acquired = await database.scalar(select(func.pg_try_advisory_xact_lock(
+                func.hashtextextended(f"chat-execution:{session_id}", 0),
+            )))
+            if not acquired:
+                raise ChatSessionBusyError()
+            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+            if row is None or row.user_id != user_id:
+                raise FileNotFoundError("chat session not found")
+            await database.delete(row)
+
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSession, ...]:

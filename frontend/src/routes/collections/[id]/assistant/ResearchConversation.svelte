@@ -9,6 +9,7 @@
 	import { collections } from '../../../_shared/collections';
 	import {
 		createChatSession,
+		deleteChatSession,
 		listChatSessions,
 		branchChatMessage,
 		clearPendingChatSourceContexts,
@@ -115,7 +116,8 @@
 	let loading = false;
 	let sending = false;
 	let submitting = false;
-	$: sessionNavigationDisabled = loading || submitting || deciding || revising;
+	let deletingSessionId = '';
+	$: sessionNavigationDisabled = loading || submitting || deciding || revising || Boolean(deletingSessionId);
 	let progress: ChatProgress | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
@@ -723,6 +725,29 @@
 		if (preserveDraft && userId === owner && activeSessionId === sessionId) input = draft;
 	}
 
+	async function removeSession(sessionId: string) {
+		if (sessionNavigationDisabled || !browser) return;
+		const item = history.find((entry) => entry.session_id === sessionId);
+		if (!item || !window.confirm($t('researchAgent.deleteSessionConfirm', { title: item.title }))) return;
+		deletingSessionId = sessionId;
+		error = '';
+		try {
+			await deleteChatSession(sessionId, sessionController?.signal);
+			const remaining = history.filter((entry) => entry.session_id !== sessionId);
+			writeHistory(remaining);
+			if (sessionId !== activeSessionId) return;
+			clearStoredSessionId();
+			session = null;
+			messages = [];
+			pendingApproval = null;
+			await loadSession(remaining[0]?.session_id ?? '');
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			deletingSessionId = '';
+		}
+	}
+
 	function closeTree() {
 		showTree = false;
 		treeController?.abort();
@@ -1240,6 +1265,7 @@
 			disabled={sessionNavigationDisabled}
 			onNewSession={startNewSession}
 			onSwitchSession={switchSession}
+			onDeleteSession={removeSession}
 			{formatHistoryTime}
 		/>
 	{/if}

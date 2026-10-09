@@ -83,6 +83,14 @@ Source context attached from the document reader is resolved against the
 canonical Source before the model runs. A quote is inspection material, not
 Evidence or permission to mutate a scientific record.
 
+Collection paper screening prefers an explicitly labelled abstract section.
+When a parser retains `Abstract:` or an equivalent dash/Chinese label at the
+start of a paragraph instead of in its heading, browsing reads that paragraph
+as the bounded abstract excerpt. Reference-section entries and incidental
+mentions are excluded from this paragraph-label path. Excerpts remain screening
+signals tied to the existing Document reference, not an exact Source read or
+scientific Evidence; genuinely missing abstracts remain explicit limitations.
+
 Repeated identical calls within one model response execute once. Retained calls
 are assigned contiguous positions so checkpointed requests and results stay paired.
 

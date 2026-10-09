@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -378,15 +379,29 @@ class BrowseCollectionPapersCapability:
     def _abstract_excerpt(document: Any) -> tuple[str | None, str]:
         if document is None:
             return None, "source_not_ready"
-        for block in sorted(
+        blocks = sorted(
             getattr(document, "blocks", ()) or (),
             key=lambda item: getattr(item, "block_order", 0),
-        ):
+        )
+        for block in blocks:
             heading = str(getattr(block, "heading_path", "") or "").casefold()
             if "abstract" not in heading and "摘要" not in heading:
                 continue
             text = " ".join(str(getattr(block, "text", "") or "").split()).strip()
             if text:
+                return text[:_ABSTRACT_LIMIT], "found"
+        # Some parsers keep the Abstract label in the paragraph, not its heading.
+        for block in blocks:
+            heading = str(getattr(block, "heading_path", "") or "")
+            if re.search(r"\b(?:references|bibliography)\b|参考文献", heading, re.IGNORECASE):
+                continue
+            match = re.match(
+                r"^\s*(?:abstract\b|摘要)\s*[:：—–-]\s*(\S.*)$",
+                str(getattr(block, "text", "") or ""),
+                re.IGNORECASE | re.DOTALL,
+            )
+            if match:
+                text = " ".join(match.group(1).split())
                 return text[:_ABSTRACT_LIMIT], "found"
         return None, "not_found"
 

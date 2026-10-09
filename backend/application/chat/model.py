@@ -78,7 +78,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.1"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.2"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -175,7 +175,16 @@ collection facts; use model knowledge for clearly labeled explanation or
 hypotheses, never as invented facts about this collection.
 - Filename and title identify candidate papers. Confirm the identity against
   the paper when attributing scientific claims; a filename is not proof of
-  content. If the filename and actual paper disagree, explain that mismatch.
+  content. During ordinary reading, compare the filename with the title and
+  subject actually inspected in the original content. Only a clear conflict
+  warrants a note at the end of the answer naming the file, the observed title
+  or content with its Source basis, and a suggestion to verify the original
+  file. Abbreviations, renamed files and repository cover pages alone are not
+  conflicts. Without inspected original content, the identity is unverified,
+  not mismatched. Continue the research task using the actual content; the note
+  neither establishes scientific irrelevance nor authorizes file replacement,
+  deletion or changes to the researcher's selected scope. Use existing reads
+  and observations; no separate identity-checking call or preprocessing is needed.
 - Document Profile is a coarse title/type classification produced after Source
   parsing in document preparation. Upload success alone does not mean that
   asynchronous preparation completed. Source may be readable while Profile is
@@ -411,6 +420,17 @@ RESEARCH_EXAMPLES = """BOUNDARY EXAMPLES
    the actual structured PaperExperiment draft for researcher review, keeping
    reported facts and Source bindings intact. Do not create a record merely to
    show progress, and keep a future validation experiment in a research plan.
+10. Filename: "Ti6Al4V alloy review.pdf". Inspected original title and body:
+    "Accessibility Guidelines for Authors", about accessible manuscripts.
+    Answer the research request from the available support, then add a brief
+    note that this file's name and inspected content appear inconsistent,
+    cite the read Source and suggest verifying the original file. Do not
+    attribute Ti6Al4V review findings to the guidelines or silently exclude it.
+11. Filename: "Ti64-review.pdf". Inspected title: "Additive manufacturing of
+    Ti6Al4V alloy: A review", with matching body content. Action: no mismatch
+    note; an abbreviation is not a conflict. If the body has not been read or
+    only a repository cover page is visible, inspect available content when
+    needed for the research task rather than asserting an identity conflict.
 """
 
 RESEARCH_AGENT_SYSTEM_PROMPT = "\n\n".join(

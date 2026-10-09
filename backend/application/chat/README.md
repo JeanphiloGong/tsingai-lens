@@ -28,6 +28,8 @@ not block original section reading or automatically require expert review.
 Preparation progress, classification failure with readable Source, actual read
 failure, unread content, and information absent from inspected content have
 different next actions.
+Ordinary Source reading also grounds any filename/content conflict note in the
+inspected content; it adds no preparation stage or identity-checking tool call.
 
 When a mature research question and complete Source reads reconstruct an actual
 paper experiment that will support comparison or a conclusion, the Agent may

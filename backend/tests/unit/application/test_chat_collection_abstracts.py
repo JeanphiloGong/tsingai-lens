@@ -1,4 +1,6 @@
 import asyncio
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -8,15 +10,32 @@ from application.chat.capabilities.collection_context import (
     BrowseCollectionPapersCapability,
     BrowseCollectionPapersToolRequest,
 )
+from application.chat.capabilities.document_sources import (
+    InspectDocumentSourcesCapability,
+    InspectDocumentSourcesToolRequest,
+)
 from application.chat.capabilities.contracts import CapabilityExecutionContext
-from domain.source.artifacts import SourceBlock
+from domain.source.artifacts import SourceBlock, SourceDocument
+from infra.persistence.memory import (
+    MemoryDocumentProfileRepository,
+    MemoryPaperMapRepository,
+    MemorySourceArtifactRepository,
+)
 
 
 def document(text, heading="Paper title"):
-    return SimpleNamespace(blocks=(SourceBlock(
-        block_id="block-1", document_id="paper-1", block_type="paragraph",
-        text=text, block_order=0, heading_path=heading,
-    ),))
+    return SimpleNamespace(
+        document_id="paper-1",
+        document_order=0,
+        title="Paper title",
+        text=text,
+        blocks=(SourceBlock(
+            block_id="block-1", document_id="paper-1", block_type="paragraph",
+            text=text, block_order=0, heading_path=heading,
+        ),),
+        tables=(),
+        figures=(),
+    )
 
 
 @pytest.mark.parametrize("label", ["Abstract:", "ABSTRACT :", "Abstract —", "Abstract–", "摘要："])
@@ -79,8 +98,161 @@ def test_browse_prepared_paper_reports_only_real_screening_limitations(text, exp
     ))
     paper = result.data["papers"][0]
     assert paper["abstract_status"] == expected_status
-    assert bool(result.warnings) == (expected_status == "not_found")
+    assert result.warnings == ()
+    assert paper["source_status"] == "available"
     assert bool(paper["screening_limitations"]) == (expected_status == "not_found")
     assert paper["support_is_evidence"] is False
     assert any(ref.resource_id == "paper-1" for ref in result.resource_refs)
     capability.source_artifact_repository.read_document.assert_awaited_once_with("collection-1", "paper-1")
+
+
+@pytest.mark.parametrize("missing,document_status", [
+    ("profile", "ready"), ("map", "ready"), ("insufficient_map", "ready"),
+    ("abstract", "ready"), ("profile", "failed"),
+])
+def test_optional_screening_information_does_not_require_researcher_intervention(missing, document_status):
+    profile = SimpleNamespace(
+        document_id="paper-1", title="LPBF preheating", doc_type="experimental", confidence=0.9
+    )
+    paper_map = SimpleNamespace(
+        document_id="paper-1", studies=(), map_status="sufficient", map_limitations=()
+    )
+    if missing == "insufficient_map":
+        paper_map.map_status = "insufficient_map"
+        paper_map.map_limitations = ("Process scope is not mapped.",)
+    capability = BrowseCollectionPapersCapability(
+        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
+            "documents": [{"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": document_status}],
+        })),
+        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(
+            return_value=[] if missing == "profile" else [profile]
+        )),
+        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(
+            return_value=[] if missing == "map" else [paper_map]
+        )),
+        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document(
+            "Preheating temperature was varied." if missing == "abstract" else "Abstract: LPBF preheating study."
+        ))),
+    )
+    result = asyncio.run(capability.execute(
+        CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t"),
+        BrowseCollectionPapersToolRequest(),
+    ))
+    assert result.status == "succeeded"
+    assert result.warnings == ()
+    assert result.data["papers"][0]["source_status"] == "available"
+    assert result.data["papers"][0]["screening_limitations"]
+
+
+def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
+    records = [
+        {"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": "ready"},
+        {"document_id": "paper-2", "original_filename": "Processing.pdf", "status": "processing"},
+        {"document_id": "paper-3", "original_filename": "Stored.pdf", "status": "stored"},
+        {"document_id": "paper-4", "original_filename": "Preparation failed.pdf", "status": "failed"},
+        {"document_id": "paper-5", "original_filename": "Source unavailable.pdf", "status": "ready"},
+        {"document_id": "paper-6", "original_filename": "Read failed.pdf", "status": "ready"},
+        {"document_id": "paper-7", "original_filename": "Later paper.pdf", "status": "ready"},
+    ]
+
+    async def read_source(_collection_id, document_id):
+        if document_id == "paper-6":
+            raise OSError("private-storage-detail")
+        return document("Abstract: LPBF study.") if document_id == "paper-1" else None
+
+    capability = BrowseCollectionPapersCapability(
+        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={"documents": records})),
+        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
+        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
+        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(side_effect=read_source)),
+    )
+    context = CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t")
+    result = asyncio.run(capability.execute(context, BrowseCollectionPapersToolRequest(limit=6)))
+    assert [paper["source_status"] for paper in result.data["papers"]] == [
+        "available", "preparing", "not_prepared", "preparation_failed", "unavailable", "read_failed"
+    ]
+    assert result.data["next_offset"] == 6
+    assert result.data["paper_total"] == 7
+    assert len(result.warnings) == 1
+    assert "3" in result.warnings[0]
+    assert "private-storage-detail" not in str(result.to_record())
+    assert "paper-6" in caplog.text
+
+    miss = asyncio.run(capability.execute(context, BrowseCollectionPapersToolRequest(query="not-a-filename")))
+    assert miss.data["papers"] == []
+    assert miss.warnings == ()
+
+
+def test_normal_pagination_is_not_a_warning():
+    capability = BrowseCollectionPapersCapability(
+        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
+            "documents": [{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)],
+        })),
+        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
+        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
+        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text."))),
+    )
+    result = asyncio.run(capability.execute(
+        CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t"),
+        BrowseCollectionPapersToolRequest(limit=8),
+    ))
+    assert result.warnings == ()
+    assert result.data["next_offset"] == 8
+    assert result.data["returned_paper_count"] == 8
+
+
+def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing():
+    fixture = Path(__file__).resolve().parents[2] / "fixtures" / "agent_p002" / "source_document.json"
+    source_document = SourceDocument.from_record(json.loads(fixture.read_text(encoding="utf-8")))
+    records = [
+        {"document_id": source_document.document_id, "original_filename": "P002-preheating.pdf", "status": "ready"},
+        {"document_id": "paper-2", "original_filename": "Missing.pdf", "status": "ready"},
+    ]
+    collection_service = SimpleNamespace(
+        get_collection_for_user=AsyncMock(return_value={"documents": records})
+    )
+    sources = MemorySourceArtifactRepository()
+    browse = BrowseCollectionPapersCapability(
+        collection_service=collection_service,
+        document_profile_repository=MemoryDocumentProfileRepository(),
+        paper_map_repository=MemoryPaperMapRepository(),
+        source_artifact_repository=sources,
+    )
+    inspect = InspectDocumentSourcesCapability(
+        collection_service=collection_service,
+        source_artifact_repository=sources,
+    )
+    context = CapabilityExecutionContext(
+        session_id="s", user_id="u", collection_id="c", tool_call_id="browse"
+    )
+
+    async def scenario():
+        await sources.replace_document("c", source_document)
+        survey = await browse.execute(context, BrowseCollectionPapersToolRequest())
+        assert [paper["source_status"] for paper in survey.data["papers"]] == ["available", "unavailable"]
+        assert len(survey.warnings) == 1
+        selected = await browse.execute(context, BrowseCollectionPapersToolRequest(query="P002"))
+        assert selected.warnings == ()
+        paper = selected.data["papers"][0]
+        assert paper["abstract_status"] == "not_found"
+        assert paper["map_status"] == "not_available"
+
+        outline = await inspect.execute(context, InspectDocumentSourcesToolRequest(
+            document_id=paper["document_id"], limit=1,
+        ))
+        heading = next(section["heading_path"] for section in outline.data["document_outline"]
+                       if section["heading_path"] == "Experimental Procedures")
+        read = await inspect.execute(context, InspectDocumentSourcesToolRequest(
+            document_id=paper["document_id"], heading_path=heading,
+        ))
+        assert read.status == "succeeded"
+        assert read.data["returned_source_count"] == 1
+        assert read.data["sources"][0]["content"] == source_document.blocks[0].text
+        assert read.data["sources"][0]["content_truncated"] is False
+        assert read.data["sources"][0]["source_digest"]
+        assert any(ref.resource_type == "source" for ref in read.resource_refs)
+        missing = await inspect.execute(context, InspectDocumentSourcesToolRequest(document_id="paper-2"))
+        assert missing.status == "failed"
+        assert missing.error_code == "document_sources_not_ready"
+
+    asyncio.run(scenario())

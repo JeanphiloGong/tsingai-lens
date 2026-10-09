@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { Check, CircleAlert, LoaderCircle } from '@lucide/svelte';
+	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
 	import type { ChatPresentationItem, ToolActivityOperation } from './conversationPresentation';
 	import {
 		capabilityName,
 		capabilityRequestLabel,
 		resultTitle,
-		resultSummary
+		resultSummary,
+		paperSourceIssues
 	} from './capabilityPresentation';
 	import ResultResources from './ResultResources.svelte';
 	import ResultWarnings from './ResultWarnings.svelte';
@@ -107,9 +109,22 @@
 	}
 
 	function activityHasWarnings(activity: ActivityItem) {
-		return activityOperations(activity).some(
-			(operation) => (operation.resultMessage?.tool_result?.warnings.length ?? 0) > 0
+		return activityOperations(activity).some((operation) =>
+			operation.toolName === 'browse_collection_papers'
+				? paperSourceIssues(operation.resultMessage).some((issue) => issue.failed)
+				: (operation.resultMessage?.tool_result?.warnings.length ?? 0) > 0
 		);
+	}
+
+	function paperSourceReason(status: string) {
+		const keys: Record<string, string> = {
+			preparing: 'paperSourcePreparing',
+			not_prepared: 'paperSourceNotPrepared',
+			preparation_failed: 'paperSourcePreparationFailed',
+			unavailable: 'paperSourceMissing',
+			read_failed: 'paperSourceReadFailed'
+		};
+		return $t(`researchAgent.capability.${keys[status]}`);
 	}
 
 	function activityIsOpen(activity: ActivityItem) {
@@ -143,13 +158,14 @@
 {#if activityOperations(item).length}<details
 		class="research-activity"
 		class:failed={item.status === 'failed'}
+		class:attention={activityHasWarnings(item)}
 		class:active={item.status === 'in_progress' || item.status === 'pending'}
 		use:initializeActivityDisclosure={activityIsOpen(item)}
 		data-testid="research-activity"
 	>
 		<summary>
 			<span class="activity-icon" aria-hidden="true">
-				{#if item.status === 'failed'}<CircleAlert
+				{#if item.status === 'failed' || activityHasWarnings(item)}<CircleAlert
 						size={15}
 					/>{:else if item.status === 'completed'}<Check size={15} />{:else}<LoaderCircle
 						size={15}
@@ -182,7 +198,36 @@
 								<blockquote>{operationExcerpt(operation)}</blockquote>
 							</details>
 						{/if}
-						{#if operation.resultMessage?.tool_result?.warnings.length}
+						{#if operation.toolName === 'browse_collection_papers'}
+							{#each [true, false] as failed}
+								{@const issues = paperSourceIssues(operation.resultMessage).filter(
+									(issue) => issue.failed === failed
+								)}
+								{#if issues.length}
+									<details class="paper-source-issues" class:failed>
+										<summary
+											>{$t(
+												failed
+													? 'researchAgent.capability.paperSourcesFailed'
+													: 'researchAgent.capability.paperSourcesPending',
+												{ count: issues.length }
+											)}</summary
+										>
+										<ul>
+											{#each issues as issue (issue.documentId)}
+												<li>
+													<span>{issue.title || $t('researchAgent.progress.currentPaper')}</span>
+													<span class="paper-source-reason">{paperSourceReason(issue.status)}</span>
+													{#if issue.href}<a href={resolve(issue.href)}
+															>{$t('researchAgent.capability.viewPaper')}</a
+														>{/if}
+												</li>
+											{/each}
+										</ul>
+									</details>
+								{/if}
+							{/each}
+						{:else if operation.resultMessage?.tool_result?.warnings.length}
 							<ResultWarnings warnings={operation.resultMessage.tool_result.warnings} />
 						{/if}
 						{#if operation === resourceOperation(item) && operation.resultMessage && operation.resultMessage.tool_result?.resource_refs.length}
@@ -212,7 +257,49 @@
 		border-color: var(--warning-border);
 	}
 
-	.research-activity summary {
+	.research-activity.attention .activity-icon {
+		color: var(--warning-text);
+	}
+
+	.paper-source-issues {
+		margin-top: 10px;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.paper-source-issues.failed {
+		border-left: 2px solid var(--warning-border);
+		padding-left: 10px;
+	}
+
+	.paper-source-issues summary {
+		cursor: pointer;
+	}
+
+	.paper-source-issues.failed summary {
+		color: var(--warning-text);
+	}
+
+	.paper-source-issues ul {
+		list-style: none;
+		margin: 8px 0 0;
+		padding: 0;
+	}
+
+	.paper-source-issues li {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(100px, auto) auto;
+		gap: 8px 16px;
+		padding: 8px 0;
+		border-top: 1px solid var(--border-default);
+		overflow-wrap: anywhere;
+	}
+
+	.paper-source-issues a {
+		color: var(--brand-primary);
+	}
+
+	.research-activity > summary {
 		display: grid;
 		grid-template-columns: 20px minmax(0, 1fr) 12px;
 		align-items: center;
@@ -224,15 +311,15 @@
 		transition: background-color 140ms ease;
 	}
 
-	.research-activity summary:hover {
+	.research-activity > summary:hover {
 		background: var(--bg-subtle);
 	}
 
-	.research-activity summary::-webkit-details-marker {
+	.research-activity > summary::-webkit-details-marker {
 		display: none;
 	}
 
-	.research-activity summary:focus-visible {
+	.research-activity > summary:focus-visible {
 		outline: 2px solid var(--brand-primary);
 		outline-offset: 2px;
 	}
@@ -362,11 +449,19 @@
 	}
 
 	@media (max-width: 560px) {
+		.paper-source-issues li {
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+
+		.paper-source-issues li > span:first-child {
+			grid-column: 1 / -1;
+		}
+
 		.research-activity {
 			margin-left: 0;
 		}
 
-		.research-activity summary {
+		.research-activity > summary {
 			grid-template-columns: 24px minmax(0, 1fr) 12px;
 		}
 	}

@@ -588,6 +588,19 @@ not provider calls, prompts, model reasoning, JSON payloads, or retry mechanics.
 A checkpointed capability request without a result remains visible as prepared
 research activity after reload.
 
+Paper browsing treats optional preparation metadata as navigation context. A
+missing Document Profile, Paper Map, insufficient map, or labelled abstract
+does not open a warning when the paper's canonical Source is available. Normal
+pagination and a literal filename/title query with no matches stay ordinary
+navigation feedback. When Source content is genuinely unavailable, preparation
+failed, or a Source read failed, the activity opens one grouped review section
+with each paper's visible title or filename, the specific state, and its
+existing document link. Papers still being prepared or not yet prepared appear
+in a separate neutral pending group. These statuses describe technical
+availability only; they do not establish scientific irrelevance or absence.
+Paper and other record links are labelled as referenced records; only a group
+consisting entirely of canonical Source links is labelled as exact Sources.
+
 One assistant message can contain an ordered `tool_calls` batch. The browser
 matches each request to its own result by durable call ID and preserves request
 order, even when reads finish concurrently. An individual failed read does not
@@ -721,7 +734,10 @@ The focused browser suite covers:
     Objective-analysis presentation.
 18. consecutive routine capability work compressed into one collapsed activity
     disclosure, with warnings opened automatically;
-19. Objective drafts and other reviewable research results kept visible as
+19. paper browsing keeps missing optional metadata and ordinary pagination
+    collapsed, while grouping actual Source failures by paper and separating
+    preparation-pending papers;
+20. Objective drafts and other reviewable research results kept visible as
     standalone artifacts while the underlying tool mechanics stay secondary.
 
 The page audit additionally verifies desktop and mobile framing, accessible

@@ -668,6 +668,21 @@ are exposed only for an explicit matching action and still stop for exact user
 approval. The production Research Agent currently exposes these capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
+- `browse_collection_papers` returns a bounded, screening-only paper survey. A
+  paper's `source_status` is `available` when canonical parsed Source content
+  can be read, `preparing` while preparation is still running,
+  `not_prepared` when an uploaded/stored paper has not been prepared,
+  `preparation_failed` when preparation failed, `unavailable` when the expected
+  Source is missing, and `read_failed` when that paper's Source read failed.
+  Missing Document Profile, missing or insufficient Paper Map, and an absent
+  labelled abstract remain optional screening limitations; they do not create a
+  warning when Source content is available and do not establish irrelevance.
+  A page warning is reserved for papers whose Source is actually unavailable or
+  failed to read, and names only the count; the structured paper records carry
+  the per-paper state. `next_offset` and an empty literal filename/title query
+  are normal navigation results, not warnings or scientific absence. Source
+  read failures are isolated to the affected paper so other page results remain
+  usable;
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
   bounded table Markdown, and figure captions through exact or focused,
   paginated Source filters. Each Source includes a digest of its complete

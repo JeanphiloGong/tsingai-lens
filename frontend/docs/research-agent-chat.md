@@ -146,14 +146,27 @@ stays disabled while that result is unconfirmed, and recovery never resubmits a
 write. Leaving the session or account cancels its timer and request and ignores
 late results.
 
-Successful history-index requests replace the cached list with the server's
-latest 12 sessions, removing entries deleted elsewhere. Index failures retain
+History initially requests 10 sessions. Scrolling near the bottom requests only
+the next page of 10 and appends it, deduplicating session identities. A load-more
+action also supports short viewports and retries. No subsequent pages are
+prefetched. A failed page preserves loaded entries and the same next-page offset.
+Successful index refreshes replace the already loaded window with the server's
+current ordering, removing entries deleted elsewhere. Index failures retain
 the cache. Returning focus to the window, opening embedded history, and polling
 background activity refresh the index so remote conversations and status
 changes become visible without loading idle trajectories. A failed background
 trajectory read is retried while recovery is needed. Deletion conflicts retain
 the current conversation and explain whether execution is running or dependent
 conversation versions must be deleted first.
+
+The standalone sidebar and embedded history provide pin/unpin icon buttons.
+Pin state is saved by the server and is shared across browsers. Pinned sessions
+precede ordinary sessions; both groups use most-recent activity order. Pinning
+does not switch conversations, send a message, or change the activity timestamp.
+The control shows pending state and updates after a successful save; failures
+retain the previous state and allow retry. A successful pin change refreshes
+the loaded window before continuing pagination. Responses from a previous
+account or Collection cannot update the current history or cache.
 
 The selected session ID and a small presentation-only history are stored under:
 

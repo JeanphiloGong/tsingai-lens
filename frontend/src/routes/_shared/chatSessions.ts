@@ -56,6 +56,7 @@ export type ChatSession = {
 	created_at: string;
 	updated_at: string;
 	title?: string | null;
+	is_pinned: boolean;
 	status: 'idle' | 'running' | 'approval';
 	root_session_id?: string | null;
 	parent_session_id?: string | null;
@@ -260,6 +261,14 @@ export async function fetchChatSession(sessionId: string, signal?: AbortSignal) 
 
 export async function deleteChatSession(sessionId: string, signal?: AbortSignal) {
 	await requestJson(chatSessionPath(sessionId), { signal, method: 'DELETE' });
+}
+
+export async function setChatSessionPin(sessionId: string, isPinned: boolean, signal?: AbortSignal) {
+	return (await requestJson(`${chatSessionPath(sessionId)}/pin`, {
+		signal,
+		method: 'PUT',
+		body: JSON.stringify({ is_pinned: isPinned })
+	})) as ChatSession;
 }
 
 export type AgentPermission = {

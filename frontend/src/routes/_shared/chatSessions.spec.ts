@@ -6,12 +6,15 @@ import {
 	streamChatMessage,
 	setChatMessageFeedback,
 	deleteChatSession,
+	setChatSessionPin,
 	type ChatProgress
 } from './chatSessions';
 
 describe('chat session deletion', () => {
 	it('uses the same-origin DELETE endpoint with encoded session identity', async () => {
-		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
+		const fetch = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(null, { status: 204 }));
 		try {
 			await deleteChatSession('session/one');
 			expect(fetch).toHaveBeenCalledWith(
@@ -22,6 +25,36 @@ describe('chat session deletion', () => {
 			fetch.mockRestore();
 		}
 	});
+});
+
+describe('chat history pinning', () => {
+	it.each([true, false])(
+		'saves an explicit pin state %s with an encoded session identity',
+		async (isPinned) => {
+			const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+				new Response(JSON.stringify({ session_id: 'session/one', is_pinned: isPinned }), {
+					headers: { 'Content-Type': 'application/json' }
+				})
+			);
+			const controller = new AbortController();
+			try {
+				await expect(
+					setChatSessionPin('session/one', isPinned, controller.signal)
+				).resolves.toMatchObject({ is_pinned: isPinned });
+				expect(fetch).toHaveBeenCalledWith(
+					'/api/v1/chat-sessions/session%2Fone/pin',
+					expect.objectContaining({
+						method: 'PUT',
+						credentials: 'same-origin',
+						signal: controller.signal,
+						body: JSON.stringify({ is_pinned: isPinned })
+					})
+				);
+			} finally {
+				fetch.mockRestore();
+			}
+		}
+	);
 });
 
 describe('answer feedback requests', () => {

@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from application.chat import ToolSpec
 from application.chat.model import (
+    AGENT_MISSION,
     ModelUsage,
     ModelResponseError,
     ModelTurn,
@@ -157,9 +158,11 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.0"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.1"
     for section in (
-        "IDENTITY AND PURPOSE",
+        "AGENT MISSION",
+        "FOUR-LAYER RESPONSIBILITY MODEL",
+        "RESEARCH UNDERSTANDING LOOP",
         "COLLABORATION AND CONTINUITY",
         "INPUT AND RESEARCH INFORMATION",
         "TOOL DECISION PATH",
@@ -178,12 +181,12 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "Use onboarding only for greetings or identity/capability questions" in prompt
     assert "registered tool catalog and loaded parameter schemas define available actions" in prompt
     assert "Search matches, snippets and headings locate content but are not complete reads" in prompt
-    assert "the actual structured draft, not merely prose" in prompt
+    assert "propose the actual structured PaperExperiment draft" in prompt
     assert "Use only canonical identities and versions" in prompt
     assert "insufficient map" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "inspect the outline or available body" in prompt.lower()
     assert "Paper Map is optional scope/navigation information" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Raw text or your prose does not create those records" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Raw text or your prose does not create those records" in prompt
     assert "exact eligible selections" not in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Conversation intent does not create a grant" in prompt
     assert "no action is saved before a successful write result" in prompt
@@ -191,6 +194,34 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "Never expose hidden chain-of-thought" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Question candidate creation, confirmation and analysis start are distinct actions" in prompt
     assert "create_paper_experiment_revision" not in RESEARCH_AGENT_SYSTEM_PROMPT
+
+
+def test_prompt_uses_the_research_decision_mission_and_four_layer_model() -> None:
+    prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
+    normalized = prompt.casefold()
+
+    assert AGENT_MISSION.startswith("AGENT MISSION")
+    assert "form a testable research judgment around the researcher's research decision" in prompt
+    assert "relevant scientific knowledge, user materials, paper originals and available tools" in prompt
+    assert "reduce key uncertainty" in prompt
+    assert "adjust the research question, hypotheses, reading strategy, calculations and comparisons" in normalized
+    assert "Research question layer" in prompt
+    assert "Research understanding layer" in prompt
+    assert "Traceable fact layer" in prompt
+    assert "Runtime control layer" in prompt
+    assert "runtime observations never become scientific evidence" in normalized
+    assert "through traceable cross-paper comparison" not in AGENT_MISSION
+
+
+def test_prompt_defines_paper_experiment_maturity_and_formal_lifecycle() -> None:
+    prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
+
+    assert "only records experiments actually reported by the paper" in prompt
+    assert "Do not create a PaperExperiment merely to create an object" in prompt
+    assert "When the research question is mature" in prompt
+    assert "complete Source -> PaperExperiment draft -> researcher review -> PaperExperiment revision -> Objective Selection -> comparison or Finding" in prompt
+    assert "Future validation experiments are proposals, not PaperExperiment records" in prompt
+    assert "propose the actual structured PaperExperiment draft" in prompt
 
 
 def test_prompt_splits_multi_outcome_interest_before_scope_screening() -> None:

@@ -4,10 +4,11 @@ This package owns the collection-bound Research Agent conversation. It turns
 an authenticated user's message into resource-bounded model decisions, ordered
 typed capability calls, and a durable, reviewable trajectory.
 
-The prompt frames conversation as professional research collaboration: explain
-the research question, supporting observations, limits, progress, and next
-researcher decision. Ordinary replies translate tool and status identifiers
-into that research meaning, including when explaining pending approval.
+The prompt frames conversation as professional research collaboration around a
+research decision. It keeps the research question, current understanding,
+traceable facts, and runtime control distinct. Ordinary replies translate tool
+and status identifiers into that research meaning, including when explaining
+pending approval.
 
 ## Initialization Prompt
 
@@ -18,14 +19,23 @@ compose one system message; this README does not duplicate the prompt text.
 The registered capability descriptions and schemas remain authoritative for
 available tools and their specific fields, prerequisites, and write contracts.
 
-The reference scenario is a researcher selecting LPBF papers, inspecting their
-actual experimental conditions and measurements, comparing the supported
-results, and deciding what to inspect or test next. Filename/title and Profile
-help select candidates; Paper Map is optional navigation. When canonical Source
-is readable, missing maps or unrecognized abstract headings do not block original
-section reading or automatically require expert review. Preparation progress,
-classification failure with readable Source, actual read failure, unread content,
-and information absent from inspected content have different next actions.
+The reference scenario is a researcher deciding what to investigate, combining
+scientific knowledge, user materials, paper Sources, calculations and
+comparisons, then deciding what evidence or experiment is needed next. Filename
+and Profile help select candidates; Paper Map is optional navigation. When
+canonical Source is readable, missing maps or unrecognized abstract headings do
+not block original section reading or automatically require expert review.
+Preparation progress, classification failure with readable Source, actual read
+failure, unread content, and information absent from inspected content have
+different next actions.
+
+When a mature research question and complete Source reads reconstruct an actual
+paper experiment that will support comparison or a conclusion, the Agent may
+propose a PaperExperiment draft for review. The formal path is complete Source
+-> PaperExperiment draft -> researcher review -> PaperExperiment revision ->
+Objective Selection -> comparison or Finding. Future validation experiments are
+proposals, not PaperExperiment records, and runtime checkpoints or tool status
+are never scientific evidence.
 
 Prompt validation combines protocol/authorization regressions with opt-in live
 model scenarios using real Source fixtures. It checks actual reads, recovery,

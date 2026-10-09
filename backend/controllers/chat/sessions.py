@@ -555,6 +555,7 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
         status=str(turn["status"]),
         completion_reason=turn.get("completion_reason"),
         warnings=list(turn.get("warnings") or ()),
+        execution_plan=turn.get("execution_plan"),
         messages=[_message_response(item) for item in turn.get("messages") or ()],
         pending_approval=(
             ChatToolCallResponse.model_validate(pending, from_attributes=True)

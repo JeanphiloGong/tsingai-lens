@@ -25,9 +25,6 @@ from application.chat.inline_citations import (
     format_inline_citations,
     format_message_citations,
 )
-from application.chat.intent_policy import _write_request_scope
-
-
 from application.repositories.analysis_job_repository import (
     AnalysisJobRepository,
     correction_signal_idempotency_key,
@@ -903,7 +900,6 @@ class ChatSessionService:
             "user_rejected",
             "permission_write_denied",
             "tool_permission_denied",
-            "current_request_prohibits_write",
         }
         queued = False
         failed = False
@@ -1062,16 +1058,7 @@ class ChatSessionService:
                 permission = await self.repository.read_permission(
                     session.session_id, session.user_id
                 )
-                request = next(
-                    (
-                        item.content
-                        for item in reversed(result.messages)
-                        if item.role.value == "user"
-                    ),
-                    "",
-                )
-                _, forbidden = _write_request_scope(request)
-                if permission["mode"] == "read_only" or pending.name in forbidden:
+                if permission["mode"] == "read_only":
                     denied = await self.repository.decide_tool_call(
                         session_id=session.session_id,
                         user_id=session.user_id,
@@ -1122,6 +1109,10 @@ class ChatSessionService:
                 status=result.status.value, message_id=None, message_created_at=None, content="",
                 completion_reason=result.completion_reason.value if result.completion_reason else None,
                 error_code=result.error_code, warnings=result.warnings,
+                progress={
+                    **snapshot.progress,
+                    "research_plan": result.execution_plan,
+                },
             )
             return result
         except BaseException:
@@ -1263,20 +1254,6 @@ class ChatSessionService:
         decision: str,
     ) -> dict[str, Any]:
         session = await self.get_session_for_user(session_id, user_id)
-        if decision == "approved":
-            history = await self.repository.read_messages(session_id)
-            request = next(
-                (
-                    item.content
-                    for item in reversed(history)
-                    if item.role.value == "user"
-                ),
-                "",
-            )
-            _, forbidden = _write_request_scope(request)
-            requested = await self.repository.read_tool_call(tool_call_id)
-            if requested is not None and requested.name in forbidden:
-                raise ValueError("current_request_prohibits_write")
         existing = await self.repository.read_tool_call(tool_call_id)
         if existing is None or existing.session_id != session_id:
             raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
@@ -1415,6 +1392,7 @@ class ChatSessionService:
             "messages": result.messages[previous_count:],
             "pending_approval": result.pending_approval,
             "error_code": result.error_code,
+            "execution_plan": result.execution_plan,
         }
 
 

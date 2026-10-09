@@ -208,6 +208,12 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     assert wrong_digest.status_code == 409
     assert approved.status_code == 200
     assert approved.json()["status"] == "completed"
+    assert approved.json()["execution_plan"]["plan_id"] == proposed_write.json()[
+        "execution_plan"
+    ]["plan_id"]
+    assert approved.json()["execution_plan"]["plan_version"] > proposed_write.json()[
+        "execution_plan"
+    ]["plan_version"]
     assert candidate_capability.executed == [
         {"question": "How does energy input affect grain morphology?"}
     ]
@@ -230,6 +236,8 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         "tool",
         "assistant",
         "user",
+        "assistant",
+        "tool",
         "assistant",
         "tool",
         "assistant",

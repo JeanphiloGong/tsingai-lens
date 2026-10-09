@@ -94,7 +94,7 @@ Evidence, Finding, or Analysis record; it calls the Source and Core services.
 | Context selection | `context_builder.py` | none |
 | Model/tool loop | `agent_runner.py` | none; execution only |
 | Tool discovery and execution prerequisites | `capabilities/tool_discovery.py` and `capability_policy.py` | approval only |
-| Explicit write requests | `intent_policy.py` | no execution authority |
+| Tool discovery and requested actions | `tool_discovery.py`, `model.py` | model selects registered capabilities; no execution authority |
 | Objective, Evidence, Finding data | `application/core/` | Core services |
 
 When adding a capability, define its typed input/output and approval risk first;
@@ -509,6 +509,13 @@ If execution stops unexpectedly, partial text remains explicitly incomplete.
 Snapshots support observation of the research work; they do not replace source
 checks, certify a scientific stage, or automatically restart interrupted work.
 
+Each run also exposes a runtime `execution_plan` in progress snapshots and the
+turn response. The plan is versioned and rebuilt from the ordered capability
+trajectory, so it shows which steps are pending, complete, awaiting approval,
+scientifically unsupported, clarification-blocked, resource-limited, or
+technically failed. It is operational state only; it never becomes Evidence,
+permission, or a Finding.
+
 ## Key Areas
 
 - `session_service.py`: owns session reads, source-context validation, turn
@@ -535,15 +542,12 @@ checks, certify a scientific stage, or automatically restart interrupted work.
   request timeout/output limits, reported usage (including invalid responses),
   and the Research Agent instructions. Implementations must propagate
   cancellation and close in-flight streams without background thread work.
-- `intent_policy.py`: supplies explicit write-request vocabulary and research
-  prerequisite signals. Its legacy read-name groups do not grant read access.
-  It has no model, persistence, or capability side effects.
-- `capability_policy.py`: selects discovered tools from the request and completed
+- `capability_policy.py`: selects tools loaded by discovery and completed
   observations, validates batches and exact Source prerequisites, and maps
   capability risk to automatic execution or exact user approval. The Runner
   consumes these decisions; it does not define a second permission path.
 - `capabilities/tool_discovery.py`: derives the short catalog from registered
-  read/draft handlers and validates selected names against that catalog.
+  read/draft/write handlers and validates selected names against that catalog.
 - `capabilities/`: contains the explicit typed capability registry and handlers
   for collection and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.
@@ -567,14 +571,18 @@ end-to-end scenario that preserves Source traceability.
 
 ## Changing This Module
 
-For ordinary response wording, start with `model.py`; for request vocabulary,
-start with `intent_policy.py`. For prerequisite reads or approval, use
-`capability_policy.py`. Change `agent_runner.py` only when execution order,
-continuation, checkpointing, or stopping behavior must change.
+For ordinary response wording and tool-selection guidance, start with
+`model.py`. For tool visibility, Source prerequisites, or approval, use
+`tool_discovery.py` and `capability_policy.py`. Change `agent_runner.py` only
+when execution order, continuation, checkpointing, or stopping behavior must
+change.
 
 To add a capability, implement its typed handler under `capabilities/` and
-register it in the existing registry. Read/draft handlers enter the catalog
-automatically; writes need explicit request and approval policy.
+register it in the existing registry. Read, draft, and write handlers enter the
+current discovery catalog automatically. The model selects a registered action
+from its description and the conversation; the backend then enforces its risk,
+permission mode, typed contract, and scientific prerequisites. Writes still
+require the exact approval or scoped grant required by their risk.
 The handler calls the owning Source, Core, or Goal service. The Runner does not
 need a branch for each new capability. A read or draft returns an observation;
 an approved write may persist a scientific resource through its existing owner.

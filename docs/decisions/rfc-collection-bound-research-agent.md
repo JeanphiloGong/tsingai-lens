@@ -92,14 +92,18 @@ API specification owns the complete capability list and payload contracts:
 
 Capabilities are registered explicitly in application code. There is no plugin
 discovery mechanism and the model cannot name an arbitrary executable action.
-For each model decision, the Runner exposes only the registered capabilities
-that match the current research intent: ordinary conversation receives none,
-paper screening receives collection reads, source questions add Source reads,
-and conclusion or plan work adds the corresponding read or draft actions.
-Mutation capabilities are added only when the researcher explicitly requests
-the matching save, revision, confirmation, or start action. Deriving a new
-Objective is likewise a separate explicit request and is not implied by merely
-asking for current Objective status.
+For each model decision, the Runner exposes the current registered catalog; the
+model loads exact schemas through `discover_research_tools` when the task needs
+them. Tool choice follows the researcher's requested deliverable, the
+conversation trajectory, filenames or identifiers, and each capability's
+description. It does not depend on a fixed user-keyword table. Ordinary
+conversation can finish without discovery, while a collection question can
+load collection reads and a Source-grounded experiment question can load Source
+and PaperExperiment capabilities. Backend permission mode, tool risk, typed
+arguments, and scientific prerequisites remain authoritative. A Finding,
+Objective, revision, confirmation, or start action is still a distinct
+deliverable and must follow its own capability contract and approval boundary;
+one requested action does not imply another.
 
 ## Authorization
 

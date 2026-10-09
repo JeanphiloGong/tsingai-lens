@@ -588,8 +588,15 @@ validation, and it does not turn a model proposal into approval.
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
 `{"content": string}` data and are transient presentation updates. `progress`
-events carry phase, cycle, elapsed time, and budget fields while a turn runs;
-they are presentation updates and are not scientific trajectory records.
+events carry phase, cycle, elapsed time, budget fields, and the current
+`research_plan` while a turn runs; they are presentation updates and are not
+scientific trajectory records. The plan has a stable `plan_id`, increasing
+`plan_version`, ordered steps, and one of `in_progress`, `completed`,
+`awaiting_approval`, `waiting_for_clarification`, `scientific_refusal`,
+`technical_failure`, or `resource_limited`. It is rebuilt from saved capability
+requests and results, so compaction or a disconnected stream does not require
+a second persistence model. It never represents Evidence, permission, or a
+scientific conclusion.
 `snapshot` events identify the current response and assistant message before its
 text deltas; `trajectory` events replace the saved messages after checkpoints.
 The stream
@@ -659,13 +666,17 @@ the capability. While a write remains `approval_required`, posting another
 message to that session returns `409 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
-The production Research Agent registers the capabilities below, but the Runner
-selects a bounded subset for each model decision based on the current user
-intent. Ordinary conversation receives no capability schemas; collection
-screening, Source inspection, Finding review, Objective work, and research-plan
-work each receive only their relevant read or draft actions. Write capabilities
-are exposed only for an explicit matching action and still stop for exact user
-approval. The production Research Agent currently exposes these capabilities:
+The production Research Agent registers the capabilities below. For each model
+decision, the Runner first exposes the current registered catalog; the model can
+load a bounded set of exact schemas through `discover_research_tools` based on
+the requested deliverable, trajectory observations, filenames, identifiers, and
+the registered descriptions. It does not use a fixed user-keyword router.
+Ordinary conversation may finish without discovery, while collection screening,
+Source inspection, Finding review, Objective work, and research-plan work load
+the capabilities needed for that task. Backend permission mode, capability risk,
+typed arguments, Source prerequisites, and exact write approval remain the
+authoritative boundaries. The production Research Agent currently exposes these
+capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
 - `browse_collection_papers` returns a bounded, screening-only paper survey. A
@@ -902,6 +913,8 @@ call ID; any request-local identifier returned by a model provider is not a
 Chat identity and is not persisted.
 
 Turn status is one of `completed`, `approval_required`, `failed`, or `rejected`.
+The JSON turn response also includes `execution_plan` with the same runtime
+plan record shown in progress snapshots.
 Only `completed` has a non-null `completion_reason`: `model_answer`,
 `resource_budget`, `no_progress`, or `emergency_ceiling`. Every turn exposes
 `warnings` as an array. A completed answer may be partial: resource exhaustion,

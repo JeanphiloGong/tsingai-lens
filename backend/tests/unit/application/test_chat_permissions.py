@@ -8,7 +8,6 @@ from application.chat import (
     ModelTurn,
     ResearchAgentRunner,
     ToolSpec,
-    intent_policy,
 )
 from application.chat.session_service import ChatSessionService
 from domain.chat import ToolPermissionMode, ToolRisk
@@ -65,7 +64,7 @@ async def test_session_permission_controls_actual_write(mode, expected):
         assert not write.executed
 
 
-async def test_no_save_request_overrides_automatic_grant():
+async def test_automatic_grant_is_not_reinterpreted_from_user_phrases():
     repository = MemoryChatRepository()
     write = _WriteCapability()
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
@@ -79,8 +78,7 @@ async def test_no_save_request_overrides_automatic_grant():
         expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
     result = await service.post_message_for_user(session.session_id, "user-1", message="Inspect this feedback, do not save anything.")
     assert result["status"] == "completed"
-    assert not write.executed
-    assert any(call.error_code == "current_request_prohibits_tool" for call in repository.calls.values())
+    assert write.executed
 
 
 @pytest.mark.parametrize("revoke", [False, True])
@@ -264,7 +262,7 @@ def test_automatic_permission_covers_every_registered_write_action() -> None:
         "create_research_plan",
         "revise_research_plan",
     }
-    assert AUTO_ACTIONS == intent_policy.WRITE_CAPABILITIES == expected
+    assert AUTO_ACTIONS == expected
     permission = change_permission(
         None,
         mode="auto",

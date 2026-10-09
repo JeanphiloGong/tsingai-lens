@@ -222,6 +222,7 @@ class ChatTurnResponse(BaseModel):
         | None
     ) = None
     warnings: list[str] = Field(default_factory=list)
+    execution_plan: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_completion(self) -> "ChatTurnResponse":

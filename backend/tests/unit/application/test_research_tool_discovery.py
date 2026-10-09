@@ -244,7 +244,7 @@ def test_none_rejects_a_forged_read_call_before_execution():
     assert read.executed_arguments == []
 
 
-def test_current_request_write_prohibition_rejects_a_forged_write_call():
+def test_write_validation_does_not_parse_natural_language_prohibitions():
     write = _Capability("create_objective_candidate", ToolRisk.WRITE)
     call = ChatToolCall.requested(
         tool_call_id="call-1",
@@ -269,9 +269,8 @@ def test_current_request_write_prohibition_rejects_a_forged_write_call():
         ),
     )
 
-    assert error is not None
-    assert error[0] == "current_request_prohibits_tool"
-    assert validated == {}
+    assert error is None
+    assert validated[call.tool_call_id] is not None
 
 
 def test_initial_catalog_defers_new_registered_read_capability():
@@ -505,27 +504,71 @@ def test_explicit_none_mode_disables_catalog():
     ) == ()
 
 
-@pytest.mark.parametrize("request_text", [
-    "Do not publish analysis; inspect it first.",
-    "Review this finding, do not save any changes.",
-    "Do not save evidence; check the source first.",
-    "Revise the saved plan as a draft, do not save changes.",
-    "Do not save a new version of this finding; review it first.",
-    "复核这个 Finding，不要保存任何修改。",
-    "不要发布分析，先检查。",
-    "先不要保存证据，读取原文。",
-    "Review the start analysis action; do not save any changes.",
-    "Inspect the confirm objective action, do not save anything.",
-])
-def test_no_write_request_excludes_all_persistence_tools(request_text):
-    from application.chat.intent_policy import WRITE_CAPABILITIES
+def test_loaded_write_is_not_filtered_by_natural_language_request_scope():
+    writer = _Capability("create_finding_version", ToolRisk.WRITE)
+    messages = [
+        ChatMessage.user(
+            message_id="u",
+            session_id="chat-1",
+            content="保留实验事实，先不要保存任何结论。",
+            created_at="2026-09-09T00:00:00Z",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="request",
+            session_id="chat-1",
+            content="",
+            tool_calls=(ChatToolRequest(
+                tool_call_id="discovery",
+                name="discover_research_tools",
+                arguments={"tool_names": ["create_finding_version"]},
+                position=0,
+            ),),
+            created_at="2026-09-09T00:00:01Z",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="result",
+            session_id="chat-1",
+            result=ChatToolResult(
+                tool_call_id="discovery",
+                status="succeeded",
+                data={"loaded_tool_names": ["create_finding_version"]},
+            ),
+            created_at="2026-09-09T00:00:02Z",
+        ),
+    ]
 
-    registry = CapabilityRegistry((
-        _Capability("read_source", ToolRisk.READ),
-        *(_Capability(name, ToolRisk.WRITE) for name in sorted(WRITE_CAPABILITIES)),
-    ))
-    message = ChatMessage.user(message_id="u", session_id="chat-1", content=request_text, created_at="2026-09-09T00:00:00Z")
-    assert not {spec.name for spec in select_tool_specs(registry, [message], [])}.intersection(WRITE_CAPABILITIES)
+    selected = select_tool_specs(CapabilityRegistry((writer,)), messages, [])
+
+    assert [spec.name for spec in selected] == [
+        "create_finding_version",
+        "discover_research_tools",
+    ]
+
+
+def test_write_validation_uses_permission_and_contract_not_user_phrases():
+    writer = _Capability("create_finding_version", ToolRisk.WRITE)
+    call = ChatToolCall.requested(
+        tool_call_id="write-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        name="create_finding_version",
+        risk=ToolRisk.WRITE,
+        arguments={},
+    )
+    messages = [ChatMessage.user(
+        message_id="u",
+        session_id="chat-1",
+        content="保留实验事实，先不要保存任何结论。",
+        created_at="2026-09-09T00:00:00Z",
+    )]
+
+    error, _ = validate_batch(
+        CapabilityRegistry((writer,)),
+        ((call, writer),),
+        messages,
+    )
+
+    assert error is None
 
 
 @pytest.mark.anyio

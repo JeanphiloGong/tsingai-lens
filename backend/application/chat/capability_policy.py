@@ -13,7 +13,6 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from application.chat import intent_policy
 from application.chat.capabilities.contracts import AgentContext, ToolSpec
 from application.chat.capabilities.registry import CapabilityRegistry
 from domain.chat import (
@@ -51,12 +50,6 @@ def validate_batch(
 ) -> tuple[tuple[str, str] | None, dict[str, BaseModel]]:
     permission_mode = ToolPermissionMode(permission_mode)
     successful_results = active_successful_results_by_name(messages)
-    latest_user = next(
-        (message for message in reversed(messages) if message.role is ChatMessageRole.USER),
-        None,
-    )
-    request_text = str(latest_user.content if latest_user is not None else "").casefold()
-    _, forbidden_writes = intent_policy._write_request_scope(request_text)
     validated_arguments: dict[str, BaseModel] = {}
     for call, handler in requested:
         if (
@@ -64,7 +57,8 @@ def validate_batch(
             and permission_mode is ToolPermissionMode.READ_ONLY
             and any(
                 isinstance(name, str)
-                and name in intent_policy.WRITE_CAPABILITIES
+                and (candidate := capabilities.get(name)) is not None
+                and candidate.spec.risk is ToolRisk.WRITE
                 for name in (call.arguments.get("tool_names") or ())
             )
         ):
@@ -88,14 +82,6 @@ def validate_batch(
                 (
                     "tool_permission_denied",
                     "The current tool permission mode does not allow this research action.",
-                ),
-                validated_arguments,
-            )
-        if call.risk is ToolRisk.WRITE and call.name in forbidden_writes:
-            return (
-                (
-                    "current_request_prohibits_tool",
-                    "The current request prohibits this research action.",
                 ),
                 validated_arguments,
             )
@@ -211,28 +197,7 @@ def select_tool_specs(
         set(successful_results).intersection(capabilities.discovery.tools)
     )
 
-    latest_user = next(
-        (
-            message
-            for message in reversed(messages)
-            if message.role is ChatMessageRole.USER
-        ),
-        None,
-    )
-    user_text = str(latest_user.content if latest_user is not None else "").casefold()
-    requested_names = intent_policy.capability_names_for_intent(
-        user_text,
-        has_source_context=bool(
-            latest_user is not None and latest_user.source_contexts
-        ),
-        prior_tool_names={
-            request.name
-            for message in messages
-            for request in message.tool_calls
-        },
-    )
     if permission_mode is ToolPermissionMode.READ_ONLY:
-        requested_names.difference_update(intent_policy.WRITE_CAPABILITIES)
         loaded_names.difference_update(
             name
             for name in loaded_names
@@ -247,9 +212,7 @@ def select_tool_specs(
         and call.status is ToolCallStatus.SUCCEEDED
     }
     completed_writes.update(inherited_completed_writes or ())
-    allowed_names = loaded_names | requested_names.intersection(
-        intent_policy.WRITE_CAPABILITIES
-    )
+    allowed_names = loaded_names
     allowed_names.difference_update(completed_writes)
 
     selected = select_names(allowed_names)
@@ -631,19 +594,26 @@ def stage_instruction(
         + json.dumps(observations, ensure_ascii=False)
     )
 
-def completed_write_names(messages: list[ChatMessage]) -> set[str]:
+def completed_write_names(
+    messages: list[ChatMessage], capabilities: CapabilityRegistry,
+) -> set[str]:
     """Find writes completed before an approval continuation resumed.
 
     A fresh user message starts a new intent turn, so its call list is empty
     and these names are intentionally not carried over by ``run_turn``.
     Approval resumption has no new user message, though, and must preserve
     the same trajectory's write boundary while the model chooses its next
-    read or draft step.
+    read or draft step. Persisted ChatToolRequest rows do not carry risk, so
+    the current registry is the authority for identifying completed writes.
     """
-    names_by_call_id = {
+    write_names_by_call_id = {
         request.tool_call_id: request.name
         for message in messages
         for request in message.tool_calls
+        if (
+            (handler := capabilities.get(request.name)) is not None
+            and handler.spec.risk is ToolRisk.WRITE
+        )
     }
     return {
         name
@@ -652,8 +622,8 @@ def completed_write_names(messages: list[ChatMessage]) -> set[str]:
         and message.tool_result is not None
         and message.tool_result.status
         in {ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED}
-        for name in (names_by_call_id.get(message.tool_call_id),)
-        if name in intent_policy.WRITE_CAPABILITIES
+        for name in (write_names_by_call_id.get(message.tool_call_id),)
+        if name is not None
     }
 
 

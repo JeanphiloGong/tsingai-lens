@@ -158,7 +158,7 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.4"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.6"
     for section in (
         "AGENT MISSION",
         "FOUR-LAYER RESPONSIBILITY MODEL",
@@ -193,6 +193,10 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "Technical completion is not scientific support" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Never expose hidden chain-of-thought" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Question candidate creation, confirmation and analysis start are distinct actions" in prompt
+    assert "Saving a paper experiment never creates or requests a Finding by implication" in prompt
+    assert "complete only the experiment path" in prompt
+    assert "do not wait for a fixed user keyword" in prompt
+    assert "backend permission mode, tool risk and prerequisite validation remain authoritative" in prompt
     assert "create_paper_experiment_revision" not in RESEARCH_AGENT_SYSTEM_PROMPT
 
 

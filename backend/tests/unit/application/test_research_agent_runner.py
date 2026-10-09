@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from application.chat import capability_policy, intent_policy
+from application.chat import capability_policy
 from application.chat import (
     AgentContext,
     AgentCompletionReason,
@@ -38,6 +38,7 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
+from domain.chat.permissions import AUTO_ACTIONS
 
 pytestmark = pytest.mark.anyio
 
@@ -1242,14 +1243,6 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
     assert all({"browse_collection_papers", "search_sources", "read_source"}.issubset(names)
                for names in model.tool_spec_names)
 
-    explicit_search = intent_policy.capability_names_for_intent(
-        "请搜索相关论文然后谈谈判断。",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-    assert "search_sources" in explicit_search
-
-
 async def test_literature_based_opinion_completion_does_not_certify_source_support() -> None:
     unsupported_answer = "不读取原文也可以判断能量输入降低了孔隙率。"
     runner = ResearchAgentRunner(
@@ -1327,32 +1320,6 @@ async def test_experiment_draft_requires_a_complete_matching_source_read(read_do
     assert result.tool_results[-1].error_code == "source_read_incomplete"
 
 
-async def test_continuation_does_not_restore_finding_draft_capabilities() -> None:
-    allowed = intent_policy.capability_names_for_intent(
-        "继续看一下",
-        has_source_context=False,
-        prior_tool_names={"query_published_findings"},
-    )
-
-    assert "query_published_findings" in allowed
-    assert "inspect_published_finding" in allowed
-    assert "create_finding_draft" not in allowed
-    assert "create_evidence_draft" not in allowed
-    assert "derive_objective" not in allowed
-
-
-async def test_standalone_status_query_does_not_expose_paper_browsing() -> None:
-    allowed = intent_policy.capability_names_for_intent(
-        "查看当前状态",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "inspect_research_process" in allowed
-    assert "get_collection_context" in allowed
-    assert "browse_collection_papers" not in allowed
-
-
 async def test_research_plan_question_does_not_expose_finding_writes() -> None:
     model = _Model(ModelTurn(content="我会先根据现有证据拟定研究方案草案。"),
                    discover=("propose_research_plan",))
@@ -1363,7 +1330,7 @@ async def test_research_plan_question_does_not_expose_finding_writes() -> None:
                 _Capability(
                     name,
                     ToolRisk.READ
-                    if name not in intent_policy.WRITE_CAPABILITIES
+                    if name not in AUTO_ACTIONS
                     else ToolRisk.WRITE,
                 )
                 for name in (
@@ -1617,7 +1584,10 @@ async def test_objective_write_is_hidden_until_the_user_requests_persistence() -
         )
     ]
 
-    save_model = _Model(ModelTurn(content="我会准备保存这个候选目标。"))
+    save_model = _Model(
+        ModelTurn(content="我会准备保存这个候选目标。"),
+        discover=("create_objective_candidate",),
+    )
     save_runner = ResearchAgentRunner(model=save_model, capabilities=capabilities)
     await save_runner.run_turn(
         context=_context(),
@@ -1631,7 +1601,10 @@ async def test_objective_write_is_hidden_until_the_user_requests_persistence() -
 
 
 async def test_candidate_creation_with_explicit_stop_hides_confirmation_and_analysis() -> None:
-    model = _Model(ModelTurn(content="我只会准备候选目标的创建动作。"))
+    model = _Model(
+        ModelTurn(content="我只会准备候选目标的创建动作。"),
+        discover=("create_objective_candidate",),
+    )
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
@@ -2064,7 +2037,11 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                 ),),
             ),
             ModelTurn(content="The approved plan draft has been saved."),
-            discover=("inspect_published_finding", "propose_research_plan"),
+            discover=(
+                "inspect_published_finding",
+                "propose_research_plan",
+                "create_research_plan",
+            ),
         ),
         capabilities=CapabilityRegistry((reader, drafter, writer)),
     )
@@ -2343,6 +2320,7 @@ async def test_queued_capability_result_returns_to_model_as_a_successful_observa
                 ),)
             ),
             ModelTurn(content="分析任务已启动，你可以稍后查看研究目标结果。"),
+            discover=("start_objective_analysis",),
         ),
         capabilities=CapabilityRegistry((capability,)),
     )
@@ -2354,9 +2332,15 @@ async def test_queued_capability_result_returns_to_model_as_a_successful_observa
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert result.tool_calls[0].status is ToolCallStatus.SUCCEEDED
-    assert result.tool_results[0].status is ToolResultStatus.QUEUED
-    assert result.tool_results[0].resource_refs[0].resource_type == "objective_analysis"
+    queued_call = next(
+        call for call in result.tool_calls if call.name == "start_objective_analysis"
+    )
+    queued_result = next(
+        item for item in result.tool_results if item.tool_call_id == queued_call.tool_call_id
+    )
+    assert queued_call.status is ToolCallStatus.SUCCEEDED
+    assert queued_result.status is ToolResultStatus.QUEUED
+    assert queued_result.resource_refs[0].resource_type == "objective_analysis"
     assert result.messages[-1].content.startswith("分析任务已启动")
 
 
@@ -2885,7 +2869,7 @@ async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan(
     assert result.status is AgentRunStatus.COMPLETED
     assert any(event["phase"] == "tools" for event in progress_events)
     assert any(event["executed_tool_count"] > 0 for event in progress_events)
-    assert all("research_plan" not in event for event in progress_events)
+    assert all(isinstance(event["research_plan"], dict) for event in progress_events)
     assert any(call.name == "read_source" and call.status is ToolCallStatus.SUCCEEDED
                for call in result.tool_calls)
 
@@ -2943,7 +2927,7 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
     assert not evidence_write.executed_arguments
     assert not finding_draft.executed_arguments
-    assert all("research_plan" not in event for event in events)
+    assert all(isinstance(event["research_plan"], dict) for event in events)
     assert any(event["executed_tool_count"] > 0 for event in events)
 
 
@@ -3372,74 +3356,6 @@ async def test_source_read_proof_does_not_cross_user_request_boundary() -> None:
     assert second_read.executed_arguments == []
 
 
-def test_research_plan_intent_exposes_inspection_and_revision_capabilities() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "查看已保存的研究方案并修订后保存",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "inspect_research_plans" in names
-    assert "revise_research_plan" in names
-    assert "create_research_plan" in names
-
-
-def test_explanation_does_not_enable_research_plan_capabilities() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Please provide an explanation of this system.",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert not {
-        "query_published_findings",
-        "assess_objective_quality",
-        "inspect_research_plans",
-        "propose_research_plan",
-    }.intersection(names)
-
-
-def test_generic_method_question_does_not_enable_source_reading() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Please explain this method.",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert not {
-        "browse_collection_papers",
-        "search_sources",
-        "read_source",
-        "inspect_document_sources",
-        "inspect_table",
-    }.intersection(names)
-
-
-def test_paper_method_question_still_enables_source_reading() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Read the paper's methods and results.",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "read_source" in names
-
-
-def test_document_identifier_enables_direct_source_inspection() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Inspect the P002 group definitions",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert {
-        "search_sources",
-        "read_source",
-        "inspect_document_sources",
-        "inspect_table",
-    }.intersection(names)
-
-
 async def test_document_identifier_request_can_execute_source_read() -> None:
     read = _Capability(
         "read_source",
@@ -3478,49 +3394,8 @@ async def test_document_identifier_request_can_execute_source_read() -> None:
     assert read.executed_arguments == [{"question": "P002 group definitions"}]
 
 
-def test_generic_plan_question_does_not_enable_research_plan_tools() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "What is your plan?",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert not {
-        "query_published_findings",
-        "assess_objective_quality",
-        "inspect_research_plans",
-        "propose_research_plan",
-        "create_research_plan",
-    }.intersection(names)
-
-
-@pytest.mark.parametrize(
-    "request_text",
-    ["Draft and save a plan", "Revise the saved plan"],
-)
-def test_actionable_english_plan_request_enables_plan_capabilities(
-    request_text: str,
-) -> None:
-    names = intent_policy.capability_names_for_intent(
-        request_text,
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "propose_research_plan" in names
-    assert "inspect_research_plans" in names
-
-
-@pytest.mark.parametrize(
-    ("request_text", "capability_name"),
-    [
-        ("Draft and save a plan", "create_research_plan"),
-    ],
-)
-async def test_actionable_english_plan_request_reaches_write_approval(
-    request_text: str,
-    capability_name: str,
-) -> None:
+async def test_registered_write_reaches_approval_after_model_discovery() -> None:
+    capability_name = "create_research_plan"
     write = _Capability(capability_name, ToolRisk.WRITE)
     model = _Model(
         ModelTurn(
@@ -3533,7 +3408,7 @@ async def test_actionable_english_plan_request_reaches_write_approval(
     ).run_turn(
         context=_context(),
         previous_messages=(),
-        user_message=request_text,
+        user_message="保存已经审核的研究方案。",
     )
 
     assert result.status is AgentRunStatus.APPROVAL_REQUIRED
@@ -3541,36 +3416,38 @@ async def test_actionable_english_plan_request_reaches_write_approval(
     assert write.executed_arguments == []
 
 
-def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "不要修改旧 Finding，请创建一个新版本。",
-        has_source_context=False,
-        prior_tool_names=set(),
+@pytest.mark.anyio
+async def test_research_request_discovers_source_and_experiment_tools_from_catalog() -> None:
+    names = (
+        "get_collection_context",
+        "browse_collection_papers",
+        "inspect_document_sources",
+        "read_source",
+        "inspect_table",
+        "propose_paper_experiment_draft",
+    )
+    model = _Model(
+        ModelTurn(content="已加载完成研究这项请求所需的工具。"),
+        discover=names,
+        source_inspection_required=True,
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry(
+            tuple(_Capability(name, ToolRisk.DRAFT if name.endswith("draft") else ToolRisk.READ) for name in names)
+        ),
     )
 
-    assert "create_finding_version" in names
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="分析这些论文并重建其中实际报告的实验，给出下一步建议。",
+    )
 
-
-@pytest.mark.parametrize(("request_text", "writes"), [
-    ("请把这个 Finding 标为错误，保存错误反馈；不保存修订结论，也不发布新分析。", {"record_finding_feedback"}),
-    ("保存 Finding 人工修订，保留原始结果和现有 Evidence；不创建独立新 Finding，不发布新的分析版本。", {"curate_finding"}),
-    ("Save feedback for this Finding, but do not save the curation or publish a new analysis.", {"record_finding_feedback"}),
-    ("Check the complete table and save the corrected paper experiment as a new revision.", {"create_paper_experiment_revision"}),
-    ("Save the human revision of this Finding; do not publish a new Finding.", {"curate_finding"}),
-    ("请保存这个 Finding 的修订。", {"create_finding_version"}),
-    ("Save the revision of this Finding.", {"create_finding_version"}),
-    ("请保存实验记录修订，保留旧记录。", {"create_paper_experiment_revision"}),
-    ("保存这个 Finding 的反馈，先不要保存任何内容。", set()),
-    ("只读查看 Finding 已保存的错误反馈和人工修订，不要写入。", set()),
-    ("Read-only: inspect the saved Finding revision.", set()),
-    ("请核对这个已发布 Finding 并给修订草案，先不要保存或发布。", set()),
-    ("Review this published Finding; do not save or publish.", set()),
-    ("请复核这个 Finding，先不要发布。", set()),
-    ("请保存反馈但不保存修订，Finding 原始发布结果保留。", {"record_finding_feedback"}),
-])
-def test_research_writes_respect_each_requested_action(request_text, writes) -> None:
-    names = intent_policy.capability_names_for_intent(request_text, has_source_context=False, prior_tool_names=set())
-    assert names.intersection(intent_policy.WRITE_CAPABILITIES) == writes
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.tool_calls[0].name == "discover_research_tools"
+    assert model.discovery_decisions == [names]
+    assert model.tool_spec_names == [names]
 
 
 def test_failed_curation_retains_failure_observation() -> None:
@@ -3765,6 +3642,7 @@ async def test_research_plan_revision_reads_existing_plan_before_write(user_requ
                 }),
             )
         ),
+        discover=("inspect_research_plans", "revise_research_plan"),
     )
     runner = ResearchAgentRunner(
         model=model,

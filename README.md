@@ -1,8 +1,9 @@
-# Lens
-
-<p align="center">
-  <img src="assets/readme/lens_lockup.png" alt="Lens brand lockup">
-</p>
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/lens_lockup-dark.png">
+    <img src="assets/readme/lens_lockup.png" alt="Lens" width="320">
+  </picture>
+</h1>
 
 Lens is a research system in development. Its purpose is to help a researcher
 study a question until the available knowledge and methods support a useful,

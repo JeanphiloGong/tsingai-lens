@@ -31,6 +31,12 @@ different next actions.
 Ordinary Source reading also grounds any filename/content conflict note in the
 inspected content; it adds no preparation stage or identity-checking tool call.
 
+Scientific background knowledge is available by default for explanations and
+hypotheses. Explicit restrictions to supplied materials also constrain their
+scientific premises while preserving reasoning and arithmetic from those
+materials. A restriction on web search alone does not impose that knowledge
+boundary. Context compaction preserves the researcher's explicit restrictions.
+
 When a mature research question and complete Source reads reconstruct an actual
 paper experiment that will support comparison or a conclusion, the Agent may
 propose a PaperExperiment draft for review. The formal path is complete Source
@@ -44,6 +50,9 @@ model scenarios using real Source fixtures. It checks actual reads, recovery,
 attribution, continuation, and final answers rather than treating prompt-string
 assertions as proof of model behavior. The warning-generation policy is owned
 by the browsing capability and tracked separately from this prompt refactor.
+The opt-in knowledge-scope checks compare ordinary discussion, no-web requests,
+and supplied-material-only requests using the same controlled trend. They check
+that arithmetic remains possible and mechanisms use only the allowed premises.
 
 ## Start Here
 

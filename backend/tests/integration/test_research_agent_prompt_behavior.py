@@ -204,3 +204,75 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
         phrase in answer.casefold()
         for phrase in ("build a paper map first", "manually review the pdf", "cannot inspect")
     )
+
+
+@pytest.mark.parametrize("knowledge_scope", ["ordinary", "no_web", "supplied_only"])
+async def test_live_agent_respects_the_requested_knowledge_scope(
+    collection_service, knowledge_scope,
+):
+    """A trend supports arithmetic; explaining its mechanism needs allowed premises."""
+
+    required = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
+    if any(not os.environ.get(name) for name in required):
+        pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
+    user_id, collection_id, _document_id, sources = await _fixture_collection(
+        collection_service
+    )
+    scope_instruction = {
+        "ordinary": "",
+        "no_web": "Do not search the web.",
+        "supplied_only": (
+            "Use only the supplied facts below. Do not use model background "
+            "knowledge or external scientific facts, including when explaining "
+            "mechanisms or proposing hypotheses."
+        ),
+    }[knowledge_scope]
+    client = AsyncOpenAI(
+        api_key=os.environ["LLM_API_KEY"],
+        base_url=os.environ["LLM_BASE_URL"],
+        timeout=60,
+    )
+    try:
+        result = await _runner(
+            client=client, collection_service=collection_service, sources=sources,
+        ).run_turn(
+            context=AgentContext(
+                session_id=f"live-knowledge-{knowledge_scope}",
+                user_id=user_id,
+                collection_id=collection_id,
+            ),
+            previous_messages=(),
+            permission_mode="none",
+            user_message=(
+                f"{scope_instruction}\n"
+                "User-supplied controlled observations: the same alloy was tensile "
+                "tested under matched conditions before and after heat treatment. "
+                "Yield strength changed from 600 MPa to 500 MPa; elongation "
+                "changed from 10% to 15%. No mechanism measurements or explanations "
+                "are supplied. Calculate the elongation change in percentage points "
+                "and explain possible physical mechanisms, distinguishing observations "
+                "from hypotheses and stating what cannot be determined. Do not read "
+                "the collection or save anything. Return only a JSON object with "
+                "elongation_change_pp (number), mechanism_hypotheses (list of objects "
+                "with hypothesis and basis strings), and mechanism_gap (string)."
+            ),
+        )
+    finally:
+        await client.close()
+
+    assert result.status == "completed", result.error_code
+    assert not result.tool_calls
+    answer = result.messages[-1].content.strip()
+    if answer.startswith("```json") and answer.endswith("```"):
+        answer = answer[len("```json"): -len("```")].strip()
+    payload = json.loads(answer)
+    assert payload["elongation_change_pp"] == 5
+    assert payload["mechanism_gap"].strip()
+    hypotheses = payload["mechanism_hypotheses"]
+    assert isinstance(hypotheses, list)
+    if knowledge_scope == "supplied_only":
+        assert hypotheses == [], payload
+    else:
+        assert hypotheses, payload
+        assert all(item["hypothesis"].strip() and item["basis"].strip()
+                   for item in hypotheses)

@@ -335,6 +335,17 @@ class ChatSessionService:
             raise ChatSessionBusyError()
         await self.repository.delete_session(session_id=session_id, user_id=user_id)
 
+    async def set_session_pin_for_user(
+        self, session_id: str, user_id: str, *, is_pinned: bool,
+    ) -> ChatSession:
+        await self.get_session_for_user(session_id, user_id)
+        try:
+            return await self.repository.set_session_pin(
+                session_id=session_id, user_id=user_id, is_pinned=is_pinned,
+            )
+        except FileNotFoundError as exc:
+            raise ChatSessionNotFoundError(session_id) from exc
+
     async def list_messages_for_user(
         self,
         session_id: str,

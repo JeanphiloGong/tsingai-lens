@@ -218,6 +218,7 @@ class PostgresChatRepository:
                     collection_id=record.collection_id,
                     created_at=_datetime(record.created_at),
                     updated_at=_datetime(record.updated_at),
+                    is_pinned=record.is_pinned,
                 )
             )
 
@@ -246,6 +247,16 @@ class PostgresChatRepository:
                 raise ChatSessionHasBranchesError()
             await database.delete(row)
 
+    async def set_session_pin(
+        self, *, session_id: str, user_id: str, is_pinned: bool,
+    ) -> ChatSession:
+        async with self.session_factory.begin() as database:
+            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+            if row is None or row.user_id != user_id:
+                raise FileNotFoundError("chat session not found")
+            row.is_pinned = is_pinned
+            return _session_record(row)
+
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSessionSummary, ...]:
@@ -266,7 +277,11 @@ class PostgresChatRepository:
                     ChatSessionRow.user_id == user_id,
                     ChatSessionRow.collection_id == collection_id,
                 )
-                .order_by(ChatSessionRow.updated_at.desc(), ChatSessionRow.session_id.desc())
+                .order_by(
+                    ChatSessionRow.is_pinned.desc(),
+                    ChatSessionRow.updated_at.desc(),
+                    ChatSessionRow.session_id.desc(),
+                )
                 .limit(limit)
                 .offset(offset)
             )
@@ -702,6 +717,7 @@ def _session_record(row: ChatSessionRow) -> ChatSession:
         created_at=_iso(row.created_at),
         updated_at=_iso(row.updated_at),
         status=status,
+        is_pinned=row.is_pinned,
         root_session_id=row.root_session_id,
         parent_session_id=row.parent_session_id,
         fork_message_id=row.fork_message_id,

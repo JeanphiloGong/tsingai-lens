@@ -167,6 +167,70 @@ async def _send(app, branch, *, streaming=False):
     return response
 
 
+async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(branch_app):
+    app = branch_app
+    newer = await app.service.create_session(collection_id="collection", user_id=app.owner)
+    original = await app.repository.read_session("original")
+    messages = await app.repository.read_messages("original")
+    assert (await app.client.get(f"{BASE}/original")).json()["is_pinned"] is False
+
+    for _ in range(2):
+        response = await app.client.put(f"{BASE}/original/pin", json={"is_pinned": True})
+        assert response.status_code == 200, response.text
+        assert response.json()["is_pinned"] is True
+        assert response.json()["updated_at"] == original.updated_at
+
+    # A model checkpoint that started before pinning must not undo the preference.
+    await app.repository.save_trajectory(
+        session=original, messages=messages, tool_calls=(), tool_results=(),
+    )
+    reloaded = PostgresChatRepository(app.factory)
+    assert (await reloaded.read_session("original")).is_pinned is True
+    assert await reloaded.read_messages("original") == messages
+    first = await app.client.get(BASE, params={"collection_id": "collection", "limit": 1})
+    second = await app.client.get(BASE, params={"collection_id": "collection", "limit": 1, "offset": 1})
+    assert first.json()["items"][0]["session_id"] == "original"
+    assert first.json()["items"][0]["is_pinned"] is True
+    assert second.json()["items"][0]["session_id"] == newer.session_id
+    branch = await _branch(app)
+    assert branch["is_pinned"] is False
+
+    response = await app.client.put(f"{BASE}/original/pin", json={"is_pinned": False})
+    assert response.status_code == 200, response.text
+    assert response.json()["updated_at"] == original.updated_at
+    items = (await app.client.get(BASE, params={"collection_id": "collection"})).json()["items"]
+    assert items[-1]["session_id"] == "original"
+    assert items[-1]["is_pinned"] is False
+
+
+async def test_pin_is_owner_only_and_requires_an_explicit_boolean(branch_app):
+    app = branch_app
+    for payload in ({}, {"is_pinned": "false"}, {"is_pinned": None}):
+        response = await app.client.put(f"{BASE}/original/pin", json=payload)
+        assert response.status_code == 422, response.text
+    app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[1])
+    for session_id in ("original", "missing"):
+        response = await app.client.put(f"{BASE}/{session_id}/pin", json={"is_pinned": True})
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"]["code"] == "chat_session_not_found"
+    assert (await app.repository.read_session("original")).is_pinned is False
+
+
+async def test_pin_migration_upgrades_existing_sessions_without_changing_messages(
+    branch_app, postgres_sync_engine,
+):
+    app = branch_app
+    before = await app.repository.read_messages("original")
+    config = Config("alembic.ini")
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "20261008_0086")
+        assert "is_pinned" not in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
+        command.upgrade(config, "head")
+    assert (await app.repository.read_session("original")).is_pinned is False
+    assert await app.repository.read_messages("original") == before
+
+
 async def test_edit_preserves_sources_history_and_completed_writes(branch_app):
     app = branch_app
     original = await app.repository.read_messages("original")

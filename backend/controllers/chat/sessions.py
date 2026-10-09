@@ -35,6 +35,7 @@ from controllers.chat.schemas import (
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionListResponse,
+    ChatSessionPinRequest,
     ChatSessionResponse,
     ChatToolCallResponse,
     ChatToolDecisionRequest,
@@ -161,6 +162,23 @@ async def get_chat_session(
         session = await request.app.state.chat_session_service.get_session_for_user(
             session_id,
             await current_user_id(request),
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
+
+
+@router.put(
+    "/{session_id}/pin",
+    response_model=ChatSessionResponse,
+    summary="Pin or unpin one owned Chat session",
+)
+async def set_chat_session_pin(
+    session_id: str, payload: ChatSessionPinRequest, request: Request,
+) -> ChatSessionResponse:
+    try:
+        session = await request.app.state.chat_session_service.set_session_pin_for_user(
+            session_id, await current_user_id(request), is_pinned=payload.is_pinned,
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc

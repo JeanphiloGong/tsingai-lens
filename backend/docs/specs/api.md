@@ -183,6 +183,7 @@ list.
 - `POST /api/v1/chat-sessions`
 - `GET /api/v1/chat-sessions?collection_id={collection_id}`
 - `GET /api/v1/chat-sessions/{session_id}`
+- `PUT /api/v1/chat-sessions/{session_id}/pin`
 - `DELETE /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
@@ -199,12 +200,21 @@ references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
 
 The collection-scoped list returns the authenticated user's saved sessions,
-ordered by most recently updated, with `limit` and `offset` pagination. It is
+ordered by `is_pinned` descending, then `updated_at` descending and `session_id`
+descending, before applying `limit` and `offset` pagination. It is
 the source for restoring Chat history on another device; browser local storage
 may remember the active session but is not the authoritative history index. Each
 list item also includes `title`, the trimmed first line of the first user question
 (up to 160 characters), or `null` for an empty conversation. A client can render
 history without loading every trajectory or relying on a local title cache.
+
+Session responses include `is_pinned` (false by default). `PUT .../{session_id}/pin`
+accepts exactly `{"is_pinned": true}` or `{"is_pinned": false}` and returns the
+saved session. Setting the same state is idempotent. The authenticated user must
+own both the session and its Collection; missing or unowned sessions return 404
+`chat_session_not_found`. Pinning is independent of execution and does not
+change `updated_at`, messages, approvals, or Source attachments. Generation
+checkpoints preserve the saved preference, and new branches start unpinned.
 
 Deleting an owned idle session returns 204 and removes its trajectory. Execution
 conflicts return 409 `chat_session_busy`. A session still referenced by another

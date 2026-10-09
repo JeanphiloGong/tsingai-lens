@@ -99,7 +99,7 @@ class MemoryChatRepository:
                 for session in self.sessions.values()
                 if session.user_id == user_id and session.collection_id == collection_id
             ),
-            key=lambda session: (session.updated_at, session.session_id),
+            key=lambda session: (session.is_pinned, session.updated_at, session.session_id),
             reverse=True,
         )
         return tuple(
@@ -116,6 +116,16 @@ class MemoryChatRepository:
             )
             for session in sessions[offset : offset + limit]
         )
+
+    async def set_session_pin(
+        self, *, session_id: str, user_id: str, is_pinned: bool,
+    ) -> ChatSession:
+        session = self.sessions.get(session_id)
+        if session is None or session.user_id != user_id:
+            raise FileNotFoundError("chat session not found")
+        pinned = replace(session, is_pinned=is_pinned)
+        self.sessions[session_id] = pinned
+        return pinned
 
     async def delete_session(self, *, session_id: str, user_id: str) -> None:
         session = self.sessions.get(session_id)
@@ -225,7 +235,9 @@ class MemoryChatRepository:
         tool_calls: tuple[ChatToolCall, ...],
         tool_results: tuple[ChatToolResult, ...],
     ) -> None:
-        self.sessions[session.session_id] = session
+        self.sessions[session.session_id] = replace(
+            session, is_pinned=self.sessions[session.session_id].is_pinned,
+        )
         self.messages[session.session_id] = messages
         for call in tool_calls:
             self.proposed_revisions.setdefault(call.tool_call_id, permission_record(self.permissions.get(session.session_id))["revision"])

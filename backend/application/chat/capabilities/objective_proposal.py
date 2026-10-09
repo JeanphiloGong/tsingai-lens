@@ -83,7 +83,12 @@ class ProposeObjectiveDraftsCapability:
             "Record one to three focused transient Research Objective drafts for user "
             "review. Each draft must have one specific outcome. The result may report "
             "PaperResearchMap proposal context, but it is not Evidence and does not "
-            "create a Core Objective."
+            "create a Core Objective. Split a multi-outcome interest into separate "
+            "questions before scope screening. Preserve the intervention in variables, "
+            "all named materials in material_scope, and explicit process/test limits "
+            "in constraints; outcomes never belong in variables. Use scope preview "
+            "separately for each question when maps are available. Missing mapped "
+            "support leaves a draft unverified, not scientifically disproven."
         ),
         risk=ToolRisk.DRAFT,
         input_model=ProposeObjectiveDraftsToolRequest,

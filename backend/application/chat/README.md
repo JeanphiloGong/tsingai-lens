@@ -9,6 +9,30 @@ the research question, supporting observations, limits, progress, and next
 researcher decision. Ordinary replies translate tool and status identifiers
 into that research meaning, including when explaining pending approval.
 
+## Initialization Prompt
+
+`model.py` owns the runtime prompt and its version. Named sections cover identity,
+collaboration and continuity, research information, tool decisions, scientific
+reading, recovery, write authority, response style, and boundary examples. They
+compose one system message; this README does not duplicate the prompt text.
+The registered capability descriptions and schemas remain authoritative for
+available tools and their specific fields, prerequisites, and write contracts.
+
+The reference scenario is a researcher selecting LPBF papers, inspecting their
+actual experimental conditions and measurements, comparing the supported
+results, and deciding what to inspect or test next. Filename/title and Profile
+help select candidates; Paper Map is optional navigation. When canonical Source
+is readable, missing maps or unrecognized abstract headings do not block original
+section reading or automatically require expert review. Preparation progress,
+classification failure with readable Source, actual read failure, unread content,
+and information absent from inspected content have different next actions.
+
+Prompt validation combines protocol/authorization regressions with opt-in live
+model scenarios using real Source fixtures. It checks actual reads, recovery,
+attribution, continuation, and final answers rather than treating prompt-string
+assertions as proof of model behavior. The warning-generation policy is owned
+by the browsing capability and tracked separately from this prompt refactor.
+
 ## Start Here
 
 - HTTP entry: `controllers/chat/sessions.py`

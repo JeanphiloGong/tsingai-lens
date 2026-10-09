@@ -29,6 +29,11 @@ class PreviewResearchScopeCapability:
             "confidently out of scope. This is a read-only screening judgment, not "
             "Evidence. A paper with an insufficient map is never automatically "
             "excluded, and review-paper citation leads are navigation only."
+            " A missing exact map match for an umbrella intervention, such as energy "
+            "input, is uncertainty rather than grounds to exclude a same-material "
+            "paper without an explicit scope conflict. If maps are unavailable, "
+            "use the paper survey and available Sources to inspect candidate scope; "
+            "map construction is not a prerequisite for original-content reading."
         ),
         risk=ToolRisk.READ,
         input_model=PreviewResearchScopeToolRequest,

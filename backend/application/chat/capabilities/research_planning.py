@@ -204,7 +204,16 @@ class ProposeResearchPlanCapability:
             "published research question. The draft must specify hypothesis, variables, "
             "controls, fixed conditions, measurements, replication, analysis, acceptance, "
             "feasibility, safety, and limitations, and cite exact current Finding and "
-            "Evidence IDs. This call does not persist or authorize the plan."
+            "Evidence IDs. Inspect those Findings and their exact Evidence first; "
+            "a technical extraction failure is a recovery task, not a scientific "
+            "gap. Distinguish literature-derived choices, researcher-supplied "
+            "constraints, proposed validation levels and unresolved expert choices. "
+            "A power/sample ceiling is not a selected setpoint or proof of adequate "
+            "statistical power. Identify observations that support, challenge or "
+            "leave the hypothesis unresolved; equipment and standards compliance "
+            "need inspected support or expert confirmation. Create this actual "
+            "structured draft when requested, rather than stopping at prose. This "
+            "call does not persist or authorize the plan."
         ),
         risk=ToolRisk.DRAFT,
         input_model=ProposeResearchPlanToolRequest,

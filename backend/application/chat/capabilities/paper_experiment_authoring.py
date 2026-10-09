@@ -470,9 +470,14 @@ class _PaperExperimentDraftExperimentField(BaseModel):
 class _PaperExperimentDraftFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    objective_id: str = Field(
-        min_length=1, max_length=240,
-        description="Existing confirmed Objective ID from get_collection_context; never invent a draft-only Objective ID.",
+    objective_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=240,
+        description=(
+            "Optional Objective context for later selection. It is not required "
+            "to reconstruct or save a paper-local experiment."
+        ),
     )
     document_id: str = Field(min_length=1, max_length=240)
     experiments: list[_PaperExperimentDraftExperimentField] = Field(
@@ -516,12 +521,12 @@ class ProposePaperExperimentDraftCapability:
         name="propose_paper_experiment_draft",
         description=(
             "Validate a source-grounded PaperExperiment draft after reading the "
-            "complete Sources for one paper. Obtain the existing confirmed Objective "
-            "ID from get_collection_context. Reuse complete reads from this session "
+            "complete Sources for one paper. An Objective is optional context; it is "
+            "not a prerequisite for recording paper facts. Reuse complete reads from this session "
             "when their canonical content is unchanged. Read every cited Source; "
             "one passage does not cover the paper. For a complete experiment request, "
             "include all source-supported variants, tests, measurements and comparisons "
-            "before proposing a save. When correcting an Objective or Source error, "
+            "before proposing a save. When correcting a Source error, "
             "preserve the scientific payload and repair only the failed prerequisite; "
             "do not shrink the draft to pass validation. Use only response-local experiment, "
             "variant, test, measurement and comparison keys plus supplied Sxxx "
@@ -544,7 +549,8 @@ class ProposePaperExperimentDraftCapability:
             "Measurements must provide a local key, outcome, value or result_text, "
             "and source_labels. This is a review-only draft; do not include formal "
             "IDs, fingerprints, versions, collection IDs, or objective IDs inside "
-            "the scientific payload. The draft does not write a PaperExperiment."
+            "the scientific payload. The draft does not write a PaperExperiment or "
+            "an Objective Selection."
         ),
         risk=ToolRisk.DRAFT,
         input_model=PaperExperimentDraftToolRequest,
@@ -568,7 +574,6 @@ class ProposePaperExperimentDraftCapability:
         prepared = await self.authoring_service.prepare(
             collection_id=context.collection_id,
             user_id=context.user_id,
-            objective_id=arguments.objective_id,
             document_id=arguments.document_id,
             raw_draft=arguments.raw_draft(),
         )
@@ -612,7 +617,6 @@ class ProposePaperExperimentDraftCapability:
                 "draft_digest": prepared.draft_digest,
                 "draft_created_at": datetime.now(timezone.utc).isoformat(),
                 "status": "pending_approval",
-                "published": False,
                 "requires_user_approval": True,
                 "experiment_count": len(prepared.output.output.experiments),
                 "experiments": [item.payload for item in prepared.output.output.experiments],
@@ -639,16 +643,15 @@ class CreatePaperExperimentRevisionCapability:
         name="create_paper_experiment_revision",
         description=(
             "After the exact PaperExperiment draft has been reviewed and approved, "
-            "create one immutable PaperExperiment revision and any scientifically "
-            "eligible Objective Selections. Submit the stored draft ID and digest "
+            "create the immutable paper-local PaperExperiment revisions. Submit the "
+            "stored draft ID and digest "
             "unchanged; this saves exactly that draft, not the latest prose description. "
-            "Partial records may be saved, but empty measurements cannot create a "
-            "Selection. Do not substitute a reduced draft for a reviewed complete one. The service "
-            "reloads the prepared Source, resolves formal identities, and writes "
-            "the revision and eligible selections atomically. Report the actual saved "
-            "variant, test, measurement and comparison counts and returned selection_ids; "
-            "do not redraft or reread after a successful save unless requested. "
-            "Finding creation is a separate approved action."
+            "Partial records may be saved, but empty measurements remain ineligible "
+            "for later Objective Selection. Do not substitute a reduced draft for a "
+            "reviewed complete one. The service reloads the prepared Source, resolves "
+            "formal identities, and writes all revisions atomically. Saving a revision "
+            "does not start or publish Objective analysis, create a Selection, or create "
+            "a Finding."
         ),
         risk=ToolRisk.WRITE,
         input_model=PaperExperimentRevisionToolRequest,
@@ -667,7 +670,7 @@ class CreatePaperExperimentRevisionCapability:
         self,
         context: CapabilityExecutionContext,
         arguments: PaperExperimentRevisionToolRequest,
-    ) -> tuple[str, str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any]]:
         if self.chat_repository is None:
             raise ValueError("paper experiment draft store is unavailable")
         messages = await self.chat_repository.read_messages(context.session_id)
@@ -678,12 +681,16 @@ class CreatePaperExperimentRevisionCapability:
                 continue
             if data.get("status") != "pending_approval":
                 continue
+            if getattr(result, "status", None) != "succeeded":
+                continue
+            if str(data.get("draft_digest") or "").casefold() != arguments.draft_digest.casefold():
+                raise ValueError("stored paper experiment draft digest does not match approval")
             created_at = str(data.get("draft_created_at") or "")
             try:
                 is_expired = datetime.now(timezone.utc) - datetime.fromisoformat(
                     created_at.replace("Z", "+00:00")
                 ) > _DRAFT_TTL
-            except ValueError:
+            except (ValueError, TypeError):
                 is_expired = True
             if is_expired:
                 raise ValueError("paper experiment draft has expired; propose it again")
@@ -691,7 +698,6 @@ class CreatePaperExperimentRevisionCapability:
             if not isinstance(draft, dict):
                 continue
             return (
-                str(data.get("objective_id") or ""),
                 str(data.get("document_id") or ""),
                 draft,
             )
@@ -702,15 +708,14 @@ class CreatePaperExperimentRevisionCapability:
         context: CapabilityExecutionContext,
         arguments: PaperExperimentRevisionToolRequest,
     ) -> ChatToolResult:
-        objective_id, document_id, raw_draft = await self._stored_draft(
+        document_id, raw_draft = await self._stored_draft(
             context, arguments
         )
-        if not objective_id or not document_id:
+        if not document_id:
             raise ValueError("stored paper experiment draft is missing its scope")
         prepared = await self.authoring_service.prepare(
             collection_id=context.collection_id,
             user_id=context.user_id,
-            objective_id=objective_id,
             document_id=document_id,
             raw_draft=raw_draft,
         )
@@ -720,40 +725,29 @@ class CreatePaperExperimentRevisionCapability:
             prepared=prepared,
             collection_id=context.collection_id,
             created_by=context.user_id,
-            created_by_tool_call_id=context.tool_call_id,
         )
-        revision = result.revisions[0]
         refs = [
             ChatResourceRef(
                 resource_type="paper_experiment",
                 resource_id=(
-                    f"{revision.revision.experiment_id}:"
-                    f"{revision.revision.experiment_version}"
+                    f"{item.revision.experiment_id}:"
+                    f"{item.revision.experiment_version}"
                 ),
                 href=(
                     f"/collections/{context.collection_id}/documents/"
-                    f"{revision.revision.document_id}?view=paper-experiment"
+                    f"{item.revision.document_id}?view=paper-experiment"
                 ),
             )
+            for item in result.revisions
         ]
-        refs.extend(
-            ChatResourceRef(
-                resource_type="objective_selection",
-                resource_id=item.selection_id,
-                href=(
-                    f"/collections/{context.collection_id}/objectives/"
-                    f"{objective_id}?selection_id={item.selection_id}"
-                ),
-            )
-            for item in result.selections
-        )
+        revisions = [item.revision.to_record() for item in result.revisions]
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
             data={
-                "published": True,
-                "revision": revision.revision.to_record(),
-                "selection_ids": [item.selection_id for item in result.selections],
+                "revision_saved": True,
+                "revisions": revisions,
+                "selection_ids": [],
                 "finding_ids": [],
             },
             resource_refs=tuple(refs),

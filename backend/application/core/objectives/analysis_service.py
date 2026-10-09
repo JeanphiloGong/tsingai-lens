@@ -833,6 +833,7 @@ class ObjectiveAnalysisService:
                     "analysis": claimed,
                     "experiment_outputs": artifacts.experiment_outputs,
                     "partial_experiment_outputs": artifacts.partial_experiment_outputs,
+                    "reused_revisions": artifacts.reused_revisions,
                 }
                 if transaction is not None:
                     writer_kwargs["transaction"] = transaction

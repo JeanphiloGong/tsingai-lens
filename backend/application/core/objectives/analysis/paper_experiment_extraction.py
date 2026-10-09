@@ -709,7 +709,7 @@ class PaperExperimentExtractor:
                     source_fingerprint=bundle.source_fingerprint,
                     source_labels=bundle.source_catalog,
                 )
-                reconciled = prepare_model_output(output, objective=objective)
+                reconciled = prepare_model_output(output)
                 if not reconciled.output.experiments:
                     attempts.append(
                         ExtractionAttempt(

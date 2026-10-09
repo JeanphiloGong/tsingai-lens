@@ -773,6 +773,7 @@ class ExperimentAnalysisWriter:
         analysis: ObjectiveAnalysis,
         experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
         partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput] = (),
+        reused_revisions: Sequence[PaperExperimentRevision] = (),
         allow_finding: bool = True,
         created_by: str | None = None,
         transaction: RepositoryTransaction | None = None,
@@ -786,8 +787,44 @@ class ExperimentAnalysisWriter:
             experiment_outputs=experiment_outputs,
             partial_experiment_outputs=partial_experiment_outputs,
             include_selections=allow_finding,
-            created_by=created_by,
             transaction=transaction,
+        )
+        reused_selections: list[ObjectiveExperimentSelection] = []
+        seen_documents = {item.document_id for item in prepared.revisions}
+        fingerprints = {
+            item.document_id: item.preparation_fingerprint for item in analysis.document_inputs
+        }
+        seen_experiments: set[str] = set()
+        for revision in reused_revisions:
+            if (
+                revision.document_id in seen_documents
+                or revision.experiment_id in seen_experiments
+                or fingerprints.get(revision.document_id) != revision.source_fingerprint
+                or revision.identity_status == "unknown"
+            ):
+                raise ValueError("reused experiment does not match the analysis read scope")
+            stored_revision = await _repository_call(
+                self.paper_experiment_repository.read_revision,
+                revision.experiment_id,
+                revision.experiment_version,
+                transaction=transaction,
+            )
+            if stored_revision is None or stored_revision.archived_at is not None or stored_revision.revision != revision:
+                raise ValueError("reused experiment is not an available fixed revision")
+            seen_experiments.add(revision.experiment_id)
+            if allow_finding:
+                reused_selections.extend(
+                    _build_selection(
+                        collection_id=collection_id, objective=objective,
+                        analysis_version=analysis.analysis_version,
+                        revision=revision, selection_slice=selection_slice,
+                    )
+                    for selection_slice in _selection_slices(revision, objective)
+                )
+        prepared = replace(
+            prepared,
+            revisions=(*prepared.revisions, *reused_revisions),
+            selections=(*prepared.selections, *reused_selections),
         )
         if allow_finding and prepared.selections:
             synthesis = self.finding_synthesis_service.synthesize(
@@ -821,55 +858,94 @@ class ExperimentAnalysisWriter:
             post_bind_diagnostics=prepared.post_bind_diagnostics,
         )
 
-    async def write_single_experiment_revision(
+    async def write_paper_experiment_revisions(
         self,
         *,
-        collection_id: str,
-        objective: ResearchObjective,
-        analysis: ObjectiveAnalysis,
-        experiment_output: ReconciledPaperExperimentOutput,
-        create_selection: bool,
+        experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
+        transaction: RepositoryTransaction,
         created_by: str | None = None,
-        transaction: RepositoryTransaction | None = None,
     ) -> ExperimentAnalysisWriteResult:
-        """Write one Agent-authored experiment graph and synthesize its Findings.
+        """Persist source-grounded revisions without an Objective snapshot.
 
-        Agent authoring deliberately shares the same preparation, identity,
-        binding, and repository transaction as automatic analysis.  The only
-        difference is the graph scope: one reconciled output and, when the
-        Objective has an active analysis, its explicit Selection.
+        Agent authoring records paper facts before a research objective chooses
+        which parts are useful for a comparison. Identity resolution, Source
+        binding, and revision immutability stay on this canonical writer; this
+        path deliberately creates no Objective selections, groups, or Findings.
         """
 
-        prepared = await self._prepare_experiment_selections(
-            collection_id=collection_id,
-            objective=objective,
-            analysis=analysis,
-            experiment_outputs=(experiment_output,),
-            partial_experiment_outputs=(),
-            include_selections=create_selection,
-            created_by=created_by,
-            transaction=transaction,
-        )
-        stored = await _repository_call(
-            self.experiment_analysis_repository.write_graph,
-            ExperimentAnalysisWrite(
-                collection_id=collection_id,
-                objective_id=objective.objective_id,
-                analysis_version=analysis.analysis_version,
-                revisions=prepared.revisions,
-                selections=prepared.selections,
+        if transaction is None:
+            raise ValueError("paper experiment revisions require an atomic transaction")
+        if not experiment_outputs:
+            return ExperimentAnalysisWriteResult(
+                revisions=(),
+                selections=(),
                 groups=(),
                 findings=(),
-                created_by=created_by,
-            ),
-            transaction=transaction,
+            )
+
+        output_specs = tuple(
+            (output, draft, local_key)
+            for output in experiment_outputs
+            for draft, local_key in zip(
+                output.output.experiments,
+                output.accepted_experiment_keys,
+                strict=True,
+            )
         )
+        if transaction is not None:
+            for document_id in sorted(
+                {output.output.document_id for output in experiment_outputs}
+            ):
+                await _repository_call(
+                    self.paper_experiment_repository.lock_document,
+                    document_id,
+                    transaction=transaction,
+                )
+
+        prepared_revisions: list[PaperExperimentRevision] = []
+        diagnostics: dict[str, tuple[str, ...]] = {}
+        identity_owners: dict[tuple[str, str], tuple[str, str]] = {}
+        for output, draft, local_key in output_specs:
+            revision, revision_diagnostics = await self._prepare_draft(
+                output=output,
+                draft=draft,
+                local_key=local_key,
+                allow_partial_archive=True,
+                transaction=transaction,
+            )
+            identity_key = (revision.document_id, revision.experiment_id)
+            owner = (output.output.document_id, local_key)
+            previous_owner = identity_owners.get(identity_key)
+            if previous_owner is not None and previous_owner != owner:
+                raise ValueError(
+                    "experiment identity collision requires manual boundary "
+                    "reconciliation: "
+                    f"{identity_key[1]} is used by {previous_owner[1]!r} "
+                    f"and {owner[1]!r}"
+                )
+            identity_owners.setdefault(identity_key, owner)
+            prepared_revisions.append(revision)
+            if revision_diagnostics:
+                diagnostics[revision.document_id] = tuple(dict.fromkeys(
+                    (*diagnostics.get(revision.document_id, ()), *revision_diagnostics)
+                ))
+
+        revisions: list[StoredPaperExperimentRevision] = []
+        for revision in prepared_revisions:
+            stored = await _repository_call(
+                self.paper_experiment_repository.add_revision,
+                revision,
+                created_by=created_by,
+                transaction=transaction,
+            )
+            revisions.append(stored)
+
         return ExperimentAnalysisWriteResult(
-            revisions=stored.revisions,
-            selections=stored.selections,
-            groups=stored.groups,
-            findings=stored.findings,
-            post_bind_diagnostics=prepared.post_bind_diagnostics,
+            revisions=tuple(revisions),
+            selections=(),
+            groups=(),
+            findings=(),
+            post_bind_diagnostics=diagnostics,
         )
 
     async def write_selection_finding_revision(
@@ -948,7 +1024,6 @@ class ExperimentAnalysisWriter:
         experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
         partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
         include_selections: bool,
-        created_by: str | None,
         transaction: RepositoryTransaction | None,
     ) -> _PreparedExperimentSelections:
         if objective.collection_id != collection_id:
@@ -1039,18 +1114,26 @@ class ExperimentAnalysisWriter:
             draft,
             local_key,
         ) in sorted(work_items, key=lambda item: item[:3]):
-            revision, revision_selections, revision_diagnostics = (
+            revision, revision_diagnostics = (
                 await self._prepare_draft(
                     output=output,
                     draft=draft,
                     local_key=local_key,
+                    allow_partial_archive=allow_partial_archive,
+                    transaction=transaction,
+                )
+            )
+            revision_selections = tuple(
+                _build_selection(
                     collection_id=collection_id,
                     objective=objective,
                     analysis_version=analysis.analysis_version,
-                    include_selections=output_include_selections,
-                    allow_partial_archive=allow_partial_archive,
-                    created_by=created_by,
-                    transaction=transaction,
+                    revision=revision,
+                    selection_slice=selection_slice,
+                )
+                for selection_slice in (
+                    _selection_slices(revision, objective)
+                    if output_include_selections else ()
                 )
             )
             identity_key = (revision.document_id, revision.experiment_id)
@@ -1104,16 +1187,10 @@ class ExperimentAnalysisWriter:
         output: ReconciledPaperExperimentOutput,
         draft: PaperExperimentDraft,
         local_key: str,
-        collection_id: str,
-        objective: ResearchObjective,
-        analysis_version: int,
-        include_selections: bool,
         allow_partial_archive: bool,
-        created_by: str | None,
         transaction: RepositoryTransaction | None,
     ) -> tuple[
         PaperExperimentRevision,
-        tuple[ObjectiveExperimentSelection, ...],
         tuple[str, ...],
     ]:
         payload = dict(draft.payload)
@@ -1181,22 +1258,7 @@ class ExperimentAnalysisWriter:
         else:
             revision = finalized
 
-        selections: tuple[ObjectiveExperimentSelection, ...] = ()
-        # A revision may intentionally retain unrelated partial measurements.
-        # Selection eligibility is decided per requested slice, not by the
-        # aggregate binding status of every record in the revision.
-        if include_selections:
-            selections = tuple(
-                _build_selection(
-                    collection_id=collection_id,
-                    objective=objective,
-                    analysis_version=analysis_version,
-                    revision=revision,
-                    selection_slice=selection_slice,
-                )
-                for selection_slice in _selection_slices(revision, objective)
-            )
-        return revision, selections, diagnostics
+        return revision, diagnostics
 
 def _revision_outcomes(revision: PaperExperimentRevision) -> tuple[str, ...]:
     values: list[str] = []

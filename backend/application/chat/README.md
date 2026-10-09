@@ -37,13 +37,13 @@ scientific premises while preserving reasoning and arithmetic from those
 materials. A restriction on web search alone does not impose that knowledge
 boundary. Context compaction preserves the researcher's explicit restrictions.
 
-When a mature research question and complete Source reads reconstruct an actual
-paper experiment that will support comparison or a conclusion, the Agent may
-propose a PaperExperiment draft for review. The formal path is complete Source
--> PaperExperiment draft -> researcher review -> PaperExperiment revision ->
-Objective Selection -> comparison or Finding. Future validation experiments are
-proposals, not PaperExperiment records, and runtime checkpoints or tool status
-are never scientific evidence.
+When complete Source reads reconstruct an actual paper experiment, the Agent may
+propose a PaperExperiment draft for review without a confirmed Objective or
+published Objective analysis. The formal paper-fact path is complete Source ->
+PaperExperiment draft -> researcher review -> PaperExperiment revision. A later
+Objective analysis selects one or more fixed revisions -> comparison or Finding.
+Future validation experiments are proposals, not PaperExperiment records, and
+runtime checkpoints or tool status are never scientific evidence.
 
 Prompt validation combines protocol/authorization regressions with opt-in live
 model scenarios using real Source fixtures. It checks actual reads, recovery,
@@ -103,7 +103,8 @@ do not add scientific state to the Chat trajectory.
 Agent-authored experiment records use `propose_paper_experiment_draft` followed
 by the separately approved `create_paper_experiment_revision`. The capability
 does not own experiment persistence: it reloads canonical Sources and delegates
-identity, revision, Selection, and atomic graph writes to `application/core/`.
+identity, revision, and atomic paper-revision writes to `application/core/`.
+Saving a revision does not create an Objective Selection or publish an analysis.
 
 ## Main Flow
 

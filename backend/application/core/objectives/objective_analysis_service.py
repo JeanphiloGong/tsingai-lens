@@ -15,6 +15,8 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
     PaperExperimentExtractor,
     build_bundle_from_routes,
 )
+from application.core.objectives.analysis.paper_experiment_reuse import reusable_paper_experiments
+from application.core.objectives.analysis.experiment_analysis_writer import _selection_slices
 from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
     PaperAnalysisFrame,
@@ -34,6 +36,11 @@ from application.repositories.objective_repository import (
     ObjectiveRepository,
 )
 from application.repositories.paper_map_repository import PaperMapRepository
+from application.repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
+    StoredPaperExperimentRevision,
+)
+from domain.core.paper_experiment import PaperExperimentRevision
 from application.source.collection_service import CollectionService
 from domain.core import (
     InspectedObjectiveSourceRef,
@@ -165,6 +172,7 @@ def _build_contribution_for_extraction(
     failed_source_refs: Sequence[Mapping[str, Any]],
     omitted_source_refs: Sequence[str],
     comparable_evidence_count: int = 0,
+    reused_revisions: Sequence[PaperExperimentRevision] = (),
 ) -> PaperContribution:
     """Build contribution accounting from Source identities, not call counts."""
 
@@ -200,6 +208,8 @@ def _build_contribution_for_extraction(
     output = extraction.output
     used_labels = _used_draft_source_labels(output) if output is not None else set()
     extracted_ids: set[tuple[str, str]] = set()
+    if reused_revisions:
+        extracted_ids.update(inspected_ids)
     if output is not None:
         for label in used_labels:
             raw = output.output.source_labels.get(label)
@@ -269,7 +279,9 @@ def _build_contribution_for_extraction(
         "extraction_failed": "One or more routed Sources failed during Source-level extraction.",
         "comparable_evidence": None,
     }[disposition]
-    measured_scope = tuple(
+    measured_scope = tuple(dict.fromkeys(
+        item.outcome for revision in reused_revisions for item in revision.measurements
+    )) or tuple(
         dict.fromkeys(
             str(item.get("outcome") or "").strip()
             for draft in (output.output.experiments if output is not None else ())
@@ -280,7 +292,7 @@ def _build_contribution_for_extraction(
     document_id = (
         output.output.document_id
         if output is not None
-        else (frame.document_id if frame is not None else "")
+        else (reused_revisions[0].document_id if reused_revisions else (frame.document_id if frame is not None else ""))
     )
     return PaperContribution(
         collection_id=collection_id,
@@ -291,6 +303,8 @@ def _build_contribution_for_extraction(
         relevance=frame.relevance if frame is not None else "uncertain",
         paper_role=frame.paper_role if frame is not None else "uncertain",
         contribution_summary=(
+            f"Reused {len(reused_revisions)} fixed PaperExperiment revision(s) for the routed Sources."
+            if reused_revisions else
             f"Recovered {len(output.output.experiments)} PaperExperiment Draft series."
             if output is not None
             else None
@@ -349,6 +363,7 @@ class ObjectiveExperimentAnalysisArtifacts:
     contributions: tuple[PaperContribution, ...]
     experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
     partial_experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+    reused_revisions: tuple[PaperExperimentRevision, ...] = ()
     extraction_statuses: Mapping[str, str] = field(default_factory=dict)
     extraction_diagnostics: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     model_name: str | None = None
@@ -361,8 +376,9 @@ class DocumentExperimentArtifacts:
     contribution: PaperContribution
     experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
     partial_experiment_outputs: tuple[ReconciledPaperExperimentOutput, ...] = ()
+    reused_revisions: tuple[PaperExperimentRevision, ...] = ()
     extraction_status: Literal[
-        "ready", "partial_archive", "abstained", "technical_failure"
+        "ready", "reused", "partial_archive", "abstained", "technical_failure"
     ] = "abstained"
     extraction_diagnostics: tuple[str, ...] = ()
 
@@ -395,6 +411,7 @@ class ObjectiveExperimentAnalysisService:
         objective_input_service: ObjectiveInputService,
         objective_source_screener: ObjectiveSourceScreener | None = None,
         paper_experiment_extractor: PaperExperimentExtractor | None = None,
+        paper_experiment_repository: PaperExperimentRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._objective_source_screener = objective_source_screener
@@ -402,6 +419,7 @@ class ObjectiveExperimentAnalysisService:
         self.paper_map_repository = paper_map_repository
         self.objective_repository = objective_repository
         self.objective_input_service = objective_input_service
+        self.paper_experiment_repository = paper_experiment_repository
 
     async def preview_objective_scope(
         self,
@@ -496,6 +514,12 @@ class ObjectiveExperimentAnalysisService:
 
             try:
                 async with extraction_limit:
+                    stored_revisions = (
+                        await self.paper_experiment_repository.list_latest_for_document(
+                            document_input.document_id
+                        )
+                        if self.paper_experiment_repository is not None else ()
+                    )
                     artifacts = await to_thread(
                         self._reconstruct_document_experiments,
                         collection_id=collection_id,
@@ -503,6 +527,7 @@ class ObjectiveExperimentAnalysisService:
                         objective=active_objective,
                         objective_inputs=document_objective_inputs,
                         progress_callback=document_progress_callback,
+                        stored_revisions=stored_revisions,
                     )
             except Exception as exc:  # noqa: BLE001
                 record_analysis_failure(
@@ -546,6 +571,9 @@ class ObjectiveExperimentAnalysisService:
         # becoming the source of the published conclusion.
         return ObjectiveExperimentAnalysisArtifacts(
             contributions=contributions,
+            reused_revisions=tuple(
+                revision for item in document_artifacts for revision in item.reused_revisions
+            ),
             experiment_outputs=tuple(
                 output
                 for item in document_artifacts
@@ -576,6 +604,7 @@ class ObjectiveExperimentAnalysisService:
         objective: ResearchObjective,
         objective_inputs: ObjectiveAnalysisInputs,
         progress_callback: ProgressCallback | None,
+        stored_revisions: Sequence[StoredPaperExperimentRevision] = (),
     ) -> DocumentExperimentArtifacts:
         screened_sources = screen_sources(
             collection_id=collection_id,
@@ -622,9 +651,16 @@ class ObjectiveExperimentAnalysisService:
                 objective_inputs["table_cells_by_document_id"].get(document_id, ())
             ),
         )
-        extraction = self._paper_experiment_extractor.extract(
-            objective=objective,
-            bundle=bundle,
+        reused_revisions = reusable_paper_experiments(
+            stored_revisions, objective=objective, bundle=bundle
+        )
+        extraction = (
+            PaperExperimentExtractionResult(
+                output=None, readiness=None, attempts=(), status="ready",
+                diagnostics=("Reused fixed paper facts; coverage is limited to the routed Sources.",),
+            )
+            if reused_revisions else
+            self._paper_experiment_extractor.extract(objective=objective, bundle=bundle)
         )
         frame = next(
             (
@@ -668,6 +704,12 @@ class ObjectiveExperimentAnalysisService:
             if extraction.status == "ready" and extraction.readiness is not None
             else 0
         )
+        if reused_revisions:
+            comparable_count = sum(
+                len(selection.comparison_keys)
+                for revision in reused_revisions
+                for selection in _selection_slices(revision, objective)
+            )
         contribution = _build_contribution_for_extraction(
             collection_id=collection_id,
             analysis=analysis,
@@ -679,12 +721,14 @@ class ObjectiveExperimentAnalysisService:
             failed_source_refs=failed_refs,
             omitted_source_refs=bundle.omitted_source_refs,
             comparable_evidence_count=comparable_count,
+            reused_revisions=reused_revisions,
         )
         return DocumentExperimentArtifacts(
             contribution=contribution,
             experiment_outputs=ready_outputs,
             partial_experiment_outputs=partial_outputs,
-            extraction_status=extraction.status,
+            reused_revisions=reused_revisions,
+            extraction_status="reused" if reused_revisions else extraction.status,
             extraction_diagnostics=extraction.diagnostics,
         )
 

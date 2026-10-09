@@ -483,7 +483,6 @@ async def build_application_runtime(
             paper_experiment_authoring_service = PaperExperimentAuthoringService(
                 collection_service=collection_service,
                 source_artifact_repository=source_artifact_repository,
-                objective_repository=objective_repository,
                 experiment_analysis_writer=experiment_analysis_writer,
                 experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
             )
@@ -693,6 +692,7 @@ async def build_application_runtime(
             paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
             objective_input_service=objective_input_service,
+            paper_experiment_repository=paper_experiment_repository,
         )
         document_markdown_service = DocumentMarkdownService(
             collection_service=collection_service,

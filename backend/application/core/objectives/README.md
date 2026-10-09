@@ -2,16 +2,19 @@
 
 ## Purpose
 
-This package owns two different research activities:
+This package owns three related research activities:
 
 1. form candidate questions from lightweight maps of explicitly selected papers;
 2. answer one confirmed question by extracting, grounding, binding, and
-   comparing PaperExperiment revisions from explicitly selected papers.
+   comparing PaperExperiment revisions from explicitly selected papers;
+3. preserve source-grounded paper experiments so later Objectives can reuse
+   them.
 
-The two activities share paper inputs but not scientific authority. A Paper Map
-can suggest what to inspect; only Objective analysis can publish experiment
-selections and Findings. Authored Evidence remains a separate immutable
-analysis snapshot.
+These activities share paper inputs but not scientific authority. A Paper Map
+can suggest what to inspect. PaperExperiment revisions are reusable paper-owned
+facts and may be saved before an Objective exists. Only Objective analysis can
+publish experiment selections and Findings. Authored Evidence remains a separate
+immutable analysis snapshot.
 
 ## Start Here
 

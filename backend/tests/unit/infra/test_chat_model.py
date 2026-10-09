@@ -158,7 +158,7 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.3"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.4"
     for section in (
         "AGENT MISSION",
         "FOUR-LAYER RESPONSIBILITY MODEL",
@@ -218,8 +218,9 @@ def test_prompt_defines_paper_experiment_maturity_and_formal_lifecycle() -> None
 
     assert "only records experiments actually reported by the paper" in prompt
     assert "Do not create a PaperExperiment merely to create an object" in prompt
-    assert "When the research question is mature" in prompt
-    assert "complete Source -> PaperExperiment draft -> researcher review -> PaperExperiment revision -> Objective Selection -> comparison or Finding" in prompt
+    assert "When complete Source reads make a reusable paper-local" in prompt
+    assert "complete Source -> PaperExperiment draft -> researcher review -> PaperExperiment revision" in prompt
+    assert "later Objective analysis creates selections and cross-paper comparisons" in prompt
     assert "Future validation experiments are proposals, not PaperExperiment records" in prompt
     assert "propose the actual structured PaperExperiment draft" in prompt
 

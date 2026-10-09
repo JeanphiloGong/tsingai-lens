@@ -19,6 +19,13 @@ prepared Source
 Collection. An Objective selects experiment content through
 `ObjectiveExperimentSelection`.
 
+One Document may contain multiple independent `PaperExperiment` identities. A
+revision is always paper-local and source-bound. Cross-paper research is formed
+later from multiple Objective selections; multiple Documents are not merged into
+one PaperExperiment identity. A proposed new experiment informed by several
+papers belongs to the downstream ExperimentPlan, with its literature basis
+traceable through Findings and selections; it is not a paper-reported fact.
+
 ## Required invariants
 
 - `ExperimentalVariant` (called `SampleVariant` in the materials-science
@@ -68,13 +75,15 @@ Collection. An Objective selects experiment content through
 
 Agent maintenance uses a successful `propose_paper_experiment_draft` result as
 the review artifact, followed by exact approval of
-`create_paper_experiment_revision` with that draft ID and digest. A prose
-summary after a failed proposal is not a stored, reviewable experiment draft.
-Saving a reviewed draft must preserve its scientific content; changed or
-reduced content requires renewed review.
-The review digest also binds the source Objective analysis version. Publishing
-a successor analysis invalidates the earlier draft approval even when the
-paper Sources and scientific payload have not changed.
+`create_paper_experiment_revision` with that draft ID and digest. A confirmed
+Objective or published Objective analysis is not required to save paper-local
+facts. The write creates revisions only; it does not create Objective selections
+or publish an analysis. A later Objective analysis may select the fixed revisions
+from one or more papers for comparison. A prose summary after a failed proposal
+is not a stored, reviewable experiment draft. Saving a reviewed draft must
+preserve its scientific content; changed or reduced content requires renewed
+review. The review digest binds the current Source fingerprint and scientific
+payload and canonical Source content, not an Objective analysis version.
 
 Agent Finding inspection preserves the complete Finding and returns only as
 many complete Evidence records as fit the escaped tool-message token budget.
@@ -88,14 +97,26 @@ session. Before accepting a proposal, the capability compares every cited
 Source's current content digest with the session's complete reading records.
 Unread or changed Sources return exact locators for further reading. Reading
 one passage does not complete the other cited passages, and repairing a read
-or Objective prerequisite must not remove supported measurements or
+prerequisite must not remove supported measurements or
 comparisons from a requested complete experiment.
 
 Partial records remain valid archival input, but acceptance and persistence
 do not certify complete coverage. A revision with no measurements cannot
-produce an Objective Selection. Saving an experiment reports the actual
-contents and eligible Selection IDs; Finding publication remains a separate
-approved action.
+produce an Objective Selection. Source-only authoring reports the actual
+revision contents and returns no Selection IDs; a later Objective analysis
+decides whether any fixed revision slice is eligible. Finding publication
+remains a separate approved action.
+
+Automatic analysis checks stored revisions after Source screening and routing.
+It considers every latest experiment in the document, requiring current
+fingerprints and exact Source quotes, complete coverage of the routed bundle,
+known experiment boundaries, and eligible slices for the requested materials,
+variables, and outcomes. Omitted Sources, unresolved scientific issues, missing
+facts, and free-text constraints trigger fresh extraction. Reconciled boundary
+audit metadata is not an unresolved scientific issue. Reuse fixes existing
+revision IDs/versions and creates only the current Objective's selections and
+comparison results. Coverage refers to the routed Sources, not an exhaustive
+claim about the paper. New revisions never rewrite earlier selections.
 
 A measurement must supply a reported scalar `value` or qualitative
 `result_text`; the unused field may be omitted or null. Omitting both is

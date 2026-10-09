@@ -1,183 +1,165 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-from application.core.objectives.analysis.paper_experiment_reuse import (
-    PaperExperimentReadRequest,
-    PaperExperimentReuseService,
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentExtractionResult,
+    PaperExperimentSourceBundle,
 )
-from application.repositories.paper_experiment_repository import (
-    PaperExperimentRevisionConflictError,
-    StoredPaperExperimentRevision,
+from application.core.objectives.analysis.paper_experiment_reuse import reusable_paper_experiments
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.objective_analysis_service import ObjectiveExperimentAnalysisService
+from domain.core import PreparedDocumentInput
+from tests.unit.application.test_experiment_analysis_writer import (
+    _analysis, _draft_output, _objective, _physical_split_experiment, _writer,
 )
-from domain.core.paper_experiment import PaperExperimentRevision
-
-
-NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
-
 
 pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture
-def anyio_backend() -> str:
+def anyio_backend():
     return "asyncio"
 
 
-class MemoryPaperExperimentRepository:
-    def __init__(self) -> None:
-        self.records: list[StoredPaperExperimentRevision] = []
-        self.next_id = 1
-
-    async def add_revision(self, revision, *, created_by=None, created_at=None):
-        for record in self.records:
-            if (
-                record.revision.experiment_id == revision.experiment_id
-                and record.revision.experiment_version == revision.experiment_version
-            ):
-                if record.revision == revision:
-                    return record
-                raise PaperExperimentRevisionConflictError("conflicting revision")
-        record = StoredPaperExperimentRevision(
-            revision_id=self.next_id,
-            revision=revision,
-            created_at=created_at or NOW,
-            created_by=created_by,
-        )
-        self.next_id += 1
-        self.records.append(record)
-        return record
-
-    async def read_revision(self, experiment_id, experiment_version):
-        return next(
-            (
-                item
-                for item in self.records
-                if item.revision.experiment_id == experiment_id
-                and item.revision.experiment_version == experiment_version
-            ),
-            None,
-        )
-
-    async def read_revision_by_id(self, revision_id):
-        return next((item for item in self.records if item.revision_id == revision_id), None)
-
-    async def read_latest_revision(self, experiment_id):
-        records = [
-            item for item in self.records if item.revision.experiment_id == experiment_id
-        ]
-        return max(records, key=lambda item: item.revision.experiment_version, default=None)
-
-    async def list_latest_for_document(self, document_id):
-        records = [
-            item for item in self.records if item.revision.document_id == document_id
-        ]
-        latest: dict[str, StoredPaperExperimentRevision] = {}
-        for item in records:
-            current = latest.get(item.revision.experiment_id)
-            if current is None or item.revision.experiment_version > current.revision.experiment_version:
-                latest[item.revision.experiment_id] = item
-        return tuple(latest.values())
-
-
-def _revision(version: int = 1, *, outcome: str = "elongation") -> PaperExperimentRevision:
-    return PaperExperimentRevision.from_mapping(
-        {
-            "experiment_id": "exp-1",
-            "document_id": "paper-1",
-            "experiment_version": version,
-            "source_fingerprint": f"source-{version}",
-            "label": "Tensile series",
-            "scope_description": "Two variants",
-            "variants": [{"variant_key": "a", "variant_label": "A"}],
-            "measurements": [
-                {
-                    "measurement_key": "m1",
-                    "variant_key": "a",
-                    "outcome": outcome,
-                    "value": 72,
-                }
-            ],
-        }
+def _bundle(output):
+    return PaperExperimentSourceBundle(
+        document_id=output.output.document_id,
+        source_fingerprint=output.output.source_fingerprint,
+        source_catalog=output.output.source_labels,
+        prompt_sources=tuple({"source_label": label} for label in output.output.source_labels),
     )
 
 
-@pytest.mark.anyio
-async def test_reuses_existing_revision_when_requested_content_is_present():
-    repository = MemoryPaperExperimentRepository()
-    original = await repository.add_revision(_revision())
-    service = PaperExperimentReuseService(repository)
-    called = False
+async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_comparison(monkeypatch):
+    import application.core.objectives.objective_analysis_service as service_module
 
-    def fail_builder(_existing, _version):
-        nonlocal called
-        called = True
-        raise AssertionError("a sufficient revision must not be rebuilt")
-
-    result = await service.read_or_reread(
-        PaperExperimentReadRequest("paper-1", outcomes=("elongation",)),
-        build_revision=fail_builder,
+    writer, repository, graphs = _writer()
+    outputs = (
+        _physical_split_experiment("paper-a", distinct_boundary=True),
+        _draft_output("paper-b"),
     )
-
-    assert result.stored == original
-    assert result.created_revision is False
-    assert called is False
-
-
-@pytest.mark.anyio
-async def test_missing_context_creates_same_identity_successor_and_keeps_old_revision():
-    repository = MemoryPaperExperimentRepository()
-    original = await repository.add_revision(_revision())
-    service = PaperExperimentReuseService(repository)
-
-    def reread(existing, version):
-        assert existing is not None
-        assert existing.revision.experiment_id == "exp-1"
-        return PaperExperimentRevision.from_mapping(
-            {
-                **_revision(version).to_record(),
-                "source_fingerprint": "source-with-methods",
-                "test_conditions": [
-                    {
-                        "test_key": "tensile",
-                        "test_type": "tensile",
-                        "parameters": [{"name": "temperature", "value": 293, "unit": "K"}],
-                    }
-                ],
-            }
-        )
-
-    result = await service.read_or_reread(
-        PaperExperimentReadRequest(
-            "paper-1",
-            outcomes=("elongation",),
-            required_context_names=("temperature",),
-        ),
-        build_revision=reread,
+    outputs = tuple(replace(output, output=replace(output.output, source_labels={
+        label: {**source, "source_kind": "text_window" if source["source_kind"] == "section" else source["source_kind"]}
+        for label, source in output.output.source_labels.items()
+    })) for output in outputs)
+    saved = await writer.write_paper_experiment_revisions(
+        experiment_outputs=outputs, transaction=object(), created_by="researcher",
     )
+    assert len(saved.revisions) == 3
+    assert saved.selections == saved.findings == ()
+    assert graphs.graphs == []
+    fixed_revisions = tuple(item.revision for item in saved.revisions)
+    bundles = {output.output.document_id: _bundle(output) for output in outputs}
+    analysis = replace(_analysis(), document_inputs=tuple(
+        PreparedDocumentInput(document_id=key, preparation_fingerprint=value.source_fingerprint)
+        for key, value in bundles.items()
+    ))
+    objective = replace(_objective(), active_analysis_version=analysis.analysis_version)
+    objective_repository = SimpleNamespace(read_objective=AsyncMock(return_value=objective))
+    extractor = SimpleNamespace(extract=lambda **kwargs: pytest.fail("sufficient stored facts must be reused"))
+    service = ObjectiveExperimentAnalysisService(
+        collection_service=object(), paper_map_repository=object(),
+        objective_repository=objective_repository,
+        objective_input_service=SimpleNamespace(response_client=SimpleNamespace(model="test-model")),
+        objective_source_screener=object(), paper_experiment_extractor=extractor,
+        paper_experiment_repository=repository,
+    )
+    inputs = {
+        "documents": tuple(SimpleNamespace(document_id=key) for key in bundles),
+        "paper_maps": tuple(SimpleNamespace(document_id=key) for key in bundles),
+        **{name: {key: () for key in bundles} for name in (
+            "blocks_by_document_id", "tables_by_document_id", "figures_by_document_id",
+            "table_cells_by_document_id", "profiles_by_document_id", "document_trees_by_document_id",
+        )},
+    }
+    service._build_objective_analysis_inputs = AsyncMock(return_value=inputs)
 
-    assert result.created_revision is True
-    assert result.reread_required is True
-    assert result.stored.revision.experiment_id == original.revision.experiment_id
-    assert result.stored.revision.experiment_version == 2
-    assert (await repository.read_revision("exp-1", 1)).revision == original.revision
+    def screen(**kwargs):
+        return tuple(PaperAnalysisFrame.from_mapping({
+            "objective_id": objective.objective_id, "document_id": item.document_id,
+            "relevance": "high", "paper_role": "primary_experiment",
+            "material_match": ["316L"], "changed_variables": ["preheat"],
+            "measured_property_scope": ["elongation"],
+        }) for item in kwargs["documents"])
+
+    def route(**kwargs):
+        document_id = kwargs["objective_paper_frames"][0].document_id
+        return tuple(SimpleNamespace(**source, extractable=True)
+                     for source in bundles[document_id].source_catalog.values())
+
+    monkeypatch.setattr(service_module, "screen_sources", screen)
+    monkeypatch.setattr(service_module, "route_sources", route)
+    monkeypatch.setattr(service_module, "build_bundle_from_routes", lambda **kwargs: bundles[kwargs["document_id"]])
+    artifacts = await service.generate_experiment_analysis_artifacts("collection-1", analysis)
+    assert artifacts.experiment_outputs == ()
+    assert len(artifacts.reused_revisions) == 3
+    assert set(artifacts.extraction_statuses.values()) == {"reused"}
+    assert all(item.extracted_source_count == item.routed_source_count for item in artifacts.contributions)
+    assert all(item.uninspected_source_count == 0 for item in artifacts.contributions)
+    first = await writer.write_experiment_analysis(
+        collection_id="collection-1", objective=objective, analysis=analysis,
+        experiment_outputs=(), reused_revisions=artifacts.reused_revisions,
+    )
+    assert len(first.selections) == 3
+    assert first.groups
+    assert first.findings
+    experiment_documents = {item.revision.experiment_id: item.revision.document_id for item in first.revisions}
+    selection_documents = {item.selection_id: experiment_documents[item.experiment_id] for item in first.selections}
+    assert any(len({selection_documents[member.selection_id] for member in group.members}) == 2 for group in first.groups)
+    other_objective = replace(objective, objective_id="objective-2")
+    second = await writer.write_experiment_analysis(
+        collection_id="collection-1", objective=other_objective,
+        analysis=replace(analysis, objective_id="objective-2"),
+        experiment_outputs=(), reused_revisions=artifacts.reused_revisions,
+    )
+    assert {item.experiment_id for item in first.selections} == {item.experiment_id for item in second.selections}
+    assert all(item.objective_id == "objective-2" for item in second.selections)
+    await writer.write_paper_experiment_revisions(
+        experiment_outputs=(_draft_output("paper-b", source_fingerprint="updated-source"),),
+        transaction=object(),
+    )
+    assert tuple(item.revision for item in first.revisions) == fixed_revisions
+    assert all(item.experiment_version == 1 for item in first.selections)
 
 
-@pytest.mark.anyio
-async def test_reread_cannot_switch_experiment_identity():
-    repository = MemoryPaperExperimentRepository()
-    await repository.add_revision(_revision())
-    service = PaperExperimentReuseService(repository)
-
-    def wrong_identity(_existing, version):
-        return PaperExperimentRevision.from_mapping(
-            {**_revision(version).to_record(), "experiment_id": "other"}
+@pytest.mark.parametrize("change", [
+    "fingerprint", "quote", "missing_source", "omitted_source", "outcome",
+    "variable", "material", "constraint", "archived", "boundary", "conflict",
+])
+async def test_insufficient_or_stale_facts_require_extraction(change):
+    writer, _, _ = _writer()
+    output = _draft_output("paper-a")
+    saved = await writer.write_paper_experiment_revisions(experiment_outputs=(output,), transaction=object())
+    candidates = saved.revisions
+    bundle = _bundle(output)
+    objective = _objective()
+    assert reusable_paper_experiments(candidates, objective=objective, bundle=bundle)
+    if change == "fingerprint":
+        bundle = replace(bundle, source_fingerprint="changed")
+    elif change == "quote":
+        bundle = replace(bundle, source_catalog={key: {**source, "quote": "changed"} for key, source in bundle.source_catalog.items()})
+    elif change == "missing_source":
+        bundle = replace(bundle,
+            source_catalog={**bundle.source_catalog, "extra": {"source_kind": "block", "source_ref": "new", "quote": "new"}},
+            prompt_sources=(*bundle.prompt_sources, {"source_label": "extra"}),
         )
-
-    with pytest.raises(ValueError, match="preserve experiment identity"):
-        await service.read_or_reread(
-            PaperExperimentReadRequest("paper-1", outcomes=("missing",)),
-            build_revision=wrong_identity,
-        )
+    elif change == "omitted_source":
+        bundle = replace(bundle, omitted_source_refs=("unread",))
+    elif change in {"outcome", "variable", "material", "constraint"}:
+        field = {"outcome": "outcomes", "variable": "variables", "material": "material_scope", "constraint": "constraints"}[change]
+        objective = replace(objective, **{field: ("unreported requirement",)})
+    elif change == "archived":
+        candidates = (replace(candidates[0], archived_at=datetime.now(timezone.utc)),)
+    else:
+        revision = replace(candidates[0].revision, **(
+            {"identity_status": "unknown"} if change == "boundary" else
+            {"unresolved_issues": ({"description": "conflicting reports"},)}
+        ))
+        candidates = (replace(candidates[0], revision=revision),)
+    assert reusable_paper_experiments(candidates, objective=objective, bundle=bundle) == ()

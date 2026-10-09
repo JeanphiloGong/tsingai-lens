@@ -803,8 +803,9 @@ approval. The production Research Agent currently exposes these capabilities:
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
 - `propose_paper_experiment_draft` is a `draft` capability for Agent-authored
-  reconstruction of one paper's reusable experiment record. The Agent must
-  first read complete canonical Sources and may submit only response-local
+  reconstruction of one paper's reusable experiment record. It does not require
+  a confirmed Objective or a published Objective analysis. The Agent must first
+  read complete canonical Sources and may submit only response-local
   scientific keys plus supplied Source labels. Lens reloads the prepared
   document, resolves the authoritative Source catalog and fingerprint, and
   rejects Lens-owned IDs, versions, ownership fields, and validation status in
@@ -833,11 +834,12 @@ approval. The production Research Agent currently exposes these capabilities:
   fields, SourceReference objects, and analysis ownership remain service-owned;
 - `create_paper_experiment_revision` is a separate `write` capability for an
   approved, unchanged PaperExperiment draft. Lens revalidates the draft digest,
-  confirmed Objective, active analysis, current Source fingerprint, and user
-  ownership, then calls the canonical single-experiment writer. The immutable
-  PaperExperiment revision and its Objective Selection are committed through
-  the same atomic graph repository as automatic analysis. It does not create a
-  Finding; a Finding remains a separate Evidence/Selection-backed write;
+  current Source fingerprint, and user ownership, then calls the canonical
+  paper-revision writer. The immutable PaperExperiment revisions are committed
+  atomically without starting or publishing Objective analysis and without
+  creating an Objective Selection. A later Objective analysis may select one or
+  more fixed revisions for comparison. It does not create a Finding; a Finding
+  remains a separate Evidence/Selection-backed write;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work;
@@ -1098,15 +1100,18 @@ newer version. The analysis command and analysis-status route share this
 response contract.
 
 PaperContribution is analysis-level coverage metadata, not a PaperExperiment
-field or scientific evidence for a Finding. Finding and experiment authoring
+field or scientific evidence for a Finding. Finding authoring
 copy the source analysis coverage into the new version, including excluded and
 failed papers with no experiment revision. This preserves the original input
 processing record; it does not assert that every paper supports the new Finding.
 The metadata is saved in the same publication transaction as the experiment
 graph. Finding synthesis consumes only fixed experiment revisions and their
 Selections and ComparisonGroups; it never consumes PaperContribution.
-Authored experiment graph snapshots retain the source analysis version and
-user identity; Agent publication also retains the committing tool-call ID.
+Authored Finding graph snapshots retain the source analysis version and user
+identity. PaperExperiment authoring saves paper facts independently and creates
+no analysis snapshot or copied coverage. A later automatic analysis may reuse
+current fixed revisions after validating the routed Source coverage and the
+Objective's required facts; otherwise it extracts new revisions.
 
 Each analysis-level contribution exposes `evidence_disposition`,
 `routed_source_count`, `extracted_source_count`,
@@ -1279,9 +1284,11 @@ Evidence remains available through read-only projections for historical analyses
 and source traceback. New researcher and Agent writes use the reviewed
 PaperExperiment draft and the approved `create_paper_experiment_revision`
 capability; that write validates the complete Source digest, creates an
-immutable revision and Objective Selection, and does not create a Finding.
-Historical Evidence records remain readable, but no new Evidence version or
-independent Evidence identity can be created through the browser or Agent.
+immutable paper-local revision, and does not start or publish Objective
+analysis, create an Objective Selection, or create a Finding. A later Objective
+analysis may select the fixed revision for comparison. Historical Evidence
+records remain readable, but no new Evidence version or independent Evidence
+identity can be created through the browser or Agent.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns

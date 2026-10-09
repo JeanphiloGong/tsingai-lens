@@ -776,16 +776,11 @@ def _recompute_comparison_direction(
 
 def prepare_model_output(
     output: PaperExperimentModelOutput,
-    *,
-    objective: ResearchObjective,
 ) -> ReconciledPaperExperimentOutput:
-    """Validate a response-local graph and derive service-owned candidates."""
+    """Validate paper facts; Objective readiness is assessed separately."""
 
     if not isinstance(output, PaperExperimentModelOutput):
         raise TypeError("prepare_model_output requires PaperExperimentModelOutput")
-    if not isinstance(objective, ResearchObjective):
-        raise TypeError("prepare_model_output requires ResearchObjective")
-
     catalog = set(output.source_labels)
     prepared: list[PaperExperimentDraft] = []
     accepted: list[str] = []

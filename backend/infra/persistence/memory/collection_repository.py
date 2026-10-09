@@ -57,6 +57,15 @@ class MemoryCollectionRepository:
     async def read_collection(self, collection_id: str) -> StoredCollection | None:
         return self._collections.get(collection_id)
 
+    async def collection_belongs_to_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> bool:
+        collection = self._collections.get(collection_id)
+        return (
+            collection is not None
+            and collection.collection.owner_user_id == owner_user_id
+        )
+
     async def read_document(
         self,
         collection_id: str,

@@ -223,15 +223,15 @@ class ChatSessionService:
     async def create_session(
         self, *, collection_id: str, user_id: str
     ) -> ChatSession:
-        collection = await self.collection_service.get_collection_for_user(
-            collection_id,
-            user_id,
-        )
+        if not await self.collection_service.collection_belongs_to_user(
+            collection_id, user_id
+        ):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
         now = _now_iso()
         session = ChatSession.create(
             session_id=f"chat_{uuid4().hex[:16]}",
             user_id=user_id,
-            collection_id=str(collection["collection_id"]),
+            collection_id=collection_id,
             created_at=now,
         )
         # Collection settings are defaults for newly created conversations. A
@@ -304,9 +304,10 @@ class ChatSessionService:
         session = await self.repository.read_session(session_id)
         if session is None or session.user_id != user_id:
             raise ChatSessionNotFoundError(session_id)
-        await self.collection_service.get_collection_for_user(
+        if not await self.collection_service.collection_belongs_to_user(
             session.collection_id, user_id
-        )
+        ):
+            raise ChatSessionNotFoundError(session_id)
         return session
 
     async def list_sessions_for_user(
@@ -317,7 +318,10 @@ class ChatSessionService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[ChatSessionSummary, ...]:
-        await self.collection_service.get_collection_for_user(collection_id, user_id)
+        if not await self.collection_service.collection_belongs_to_user(
+            collection_id, user_id
+        ):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
         return await self.repository.list_sessions(
             user_id=user_id,
             collection_id=collection_id,

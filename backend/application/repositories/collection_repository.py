@@ -56,6 +56,10 @@ class CollectionRepository(Protocol):
 
     async def read_collection(self, collection_id: str) -> StoredCollection | None: ...
 
+    async def collection_belongs_to_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> bool: ...
+
     async def read_document(
         self,
         collection_id: str,

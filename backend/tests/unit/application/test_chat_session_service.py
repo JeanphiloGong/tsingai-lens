@@ -82,11 +82,22 @@ class _WriteCapability:
 
 
 class _CollectionService:
+    def __init__(self) -> None:
+        self.full_reads = 0
+
+    async def collection_belongs_to_user(
+        self,
+        collection_id: str,
+        user_id: str,
+    ) -> bool:
+        return collection_id == "col-1" and user_id == "user-1"
+
     async def get_collection_for_user(
         self,
         collection_id: str,
         user_id: str,
     ) -> dict:
+        self.full_reads += 1
         if collection_id != "col-1" or user_id != "user-1":
             raise FileNotFoundError("collection not found")
         return {"collection_id": collection_id, "owner_user_id": user_id}
@@ -287,6 +298,17 @@ async def test_chat_session_service_persists_ordinary_conversation() -> None:
     assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
     with pytest.raises(ChatSessionNotFoundError):
         await service.get_session_for_user(session.session_id, "user-2")
+
+
+async def test_chat_session_access_uses_collection_owner_probe() -> None:
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="answer")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+
+    await service.get_session_for_user(session.session_id, "user-1")
+    await service.list_sessions_for_user(collection_id="col-1", user_id="user-1")
+
+    assert service.collection_service.full_reads == 0
 
 
 class _FailingAnalysisJobs:

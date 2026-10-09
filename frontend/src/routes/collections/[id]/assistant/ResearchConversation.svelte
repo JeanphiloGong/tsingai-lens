@@ -330,7 +330,7 @@
 		]);
 	}
 
-	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
+	async function fetchServerHistory(generation: number, ownerCollectionId: string) {
 		const historyRequest = ++historyGeneration;
 		try {
 			const response = await listChatSessions(ownerCollectionId, {
@@ -341,37 +341,51 @@
 				!isCurrentSession(generation, ownerCollectionId) ||
 				historyRequest !== historyGeneration
 			)
-				return;
-			const stored = readHistory();
-			// The list is a navigation index. Do not download every trajectory just
-			// to derive sidebar titles; a trajectory is loaded when selected.
-			const serverHistory = response.items.map((item) => {
-				const previous = stored.find((entry) => entry.session_id === item.session_id);
-				const status: ChatSessionActivity =
-					item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
-				const title =
-					item.session_id === session?.session_id && messages.length
-						? titleFromMessages(messages)
-						: item.title?.trim()
-							? titleFromText(item.title)
-							: previous?.title || $t('researchAgent.untitledSession');
-				return {
-					session_id: item.session_id,
-					title,
-					created_at: item.created_at,
-					updated_at: item.updated_at,
-					status
-				};
-			});
-			if (!isCurrentSession(generation, ownerCollectionId)) return;
-			sessionActivities = {
-				...sessionActivities,
-				...Object.fromEntries(serverHistory.map((item) => [item.session_id, item.status]))
-			};
-			writeHistory(serverHistory);
+				return null;
+			return response.items;
 		} catch {
 			// The existing local history remains usable when the list request is unavailable.
+			return null;
 		}
+	}
+
+	function applyServerHistory(
+		items: ChatSession[],
+		generation: number,
+		ownerCollectionId: string
+	) {
+		if (!isCurrentSession(generation, ownerCollectionId)) return;
+		const stored = readHistory();
+		// The list is a navigation index. Do not download every trajectory just
+		// to derive sidebar titles; a trajectory is loaded when selected.
+		const serverHistory = items.map((item) => {
+			const previous = stored.find((entry) => entry.session_id === item.session_id);
+			const status: ChatSessionActivity =
+				item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
+			const title =
+				item.session_id === session?.session_id && messages.length
+					? titleFromMessages(messages)
+					: item.title?.trim()
+						? titleFromText(item.title)
+						: previous?.title || $t('researchAgent.untitledSession');
+			return {
+				session_id: item.session_id,
+				title,
+				created_at: item.created_at,
+				updated_at: item.updated_at,
+				status
+			};
+		});
+		sessionActivities = {
+			...sessionActivities,
+			...Object.fromEntries(serverHistory.map((item) => [item.session_id, item.status]))
+		};
+		writeHistory(serverHistory);
+	}
+
+	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
+		const items = await fetchServerHistory(generation, ownerCollectionId);
+		if (items) applyServerHistory(items, generation, ownerCollectionId);
 	}
 
 	async function refreshHistoryActivities(refreshIndex = true) {
@@ -473,10 +487,14 @@
 		loading = true;
 		pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId);
 		history = readHistory();
+		// The history endpoint is an independent navigation index. Start it with
+		// session recovery so the page does not wait for a serial request waterfall.
+		const initialHistoryPromise = fetchServerHistory(generation, activeCollectionId);
 
 		try {
 			const storedSessionId = requestedSessionId || readStoredSessionId();
 			let nextSession: ChatSession | null = null;
+			let createdSession = false;
 			if (storedSessionId) {
 				try {
 					nextSession = await fetchChatSession(storedSessionId, controller.signal);
@@ -495,6 +513,7 @@
 			if (nextSession === null) {
 				nextSession = await createChatSession(activeCollectionId, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
+				createdSession = true;
 				messages = [];
 			} else {
 				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
@@ -516,7 +535,10 @@
 			onSourcesChanged();
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
-			await refreshServerHistory(generation, activeCollectionId);
+			const initialHistory = await initialHistoryPromise;
+			if (initialHistory) applyServerHistory(initialHistory, generation, activeCollectionId);
+			if (createdSession && isCurrentSession(generation, activeCollectionId))
+				upsertHistory(nextSession);
 			scheduleRecovery();
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;

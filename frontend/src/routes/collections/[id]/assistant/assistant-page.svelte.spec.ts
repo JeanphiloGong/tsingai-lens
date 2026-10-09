@@ -726,6 +726,35 @@ describe('collections/[id]/assistant Research Agent', () => {
 		}
 	);
 
+	it.each([false, true])(
+		'keeps a newly created session when parallel history arrives first (embedded=%s)',
+		async (embedded) => {
+			installApi();
+			const original = fetchMock.getMockImplementation()!;
+			let finishCreation: ((response: Response) => void) | undefined;
+			let historyRequested = false;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input) === '/api/v1/chat-sessions') {
+					if (requestMethod(input, init) === 'GET') {
+						historyRequested = true;
+						return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
+					}
+					if (requestMethod(input, init) === 'POST') {
+						return new Promise<Response>((resolve) => { finishCreation = resolve; });
+					}
+				}
+				return original(input, init);
+			});
+			render(Conversation, { embedded });
+			await vi.waitFor(() => expect(finishCreation).toBeTypeOf('function'));
+			expect(historyRequested).toBe(true);
+			finishCreation!(jsonResponse(session, 201));
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!))
+				.toEqual([expect.objectContaining({ session_id: session.session_id })]);
+		}
+	);
+
 	it('removes server-deleted conversations from cached history', async () => {
 		const deleted = { ...session, session_id: 'chat_deleted', title: 'Deleted comparison' };
 		localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify([deleted]));
@@ -1578,7 +1607,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			});
 			render(Page);
 			await vi.waitFor(() =>
-				expect(fetchMock).toHaveBeenCalledTimes(stage === 'trajectory' ? 2 : 1)
+				expect(fetchMock).toHaveBeenCalledTimes(stage === 'trajectory' ? 3 : 2)
 			);
 			setPage({
 				params: { id: 'col_456' },

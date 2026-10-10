@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -396,6 +396,7 @@ class ChatSessionService:
     ) -> ChatSession:
         session = await self.get_session_for_user(session_id, user_id)
         async with self.repository.session_execution(session_id):
+            await self._recover_orphaned_tool_calls(session)
             messages = await self.repository.read_messages(session_id)
             position = next((index for index, item in enumerate(messages)
                              if item.message_id == message_id and item.role.value == "user"), None)
@@ -661,6 +662,7 @@ class ChatSessionService:
             session, source_contexts
         )
         async with self.repository.session_execution(session_id):
+            await self._recover_orphaned_tool_calls(session)
             previous_messages = await self.repository.read_messages(session_id)
             if branch_revision and len(previous_messages) != session.fork_position:
                 raise ChatBranchAlreadyStartedError("this revision has already been sent")
@@ -730,6 +732,7 @@ class ChatSessionService:
             async def run_turn() -> None:
                 try:
                     async with self.repository.session_execution(session_id):
+                        await self._recover_orphaned_tool_calls(session)
                         current_messages = await self.repository.read_messages(session_id)
                         if branch_revision and len(current_messages) != session.fork_position:
                             raise ChatBranchAlreadyStartedError("this revision has already been sent")
@@ -953,18 +956,38 @@ class ChatSessionService:
         self, session: ChatSession, *, previous_messages: tuple[ChatMessage, ...],
         message: str | None = None, source_contexts: tuple[ChatSourceContext, ...] = (),
         claimed_call: ChatToolCall | None = None,
+        rejected_call: ChatToolCall | None = None,
+        rejected_result: ChatToolResult | None = None,
+        continuation_calls: tuple[ChatToolCall, ...] = (),
+        continuation_results: tuple[ChatToolResult, ...] = (),
+        continuation_progress: Mapping[str, Any] | None = None,
         emit: Callable[[dict[str, Any]], None] | None = None,
         permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
     ) -> AgentRunResult:
         # The caller holds the execution lock through the final snapshot write.
         loop = asyncio.get_running_loop()
-        started_at = loop.time()
-        now = _now_iso()
+        prior_snapshot = None
+        if claimed_call is not None or rejected_call is not None:
+            prior_snapshot = await self.repository.read_response_snapshot(session.session_id)
+            if continuation_progress is None:
+                continuation_progress = prior_snapshot.progress if prior_snapshot is not None else None
+        elapsed_ms = 0
+        if continuation_progress is not None:
+            value = continuation_progress.get("elapsed_ms")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                elapsed_ms = max(0, int(value))
+        started_at = loop.time() - elapsed_ms / 1000.0
+        now = prior_snapshot.started_at if prior_snapshot is not None else _now_iso()
+        inherited_progress = dict(continuation_progress or {})
+        inherited_progress.update({
+            "phase": "waiting",
+            "elapsed_ms": elapsed_ms,
+        })
         snapshot = ChatResponseSnapshot(
             response_id=f"response_{uuid4().hex}", sequence=0,
             started_at=now, updated_at=now,
             checkpoint_message_id=previous_messages[-1].message_id if previous_messages else None,
-            progress={"phase": "waiting", "cycle_index": 0, "elapsed_ms": 0},
+            progress=inherited_progress,
         )
         saved_sequence = -1
         snapshot_lock = asyncio.Lock()
@@ -1043,8 +1066,22 @@ class ChatSessionService:
                 "response_started_callback": start_response,
                 "model_call_observer": self.model_call_observer,
             }
-            if claimed_call is not None:
-                result = await self.runner.resume_claimed_call(**arguments, claimed_call=claimed_call)
+            if rejected_call is not None and rejected_result is not None:
+                result = await self.runner.resume_after_tool_result(
+                    **arguments,
+                    calls=continuation_calls,
+                    results=continuation_results,
+                    tool_call=rejected_call,
+                    tool_result=rejected_result,
+                    continuation_progress=continuation_progress,
+                    permission_mode=permission_mode,
+                )
+            elif claimed_call is not None:
+                result = await self.runner.resume_claimed_call(
+                    **arguments,
+                    claimed_call=claimed_call,
+                    continuation_progress=continuation_progress,
+                )
             else:
                 result = await self.runner.run_turn(
                     **arguments,
@@ -1076,23 +1113,23 @@ class ChatSessionService:
                             "No research record was changed."
                         ),
                     )
-                    messages = (*result.messages, ChatMessage.from_tool_result(
-                        message_id=f"msg_{uuid4().hex}",
-                        session_id=session.session_id,
-                        result=observation,
-                        created_at=_now_iso(),
-                    ))
-                    await arguments["checkpoint"](messages, (denied,), (observation,))
-                    result = replace(
-                        result,
-                        status=AgentRunStatus.FAILED,
-                        messages=messages,
-                        pending_approval=None,
-                        error_code="permission_write_denied",
-                        tool_calls=(*result.tool_calls[:-1], denied),
-                        tool_results=(*result.tool_results, observation),
+                    result = await self.runner.resume_after_tool_result(
+                        **{**arguments, "previous_messages": result.messages},
+                        calls=tuple(result.tool_calls[:-1]) + (denied,),
+                        results=tuple(result.tool_results),
+                        tool_call=denied,
+                        tool_result=observation,
+                        continuation_progress=snapshot.progress,
+                        permission_mode=ToolPermissionMode.READ_ONLY,
                     )
-                    break
+                    if result.status is AgentRunStatus.FAILED and result.error_code not in {
+                        "permission_write_denied", "tool_permission_denied",
+                    }:
+                        # A revoked write permission is the blocking event. A
+                        # model failure while explaining that denial must not
+                        # replace the user-visible cause with a provider error.
+                        result = replace(result, error_code="permission_write_denied")
+                    continue
                 automatic = await self.repository.claim_automatic_call(
                     session_id=session.session_id,
                     tool_call_id=pending.tool_call_id,
@@ -1103,7 +1140,9 @@ class ChatSessionService:
                     break
                 arguments["previous_messages"] = result.messages
                 result = await self.runner.resume_claimed_call(
-                    **arguments, claimed_call=automatic
+                    **arguments,
+                    claimed_call=automatic,
+                    continuation_progress=snapshot.progress,
                 )
             update_snapshot(
                 status=result.status.value, message_id=None, message_created_at=None, content="",
@@ -1118,6 +1157,52 @@ class ChatSessionService:
             })
             return result
         except BaseException:
+            try:
+                aborted = await self.repository.abort_running_tool_calls(
+                    session_id=session.session_id,
+                    error_code="chat_response_interrupted",
+                    finished_at=_now_iso(),
+                )
+                if aborted:
+                    messages = list(await self.repository.read_messages(session.session_id))
+                    results = []
+                    for call in aborted:
+                        result = ChatToolResult(
+                            tool_call_id=call.tool_call_id,
+                            status=ToolResultStatus.FAILED,
+                            error_code="chat_response_interrupted",
+                            error_message="The research action was interrupted before it finished.",
+                        )
+                        results.append(result)
+                        messages.append(ChatMessage.from_tool_result(
+                            message_id=f"msg_{uuid4().hex}",
+                            session_id=session.session_id,
+                            result=result,
+                            created_at=_now_iso(),
+                        ))
+                    await self.repository.save_trajectory(
+                        session=session.update(
+                            user_id=session.user_id,
+                            collection_id=session.collection_id,
+                            updated_at=messages[-1].created_at,
+                        ),
+                        messages=tuple(messages),
+                        tool_calls=aborted,
+                        tool_results=tuple(results),
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to abort interrupted chat tool calls session_id=%s", session.session_id)
+            plan = snapshot.progress.get("execution_plan")
+            if isinstance(plan, Mapping):
+                snapshot_progress = {
+                    **snapshot.progress,
+                    "execution_plan": {
+                        **dict(plan),
+                        "status": "technical_failure",
+                        "blocking_reason": "chat_response_interrupted",
+                    },
+                }
+                update_snapshot(progress=snapshot_progress)
             update_snapshot(status="interrupted", error_code="chat_response_interrupted")
             raise
         finally:
@@ -1135,6 +1220,72 @@ class ChatSessionService:
                     ToolCallStatus.SUCCEEDED, ToolCallStatus.FAILED, ToolCallStatus.REJECTED,
                 }:
                     raise ChatSessionBusyError()
+
+    async def _recover_orphaned_tool_calls(self, session: ChatSession) -> None:
+        """Turn durable RUNNING calls left by a dead worker into observations."""
+        aborted = await self.repository.abort_running_tool_calls(
+            session_id=session.session_id,
+            error_code="chat_response_interrupted",
+            finished_at=_now_iso(),
+        )
+        if not aborted:
+            return
+        messages = list(await self.repository.read_messages(session.session_id))
+        existing_results = {
+            message.tool_call_id
+            for message in messages
+            if message.tool_result is not None
+        }
+        results: list[ChatToolResult] = []
+        for call in aborted:
+            if call.tool_call_id in existing_results:
+                continue
+            result = ChatToolResult(
+                tool_call_id=call.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="chat_response_interrupted",
+                error_message="The previous research action was interrupted before it finished.",
+            )
+            results.append(result)
+            messages.append(ChatMessage.from_tool_result(
+                message_id=f"msg_{uuid4().hex}",
+                session_id=session.session_id,
+                result=result,
+                created_at=_now_iso(),
+            ))
+        if results:
+            await self.repository.save_trajectory(
+                session=session.update(
+                    user_id=session.user_id,
+                    collection_id=session.collection_id,
+                    updated_at=messages[-1].created_at,
+                ),
+                messages=tuple(messages),
+                tool_calls=aborted,
+                tool_results=tuple(results),
+            )
+        snapshot = await self.repository.read_response_snapshot(session.session_id)
+        if snapshot is None:
+            return
+        plan = snapshot.progress.get("execution_plan")
+        progress = dict(snapshot.progress)
+        if isinstance(plan, Mapping):
+            progress["execution_plan"] = {
+                **dict(plan),
+                "status": "technical_failure",
+                "blocking_reason": "chat_response_interrupted",
+            }
+        await self.repository.save_response_snapshot(
+            session.session_id,
+            replace(
+                snapshot,
+                sequence=snapshot.sequence + 1,
+                updated_at=_now_iso(),
+                status="interrupted",
+                progress=progress,
+                error_code="chat_response_interrupted",
+            ),
+        )
 
     async def _branch_source_contexts(
         self, session: ChatSession, message: str,
@@ -1274,34 +1425,28 @@ class ChatSessionService:
         )
         previous_messages = await self.repository.read_messages(session_id)
         if decided.status is ToolCallStatus.REJECTED:
-            result = ChatToolResult(
+            observation = ChatToolResult(
                 tool_call_id=decided.tool_call_id,
                 status=ToolResultStatus.FAILED,
                 error_code="user_rejected",
                 error_message="The user rejected this research action.",
             )
-            result_message = ChatMessage.from_tool_result(
-                message_id=f"msg_{uuid4().hex[:16]}",
-                session_id=session_id,
-                result=result,
-                created_at=_now_iso(),
-            )
-            updated_session = session.update(
-                user_id=user_id,
-                collection_id=session.collection_id,
-                updated_at=result_message.created_at,
-            )
-            await self.repository.save_trajectory(
-                session=updated_session,
-                messages=(*previous_messages, result_message),
-                tool_calls=(decided,),
-                tool_results=(result,),
-            )
-            return {
-                "status": "rejected",
-                "messages": (result_message,),
-                "pending_approval": None,
-            }
+            prior_snapshot = await self.repository.read_response_snapshot(session_id)
+            async with self.repository.session_execution(session_id):
+                run_result = await self._run_response(
+                    session,
+                    previous_messages=previous_messages,
+                    rejected_call=decided,
+                    rejected_result=observation,
+                    continuation_calls=(decided,),
+                    continuation_progress=(prior_snapshot.progress if prior_snapshot else None),
+                )
+                if await self._enqueue_tool_failure_candidates(session, result=run_result) is False:
+                    run_result = replace(
+                        run_result,
+                        warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
+                    )
+            return self._turn_record(run_result, previous_count=len(previous_messages))
 
         async with self.repository.session_execution(session_id):
             claimed = await self.repository.claim_approved_tool_call(

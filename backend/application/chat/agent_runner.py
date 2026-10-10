@@ -395,6 +395,7 @@ class _RunProgress:
     response_message_id: str = ""
     response_created_at: str = ""
     started_at: float = field(default_factory=lambda: monotonic())
+    restored_elapsed_seconds: float = 0.0
     model_cycles: int = 0
     model_tokens: int = 0
     prompt_tokens: int = 0
@@ -441,11 +442,42 @@ class _RunProgress:
             self.response_started_callback(self.response_message_id, self.response_created_at)
 
     def remaining_seconds(self) -> float:
-        if self.limits.max_elapsed_seconds is None:
+        if self.limits.max_elapsed_seconds is None and self.restored_elapsed_seconds <= 0:
             return self.limits.max_request_seconds
-        return min(self.limits.max_request_seconds, max(
-            0.0, self.limits.max_elapsed_seconds - (monotonic() - self.started_at),
-        ))
+        elapsed = self.restored_elapsed_seconds + max(0.0, monotonic() - self.started_at)
+        request_remaining = self.limits.max_request_seconds - elapsed
+        if self.limits.max_elapsed_seconds is None:
+            return max(0.0, request_remaining)
+        return min(
+            max(0.0, request_remaining),
+            max(0.0, self.limits.max_elapsed_seconds - elapsed),
+        )
+
+    def restore_persisted_progress(self, payload: Mapping[str, Any] | None) -> None:
+        """Continue one research request with its persisted runtime budget."""
+        if not payload:
+            return
+        def number(name: str, default: float = 0.0) -> float:
+            value = payload.get(name, default)
+            return value if isinstance(value, (int, float)) and not isinstance(value, bool) else default
+
+        elapsed_ms = max(0.0, number("elapsed_ms"))
+        self.started_at = monotonic()
+        self.restored_elapsed_seconds = elapsed_ms / 1000.0
+        for name in (
+            "model_cycles", "model_tokens", "prompt_tokens", "completion_tokens",
+            "unreported_model_calls",
+        ):
+            setattr(self, name, max(0, int(number(name))))
+        # Progress snapshots use the public trace field names, while the
+        # runner keeps separate internal counter names. Restore the latter
+        # explicitly so an approval continuation cannot regain spent budget.
+        self.requested_tool_calls = max(
+            0, int(number("requested_tool_count"))
+        )
+        self.executed_tool_calls = max(
+            0, int(number("executed_tool_count"))
+        )
 
     def model_allowance_exhausted(self) -> bool:
         return (
@@ -584,7 +616,8 @@ class _RunProgress:
             "executed_tool_count": self.executed_tool_calls,
             "new_resource_reference_count": new_resources,
             "observation_digest_changed": self.consecutive_no_progress == 0,
-            "elapsed_ms": round((monotonic() - self.started_at) * 1000),
+            "elapsed_ms": round((self.restored_elapsed_seconds + max(0.0, monotonic() - self.started_at)) * 1000),
+            "model_cycles": self.model_cycles,
             "remaining_tool_budget": (max(0, self.limits.max_tool_calls - self.executed_tool_calls)
                                       if self.limits.max_tool_calls is not None else None),
             "remaining_token_budget": (max(0, self.limits.max_model_tokens - self.model_tokens)
@@ -710,6 +743,7 @@ class ResearchAgentRunner:
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         response_started_callback: Callable[[str, str], None] | None = None,
         model_call_observer: ModelCallObserver | None = None,
+        continuation_progress: Mapping[str, Any] | None = None,
     ) -> AgentRunResult:
         progress = _RunProgress(
             self.limits,
@@ -718,9 +752,10 @@ class ResearchAgentRunner:
             model_call_observer=model_call_observer,
             model_call_session_id=context.session_id,
         )
+        progress.restore_persisted_progress(continuation_progress)
         requested_count, executed_count = self._active_turn_action_counts(previous_messages)
-        progress.requested_tool_calls = requested_count
-        progress.executed_tool_calls = executed_count
+        progress.requested_tool_calls = max(progress.requested_tool_calls, requested_count)
+        progress.executed_tool_calls = max(progress.executed_tool_calls, executed_count)
         claimed_call_was_persisted = any(
             request.tool_call_id == claimed_call.tool_call_id
             for message in previous_messages
@@ -745,14 +780,24 @@ class ResearchAgentRunner:
                 self.capabilities,
                 ((claimed_call, handler),), messages
             )
+            if (
+                not error
+                and self.limits.max_tool_calls is not None
+                and progress.executed_tool_calls >= self.limits.max_tool_calls
+            ):
+                error = (
+                    "resource_budget",
+                    "The approved research action exceeds the remaining tool budget.",
+                )
             if not error:
                 progress.executed_tool_calls += 1
             call, result = (
                 self._failure(claimed_call, *error) if error
-                else await self._execute_one(
+                else await self._execute_approved_call(
                     context,
                     claimed_call,
                     handler,
+                    progress=progress,
                     arguments=validated_arguments.get(claimed_call.tool_call_id),
                 )
             )
@@ -761,36 +806,6 @@ class ResearchAgentRunner:
         messages.append(self._result_message(context, result))
         progress.refresh_execution_plan(messages)
         await self._checkpoint(checkpoint, messages, calls, results)
-        if result.status is ToolResultStatus.SUCCEEDED and call.name in {"record_finding_feedback", "curate_finding"}:
-            # These writes finish an exact approved review. Report the persisted
-            # result directly; a model continuation cannot redefine its status.
-            progress.start_response()
-            chinese = any("\u4e00" <= char <= "\u9fff" for char in self._active_user_request(messages))
-            if call.name == "record_finding_feedback":
-                content = "此结论的反馈已保存。" if chinese else "Feedback for this conclusion has been saved."
-            else:
-                content = ("此结论的人工修订已保存，原发布结论保持不变。" if chinese
-                           else "The human revision has been saved. The published conclusion is preserved.")
-                content += "\n\n" + str(result.data.get("curated_finding", {}).get("statement", ""))
-            if result.data.get("note"):
-                content += "\n\n" + ("记录原因：" if chinese else "Recorded reason: ") + str(result.data["note"])
-            messages.append(
-                self._assistant(
-                    context,
-                    content,
-                    progress,
-                    messages=messages,
-                    calls=calls,
-                    results=results,
-                )
-            )
-            await self._checkpoint(checkpoint, messages, calls, results)
-            if text_delta_callback is not None:
-                text_delta_callback(content)
-            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True,
-                           run_status=AgentRunStatus.COMPLETED, completion_reason=AgentCompletionReason.MODEL_ANSWER)
-            return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
-                                completion_reason=AgentCompletionReason.MODEL_ANSWER)
         return await self._continue(
             context,
             messages,
@@ -799,6 +814,56 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
             permission_mode=ToolPermissionMode.CONFIRM,
+            progress=progress,
+        )
+
+    async def resume_after_tool_result(
+        self,
+        *,
+        context: AgentContext,
+        previous_messages: tuple[ChatMessage, ...],
+        calls: tuple[ChatToolCall, ...],
+        results: tuple[ChatToolResult, ...],
+        tool_call: ChatToolCall,
+        tool_result: ChatToolResult,
+        checkpoint: _TrajectoryCheckpoint | None = None,
+        text_delta_callback: Callable[[str], None] | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        response_started_callback: Callable[[str, str], None] | None = None,
+        model_call_observer: ModelCallObserver | None = None,
+        continuation_progress: Mapping[str, Any] | None = None,
+        permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
+    ) -> AgentRunResult:
+        """Continue the same request after a non-executing tool decision."""
+        progress = _RunProgress(
+            self.limits,
+            progress_callback=progress_callback,
+            response_started_callback=response_started_callback,
+            model_call_observer=model_call_observer,
+            model_call_session_id=context.session_id,
+        )
+        progress.restore_persisted_progress(continuation_progress)
+        messages = list(previous_messages)
+        requested_count, executed_count = self._active_turn_action_counts(previous_messages)
+        progress.requested_tool_calls = max(progress.requested_tool_calls, requested_count)
+        progress.executed_tool_calls = max(progress.executed_tool_calls, executed_count)
+        next_calls = list(calls)
+        next_results = list(results)
+        if not any(call.tool_call_id == tool_call.tool_call_id for call in next_calls):
+            next_calls.append(tool_call)
+        if not any(item.tool_call_id == tool_result.tool_call_id for item in next_results):
+            next_results.append(tool_result)
+        messages.append(self._result_message(context, tool_result))
+        progress.refresh_execution_plan(messages)
+        await self._checkpoint(checkpoint, messages, next_calls, next_results)
+        return await self._continue(
+            context,
+            messages,
+            next_calls,
+            next_results,
+            checkpoint=checkpoint,
+            text_delta_callback=text_delta_callback,
+            permission_mode=ToolPermissionMode(permission_mode),
             progress=progress,
         )
 
@@ -1645,16 +1710,8 @@ class ResearchAgentRunner:
             if model_call.name == "curate_finding":
                 arguments = self._complete_curation_shape(arguments, messages)
             if model_call.name == "create_finding_draft":
-                # Drafts are transient and researcher-reviewed. Models often omit
-                # this conservative classification even though the schema marks it
-                # conditional (abstentions must omit it). Normalize that one safe
-                # omission before validation; published Finding writes remain strict.
-                if (
-                    arguments.get("statement")
-                    and not arguments.get("abstention_reason")
-                    and not arguments.get("assertion_strength")
-                ):
-                    arguments["assertion_strength"] = "descriptive"
+                # Structural cleanup is deterministic; scientific classifications
+                # must remain the model's explicit decision or a validation error.
                 for field_name in (
                     "supporting_evidence_ids", "contradicting_evidence_ids",
                     "context_evidence_ids", "condition_boundary_evidence_ids",
@@ -1854,17 +1911,16 @@ class ResearchAgentRunner:
             context,
             phase=phase,
             termination_reason="write_completed_response_unavailable",
-            run_status=AgentRunStatus.COMPLETED,
-            completion_reason=AgentCompletionReason.MODEL_ANSWER,
+            run_status=AgentRunStatus.FAILED,
             final_answer=True,
             retry_reason=technical_reason,
         )
         return self._result(
-            AgentRunStatus.COMPLETED,
+            AgentRunStatus.FAILED,
             messages,
             calls,
             results,
-            completion_reason=AgentCompletionReason.MODEL_ANSWER,
+            error_code=technical_reason,
             warnings=(_SUCCESSFUL_WRITE_RESPONSE_UNAVAILABLE_WARNING,),
         )
 
@@ -2035,6 +2091,33 @@ class ResearchAgentRunner:
                 + _safe_capability_error_message(exc),
             )
         return call, result
+
+    async def _execute_approved_call(
+        self,
+        context: AgentContext,
+        call: ChatToolCall,
+        handler: Any,
+        *,
+        progress: _RunProgress,
+        arguments: BaseModel | None = None,
+    ) -> tuple[ChatToolCall, ChatToolResult]:
+        """Run an approved write under the same request deadline as reads."""
+        try:
+            return await wait_for(
+                self._execute_one(
+                    context,
+                    call,
+                    handler,
+                    arguments=arguments,
+                ),
+                timeout=progress.remaining_seconds(),
+            )
+        except TimeoutError:
+            return self._failure(
+                call,
+                "capability_timeout",
+                "The approved research action could not be completed in this turn.",
+            )
 
 
     @staticmethod

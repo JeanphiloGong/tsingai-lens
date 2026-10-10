@@ -109,7 +109,8 @@ async def test_replay_uses_service_permission_and_exact_approval(mode):
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
     repo = MemoryChatRepository()
     model = _Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Review"}),)),
-                   ModelTurn(content="Saved"), ModelTurn(content="No tools needed."))
+                   ModelTurn(content="Saved"), ModelTurn(content="No tools needed."),
+                   ModelTurn(content="No tools needed for the saved review."))
     service = ChatSessionService(repository=repo, collection_service=_CollectionService(),
         source_artifact_repository=_SourceArtifactRepository(), runner=ResearchAgentRunner(
             model=model,

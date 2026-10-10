@@ -183,9 +183,10 @@ Read-only requests and a prohibition on all saving still disable every write.
 Feedback and curation keep separate exact-argument approvals. Their explicit
 save requests require the actual approval-producing tool call; a prose request
 for confirmation is not a completed deliverable. Discovery remains available
-when the target needs identification. Their successful
-approval replies render the saved result directly, without a model continuation
-that could incorrectly report another pending approval.
+when the target needs identification. After an approved feedback or curation
+write, the runner resumes the same research loop so remaining requested work
+can finish. If response generation then fails, the saved result remains
+authoritative while the turn stays `failed` with the technical error.
 Before a curation write, the runner carries forward the complete Finding envelope
 from the exact inspection. Only the proposed scientific wording and other
 reviewed fields may change; identity, Evidence bindings, paper coverage, and
@@ -531,10 +532,10 @@ Evidence, permission, or a Finding.
   deadlines and output allowances for both decisions and answer-only
   finalization. Technical limits permit finalization with scope warnings only
   while turn time remains. A response or finalization failure remains a failure
-  unless an approved durable write in the current continuation already has a
-  matching successful result. In that case, the runner checkpoints a short
-  deterministic confirmation and returns `completed` with a non-blocking
-  warning; the persisted write remains authoritative.
+  even when an approved durable write in the current continuation already has a
+  matching successful result. The runner checkpoints a short deterministic
+  confirmation that the saved result remains authoritative, while preserving the
+  technical failure status for the incomplete turn.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
   while pinning the active question and keeping whole request/result batches
   together. Selection uses the token capacity remaining after request overhead

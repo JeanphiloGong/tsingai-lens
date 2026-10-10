@@ -11,7 +11,7 @@ from application.repositories.chat_repository import (
     ChatSessionHasBranchesError,
     ModelCallOutcome,
 )
-from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
+from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult, ToolCallStatus
 from domain.chat.feedback import ChatMessageFeedback
 from domain.chat.permissions import (
     change_permission,
@@ -226,6 +226,15 @@ class MemoryChatRepository:
 
     async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
         return self.calls.get(tool_call_id)
+
+    async def abort_running_tool_calls(self, *, session_id: str, error_code: str, finished_at: str):
+        aborted = []
+        for tool_call_id, call in tuple(self.calls.items()):
+            if call.session_id == session_id and call.status is ToolCallStatus.RUNNING:
+                call = call.fail(error_code, finished_at)
+                self.calls[tool_call_id] = call
+                aborted.append(call)
+        return tuple(aborted)
 
     async def save_trajectory(
         self,

@@ -173,6 +173,10 @@ class ChatRepository(Protocol):
         self, tool_call_id: str
     ) -> ChatToolCall | None: ...
 
+    async def abort_running_tool_calls(
+        self, *, session_id: str, error_code: str, finished_at: str
+    ) -> tuple[ChatToolCall, ...]: ...
+
     async def save_trajectory(
         self,
         *,

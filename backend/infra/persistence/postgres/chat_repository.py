@@ -484,6 +484,25 @@ class PostgresChatRepository:
             row = await session.get(ChatToolCallRow, tool_call_id)
             return _call_record(row) if row is not None else None
 
+    async def abort_running_tool_calls(
+        self, *, session_id: str, error_code: str, finished_at: str
+    ) -> tuple[ChatToolCall, ...]:
+        async with self.session_factory.begin() as database:
+            rows = tuple(await database.scalars(
+                select(ChatToolCallRow)
+                .where(
+                    ChatToolCallRow.session_id == session_id,
+                    ChatToolCallRow.status == ToolCallStatus.RUNNING.value,
+                )
+                .with_for_update()
+            ))
+            aborted = []
+            for row in rows:
+                call = _call_record(row).fail(error_code, finished_at)
+                _update_call_row(row, call)
+                aborted.append(call)
+            return tuple(aborted)
+
     async def save_trajectory(
         self,
         *,

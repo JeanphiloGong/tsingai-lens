@@ -1911,7 +1911,7 @@ async def test_approved_write_resumes_exact_call_before_returning_to_model() -> 
         ),
     ),
 )
-async def test_successful_approved_write_survives_unavailable_detailed_response(
+async def test_successful_approved_write_preserves_result_but_fails_when_response_unavailable(
     model_failure: Exception,
     limits: AgentRunLimits | None,
 ) -> None:
@@ -1960,9 +1960,9 @@ async def test_successful_approved_write_survives_unavailable_detailed_response(
         claimed_call=approved.start("2026-09-29T00:01:01+00:00"),
     )
 
-    assert result.status is AgentRunStatus.COMPLETED
-    assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
-    assert result.error_code is None
+    assert result.status is AgentRunStatus.FAILED
+    assert result.completion_reason is None
+    assert result.error_code is not None
     assert result.tool_calls[0].status is ToolCallStatus.SUCCEEDED
     assert result.tool_results[0].status is ToolResultStatus.SUCCEEDED
     assert result.warnings == (
@@ -2217,7 +2217,7 @@ async def test_finding_draft_repair_receives_actionable_selection_error() -> Non
     assert any(item.data.get("draft") == {**corrected, "comparison_group_ids": []} for item in result.tool_results)
 
 
-async def test_finding_draft_normalizes_conservative_strength_and_duplicate_evidence() -> None:
+async def test_finding_draft_does_not_invent_scientific_strength_and_deduplicates_evidence() -> None:
     from application.chat.agent_runner import _RunProgress
 
     runner = ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(()))
@@ -2238,7 +2238,7 @@ async def test_finding_draft_normalizes_conservative_strength_and_duplicate_evid
         _context(), messages, turn, allowed_names={"create_finding_draft"},
         progress=progress,
     )
-    assert requested[0][0].arguments["assertion_strength"] == "descriptive"
+    assert "assertion_strength" not in requested[0][0].arguments
     assert requested[0][0].arguments["supporting_evidence_ids"] == ["evidence-1"]
 
 
@@ -2683,6 +2683,106 @@ async def test_approval_resume_keeps_the_model_authored_plan() -> None:
     assert resumed.execution_plan["plan_id"] == before["plan_id"]
     assert resumed.execution_plan["plan_version"] > before["plan_version"]
     assert resumed.execution_plan["steps"][0]["status"] == "completed"
+
+
+async def test_approval_resume_inherits_time_and_model_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+        ModelTurn(content="The approved objective was saved."),
+    )
+    limits = AgentRunLimits(
+        max_request_seconds=10.0,
+        max_model_tokens=100,
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((writer,)),
+        limits=limits,
+    )
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the reviewed objective.",
+    )
+    assert proposed.pending_approval is not None
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+
+    observed_timeouts: list[float] = []
+    original_wait_for = agent_runner_module.wait_for
+
+    async def recording_wait_for(awaitable, timeout):  # noqa: ANN001
+        observed_timeouts.append(timeout)
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(agent_runner_module, "wait_for", recording_wait_for)
+    events: list[dict[str, Any]] = []
+    resumed = await runner.resume_claimed_call(
+        context=_context(),
+        previous_messages=proposed.messages,
+        claimed_call=approved,
+        progress_callback=events.append,
+        continuation_progress={
+            "elapsed_ms": 9_500,
+            "model_cycles": 1,
+            "model_tokens": 90,
+            "prompt_tokens": 70,
+            "completion_tokens": 20,
+            "requested_tool_count": 1,
+            "executed_tool_count": 0,
+        },
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert writer.executed_arguments == [{}]
+    assert observed_timeouts
+    assert 0 < observed_timeouts[0] < 2
+    assert model.request_limits[-1][1] == 10
+    assert events[-1]["model_cycles"] == 2
+
+
+async def test_approval_resume_inherits_spent_tool_budget() -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+        ModelTurn(content="The approved objective could not run within this turn's budget."),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((writer,)),
+        limits=AgentRunLimits(max_tool_calls=2),
+    )
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the reviewed objective.",
+    )
+    assert proposed.pending_approval is not None
+    contexts_before_resume = len(model.contexts)
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+
+    resumed = await runner.resume_claimed_call(
+        context=_context(),
+        previous_messages=proposed.messages,
+        claimed_call=approved,
+        continuation_progress={
+            "requested_tool_count": 2,
+            "executed_tool_count": 2,
+        },
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert resumed.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    assert resumed.tool_results[0].status is ToolResultStatus.FAILED
+    assert resumed.tool_results[0].error_code == "resource_budget"
+    assert writer.executed_arguments == []
+    assert len(model.contexts) == contexts_before_resume + 1
 
 
 async def test_resource_budget_final_answer_has_time_to_summarize_large_trajectory(
@@ -3810,17 +3910,21 @@ async def test_approved_finding_review_reports_persisted_status_without_model_re
     ).require_approval()
     claimed = pending.approve(user_id="user-1", arguments_digest=pending.arguments_digest,
                               decided_at="2026-09-10T00:01:00Z").start("2026-09-10T00:01:01Z")
-    model = _Model(ModelTurn(content="已保存，等待您的批准。"))
-    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,)))
+    reader = _Capability("inspect_published_finding", ToolRisk.READ)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="inspect_published_finding", arguments={}),)),
+        ModelTurn(content="反馈已保存，我继续核对了另一篇论文。"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write, reader)))
     result = await runner.resume_claimed_call(context=_context(), previous_messages=(ChatMessage.user(
         message_id="msg-1", session_id="chat-1", content="请保存 Finding 修订，等待批准。",
         created_at="2026-09-10T00:00:00Z",
     ),), claimed_call=claimed)
     assert result.status is AgentRunStatus.COMPLETED
     assert result.pending_approval is None
-    assert "已保存" in result.messages[-1].content
-    assert "等待" not in result.messages[-1].content
-    assert model.contexts == []
+    assert result.messages[-1].content == "反馈已保存，我继续核对了另一篇论文。"
+    assert len(model.contexts) == 2
+    assert reader.executed_arguments == [{}]
     assert write.executed_arguments == [{}]
 
 

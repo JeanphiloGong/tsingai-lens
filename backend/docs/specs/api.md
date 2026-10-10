@@ -675,7 +675,8 @@ stored 64-character `arguments_digest`; approval is bound to the tool call,
 exact stored arguments, authenticated user, and decision timestamp. Changed
 arguments, another user, or an incompatible call state return `409` or `404`
 and never execute the call. Rejection records a tool result and does not execute
-the capability. While a write remains `approval_required`, posting another
+the capability; the Agent then resumes the same research loop so remaining reads or
+non-write work can finish. While a write remains `approval_required`, posting another
 message to that session returns `409 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
@@ -935,13 +936,12 @@ repeated identical observations, and the emergency ceiling allow one final
 model request with no tools, using inspected evidence and explicit unread or
 failed scope. It returns `completed` with warnings when an answer is available;
 response or finalization failure returns `failed` with a sanitized error code.
-The exception is an approved durable write in the current continuation whose
-tool call and matching result both already have status `succeeded`. A later
-response-generation failure does not reverse that completed action: the turn
-returns `completed` with `completion_reason: "model_answer"`, no error code, a
-deterministic saved-action message, and a non-blocking warning that the detailed
-response was unavailable. Successful reads, drafts, queued writes, failed
-writes, and writes from earlier turns do not use this fallback.
+A successful durable write is retained when later response generation fails, but
+the turn remains `failed` with the technical error code and a warning that the
+saved result is authoritative. The failure is never converted into a completed
+research turn merely because an earlier write succeeded. Successful reads,
+drafts, queued writes, failed writes, and writes from earlier turns do not
+change this rule.
 
 Tool call and result failures are
 technical trajectory outcomes; they are not scientific absence, uncertainty,

@@ -215,5 +215,7 @@ describe('chat progress presentation helpers', () => {
 		};
 
 		expect(appendChatProgress([initial], updated)).toHaveLength(2);
+		const terminal = { ...updated, execution_plan: { ...updated.execution_plan!, plan_version: 1 } };
+		expect(appendChatProgress([initial], terminal)).toHaveLength(2);
 	});
 });

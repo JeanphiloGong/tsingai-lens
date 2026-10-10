@@ -1109,11 +1109,13 @@ class ChatSessionService:
                 status=result.status.value, message_id=None, message_created_at=None, content="",
                 completion_reason=result.completion_reason.value if result.completion_reason else None,
                 error_code=result.error_code, warnings=result.warnings,
-                progress={
-                    **snapshot.progress,
-                    "execution_plan": result.execution_plan,
-                },
             )
+            emit_progress({
+                **snapshot.progress,
+                "phase": "terminal",
+                "termination_reason": result.error_code or result.completion_reason or result.status.value,
+                "execution_plan": result.execution_plan,
+            })
             return result
         except BaseException:
             update_snapshot(status="interrupted", error_code="chat_response_interrupted")

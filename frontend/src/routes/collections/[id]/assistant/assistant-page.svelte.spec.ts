@@ -180,7 +180,7 @@ function installApi({
 	uploadDocument,
 	prepareDocument
 }: {
-	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval'>;
+	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval' | 'response'>;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
@@ -2321,6 +2321,59 @@ describe('collections/[id]/assistant Research Agent', () => {
 					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
 			)
 		).toHaveLength(2);
+	});
+
+	it.each([
+		['completed', 'completed', 'Completed'],
+		['approval_required', 'awaiting_approval', 'Waiting for approval'],
+		['completed', 'waiting_for_clarification', 'Needs clarification'],
+		['completed', 'scientific_refusal', 'Insufficient support'],
+		['failed', 'technical_failure', 'Technical failure']
+	] as const)('keeps the %s / %s plan visible after the turn and after reopening', async (status, planStatus, label) => {
+		const pending = status === 'approval_required' ? pendingCall() : null;
+		const items = [message('plan-question', 'user', 'Compare the tensile conditions.')];
+		if (pending) {
+			items.push(message(pending.assistant_message_id, 'assistant', '', {
+				tool_calls: [{ tool_call_id: pending.tool_call_id, name: pending.name, arguments: pending.arguments, position: 0 }]
+			}));
+		} else {
+			items.push(message('plan-answer', 'assistant', 'The temperature must be specified for this comparison.'));
+		}
+		const executionPlan = {
+			plan_id: 'plan-1', plan_version: 4, status: planStatus,
+			steps: [{ step_id: 'temperature', action: 'Check the reported tensile temperature', status: 'blocked' as const }]
+		};
+		const turn: ChatTurn = {
+			status, completion_reason: status === 'completed' ? 'model_answer' : null,
+			warnings: [], messages: items, pending_approval: pending,
+			error_code: status === 'failed' ? 'permission_write_denied' : null,
+			execution_plan: executionPlan
+		};
+		installApi({ messageTurn: turn });
+		const screen = render(Page);
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await expect.element(composer).toBeEnabled();
+		await send('Compare the tensile conditions.', composer);
+		const plan = browserPage.getByTestId('progress-plan');
+		await expect.element(plan).toHaveTextContent(label);
+		await expect.element(plan).toHaveTextContent('Check the reported tensile temperature');
+		expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
+		expect(document.querySelector('.progress-current')).toBeNull();
+		await screen.unmount();
+		installApi({ trajectory: {
+			items, pending_approval: pending, feedback: [],
+			response: {
+				response_id: 'response-plan', sequence: 5, started_at: createdAt, updated_at: createdAt,
+				status, message_id: null, message_created_at: null, content: '',
+				progress: { phase: 'terminal', execution_plan: executionPlan },
+				checkpoint_message_id: items.at(-1)!.message_id,
+				completion_reason: turn.completion_reason, error_code: turn.error_code, warnings: []
+			}
+		} });
+		render(Page);
+		await expect.element(plan).toHaveTextContent(label);
+		expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
+		expect(document.querySelector('.progress-current')).toBeNull();
 	});
 
 	it('shows assistant text before the persisted turn finishes streaming', async () => {

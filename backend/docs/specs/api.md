@@ -601,6 +601,13 @@ pending and failed events, so an approval continuation or failed save cannot
 recreate an older version. The latest plan is recovered from the saved tool
 trajectory, so compaction, a disconnected stream, or approval continuation does
 not require a second persistence model.
+Streamed progress, the final turn, and the persisted response snapshot use the
+same runtime status calculation. A model answer preserves an explicit
+`waiting_for_clarification` or `scientific_refusal`; it closes an `in_progress`
+plan without changing the model's step assessments. Revoking write permission
+before an automatic claim produces `technical_failure`, with the denial reason,
+instead of retaining `awaiting_approval`. A runtime status change may keep the
+same plan version because it adds no capability request/result event.
 Simple answers may have no plan. It never represents Evidence, permission, or a
 scientific conclusion.
 `snapshot` events identify the current response and assistant message before its

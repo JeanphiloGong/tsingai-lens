@@ -120,6 +120,7 @@ export type ChatToolCall = {
 };
 
 export type ChatTurn = {
+	execution_plan?: ChatExecutionPlan | null;
 	status: 'completed' | 'approval_required' | 'failed' | 'rejected';
 	completion_reason:
 		| 'model_answer'
@@ -238,8 +239,10 @@ export function appendChatProgress(history: ChatProgress[], next: ChatProgress) 
 		previous.requested_tool_count === next.requested_tool_count &&
 		previous.executed_tool_count === next.executed_tool_count &&
 		previous.remaining_tool_budget === next.remaining_tool_budget &&
-		previous.remaining_token_budget === next.remaining_token_budget
-		&& previous.execution_plan?.plan_version === next.execution_plan?.plan_version
+		previous.remaining_token_budget === next.remaining_token_budget &&
+		previous.execution_plan?.plan_id === next.execution_plan?.plan_id &&
+		previous.execution_plan?.plan_version === next.execution_plan?.plan_version &&
+		previous.execution_plan?.status === next.execution_plan?.status
 	) {
 		return history;
 	}

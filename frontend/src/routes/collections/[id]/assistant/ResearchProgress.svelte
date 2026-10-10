@@ -10,6 +10,7 @@
 		type ChatProgress
 	} from '../../../_shared/chatSessions';
 	export let progress: ChatProgress;
+	export let active = true;
 	export let progressHistory: ChatProgress[] = [];
 	export let readings: CurrentReading[] = [];
 	let progressHistoryExpanded = false;
@@ -26,6 +27,7 @@
 </script>
 
 <div class="assistant-progress" data-testid="research-progress">
+	{#if active}
 	<button
 		class="progress-current"
 		type="button"
@@ -50,6 +52,7 @@
 			{#if actionCounts}<span>{$t('researchAgent.progress.actions', actionCounts)}</span>{/if}
 		</div>
 	{/if}
+	{/if}
 	{#if executionPlan}
 		<div class="progress-plan" data-testid="progress-plan" aria-label="{$t('researchAgent.progress.planLabel')}">
 			<div class="progress-plan__header">
@@ -66,6 +69,7 @@
 			</ol>
 		</div>
 	{/if}
+	{#if active}
 	{#each readings as reading (reading.toolCallId)}
 		<div
 			class="reading-current"
@@ -107,6 +111,7 @@
 				</li>
 			{/each}
 		</ol>
+	{/if}
 	{/if}
 </div>
 

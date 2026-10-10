@@ -558,25 +558,20 @@ class _RunProgress:
     def trace(self, context: AgentContext, *, phase: str, capability_names: tuple[str, ...] = (),
               new_resources: int = 0,
               termination_reason: str | None = None, final_answer: bool = False,
+              run_status: AgentRunStatus | None = None,
+              completion_reason: AgentCompletionReason | None = None,
               retry_attempt: int | None = None, retry_reason: str | None = None,
               http_status: int | None = None, retry_delay_ms: int | None = None) -> None:
-        if self.execution_plan is not None and termination_reason is not None:
-            terminal_status = {
-                "approval_required": ResearchExecutionStatus.AWAITING_APPROVAL,
-                "model_answer": ResearchExecutionStatus.COMPLETED,
-                "model_unavailable": ResearchExecutionStatus.TECHNICAL_FAILURE,
-                "provider_timeout": ResearchExecutionStatus.TECHNICAL_FAILURE,
-                "final_answer_unavailable": ResearchExecutionStatus.TECHNICAL_FAILURE,
-                "model_response_invalid": ResearchExecutionStatus.TECHNICAL_FAILURE,
-                "tool_permission_denied": ResearchExecutionStatus.TECHNICAL_FAILURE,
-                "resource_budget": ResearchExecutionStatus.RESOURCE_LIMITED,
-                "emergency_ceiling": ResearchExecutionStatus.RESOURCE_LIMITED,
-                "no_progress": ResearchExecutionStatus.RESOURCE_LIMITED,
-            }.get(termination_reason)
-            if terminal_status is not None:
-                self.execution_plan = self.execution_plan.with_runtime_status(
-                    terminal_status, termination_reason,
-                )
+        if self.execution_plan is not None and (run_status is not None or completion_reason is not None):
+            self.execution_plan = self.execution_plan.with_runtime_status(
+                _research_plan_status(
+                    run_status=run_status,
+                    completion_reason=completion_reason,
+                    pending_approval=run_status is AgentRunStatus.APPROVAL_REQUIRED,
+                    model_status=self.execution_plan.model_status,
+                ),
+                termination_reason,
+            )
         execution_plan_record = (
             self.execution_plan.to_record() if self.execution_plan is not None else None
         )
@@ -623,7 +618,7 @@ class AgentRunResult:
     warnings: tuple[str, ...] = ()
     pending_approval: ChatToolCall | None = None
     error_code: str | None = None
-    execution_plan: Mapping[str, Any] | None = None
+    execution_plan: Mapping[str, Any] | None = field(init=False)
 
     def __post_init__(self) -> None:
         if self.status is AgentRunStatus.COMPLETED:
@@ -631,15 +626,14 @@ class AgentRunResult:
                 raise ValueError("completed run requires a reason and no error code")
         elif self.completion_reason is not None:
             raise ValueError("only completed runs have a completion reason")
-        if self.execution_plan is None:
-            plan = ResearchExecutionPlan.from_messages(
-                messages=self.messages,
-                run_status=self.status,
-                completion_reason=self.completion_reason,
-                error_code=self.error_code,
-                pending_approval=self.pending_approval,
-            )
-            object.__setattr__(self, "execution_plan", plan.to_record() if plan is not None else None)
+        plan = ResearchExecutionPlan.from_messages(
+            messages=self.messages,
+            run_status=self.status,
+            completion_reason=self.completion_reason,
+            error_code=self.error_code,
+            pending_approval=self.pending_approval,
+        )
+        object.__setattr__(self, "execution_plan", plan.to_record() if plan is not None else None)
 
 class ResearchAgentRunner:
     def __init__(
@@ -793,7 +787,8 @@ class ResearchAgentRunner:
             await self._checkpoint(checkpoint, messages, calls, results)
             if text_delta_callback is not None:
                 text_delta_callback(content)
-            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True)
+            progress.trace(context, phase="terminal", termination_reason="model_answer", final_answer=True,
+                           run_status=AgentRunStatus.COMPLETED, completion_reason=AgentCompletionReason.MODEL_ANSWER)
             return self._result(AgentRunStatus.COMPLETED, messages, calls, results,
                                 completion_reason=AgentCompletionReason.MODEL_ANSWER)
         return await self._continue(
@@ -967,7 +962,8 @@ class ResearchAgentRunner:
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
-                    progress.trace(context, phase="terminal", termination_reason="model_response_invalid")
+                    progress.trace(context, phase="terminal", termination_reason="model_response_invalid",
+                                   run_status=AgentRunStatus.FAILED)
                     return self._result(
                         AgentRunStatus.FAILED,
                         messages,
@@ -1035,6 +1031,7 @@ class ResearchAgentRunner:
                     progress.trace(
                         context,
                         phase="terminal",
+                        run_status=AgentRunStatus.FAILED,
                         termination_reason=(
                             "provider_timeout" if provider_timeout else "model_unavailable"
                         ),
@@ -1063,7 +1060,8 @@ class ResearchAgentRunner:
                     )
                 )
                 await self._checkpoint(checkpoint, messages, calls, results)
-                progress.trace(context, phase="terminal", termination_reason=reason.value, final_answer=True)
+                progress.trace(context, phase="terminal", termination_reason=reason.value, final_answer=True,
+                               run_status=AgentRunStatus.COMPLETED, completion_reason=reason)
                 return self._result(
                     AgentRunStatus.COMPLETED, messages, calls, results,
                     completion_reason=reason,
@@ -1102,12 +1100,9 @@ class ResearchAgentRunner:
                 pending = requested[0][0].require_approval()
                 calls[-1] = pending
                 progress.refresh_execution_plan(messages)
-                if progress.execution_plan is not None:
-                    progress.execution_plan = progress.execution_plan.with_runtime_status(
-                        ResearchExecutionStatus.AWAITING_APPROVAL
-                    )
                 await self._checkpoint(checkpoint, messages, calls, results)
-                progress.trace(context, phase="terminal", termination_reason="approval_required")
+                progress.trace(context, phase="terminal", termination_reason="approval_required",
+                               run_status=AgentRunStatus.APPROVAL_REQUIRED)
                 return AgentRunResult(
                     status=AgentRunStatus.APPROVAL_REQUIRED,
                     messages=tuple(messages), tool_calls=tuple(calls),
@@ -1152,6 +1147,7 @@ class ResearchAgentRunner:
             await self._checkpoint(checkpoint, messages, calls, results)
             progress.trace(context, phase="tools", capability_names=tool_names,
                            new_resources=len(progress.resource_refs) - old_resource_count,
+                           completion_reason=stop_reason,
                            termination_reason=stop_reason.value if stop_reason else None)
             permission_error = next(
                 (
@@ -1166,6 +1162,7 @@ class ResearchAgentRunner:
                     context,
                     phase="terminal",
                     termination_reason=permission_error,
+                    run_status=AgentRunStatus.FAILED,
                 )
                 return self._result(
                     AgentRunStatus.FAILED,
@@ -1545,7 +1542,8 @@ class ResearchAgentRunner:
                     results=results,
                 )
             )
-            progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable")
+            progress.trace(context, phase="finalize", termination_reason="final_answer_unavailable",
+                           run_status=AgentRunStatus.FAILED)
             await self._checkpoint(checkpoint, messages, calls, results)
             return self._result(AgentRunStatus.FAILED, messages, calls, results, "final_answer_unavailable")
         messages.append(
@@ -1558,7 +1556,8 @@ class ResearchAgentRunner:
                 results=results,
             )
         )
-        progress.trace(context, phase="finalize", termination_reason=reason.value, final_answer=True)
+        progress.trace(context, phase="finalize", termination_reason=reason.value, final_answer=True,
+                       run_status=AgentRunStatus.COMPLETED, completion_reason=reason)
         await self._checkpoint(checkpoint, messages, calls, results)
         return self._result(
             AgentRunStatus.COMPLETED, messages, calls, results,
@@ -1855,6 +1854,8 @@ class ResearchAgentRunner:
             context,
             phase=phase,
             termination_reason="write_completed_response_unavailable",
+            run_status=AgentRunStatus.COMPLETED,
+            completion_reason=AgentCompletionReason.MODEL_ANSWER,
             final_answer=True,
             retry_reason=technical_reason,
         )

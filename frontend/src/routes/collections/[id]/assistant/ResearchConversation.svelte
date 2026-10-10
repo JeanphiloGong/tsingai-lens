@@ -30,6 +30,7 @@
 		type ChatMessageFeedback,
 		type ChatMessage,
 		type ChatProgress,
+		type ChatExecutionPlan,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
 		type ChatSession,
@@ -134,6 +135,7 @@
 	$: sessionNavigationDisabled =
 		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId);
 	let progress: ChatProgress | null = null;
+	let settledExecutionPlan: ChatExecutionPlan | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
@@ -573,6 +575,7 @@
 		notice = '';
 		pendingApproval = null;
 		progress = null;
+		settledExecutionPlan = null;
 		pendingSourceContexts = [];
 		history = [];
 		if (!userId || !activeCollectionId) return;
@@ -688,6 +691,7 @@
 		)
 			return;
 		responseSnapshot = snapshot;
+		settledExecutionPlan = snapshot.status === 'running' ? null : (snapshot.progress.execution_plan ?? null);
 		streamingText = snapshot.content;
 		progress = snapshot.progress;
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
@@ -713,7 +717,10 @@
 		loadFeedback(trajectory.feedback);
 		pendingApproval = trajectory.pending_approval;
 		if (trajectory.response) acceptSnapshot(trajectory.response);
-		else responseSnapshot = null;
+		else {
+			responseSnapshot = null;
+			settledExecutionPlan = null;
+		}
 	}
 
 	async function resumeResponse() {
@@ -1130,6 +1137,7 @@
 		};
 		messages = [...messages, optimisticMessage, streamingMessage];
 		responseSnapshot = null;
+		settledExecutionPlan = null;
 		streamingText = '';
 		if (!isRevision) input = '';
 		sending = true;
@@ -1328,6 +1336,7 @@
 		const knownIds = new Set(prior.map((message) => message.message_id));
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
+		settledExecutionPlan = turn.execution_plan ?? null;
 		if (turn.status === 'rejected') {
 			notice = $t(rejectionNoticeKey(decidedToolName));
 		}
@@ -1581,6 +1590,7 @@
 			pendingApproval={checkpointId ? null : pendingApproval}
 			progress={checkpointId ? null : progress}
 			progressHistory={checkpointId ? [] : progressHistory}
+			executionPlan={checkpointId ? null : settledExecutionPlan}
 			recoveringCallId={checkpointId ? null : recoveringCallId}
 			recoveryLoading={!checkpointId && recoveryLoading}
 			recoveryError={checkpointId ? '' : recoveryError}

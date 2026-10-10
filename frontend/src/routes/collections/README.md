@@ -85,6 +85,10 @@ This node owns the Collection route family.
   notice when the Agent reaches its step limit; only a failed turn is presented
   as an error. A pending Source from the document reader is reviewable and
   removable before submission, then persists on the sent user message.
+  The current execution plan remains visible after the turn ends, including
+  approval, clarification, insufficient support, and technical failure. The
+  final turn supplies this view immediately; reopening the conversation restores
+  it from the response snapshot. Only active runs show live progress controls.
   While a turn runs or reconnects, the progress area shows the current paper,
   page, section and passage excerpt from actual Source requests and results.
   Parallel reads remain separate. Pending, received and failed reads have

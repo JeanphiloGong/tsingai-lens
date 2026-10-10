@@ -2597,14 +2597,20 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
     assert any("update_execution_plan" in names for names in model.tool_spec_names)
 
 
-async def test_completed_answer_closes_runtime_plan_when_model_left_it_in_progress() -> None:
+@pytest.mark.parametrize("model_status, expected", [
+    ("in_progress", "completed"),
+    ("completed", "completed"),
+    ("waiting_for_clarification", "waiting_for_clarification"),
+    ("scientific_refusal", "scientific_refusal"),
+])
+async def test_streamed_and_final_plan_preserve_the_same_research_outcome(model_status, expected) -> None:
     plan = {
         "steps": [{
             "step_id": "inspect",
             "action": "Inspect the relevant paper conditions",
-            "status": "in_progress",
+            "status": "completed" if model_status == "completed" else "in_progress",
         }],
-        "status": "in_progress",
+        "status": model_status,
         "explanation": "Inspect the relevant paper conditions first.",
     }
     model = _Model(
@@ -2613,17 +2619,20 @@ async def test_completed_answer_closes_runtime_plan_when_model_left_it_in_progre
         discover=("update_execution_plan",),
     )
 
+    events = []
     result = await ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry(())
     ).run_turn(
         context=_context(), previous_messages=(),
         user_message="Summarize the available comparison.",
+        progress_callback=events.append,
     )
 
     assert result.status is AgentRunStatus.COMPLETED
     assert result.execution_plan is not None
-    assert result.execution_plan["status"] == "completed"
-    assert result.execution_plan["model_status"] == "in_progress"
+    assert result.execution_plan["status"] == expected
+    assert result.execution_plan["model_status"] == model_status
+    assert events[-1]["execution_plan"] == result.execution_plan
 
 
 async def test_approval_resume_keeps_the_model_authored_plan() -> None:

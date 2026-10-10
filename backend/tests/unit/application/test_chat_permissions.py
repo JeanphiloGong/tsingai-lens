@@ -102,6 +102,14 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
         "create_research_plan", ToolRisk.WRITE, _Question
     )
     model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [
+                {"step_id": "correct", "action": "Save the verified correction", "status": "in_progress"},
+                {"step_id": "follow_up", "action": "Record the next experiment", "status": "pending"},
+            ],
+            "status": "in_progress",
+            "explanation": "Apply the reviewed correction before recording the next experiment.",
+        }),)),
         ModelTurn(tool_calls=(ModelToolCall(
             finding_write.spec.name, {"question": "Publish the revised Finding"},
         ),)),
@@ -121,7 +129,9 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
         finding_write.spec.name, plan_write.spec.name,
     ],
         expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
-    result = await service.post_message_for_user(session.session_id, "user-1", message="Apply the two corrections.")
+    stream = await service.stream_message_for_user(session.session_id, "user-1", message="Apply the two corrections.")
+    events = [event async for event in stream]
+    result = next(event["turn"] for event in events if event["type"] == "turn")
     assert result["status"] == ("failed" if revoke else "completed")
     assert len(finding_write.executed_arguments) == 1
     assert len(plan_write.executed_arguments) == (0 if revoke else 1)
@@ -133,6 +143,14 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
     assert len({call.tool_call_id for call in calls}) == 2
     assert calls[0].decision_basis == "scope_grant"
     assert calls[-1].status.value == ("rejected" if revoke else "succeeded")
+    assert result["execution_plan"]["status"] == ("technical_failure" if revoke else "completed")
+    if revoke:
+        assert result["execution_plan"]["blocking_reason"] == "permission_write_denied"
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot.status == result["status"]
+    assert snapshot.progress["execution_plan"] == result["execution_plan"]
+    last_progress = [event["progress"] for event in events if event["type"] == "progress"][-1]
+    assert last_progress["execution_plan"] == result["execution_plan"]
 
 
 async def test_permission_controller_enforces_owner_and_revision():

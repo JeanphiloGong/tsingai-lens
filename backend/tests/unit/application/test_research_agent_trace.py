@@ -134,7 +134,7 @@ def test_progress_trace_exposes_versioned_execution_plan() -> None:
 
     plan = events[-1]["research_plan"]
     assert isinstance(plan, dict)
-    assert plan["plan_version"] == 1
+    assert plan["plan_version"] == 2
     assert plan["status"] == "in_progress"
     assert [step["status"] for step in plan["steps"]] == ["in_progress"]
 
@@ -202,5 +202,5 @@ def test_execution_plan_keeps_scientific_and_technical_end_states_distinct() -> 
 
     assert scientific.status.value == "scientific_refusal"
     assert technical.status.value == "technical_failure"
-    assert scientific.version == 1
+    assert scientific.version == 2
     assert technical.blocking_reason == "provider_timeout"

@@ -2418,7 +2418,115 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
     assert user_request in model.contexts[-1][-1].content
 
 
+@pytest.mark.parametrize("kind", ["repeated", "invalid", "reworded", "changing"])
+async def test_plan_only_loop_reaches_no_progress(kind: str) -> None:
+    class PlanningModel(_Model):
+        async def respond(self, *, context, tool_specs, **kwargs):
+            if not tool_specs:
+                return ModelTurn(content="The paper conditions remain uninspected.")
+            return await super().respond(context=context, tool_specs=tool_specs, **kwargs)
+
+    turns = []
+    for index in range(8):
+        arguments = {
+            "steps": [{
+                "step_id": "conditions",
+                "action": f"Inspect paper {index}" if kind == "changing" else "Inspect paper conditions",
+                "status": "in_progress",
+            }],
+            "status": "in_progress",
+            "explanation": f"Inspection is still needed ({index})." if kind == "reworded" else "Inspection is needed.",
+        }
+        if kind == "invalid":
+            arguments["steps"] = []
+        turns.append(ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", arguments),)))
+    model = PlanningModel(*turns, ModelTurn(content="The paper conditions remain uninspected."))
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(())).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="Compare the papers' material and test conditions.",
+    )
+
+    assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
+    plan_results = _results_for(result, "update_execution_plan")
+    assert len(plan_results) == (2 if kind == "invalid" else 3)
+    assert all(item.status is (ToolResultStatus.FAILED if kind == "invalid" else ToolResultStatus.SUCCEEDED)
+               for item in plan_results)
+    assert result.warnings
+
+
+async def test_plan_revision_does_not_reset_stalled_source_reads() -> None:
+    read = _Capability("read_source", ToolRisk.READ, result_data={
+        "content": "Both samples use LPBF Ti-6Al-4V; test temperature is not reported here.",
+    })
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [{"step_id": "temperature", "action": "Find the test temperature", "status": "in_progress"}],
+            "status": "in_progress", "explanation": "The inspected passage omits the temperature.",
+        }),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(content="The test temperature remains unresolved after rereading the same passage."),
+        discover=("read_source", "update_execution_plan"),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Check whether the test temperatures match.",
+    )
+
+    assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
+    assert len(_results_for(result, "read_source")) == 3
+    assert len(_results_for(result, "update_execution_plan")) == 1
+
+
+@pytest.mark.parametrize("write_status", [ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED, ToolResultStatus.FAILED])
+async def test_plan_version_advances_after_approved_write_without_model_plan_update(write_status) -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE, result_status=write_status)
+    capabilities = CapabilityRegistry((writer,))
+    proposed = await ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the reviewed objective", "status": "in_progress"}],
+                "status": "in_progress", "explanation": "The researcher requested saving the reviewed objective.",
+            }),)),
+            ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+            discover=("update_execution_plan", "create_objective_candidate"),
+        ),
+        capabilities=capabilities,
+    ).run_turn(context=_context(), previous_messages=(), user_message="Save the reviewed objective.")
+    assert proposed.pending_approval is not None
+    before = proposed.execution_plan
+    assert before is not None
+    claimed = proposed.pending_approval.approve(
+        user_id="user-1", arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-10T00:00:00Z",
+    ).start("2026-10-10T00:00:01Z")
+    events = []
+    resumed = await ResearchAgentRunner(
+        model=_Model(ModelTurn(content="The save operation returned; its recorded status is authoritative.")),
+        capabilities=capabilities,
+    ).resume_claimed_call(
+        context=_context(), previous_messages=proposed.messages, claimed_call=claimed,
+        progress_callback=events.append,
+    )
+
+    after = resumed.execution_plan
+    assert after is not None
+    assert after["plan_id"] == before["plan_id"]
+    assert after["plan_version"] > before["plan_version"]
+    assert after["steps"] == before["steps"]
+    assert resumed.tool_results[0].status is write_status
+    versions = [before["plan_version"], *(event["research_plan"]["plan_version"] for event in events), after["plan_version"]]
+    assert versions == sorted(versions)
+    recovered = agent_runner_module.ResearchExecutionPlan.from_messages(
+        messages=resumed.messages, run_status=resumed.status, completion_reason=resumed.completion_reason,
+    )
+    assert recovered is not None
+    assert recovered.to_record() == after
+
+
 async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
+    read = _Capability("read_source", ToolRisk.READ, _QuestionArguments,
+                       result_data={"document_id": "paper-1", "source_ref": "results"})
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall(
             "update_execution_plan",
@@ -2432,6 +2540,7 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
                 "explanation": "Start by matching the paper conditions.",
             },
         ),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {"question": "material and conditions"}),)),
         ModelTurn(tool_calls=(ModelToolCall(
             "update_execution_plan",
             {
@@ -2448,6 +2557,7 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
                 "explanation": "The conditions are recorded; compare the measurements next.",
             },
         ),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {"question": "reported measurements"}),)),
         ModelTurn(tool_calls=(ModelToolCall(
             "update_execution_plan",
             {
@@ -2465,12 +2575,12 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
             },
         ),)),
         ModelTurn(content="The comparison is complete."),
-        discover=("update_execution_plan",),
+        discover=("update_execution_plan", "read_source"),
     )
 
     result = await ResearchAgentRunner(
         model=model,
-        capabilities=CapabilityRegistry(()),
+        capabilities=CapabilityRegistry((read,)),
     ).run_turn(
         context=_context(),
         previous_messages=(),
@@ -2480,7 +2590,7 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
     assert result.status is AgentRunStatus.COMPLETED
     assert result.execution_plan is not None
     assert result.execution_plan["status"] == "completed"
-    assert result.execution_plan["plan_version"] == 4
+    assert result.execution_plan["plan_version"] == agent_runner_module._trajectory_event_count(result.messages)
     assert [step["status"] for step in result.execution_plan["steps"]] == [
         "completed", "completed",
     ]

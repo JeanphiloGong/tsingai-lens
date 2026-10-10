@@ -595,9 +595,12 @@ scientific trajectory records. The plan has a stable `plan_id`, increasing
 `awaiting_approval`, `waiting_for_clarification`, `scientific_refusal`,
 `technical_failure`, or `resource_limited`. Complex requests have a model-authored
 plan loaded through the registered `update_execution_plan` capability; the
-runtime only adds approval, resource, and technical dispositions. The latest
-plan is recovered from the saved tool trajectory, so compaction, a disconnected
-stream, or approval continuation does not require a second persistence model.
+runtime only adds approval, resource, and technical dispositions. `plan_version`
+is the recoverable sequence of capability request/result events, including
+pending and failed events, so an approval continuation or failed save cannot
+recreate an older version. The latest plan is recovered from the saved tool
+trajectory, so compaction, a disconnected stream, or approval continuation does
+not require a second persistence model.
 Simple answers may have no plan. It never represents Evidence, permission, or a
 scientific conclusion.
 `snapshot` events identify the current response and assistant message before its

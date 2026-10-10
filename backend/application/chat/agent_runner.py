@@ -207,7 +207,7 @@ def _now_iso() -> str:
 
 
 def _trajectory_event_count(messages: tuple[ChatMessage, ...]) -> int:
-    """Count persisted capability requests and observations once each."""
+    """Count durable capability request/result events once each."""
     request_ids = {
         request.tool_call_id
         for message in messages
@@ -305,26 +305,11 @@ class ResearchExecutionPlan:
             return None
         update = UpdateExecutionPlanToolRequest.model_validate(latest.data)
         model_status = ResearchExecutionStatus(update.status)
-        plan_updates = sum(
-            1 for message in active
-            if message.tool_result is not None
-            and message.tool_result.tool_call_id in plan_call_ids
-            and message.tool_result.status is ToolResultStatus.SUCCEEDED
-        )
-        observed_events = sum(
-            1 for message in active
-            if message.tool_result is not None
-            and message.tool_result.tool_call_id not in plan_call_ids
-            and message.tool_result.status in {
-                ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED,
-            }
-        )
         plan = cls(
             plan_id=sha256(f"{active[0].session_id}\x00{active[0].message_id}".encode()).hexdigest()[:20],
-            # Plan revisions and persisted observations both advance the
-            # observable snapshot. This keeps the version monotonic when an
-            # approval continuation adds its result before the next revision.
-            version=max(1, plan_updates + observed_events),
+            # Every durable request/result, including a pending request and a
+            # failed result, advances the recoverable event sequence.
+            version=max(1, _trajectory_event_count(active)),
             request=active[0].content[:4_000],
             status=model_status,
             steps=tuple(step.model_dump() for step in update.steps),
@@ -347,7 +332,10 @@ class ResearchExecutionPlan:
         if status is self.status:
             return self
         return replace(
-            self, status=status, version=self.version + 1,
+            # Runtime dispositions are derived views. Their version must stay
+            # tied to the durable trajectory so approval and failure recovery
+            # cannot recreate an older snapshot with a larger version.
+            self, status=status,
             blocking_reason=(
                 reason if status is ResearchExecutionStatus.TECHNICAL_FAILURE
                 else self.blocking_reason if status in {
@@ -423,12 +411,26 @@ class _RunProgress:
     model_call_observer: ModelCallObserver | None = None
     model_call_session_id: str | None = None
     execution_plan: ResearchExecutionPlan | None = None
+    plan_update_available: bool = True
 
     def refresh_execution_plan(
         self,
         messages: list[ChatMessage],
     ) -> None:
         self.execution_plan = ResearchExecutionPlan.from_messages(messages=tuple(messages))
+
+    def accept_plan_update(self, result: ChatToolResult) -> bool:
+        """Allow one changed plan between observations without clearing a stall."""
+        if result.status is not ToolResultStatus.SUCCEEDED or not self.plan_update_available:
+            return False
+        candidate_steps = tuple(dict(step) for step in result.data.get("steps", ()))
+        if self.execution_plan is not None and (
+            self.execution_plan.steps == candidate_steps
+            and self.execution_plan.model_status.value == result.data["status"]
+        ):
+            return False
+        self.plan_update_available = False
+        return True
 
     def start_response(self) -> None:
         self.response_message_id = f"msg_{uuid4().hex[:16]}"
@@ -1129,6 +1131,7 @@ class ResearchAgentRunner:
             old_resource_count = len(progress.resource_refs)
             prior_no_progress = progress.consecutive_no_progress
             progress_increased = False
+            plan_update_accepted = False
             for index, (call, capability_result) in enumerate(completed):
                 calls[batch_start + index] = call
                 if capability_result.status is ToolResultStatus.SUCCEEDED and call.name in {
@@ -1140,14 +1143,16 @@ class ResearchAgentRunner:
                     })
                 results.append(capability_result)
                 messages.append(self._result_message(context, capability_result))
-                if call.name != "update_execution_plan":
+                if call.name == "update_execution_plan":
+                    plan_update_accepted = progress.accept_plan_update(capability_result) or plan_update_accepted
+                else:
                     progress_increased = progress.observe(call, capability_result) or progress_increased
             progress.refresh_execution_plan(messages)
-            # Plan edits do not supply new research observations or reset a stalled read loop.
-            if any(call.name != "update_execution_plan" for call, _ in completed):
-                progress.consecutive_no_progress = (
-                    prior_no_progress + 1 if not progress_increased else 0
-                )
+            if progress_increased:
+                progress.consecutive_no_progress = 0
+                progress.plan_update_available = True
+            elif not plan_update_accepted:
+                progress.consecutive_no_progress = prior_no_progress + 1
             await self._checkpoint(checkpoint, messages, calls, results)
             progress.trace(context, phase="tools", capability_names=tool_names,
                            new_resources=len(progress.resource_refs) - old_resource_count,

@@ -513,7 +513,9 @@ Each complex run may expose a model-authored `execution_plan` in progress
 snapshots and the turn response. The Agent updates it through the registered
 `update_execution_plan` capability after framing the request and when new
 observations change the remaining work. The runtime recovers the latest plan
-from the ordered trajectory and adds approval, resource, and technical status;
+from the ordered trajectory and assigns `plan_version` from durable capability
+request/result events, including pending and failed events, then adds approval,
+resource, and technical status without inventing a version;
 it does not infer research steps from a metadata read or a local draft result.
 Simple answers may have no plan. It is operational state only; it never becomes
 Evidence, permission, or a Finding.

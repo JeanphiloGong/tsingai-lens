@@ -22,6 +22,12 @@
 	$: actionCounts = getChatProgressActions(progress);
 	$: executionPlan = progress.execution_plan;
 	function progressLabel(value: ChatProgress) {
+		if (value.phase === 'model_retry') {
+			return $t('researchAgent.progress.model_retry', {
+				attempt: value.retry_attempt ?? value.retry_count ?? 1,
+				seconds: Math.ceil((value.retry_delay_ms ?? 0) / 1000)
+			});
+		}
 		return $t(`researchAgent.progress.${value.phase}`, { cycle: value.cycle_index ?? 0 });
 	}
 </script>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 import pytest
 
 from application.chat import (
@@ -39,6 +40,75 @@ def test_initial_catalog_defers_read_parameters_even_without_intent_keywords():
 
 def test_search_sources_is_declared_as_a_parallel_safe_read():
     assert SearchSourcesCapability.spec.parallel_safe is True
+
+
+@pytest.mark.anyio
+async def test_model_declared_deferral_blocks_draft_and_write_without_phrase_matching():
+    draft = _Capability("create_finding_draft", ToolRisk.DRAFT)
+    write = _Capability("create_finding_version", ToolRisk.WRITE)
+    turns = iter((
+        ModelTurn(tool_calls=(ModelToolCall("discover_research_tools", {
+            "tool_names": [draft.spec.name, write.spec.name], "source_inspection_required": False,
+            "deferred_tool_names": [draft.spec.name, write.spec.name],
+        }),)),
+        ModelTurn(tool_calls=(ModelToolCall(draft.spec.name, {}),)),
+        ModelTurn(tool_calls=(ModelToolCall(write.spec.name, {}),)),
+        ModelTurn(content="Only experiment facts will be retained for now."),
+    ))
+    class Model:
+        async def respond(self, **kwargs):
+            return next(turns)
+    registry = CapabilityRegistry((draft, write))
+    result = await ResearchAgentRunner(model=Model(), capabilities=registry).run_turn(
+        context=_context(), previous_messages=(), user_message="Leave the interpretation for our next meeting.",
+    )
+    assert not draft.executed_arguments and not write.executed_arguments
+    assert result.pending_approval is None
+    assert [item.error_code for item in result.tool_results if item.error_code] == [
+        "action_deferred_for_request", "action_deferred_for_request",
+    ]
+    next_request = ChatMessage.user(message_id="next", session_id="chat-1", content="Now interpret the results.", created_at="2026-10-10T00:00:00Z")
+    call = ChatToolCall.requested(tool_call_id="new", session_id="chat-1", assistant_message_id="next-a",
+                                 name=write.spec.name, risk=ToolRisk.WRITE, arguments={})
+    error, _ = validate_batch(registry, ((call, write),), [*result.messages, next_request])
+    assert error is None  # Next user request can expand scope; normal approval still applies.
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("exists", [False, True])
+@pytest.mark.parametrize("tool", ["read_source", "inspect_document_sources", "inspect_table", "search_sources"])
+async def test_missing_source_distinguishes_unknown_identity_from_unprepared_paper(exists, tool):
+    from application.chat.capabilities.document_sources import (
+        InspectTableCapability, InspectTableToolRequest, SearchSourcesToolRequest,
+    )
+    collection = SimpleNamespace(
+        get_collection_for_user=AsyncMock(),
+        get_document=AsyncMock(side_effect=None if exists else FileNotFoundError()),
+    )
+    sources = SimpleNamespace(read_document=AsyncMock(return_value=None), read_documents=AsyncMock(return_value=()))
+    handlers = {
+        "read_source": (ReadSourceCapability, ReadSourceToolRequest(document_id="paper", source_kind="text_window", source_ref="methods")),
+        "inspect_document_sources": (InspectDocumentSourcesCapability, InspectDocumentSourcesToolRequest(document_id="paper")),
+        "inspect_table": (InspectTableCapability, InspectTableToolRequest(document_id="paper", table_ref="table")),
+        "search_sources": (SearchSourcesCapability, SearchSourcesToolRequest(document_ids=["paper"], query="HIP")),
+    }
+    capability, args = handlers[tool]
+    result = await capability(collection_service=collection, source_artifact_repository=sources).execute(
+        CapabilityExecutionContext.for_call(_context(), "read"), args,
+    )
+    assert result.error_code == ("document_sources_not_ready" if exists else "document_not_found")
+    assert result.data["missing_document_ids"] == ([] if exists else ["paper"])
+    if not exists:
+        assert "browse_collection_papers" in result.error_message
+
+
+@pytest.mark.anyio
+async def test_discovery_loads_more_than_six_registered_tools():
+    from application.chat.capabilities.tool_discovery import DiscoverResearchToolsToolRequest
+    registry = CapabilityRegistry(tuple(_Capability(f"read_{n}", ToolRisk.READ) for n in range(8)))
+    result = await registry.discovery.execute(CapabilityExecutionContext.for_call(_context(), "discover"),
+        DiscoverResearchToolsToolRequest(tool_names=[f"read_{n}" for n in range(8)], source_inspection_required=False))
+    assert len(result.data["loaded_tool_names"]) == 8
 
 
 @pytest.mark.anyio

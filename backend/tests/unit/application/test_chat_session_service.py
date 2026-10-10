@@ -1090,7 +1090,9 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     )
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((read,)),
-        limits=AgentRunLimits(max_elapsed_seconds=0.05, max_model_tokens=100),
+        # Leave enough setup time to reach the deliberately hanging third call;
+        # the whole-turn budget still cancels it promptly.
+        limits=AgentRunLimits(max_elapsed_seconds=0.5, max_model_tokens=100),
     )
     service = ChatSessionService(repository=repository, collection_service=collection,
                                  source_artifact_repository=sources, runner=runner)
@@ -1101,9 +1103,12 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     )
     events = [event async for event in stream]
     result = events[-1]["turn"]
-    assert result["status"] == ("failed" if ending == "timeout" else "completed")
+    # A request deadline now preserves the completed Source read and returns a
+    # resource-limited completion so the researcher can continue from evidence.
+    assert result["status"] == "completed"
     if ending == "timeout":
-        assert result["error_code"] == "provider_timeout"
+        assert result["completion_reason"] == "resource_budget"
+        assert result["error_code"] is None
         assert cancelled.is_set()
         assert not any(event["type"] == "text_delta" for event in events)
     else:

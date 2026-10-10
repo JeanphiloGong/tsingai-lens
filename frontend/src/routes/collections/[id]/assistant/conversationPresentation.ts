@@ -3,6 +3,9 @@ import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
 /** Map backend model failures to stable, user-facing translation keys. */
 export function getModelServiceErrorKey(errorCode: string | null | undefined): string | null {
 	switch (errorCode) {
+		case 'context_window_exceeded':
+		case 'context_compaction_unavailable':
+			return 'researchAgent.contextRecoveryFailed';
 		case 'provider_timeout':
 			return 'researchAgent.modelServiceTimeout';
 		case 'model_response_invalid':

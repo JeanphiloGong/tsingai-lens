@@ -2,6 +2,15 @@ import { expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import ResearchProgress from './ResearchProgress.svelte';
 
+it('shows retry delay and context preservation as technical progress', async () => {
+	const screen = render(ResearchProgress, {
+		progress: { phase: 'model_retry', retry_attempt: 2, retry_delay_ms: 2500 }
+	});
+	await expect.element(screen.getByRole('status')).toHaveTextContent(/Retry 2 in 3s|3 秒后第 2 次重试/);
+	await screen.rerender({ progress: { phase: 'context_compaction' } });
+	await expect.element(screen.getByRole('status')).toHaveTextContent(/Preserving research progress|正在整理并保留研究进展/);
+});
+
 it('keeps actual document and passage visible without a generated research plan', async () => {
 	const reading = {
 		toolCallId: 'read-1',

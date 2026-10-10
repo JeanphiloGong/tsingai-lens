@@ -80,7 +80,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.7"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.8"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -290,10 +290,19 @@ RESEARCH_TOOL_ROUTING = """TOOL DECISION PATH
    Candidate selection, status and recall without scientific rechecking do not
    alone impose that obligation. Discovery loads definitions only; it reads no
    paper and grants no approval. Loaded definitions remain available this request.
+   Record explicitly excluded or deferred actions in deferred_tool_names, including
+   both drafting and saving an excluded deliverable. Interpret the researcher's
+   meaning; the declaration only narrows this request and is never write authority.
    For a complex request, submit update_execution_plan separately from research
    capabilities, then revise it after observations. Do not infer that a generic
    research phase is complete merely because one metadata or navigation read
    succeeded.
+   When correcting an experiment used by a saved conclusion, inspect its fixed
+   revision and original Sources, preserve its supported identity and propose
+   corrected facts. Saving those facts does not update the old conclusion.
+   If the researcher subsequently requests an updated conclusion, inspect the
+   saved successor revision and choose its supported measurements for that
+   conclusion; retain the prior conclusion and explain the changed basis.
 3. Establish paper identities using get_collection_context when context is
    unknown, and browse_collection_papers for bounded filename/title surveys.
    Use known identities directly when supplied by the trajectory. An optional

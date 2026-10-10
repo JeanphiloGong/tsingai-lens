@@ -108,6 +108,23 @@ def _message() -> ChatMessage:
     )
 
 
+@pytest.mark.parametrize("arguments", [None, "", "{}"])
+async def test_stream_distinguishes_missing_arguments_from_explicit_empty_object(arguments):
+    client, _ = _client([_stream_chunk(tool_calls=[SimpleNamespace(
+        index=0, type="function", function=SimpleNamespace(name="inspect", arguments=arguments),
+    )])])
+    model = OpenAIChatModel(client=client, model="test-model")
+    kwargs = dict(context=ChatModelContext((_message(),)), tool_specs=(), text_delta_callback=lambda _: None)
+    if arguments == "{}":
+        turn = await model.respond(**kwargs)
+        assert turn.tool_calls[0].arguments == {}
+    else:
+        with pytest.raises(ModelResponseError) as error:
+            await model.respond(**kwargs)
+        assert error.value.reason == "stream_tool_arguments_missing"
+        assert error.value.retryable and not error.value.partial_content
+
+
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("effort", [None, "", " none ", "low"])
 async def test_chat_forwards_the_configured_reasoning_effort(monkeypatch, stream, effort):
@@ -158,7 +175,7 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.7"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.8"
     for section in (
         "AGENT MISSION",
         "FOUR-LAYER RESPONSIBILITY MODEL",

@@ -12,8 +12,11 @@ class DiscoverResearchToolsToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     tool_names: list[str] = Field(
-        min_length=1, max_length=6,
-        description="Exact names from the catalog needed for the current research request.",
+        min_length=1,
+        description=(
+            "Exact names from the catalog needed for the current research request. "
+            "Load the complete set needed for the next decision in one discovery call."
+        ),
     )
     source_inspection_required: bool = Field(
         description=(
@@ -25,6 +28,16 @@ class DiscoverResearchToolsToolRequest(BaseModel):
             "False for paper selection, status, or merely recalling saved analysis/review "
             "records without checking their scientific correctness. "
             "This records a reading prerequisite, not approval or scientific support."
+        ),
+    )
+    deferred_tool_names: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Exact catalog names for actions the researcher explicitly deferred or excluded "
+            "from this request. Interpret their meaning, including conversational context. "
+            "Include both draft and save actions for an excluded deliverable. This narrows "
+            "the current request only, grants no permission, and persists across discovery "
+            "updates until the next user request. Leave empty when nothing was excluded."
         ),
     )
 
@@ -63,7 +76,7 @@ class DiscoverResearchToolsCapability:
 
     async def execute(self, context: CapabilityExecutionContext, arguments: DiscoverResearchToolsToolRequest) -> ChatToolResult:
         names = list(dict.fromkeys(arguments.tool_names))
-        if any(name not in self.tools for name in names):
+        if any(name not in self.tools for name in (*names, *arguments.deferred_tool_names)):
             return ChatToolResult(
                 tool_call_id=context.tool_call_id, status="failed",
                 error_code="tool_not_discoverable",
@@ -77,6 +90,7 @@ class DiscoverResearchToolsCapability:
             data={
                 "loaded_tool_names": names,
                 "source_inspection_required": arguments.source_inspection_required,
+                "deferred_tool_names": list(dict.fromkeys(arguments.deferred_tool_names)),
                 "tools": [
                     {"name": name, "description": self.tools[name].description, "risk": self.tools[name].risk.value}
                     for name in names

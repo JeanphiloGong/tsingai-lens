@@ -593,6 +593,8 @@ const translations: Record<Language, Translations> = {
 				tools: 'Inspecting sources...',
 				finalize: 'Preparing the answer...',
 				waiting: 'Waiting for the research model...',
+				model_retry: 'Model service interrupted. Retry {attempt} in {seconds}s...',
+				context_compaction: 'Preserving research progress...',
 				responding: 'Writing the response...',
 				recovering: 'Research in progress...',
 				reconnecting: 'Reconnecting to research...',
@@ -892,6 +894,7 @@ const translations: Record<Language, Translations> = {
 			researchPlanRejected: 'The proposed research plan was not saved.',
 			agentObjectiveAnalysisRejected: 'The proposed Agent analysis was not published.',
 			turnFailed: 'The Agent could not complete this turn. Try again later.',
+			contextRecoveryFailed: 'Research context could not be prepared. Completed work is preserved; continue with a narrower question.',
 			modelServiceUnavailable:
 				'The model service is temporarily unavailable. Contact an administrator or try again later. Any retrieved research results were kept.',
 			modelServiceTimeout:
@@ -3947,6 +3950,8 @@ const translations: Record<Language, Translations> = {
 				tools: '正在检查来源...',
 				finalize: '正在整理答案...',
 				waiting: '正在等待研究模型响应...',
+				model_retry: '模型服务暂时中断，{seconds} 秒后第 {attempt} 次重试...',
+				context_compaction: '正在整理并保留研究进展...',
 				responding: '正在回复...',
 				recovering: '研究正在进行...',
 				reconnecting: '正在重新连接研究状态...',
@@ -4226,6 +4231,7 @@ const translations: Record<Language, Translations> = {
 			modelServiceUnavailable:
 				'模型服务暂时不可用，请联系管理员或稍后重试。已取得的研究结果已保留。',
 			modelServiceTimeout: '模型服务响应超时，请稍后重试。已取得的研究结果已保留。',
+			contextRecoveryFailed: '暂时无法整理本轮研究上下文。已完成的工作已保留，可以缩小问题范围后继续。',
 			modelServiceInvalidResponse:
 				'模型服务返回了无效响应，请联系管理员或稍后重试。已取得的研究结果已保留。',
 			responseInterrupted: '回复生成已中断，当前显示的文字尚未完成。',

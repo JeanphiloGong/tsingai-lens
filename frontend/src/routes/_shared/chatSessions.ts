@@ -193,6 +193,11 @@ export type ChatProgress = {
 	elapsed_ms?: number;
 	remaining_tool_budget?: number;
 	remaining_token_budget?: number;
+	retry_count?: number;
+	retry_attempt?: number | null;
+	retry_delay_ms?: number | null;
+	remaining_retry_budget?: number;
+	termination_reason?: string | null;
 	execution_plan?: ChatExecutionPlan | null;
 };
 
@@ -240,6 +245,9 @@ export function appendChatProgress(history: ChatProgress[], next: ChatProgress) 
 		previous.executed_tool_count === next.executed_tool_count &&
 		previous.remaining_tool_budget === next.remaining_tool_budget &&
 		previous.remaining_token_budget === next.remaining_token_budget &&
+		previous.retry_count === next.retry_count &&
+		previous.retry_attempt === next.retry_attempt &&
+		previous.termination_reason === next.termination_reason &&
 		previous.execution_plan?.plan_id === next.execution_plan?.plan_id &&
 		previous.execution_plan?.plan_version === next.execution_plan?.plan_version &&
 		previous.execution_plan?.status === next.execution_plan?.status

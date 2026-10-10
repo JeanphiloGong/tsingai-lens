@@ -610,6 +610,13 @@ instead of retaining `awaiting_approval`. A runtime status change may keep the
 same plan version because it adds no capability request/result event.
 Simple answers may have no plan. It never represents Evidence, permission, or a
 scientific conclusion.
+Progress also includes `retry_count`, `remaining_retry_budget`, `retry_attempt`,
+`retry_delay_ms` and `termination_reason`. `model_retry` and `context_compaction`
+describe technical work. The existing snapshot progress stores an internal
+`context_checkpoint` containing provisional working notes and compacted message
+IDs for recovery; clients must not render it as evidence. Context failures use
+`context_window_exceeded` or `context_compaction_unavailable`, separately from
+provider availability failures.
 `snapshot` events identify the current response and assistant message before its
 text deltas; `trajectory` events replace the saved messages after checkpoints.
 The stream

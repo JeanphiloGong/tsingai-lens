@@ -52,6 +52,13 @@ def validate_batch(
     successful_results = active_successful_results_by_name(messages)
     validated_arguments: dict[str, BaseModel] = {}
     for call, handler in requested:
+        if any(call.name in result.get("deferred_tool_names", ())
+               for result in successful_results.get("discover_research_tools", ())):
+            return (
+                ("action_deferred_for_request",
+                 "This action was explicitly deferred for this user request. Continue the requested work without it; a plan update or write approval does not expand the request."),
+                validated_arguments,
+            )
         if (
             call.name == "discover_research_tools"
             and permission_mode is ToolPermissionMode.READ_ONLY
@@ -194,6 +201,10 @@ def select_tool_specs(
     }
     loaded_names.update(
         set(successful_results).intersection(capabilities.discovery.tools)
+    )
+    loaded_names.difference_update(
+        name for result in successful_results.get("discover_research_tools", ())
+        for name in result.get("deferred_tool_names", ())
     )
 
     if permission_mode is ToolPermissionMode.READ_ONLY:
@@ -562,7 +573,35 @@ def stage_instruction(
     for name in ("create_finding_draft", "propose_paper_experiment_draft", "propose_research_plan"):
         values = successful_results.get(name, ())
         if values:
-            drafts[name] = values[-1]
+            # Full payloads remain in paired tool results and durable drafts.
+            # Repeating them in a pinned instruction can exhaust the context.
+            keys = ("draft_id", "draft_digest", "document_id", "objective_id", "draft_status",
+                    "experiment_count", "source_fingerprint", "source_snapshots", "persistence")
+            latest = values[-1]
+            drafts[name] = {key: latest[key] for key in keys if key in latest}
+            if isinstance(latest.get("draft"), Mapping):
+                drafts[name]["draft"] = {
+                    key: latest["draft"][key]
+                    for key in ("draft_id", "source_analysis_version", "selection_ids", "finding_id")
+                    if key in latest["draft"]
+                }
+    experiment_drafts = successful_results.get("propose_paper_experiment_draft", ())
+    if experiment_drafts:
+        by_document = {}
+        for draft in experiment_drafts:
+            if draft.get("document_id"):
+                by_document[draft["document_id"]] = {
+                    key: draft[key] for key in ("document_id", "draft_id", "draft_digest", "experiment_count", "source_fingerprint")
+                    if key in draft
+                }
+        observations["paper_experiment_drafts"] = list(by_document.values())
+    saved_revisions = successful_results.get("create_paper_experiment_revision", ())
+    if saved_revisions:
+        observations["saved_paper_experiments"] = [
+            {key: revision[key] for key in ("document_id", "experiment_id", "experiment_version") if key in revision}
+            for result in saved_revisions
+            for revision in result.get("revisions", ()) if isinstance(revision, Mapping)
+        ]
     if drafts:
         observations["latest_transient_results"] = drafts
     elif prior_experiment_draft and set(tool_names).intersection({

@@ -43,6 +43,49 @@ from domain.chat.permissions import AUTO_ACTIONS
 pytestmark = pytest.mark.anyio
 
 
+@pytest.fixture(autouse=True)
+def skip_retry_delays(monkeypatch):
+    async def no_wait(_delay):
+        pass
+    monkeypatch.setattr(agent_runner_module, "sleep", no_wait)
+
+
+def test_provider_overload_without_http_status_is_retryable() -> None:
+    import httpx
+    from openai import APIError
+    error = APIError("Our servers are currently overloaded. Please try again later.",
+                     request=httpx.Request("POST", "https://example.test"), body=None)
+
+    details = agent_runner_module._provider_failure_details(error)
+
+    assert details["retryable"] is True
+    assert details["reason"] == "transient_provider_error"
+
+
+def test_provider_retry_after_is_preserved_without_exposing_response_body() -> None:
+    class Response:
+        status_code = 503
+        headers = {"retry-after": "2.5"}
+
+    class ProviderError(RuntimeError):
+        response = Response()
+
+    details = agent_runner_module._provider_failure_details(ProviderError("temporary failure"))
+
+    assert details["retryable"] is True
+    assert details["http_status"] == 503
+    assert details["retry_after_seconds"] == 2.5
+
+
+def test_default_run_limits_bound_an_unconfigured_turn() -> None:
+    limits = AgentRunLimits()
+
+    assert limits.max_elapsed_seconds is not None
+    assert limits.max_tool_calls is not None
+    assert limits.max_model_tokens is not None
+    assert limits.emergency_max_model_cycles is not None
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -360,7 +403,7 @@ async def test_new_sources_may_continue_beyond_six_model_decisions() -> None:
     assert len(read.executed_arguments) == 7
 
 
-async def test_default_limits_allow_long_investigation_with_reported_usage() -> None:
+async def test_explicit_unbounded_limits_allow_long_investigation_with_reported_usage() -> None:
     read = _Capability("get_collection_context", ToolRisk.READ, _QuestionArguments)
     model = _Model(
         *(ModelTurn(tool_calls=(ModelToolCall(
@@ -369,7 +412,9 @@ async def test_default_limits_allow_long_investigation_with_reported_usage() -> 
         ModelTurn(content="The inspected comparisons are ready for review."),
     )
     traces = []
-    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,)),
+                                     limits=AgentRunLimits(max_elapsed_seconds=None, max_tool_calls=None,
+                                                           max_model_tokens=None, emergency_max_model_cycles=None)).run_turn(
         context=_context(), previous_messages=(), user_message="Inspect the collection.",
         progress_callback=traces.append,
     )
@@ -526,6 +571,90 @@ async def test_provider_retries_are_visible_in_progress_trace() -> None:
     assert all(item["retry_reason"] == "empty_response" for item in retries)
 
 
+async def test_missing_stream_arguments_retry_nonstreaming_before_any_tool_executes():
+    callbacks = []
+    tool = _Capability("get_collection_context", ToolRisk.READ)
+
+    class Model(_Model):
+        async def respond(self, **kwargs):
+            callbacks.append(kwargs.get("text_delta_callback") is not None)
+            return await super().respond(**kwargs)
+
+    model = Model(
+        ModelResponseError("missing", reason="stream_tool_arguments_missing"),
+        ModelTurn(tool_calls=(ModelToolCall(tool.spec.name, {}),)),
+        ModelTurn(content="The collection was inspected."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((tool,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Inspect this collection.",
+        text_delta_callback=lambda _: None,
+    )
+    assert result.status is AgentRunStatus.COMPLETED
+    assert callbacks[:3] == [True, False, True]  # Fallback discovery, then a new decision.
+    assert len(tool.executed_arguments) == 1
+
+
+async def test_retry_allowance_is_shared_across_successful_tool_cycles():
+    tool = _Capability("get_collection_context", ToolRisk.READ)
+    traces = []
+    model = _Model(
+        ModelResponseError("empty", reason="empty_response"),
+        ModelTurn(tool_calls=(ModelToolCall(tool.spec.name, {}),)),
+        ModelResponseError("empty", reason="empty_response"),
+        ModelTurn(content="Must not be reached."),
+    )
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((tool,)), limits=AgentRunLimits(max_model_retries=1),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Inspect collection.", progress_callback=traces.append)
+    assert result.status is AgentRunStatus.FAILED
+    assert len(tool.executed_arguments) == 1
+    assert len([trace for trace in traces if trace["phase"] == "model_retry"]) == 1
+
+
+def test_checkpoint_restores_usage_and_compacted_context_without_logging_notes(caplog):
+    original = agent_runner_module._RunProgress(AgentRunLimits())
+    original.model_tokens = 123
+    original.retry_count = 2
+    original.working_summary = '{"scope":"private provisional notes"}'
+    original.compacted_message_ids = {"m1", "m2"}
+    payloads = []
+    original.progress_callback = payloads.append
+    original.trace(_context(), phase="context_compaction")
+    restored = agent_runner_module._RunProgress(AgentRunLimits())
+    restored.restore_persisted_progress(payloads[-1])
+    assert restored.model_tokens == 123
+    assert restored.retry_count == 2
+    assert restored.working_summary == original.working_summary
+    assert restored.compacted_message_ids == {"m1", "m2"}
+    assert "private provisional notes" not in caplog.text
+
+
+async def test_request_timeout_is_independent_from_prior_active_turn_time(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
+    progress = agent_runner_module._RunProgress(AgentRunLimits(max_elapsed_seconds=600, max_request_seconds=180))
+    model = _Model(ModelTurn(content="Done."), ModelTurn(content="Done."))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()), limits=progress.limits)
+    context = agent_runner_module.ChatModelContext((ChatMessage.user(
+        message_id="u", session_id="chat-1", content="Explain.", created_at="2026-10-10T00:00:00Z",
+    ),))
+    now[0] = 200
+    await runner._respond(context, (), progress, None)
+    now[0] = 550
+    await runner._respond(context, (), progress, None)
+    assert [timeout for timeout, _ in model.request_limits] == [180, 50]
+
+
+def test_stage_hint_keeps_all_draft_references_without_copying_full_payloads():
+    drafts = [{"document_id": f"p{n}", "draft_id": f"d{n}", "draft_digest": str(n) * 64,
+               "draft": {"experiments": ["full scientific payload" * 10000]}} for n in (1, 2)]
+    hint = capability_policy.stage_instruction((), [], successful_results={"propose_paper_experiment_draft": drafts})
+    assert len(hint) < 3000
+    observed = json.loads(hint.split("\n", 1)[1])
+    assert [item["draft_id"] for item in observed["paper_experiment_drafts"]] == ["d1", "d2"]
+    assert "full scientific payload" not in hint
+
+
 @pytest.mark.parametrize("tokens", [100, 120])
 async def test_usage_exhaustion_preserves_final_text_without_another_request(tokens: int) -> None:
     model = _Model(ModelTurn(content="Only the first paper was inspected.",
@@ -617,8 +746,9 @@ async def test_timed_out_model_is_cancelled_without_starting_finalization() -> N
     ).run_turn(context=_context(), previous_messages=(), user_message="Hello",
                text_delta_callback=deltas.append)
 
-    assert result.status is AgentRunStatus.FAILED
-    assert result.error_code == "provider_timeout"
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    assert result.error_code is None
     assert model.calls == 1
     assert cancelled.is_set()
     assert deltas == []
@@ -713,7 +843,7 @@ def test_provider_error_cause_and_permanent_quota_are_distinguished():
     ({"code": "insufficient_quota", "type": "server_error"}, False),
     ({"code": "invalid_api_key"}, False),
     ({"code": ["malformed"]}, False),
-    ({"message": "unknown provider error"}, False),
+    ({"message": "unknown provider error"}, True),
 ])
 def test_stream_api_error_uses_known_structured_codes_without_status(body, retryable):
     import httpx
@@ -777,6 +907,26 @@ async def test_retryable_api_error_stops_after_initial_attempt_and_five_retries(
     assert len(model.request_limits) == 6
     assert len([event for event in events if event["phase"] == "model_retry"]) == 5
     assert events[-1]["retry_reason"] == "transient_provider_error"
+
+
+async def test_provider_stream_failure_retries_as_non_streaming_request():
+    import httpx
+    from openai import APIError
+    model = _Model(
+        APIError("stream upstream overloaded", request=httpx.Request("POST", "https://example.test"), body={"type": "upstream_error"}),
+        ModelTurn(content="The provider recovered without streaming."),
+    )
+    callbacks = []
+    class Wrapped(_Model):
+        async def respond(self, **kwargs):
+            callbacks.append(kwargs.get("text_delta_callback") is not None)
+            return await super().respond(**kwargs)
+    wrapped = Wrapped(model.turns[0], model.turns[1])
+    result = await ResearchAgentRunner(model=wrapped, capabilities=CapabilityRegistry(())).run_turn(
+        context=_context(), previous_messages=(), user_message="Answer briefly.", text_delta_callback=lambda _: None,
+    )
+    assert result.status is AgentRunStatus.COMPLETED
+    assert callbacks[:2] == [True, False]
 
 
 async def test_finalization_uses_remaining_time_and_its_own_output_limit(monkeypatch) -> None:
@@ -847,7 +997,9 @@ async def test_read_deadline_preserves_successes_without_starting_a_summary() ->
         limits=AgentRunLimits(max_elapsed_seconds=0.02),
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
 
-    assert result.error_code == "final_answer_unavailable"
+    assert result.error_code is None
+    assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    assert result.warnings
     assert cancelled.is_set()
     assert len(model.contexts) == 1
     read_results = _results_for(result, read.spec.name)
@@ -2695,6 +2847,7 @@ async def test_approval_resume_inherits_time_and_model_budget(
     )
     limits = AgentRunLimits(
         max_request_seconds=10.0,
+        max_elapsed_seconds=10.0,
         max_model_tokens=100,
     )
     runner = ResearchAgentRunner(

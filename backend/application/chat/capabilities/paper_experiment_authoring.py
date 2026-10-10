@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -608,6 +609,22 @@ class ProposePaperExperimentDraftCapability:
                                "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."),
                 data={"document_id": arguments.document_id, "sources_to_read": missing},
             )
+        for message in reversed(messages):
+            prior = message.tool_result
+            if prior is None or prior.status != "succeeded":
+                continue
+            data = prior.data
+            if (data.get("document_id") != arguments.document_id
+                    or data.get("draft_digest") != prepared.draft_digest
+                    or data.get("source_fingerprint") != prepared.source_fingerprint
+                    or data.get("draft") != arguments.raw_draft()):
+                continue
+            try:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(str(data.get("draft_created_at") or ""))
+            except (ValueError, TypeError):
+                continue
+            if timedelta(0) <= age <= _DRAFT_TTL and data.get("draft_id"):
+                return replace(prior, tool_call_id=context.tool_call_id)
         draft_id = _draft_id(context, prepared.draft_digest)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,

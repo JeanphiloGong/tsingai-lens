@@ -435,6 +435,11 @@ class OpenAIChatModel:
                 ) from exc
 
         try:
+            if any(not "".join(arguments).strip() for _, arguments in parts_by_index.values()):
+                raise _invalid_response(
+                    "research model stream omitted tool arguments",
+                    reason="stream_tool_arguments_missing", partial_content=bool(content), usage=usage,
+                )
             return ModelTurn(
                 content=content, usage=usage,
                 tool_calls=tuple(

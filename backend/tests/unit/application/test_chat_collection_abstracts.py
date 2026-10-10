@@ -209,7 +209,8 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing():
         {"document_id": "paper-2", "original_filename": "Missing.pdf", "status": "ready"},
     ]
     collection_service = SimpleNamespace(
-        get_collection_for_user=AsyncMock(return_value={"documents": records})
+        get_collection_for_user=AsyncMock(return_value={"documents": records}),
+        get_document=AsyncMock(return_value=records[1]),
     )
     sources = MemorySourceArtifactRepository()
     browse = BrowseCollectionPapersCapability(

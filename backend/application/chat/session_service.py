@@ -966,9 +966,8 @@ class ChatSessionService:
     ) -> AgentRunResult:
         # The caller holds the execution lock through the final snapshot write.
         loop = asyncio.get_running_loop()
-        prior_snapshot = None
+        prior_snapshot = await self.repository.read_response_snapshot(session.session_id)
         if claimed_call is not None or rejected_call is not None:
-            prior_snapshot = await self.repository.read_response_snapshot(session.session_id)
             if continuation_progress is None:
                 continuation_progress = prior_snapshot.progress if prior_snapshot is not None else None
         elapsed_ms = 0
@@ -977,7 +976,7 @@ class ChatSessionService:
             if isinstance(value, (int, float)) and not isinstance(value, bool):
                 elapsed_ms = max(0, int(value))
         started_at = loop.time() - elapsed_ms / 1000.0
-        now = prior_snapshot.started_at if prior_snapshot is not None else _now_iso()
+        now = prior_snapshot.started_at if prior_snapshot is not None and continuation_progress is not None else _now_iso()
         inherited_progress = dict(continuation_progress or {})
         inherited_progress.update({
             "phase": "waiting",
@@ -1083,6 +1082,9 @@ class ChatSessionService:
                     continuation_progress=continuation_progress,
                 )
             else:
+                prior_context = prior_snapshot.progress.get("context_checkpoint") if prior_snapshot else None
+                if isinstance(prior_context, Mapping):
+                    arguments["context_checkpoint"] = prior_context
                 result = await self.runner.run_turn(
                     **arguments,
                     user_message=message,

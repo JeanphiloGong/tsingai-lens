@@ -166,7 +166,7 @@ search” is conversational guidance for the model, not an authorization switch.
 
 `discover_research_tools` is an ordinary typed function call, not a provider's
 native ToolSearch API. Its short catalog comes from registered read/draft/write
-handlers. It loads up to six named schemas per call and performs no scientific
+handlers. It loads the requested registered schemas per call and performs no scientific
 read, write, or approval. Successful results retain selected names only for
 the active user request; definitions always come from the current registry.
 The registry and each tool's risk are the authority for catalog membership;
@@ -176,6 +176,11 @@ available after navigation; the model can discover additional tools, revisit a
 completed browse, or answer without a prescribed reader/draft order. The
 `source_inspection_required` flag records the model's assessment, not a gate.
 The next user request starts with a fresh catalog.
+
+Discovery may record model-interpreted `deferred_tool_names` for deliverables
+the researcher excluded. These names stay excluded for the active request,
+including approval continuation; they neither grant authority nor prescribe
+a research sequence. No user-phrase matching decides this scope.
 
 Persistence intent is scoped to the requested action: saving error feedback
 while declining curation or publication exposes only the feedback write.
@@ -360,14 +365,18 @@ separately. Explicit evidence, evaluation against real research scenarios and
 researcher review remain necessary to assess scientific correctness.
 
 Whole-turn time, tool-call count, cumulative model tokens and total model cycles
-have no default ceiling. Their optional environment settings accept a positive
-limit; unset or zero disables that ceiling. Usage remains observable telemetry.
+default to 900 seconds, 96 calls, 1,000,000 reported tokens and 64 cycles.
+Their environment settings accept a positive limit; zero explicitly disables
+that ceiling. Approval waiting time is excluded; active usage survives approval.
 Individual model/read requests retain a 180-second timeout, cancellation and
 the repeated-observation guard.
 Provider failures use structured HTTP status, known stream error codes and
 chained transport exceptions. HTTP 408/429/5xx and known transient stream or
 connection failures receive up to five retries with exponential jittered
-backoff; authentication, malformed requests, exhausted quota and unclassified
+backoff and `Retry-After`. The retry allowance is shared across the turn and its
+approval continuations. Missing streamed tool arguments retry without streaming
+before executing any tool; partial visible text is not replayed as a new answer.
+Authentication, malformed requests, exhausted quota and unclassified
 errors stop visibly. Successful tool observations remain in the trajectory
 during retries. Trace records contain normalized reasons, status, attempt and
 delay. Failure logs may add a bounded message only for low-risk structural
@@ -396,6 +405,13 @@ uncertainties and next actions. It validates references before retiring those
 operations from model input. The full trajectory remains in storage. Working
 notes are not primary evidence, approval or published results. Source claims require
 their actual passages. A failed compaction preserves history and fails visibly.
+Working notes and retired message IDs are checkpointed in the existing response
+snapshot for approval and interruption recovery, without copying notes to logs.
+Pinned execution hints retain draft references and saved revision identities;
+full scientific payloads remain in durable tool results. Identical, current,
+unexpired experiment drafts reuse their stored reference after Source validation.
+Unknown document identities return `document_not_found` with navigation advice;
+only known papers without Source content return `document_sources_not_ready`.
 Recent user requests receive a reserved share of the context before tool
 outputs. Adding one paper or deferring a review preserves other paper choices;
 compaction retains those choices separately from Agent recommendations.

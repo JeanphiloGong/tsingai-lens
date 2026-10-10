@@ -591,14 +591,57 @@ async def test_no_save_plan_draft_does_not_reenable_writes_after_discovery():
     assert all(not {"create_research_plan", "revise_research_plan"}.intersection(names) for names in model.all_tool_spec_names)
 
 
-def test_approved_write_is_not_reexposed_before_discovery():
+def test_completed_write_does_not_hide_same_capability_for_another_resource():
     registry = CapabilityRegistry((
         _Capability("get_collection_context", ToolRisk.READ),
         _Capability("create_objective_candidate", ToolRisk.WRITE),
     ))
-    message = ChatMessage.user(message_id="u", session_id="chat-1", content="Save this research objective candidate.", created_at="2026-09-09T00:00:00Z")
-    specs = select_tool_specs(registry, [message], [], inherited_completed_writes={"create_objective_candidate"})
-    assert "create_objective_candidate" not in {spec.name for spec in specs}
+    user = ChatMessage.user(
+        message_id="u", session_id="chat-1",
+        content="Save the reviewed objective records.",
+        created_at="2026-09-09T00:00:00Z",
+    )
+    discovery = ChatToolRequest(
+        tool_call_id="discover-1", name="discover_research_tools",
+        arguments={
+            "tool_names": ["create_objective_candidate"],
+            "source_inspection_required": False,
+        }, position=0,
+    )
+    messages = [
+        user,
+        ChatMessage.assistant_tool_calls(
+            message_id="assistant-1", session_id="chat-1", content="",
+            tool_calls=(discovery,), created_at="2026-09-09T00:00:01Z",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="tool-1", session_id="chat-1", created_at="2026-09-09T00:00:02Z",
+            result=ChatToolResult(
+                tool_call_id="discover-1", status="succeeded",
+                data={"loaded_tool_names": ["create_objective_candidate"]},
+            ),
+        ),
+    ]
+    specs = select_tool_specs(registry, messages, [])
+    assert "create_objective_candidate" in {spec.name for spec in specs}
+
+
+def test_read_only_discovery_catalog_excludes_write_capabilities():
+    registry = CapabilityRegistry((
+        _Capability("get_collection_context", ToolRisk.READ),
+        _Capability("create_objective_candidate", ToolRisk.WRITE),
+    ))
+    message = ChatMessage.user(
+        message_id="u", session_id="chat-1", content="Inspect this collection.",
+        created_at="2026-09-09T00:00:00Z",
+    )
+
+    specs = select_tool_specs(
+        registry, [message], [], permission_mode=ToolPermissionMode.READ_ONLY,
+    )
+    catalog = next(spec for spec in specs if spec.name == "discover_research_tools")
+    assert "get_collection_context" in catalog.description
+    assert "create_objective_candidate" not in catalog.description
 
 
 def test_discovery_name_cannot_be_shadowed_by_registered_handler():

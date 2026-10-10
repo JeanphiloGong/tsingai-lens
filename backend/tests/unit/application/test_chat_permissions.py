@@ -48,12 +48,12 @@ async def test_session_permission_controls_actual_write(mode, expected):
     assert result["status"] == expected, [(c.name, c.error_code) for c in repository.calls.values()]
     calls = [call for call in repository.calls.values() if call.name == write.spec.name]
     if mode == "read_only":
-        assert not calls
+        # The write schema is hidden from discovery. A forged model call is
+        # still retained as a denied trajectory event for auditability.
+        assert len(calls) == 1
+        assert calls[0].status.value == "failed"
+        assert calls[0].error_code == "tool_permission_denied"
         assert not write.executed
-        assert any(
-            call.error_code == "tool_permission_denied"
-            for call in repository.calls.values()
-        )
         return
     assert len(calls) == 1
     if mode == "auto":

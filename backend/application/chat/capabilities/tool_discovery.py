@@ -36,11 +36,19 @@ class DiscoverResearchToolsCapability:
             for spec in specs
             if spec.risk in {ToolRisk.READ, ToolRisk.DRAFT, ToolRisk.WRITE}
         }
+        self.spec = self.spec_for_permission(allow_writes=True)
+
+    def spec_for_permission(self, *, allow_writes: bool) -> ToolSpec:
+        """Build the catalog visible under the caller's deterministic mode."""
+        visible = tuple(
+            spec for spec in self.tools.values()
+            if allow_writes or spec.risk is not ToolRisk.WRITE
+        )
         catalog = "\n".join(
             f"- {spec.name} [{spec.risk.value}]: {spec.description.split('. ', 1)[0].rstrip('.')}."
-            for spec in self.tools.values()
+            for spec in visible
         )
-        self.spec = ToolSpec(
+        return ToolSpec(
             name="discover_research_tools",
             description=(
                 "Select tools from this catalog to load their complete parameter definitions "

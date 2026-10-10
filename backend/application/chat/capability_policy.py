@@ -159,15 +159,14 @@ def select_tool_specs(
     messages: list[ChatMessage],
     calls: list[ChatToolCall],
     *,
-    inherited_completed_writes: set[str] | None = None,
     permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
 ) -> tuple[ToolSpec, ...]:
     """Select currently available tool definitions for the next model turn.
 
     Visibility is derived from the active discovery/results trajectory. The
-    request permission mode and same-continuation write de-duplication remain
-    deterministic backend boundaries; research-stage ordering is left to the
-    model.
+    permission mode is a deterministic backend boundary; research-stage
+    ordering and whether another resource needs the same capability remain
+    model decisions.
     """
     permission_mode = ToolPermissionMode(permission_mode)
     if permission_mode is ToolPermissionMode.NONE:
@@ -205,19 +204,16 @@ def select_tool_specs(
             and handler.spec.risk is ToolRisk.WRITE
         )
 
-    completed_writes = {
-        call.name
-        for call in calls
-        if call.risk is ToolRisk.WRITE
-        and call.status is ToolCallStatus.SUCCEEDED
-    }
-    completed_writes.update(inherited_completed_writes or ())
     allowed_names = loaded_names
-    allowed_names.difference_update(completed_writes)
 
     selected = select_names(allowed_names)
     if capabilities.discovery.tools:
-        return (*selected, capabilities.discovery.spec)
+        return (
+            *selected,
+            capabilities.discovery.spec_for_permission(
+                allow_writes=permission_mode is not ToolPermissionMode.READ_ONLY,
+            ),
+        )
     return selected
 
 
@@ -593,39 +589,6 @@ def stage_instruction(
         "source locators and repair details; choose the next action for the active request.\n"
         + json.dumps(observations, ensure_ascii=False)
     )
-
-def completed_write_names(
-    messages: list[ChatMessage], capabilities: CapabilityRegistry,
-) -> set[str]:
-    """Find writes completed before an approval continuation resumed.
-
-    A fresh user message starts a new intent turn, so its call list is empty
-    and these names are intentionally not carried over by ``run_turn``.
-    Approval resumption has no new user message, though, and must preserve
-    the same trajectory's write boundary while the model chooses its next
-    read or draft step. Persisted ChatToolRequest rows do not carry risk, so
-    the current registry is the authority for identifying completed writes.
-    """
-    write_names_by_call_id = {
-        request.tool_call_id: request.name
-        for message in messages
-        for request in message.tool_calls
-        if (
-            (handler := capabilities.get(request.name)) is not None
-            and handler.spec.risk is ToolRisk.WRITE
-        )
-    }
-    return {
-        name
-        for message in messages
-        if message.role is ChatMessageRole.TOOL
-        and message.tool_result is not None
-        and message.tool_result.status
-        in {ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED}
-        for name in (write_names_by_call_id.get(message.tool_call_id),)
-        if name is not None
-    }
-
 
 def _successful_results_by_name(
     messages: list[ChatMessage],

@@ -223,9 +223,12 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         "create_objective_candidate" in names
         for names in model.all_tool_spec_names
     )
-    assert model.all_tool_spec_names[-1] == ("discover_research_tools",)
-    # The write schema is discovered before approval, then hidden after the
-    # successful same-continuation write to prevent duplicate execution.
+    assert model.all_tool_spec_names[-1] == (
+        "create_objective_candidate",
+        "discover_research_tools",
+    )
+    # A successful write does not hide the capability by name. The same
+    # capability may be needed for a different resource in this continuation.
     assert [item["role"] for item in trajectory.json()["items"]] == [
         "user",
         "assistant",

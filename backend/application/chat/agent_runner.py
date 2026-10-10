@@ -698,7 +698,6 @@ class ResearchAgentRunner:
             results,
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
-            inherited_completed_writes=set(),
             permission_mode=permission_mode,
             progress=progress,
         )
@@ -735,9 +734,6 @@ class ResearchAgentRunner:
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
         progress.refresh_execution_plan(messages)
-        inherited_completed_writes = capability_policy.completed_write_names(
-            messages, self.capabilities,
-        )
         calls = [claimed_call]
         results: list[ChatToolResult] = []
         handler = self.capabilities.get(claimed_call.name)
@@ -804,7 +800,6 @@ class ResearchAgentRunner:
             results,
             checkpoint=checkpoint,
             text_delta_callback=text_delta_callback,
-            inherited_completed_writes=inherited_completed_writes,
             permission_mode=ToolPermissionMode.CONFIRM,
             progress=progress,
         )
@@ -818,7 +813,6 @@ class ResearchAgentRunner:
         *,
         checkpoint: _TrajectoryCheckpoint | None,
         text_delta_callback: Callable[[str], None] | None,
-        inherited_completed_writes: set[str],
         permission_mode: ToolPermissionMode | str,
         progress: _RunProgress,
     ) -> AgentRunResult:
@@ -843,7 +837,6 @@ class ResearchAgentRunner:
                         self.capabilities,
                         messages,
                         calls,
-                        inherited_completed_writes=inherited_completed_writes,
                         permission_mode=permission_mode,
                     )
                     tool_names = tuple(spec.name for spec in tool_specs)

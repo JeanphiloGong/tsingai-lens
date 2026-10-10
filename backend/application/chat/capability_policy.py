@@ -173,7 +173,7 @@ def select_tool_specs(
     if permission_mode is ToolPermissionMode.NONE:
         return ()
 
-    specs = capabilities.specs
+    specs = (*capabilities.specs, capabilities.execution_plan.spec)
 
     def select_names(names: set[str] | frozenset[str]) -> tuple[ToolSpec, ...]:
         return tuple(

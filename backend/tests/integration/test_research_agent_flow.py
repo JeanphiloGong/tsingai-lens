@@ -208,12 +208,12 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     assert wrong_digest.status_code == 409
     assert approved.status_code == 200
     assert approved.json()["status"] == "completed"
-    assert approved.json()["execution_plan"]["plan_id"] == proposed_write.json()[
-        "execution_plan"
-    ]["plan_id"]
-    assert approved.json()["execution_plan"]["plan_version"] > proposed_write.json()[
-        "execution_plan"
-    ]["plan_version"]
+    proposed_plan = proposed_write.json()["execution_plan"]
+    approved_plan = approved.json()["execution_plan"]
+    assert (proposed_plan is None) == (approved_plan is None)
+    if proposed_plan is not None:
+        assert approved_plan["plan_id"] == proposed_plan["plan_id"]
+        assert approved_plan["plan_version"] > proposed_plan["plan_version"]
     assert candidate_capability.executed == [
         {"question": "How does energy input affect grain morphology?"}
     ]

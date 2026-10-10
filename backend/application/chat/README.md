@@ -509,12 +509,14 @@ If execution stops unexpectedly, partial text remains explicitly incomplete.
 Snapshots support observation of the research work; they do not replace source
 checks, certify a scientific stage, or automatically restart interrupted work.
 
-Each run also exposes a runtime `execution_plan` in progress snapshots and the
-turn response. The plan is versioned and rebuilt from the ordered capability
-trajectory, so it shows which steps are pending, complete, awaiting approval,
-scientifically unsupported, clarification-blocked, resource-limited, or
-technically failed. It is operational state only; it never becomes Evidence,
-permission, or a Finding.
+Each complex run may expose a model-authored `execution_plan` in progress
+snapshots and the turn response. The Agent updates it through the registered
+`update_execution_plan` capability after framing the request and when new
+observations change the remaining work. The runtime recovers the latest plan
+from the ordered trajectory and adds approval, resource, and technical status;
+it does not infer research steps from a metadata read or a local draft result.
+Simple answers may have no plan. It is operational state only; it never becomes
+Evidence, permission, or a Finding.
 
 ## Key Areas
 

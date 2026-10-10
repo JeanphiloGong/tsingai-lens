@@ -27,6 +27,7 @@ from application.chat.capabilities import (
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
+from application.chat.capabilities.execution_plan import UpdateExecutionPlanToolRequest
 from application.chat.inline_citations import format_inline_citations
 from application.chat.model import (
     RESEARCH_AGENT_SYSTEM_PROMPT,
@@ -206,12 +207,7 @@ def _now_iso() -> str:
 
 
 def _trajectory_event_count(messages: tuple[ChatMessage, ...]) -> int:
-    """Count persisted capability requests and observations once each.
-
-    Approval continuations receive the full saved message trajectory but only
-    execute the claimed call in the current runner instance. Counting the
-    saved events keeps the exposed plan version monotonic across that resume.
-    """
+    """Count persisted capability requests and observations once each."""
     request_ids = {
         request.tool_call_id
         for message in messages
@@ -253,149 +249,110 @@ def _research_plan_status(
     *,
     run_status: AgentRunStatus | None,
     completion_reason: AgentCompletionReason | None,
-    error_code: str | None,
     pending_approval: bool,
-    results: tuple[ChatToolResult, ...],
+    model_status: ResearchExecutionStatus,
 ) -> ResearchExecutionStatus:
+    if run_status is AgentRunStatus.FAILED:
+        return ResearchExecutionStatus.TECHNICAL_FAILURE
     if pending_approval:
         return ResearchExecutionStatus.AWAITING_APPROVAL
-    if error_code in {"clarification_required", "research_question_required", "objective_scope_required"}:
-        return ResearchExecutionStatus.WAITING_FOR_CLARIFICATION
-    if any(
-        result.data.get("draft_status") == "abstained"
-        or result.data.get("derivation_status") == "abstained"
-        or result.data.get("quality_status") == "scientific_abstention"
-        for result in results
-        if result.status is ToolResultStatus.SUCCEEDED
-    ):
-        return ResearchExecutionStatus.SCIENTIFIC_REFUSAL
     if completion_reason in {
         AgentCompletionReason.RESOURCE_BUDGET,
         AgentCompletionReason.EMERGENCY_CEILING,
+        AgentCompletionReason.NO_PROGRESS,
     }:
         return ResearchExecutionStatus.RESOURCE_LIMITED
-    if run_status is AgentRunStatus.FAILED:
-        return ResearchExecutionStatus.TECHNICAL_FAILURE
-    if run_status is AgentRunStatus.COMPLETED:
-        return ResearchExecutionStatus.COMPLETED
-    return ResearchExecutionStatus.IN_PROGRESS
+    return model_status
 
 
 @dataclass(frozen=True)
 class ResearchExecutionPlan:
-    """Reconstructable runtime plan exposed alongside a chat turn.
-
-    The plan is derived from the durable tool trajectory. It is operational
-    bookkeeping, never scientific evidence, and therefore needs no separate
-    persistence table to survive context compaction or a disconnected stream.
-    """
+    """The latest explicit model plan, with a separate runtime interruption."""
 
     plan_id: str
     version: int
     request: str
     status: ResearchExecutionStatus
     steps: tuple[Mapping[str, Any], ...]
+    model_status: ResearchExecutionStatus
+    explanation: str
     blocking_reason: str | None = None
 
     @classmethod
-    def from_trajectory(
+    def from_messages(
         cls,
         *,
-        session_id: str,
-        request: str,
-        calls: tuple[ChatToolCall, ...] = (),
-        results: tuple[ChatToolResult, ...] = (),
+        messages: tuple[ChatMessage, ...],
         run_status: AgentRunStatus | None = None,
         completion_reason: AgentCompletionReason | None = None,
         error_code: str | None = None,
         pending_approval: ChatToolCall | None = None,
-        event_offset: int = 0,
-    ) -> "ResearchExecutionPlan":
-        normalized_request = str(request or "").strip()[:4_000]
-        plan_id = sha256(
-            f"{session_id}\x00{normalized_request}".encode("utf-8")
-        ).hexdigest()[:20]
-        result_by_call = {result.tool_call_id: result for result in results}
-        steps: list[dict[str, Any]] = [
-            {
-                "step_id": "frame_research_decision",
-                "action": "frame_research_decision",
-                "status": "completed" if calls else "active",
-            },
-            {
-                "step_id": "gather_and_verify_support",
-                "action": "gather_and_verify_support",
-                "status": (
-                    "completed"
-                    if any(
-                        call.risk is ToolRisk.READ
-                            and call.name != "discover_research_tools"
-                        and call.tool_call_id in result_by_call
-                        and result_by_call[call.tool_call_id].status
-                        is ToolResultStatus.SUCCEEDED
-                        for call in calls
-                    )
-                    else "active" if calls else "pending"
-                ),
-            },
-            {
-                "step_id": "form_research_understanding",
-                "action": "form_research_understanding",
-                "status": "active" if calls else "pending",
-            },
-        ]
-        for call in calls:
-            result = result_by_call.get(call.tool_call_id)
-            if result is None:
-                step_status = (
-                    "awaiting_approval"
-                    if call.status is ToolCallStatus.APPROVAL_REQUIRED
-                    else "active"
-                )
-            elif result.status is ToolResultStatus.FAILED:
-                step_status = "failed"
-            else:
-                step_status = "completed"
-            steps.append(
-                {
-                    "step_id": f"capability:{call.tool_call_id}",
-                    "action": call.name,
-                    "risk": call.risk.value,
-                    "status": step_status,
-                    "observation_count": 0 if result is None else 1,
-                    "error_code": result.error_code if result is not None else None,
-                }
-            )
-        status = _research_plan_status(
-            run_status=run_status,
-            completion_reason=completion_reason,
-            error_code=error_code,
-            pending_approval=pending_approval is not None,
-            results=results,
+    ) -> "ResearchExecutionPlan | None":
+        active_index = next((i for i in range(len(messages) - 1, -1, -1)
+                             if messages[i].role is ChatMessageRole.USER), None)
+        if active_index is None:
+            return None
+        active = messages[active_index:]
+        plan_call_ids = {
+            call.tool_call_id for message in active for call in message.tool_calls
+            if call.name == "update_execution_plan"
+        }
+        latest = next((message.tool_result for message in reversed(active)
+                       if message.tool_result is not None
+                       and message.tool_result.tool_call_id in plan_call_ids
+                       and message.tool_result.status is ToolResultStatus.SUCCEEDED), None)
+        if latest is None:
+            return None
+        update = UpdateExecutionPlanToolRequest.model_validate(latest.data)
+        model_status = ResearchExecutionStatus(update.status)
+        plan_updates = sum(
+            1 for message in active
+            if message.tool_result is not None
+            and message.tool_result.tool_call_id in plan_call_ids
+            and message.tool_result.status is ToolResultStatus.SUCCEEDED
         )
-        if status is ResearchExecutionStatus.COMPLETED:
-            steps[2]["status"] = "completed"
-        elif status in {
-            ResearchExecutionStatus.SCIENTIFIC_REFUSAL,
-            ResearchExecutionStatus.WAITING_FOR_CLARIFICATION,
-            ResearchExecutionStatus.TECHNICAL_FAILURE,
-            ResearchExecutionStatus.RESOURCE_LIMITED,
-        }:
-            steps[2]["status"] = "blocked"
-        elif status is ResearchExecutionStatus.AWAITING_APPROVAL:
-            steps[2]["status"] = "awaiting_approval"
-        return cls(
-            plan_id=plan_id,
-            version=max(0, event_offset) + 1 + len(calls) + len(results),
-            request=normalized_request,
-            status=status,
-            steps=tuple(steps),
+        observed_events = sum(
+            1 for message in active
+            if message.tool_result is not None
+            and message.tool_result.tool_call_id not in plan_call_ids
+            and message.tool_result.status in {
+                ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED,
+            }
+        )
+        plan = cls(
+            plan_id=sha256(f"{active[0].session_id}\x00{active[0].message_id}".encode()).hexdigest()[:20],
+            # Plan revisions and persisted observations both advance the
+            # observable snapshot. This keeps the version monotonic when an
+            # approval continuation adds its result before the next revision.
+            version=max(1, plan_updates + observed_events),
+            request=active[0].content[:4_000],
+            status=model_status,
+            steps=tuple(step.model_dump() for step in update.steps),
+            model_status=model_status,
+            explanation=update.explanation,
+            blocking_reason=(update.explanation if model_status in {
+                ResearchExecutionStatus.WAITING_FOR_CLARIFICATION,
+                ResearchExecutionStatus.SCIENTIFIC_REFUSAL,
+            } else None),
+        )
+        return plan.with_runtime_status(_research_plan_status(
+            run_status=run_status, completion_reason=completion_reason,
+            pending_approval=pending_approval is not None,
+            model_status=model_status,
+        ), error_code)
+
+    def with_runtime_status(
+        self, status: ResearchExecutionStatus, reason: str | None = None,
+    ) -> "ResearchExecutionPlan":
+        if status is self.status:
+            return self
+        return replace(
+            self, status=status, version=self.version + 1,
             blocking_reason=(
-                error_code
-                if status
-                in {
+                reason if status is ResearchExecutionStatus.TECHNICAL_FAILURE
+                else self.blocking_reason if status in {
                     ResearchExecutionStatus.WAITING_FOR_CLARIFICATION,
-                    ResearchExecutionStatus.TECHNICAL_FAILURE,
+                    ResearchExecutionStatus.SCIENTIFIC_REFUSAL,
                 }
                 else None
             ),
@@ -407,6 +364,8 @@ class ResearchExecutionPlan:
             "plan_version": self.version,
             "request": self.request,
             "status": self.status.value,
+            "model_status": self.model_status.value,
+            "explanation": self.explanation,
             "steps": [dict(step) for step in self.steps],
             "blocking_reason": self.blocking_reason,
         }
@@ -464,31 +423,12 @@ class _RunProgress:
     model_call_observer: ModelCallObserver | None = None
     model_call_session_id: str | None = None
     execution_plan: ResearchExecutionPlan | None = None
-    execution_plan_event_offset: int = 0
 
     def refresh_execution_plan(
         self,
-        *,
-        session_id: str,
-        request: str,
-        calls: tuple[ChatToolCall, ...],
-        results: tuple[ChatToolResult, ...],
-        run_status: AgentRunStatus | None = None,
-        completion_reason: AgentCompletionReason | None = None,
-        error_code: str | None = None,
-        pending_approval: ChatToolCall | None = None,
+        messages: list[ChatMessage],
     ) -> None:
-        self.execution_plan = ResearchExecutionPlan.from_trajectory(
-            session_id=session_id,
-            request=request,
-            calls=calls,
-            results=results,
-            run_status=run_status,
-            completion_reason=completion_reason,
-            error_code=error_code,
-            pending_approval=pending_approval,
-            event_offset=self.execution_plan_event_offset,
-        )
+        self.execution_plan = ResearchExecutionPlan.from_messages(messages=tuple(messages))
 
     def start_response(self) -> None:
         self.response_message_id = f"msg_{uuid4().hex[:16]}"
@@ -619,30 +559,18 @@ class _RunProgress:
         if self.execution_plan is not None and termination_reason is not None:
             terminal_status = {
                 "approval_required": ResearchExecutionStatus.AWAITING_APPROVAL,
-                "model_answer": ResearchExecutionStatus.COMPLETED,
                 "model_unavailable": ResearchExecutionStatus.TECHNICAL_FAILURE,
                 "provider_timeout": ResearchExecutionStatus.TECHNICAL_FAILURE,
                 "final_answer_unavailable": ResearchExecutionStatus.TECHNICAL_FAILURE,
                 "model_response_invalid": ResearchExecutionStatus.TECHNICAL_FAILURE,
                 "tool_permission_denied": ResearchExecutionStatus.TECHNICAL_FAILURE,
-                "write_completed_response_unavailable": ResearchExecutionStatus.COMPLETED,
                 "resource_budget": ResearchExecutionStatus.RESOURCE_LIMITED,
                 "emergency_ceiling": ResearchExecutionStatus.RESOURCE_LIMITED,
                 "no_progress": ResearchExecutionStatus.RESOURCE_LIMITED,
             }.get(termination_reason)
-            if terminal_status is not None and self.execution_plan.status is ResearchExecutionStatus.IN_PROGRESS:
-                self.execution_plan = replace(
-                    self.execution_plan,
-                    status=terminal_status,
-                    blocking_reason=(
-                        termination_reason
-                        if terminal_status
-                        in {
-                            ResearchExecutionStatus.WAITING_FOR_CLARIFICATION,
-                            ResearchExecutionStatus.TECHNICAL_FAILURE,
-                        }
-                        else self.execution_plan.blocking_reason
-                    ),
+            if terminal_status is not None:
+                self.execution_plan = self.execution_plan.with_runtime_status(
+                    terminal_status, termination_reason,
                 )
         payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
@@ -662,14 +590,22 @@ class _RunProgress:
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
             "http_status": http_status, "retry_delay_ms": retry_delay_ms,
             "research_plan": (
-                self.execution_plan.to_record()
-                if self.execution_plan is not None
-                else None
+                {
+                    "plan_id": self.execution_plan.plan_id,
+                    "plan_version": self.execution_plan.version,
+                    "status": self.execution_plan.status.value,
+                    "model_status": self.execution_plan.model_status.value,
+                    "step_count": len(self.execution_plan.steps),
+                }
+                if self.execution_plan is not None else None
             ),
         }
         logger.info("Research Agent cycle %s", json.dumps(payload, separators=(",", ":")))
         if self.progress_callback is not None:
-            self.progress_callback(payload)
+            self.progress_callback({
+                **payload,
+                "research_plan": self.execution_plan.to_record() if self.execution_plan else None,
+            })
 
 
 @dataclass(frozen=True)
@@ -691,31 +627,14 @@ class AgentRunResult:
         elif self.completion_reason is not None:
             raise ValueError("only completed runs have a completion reason")
         if self.execution_plan is None:
-            request = next(
-                (
-                    message.content
-                    for message in reversed(self.messages)
-                    if message.role is ChatMessageRole.USER
-                ),
-                "",
-            )
-            plan = ResearchExecutionPlan.from_trajectory(
-                session_id=(self.messages[-1].session_id if self.messages else "chat"),
-                request=request,
-                calls=self.tool_calls,
-                results=self.tool_results,
+            plan = ResearchExecutionPlan.from_messages(
+                messages=self.messages,
                 run_status=self.status,
                 completion_reason=self.completion_reason,
                 error_code=self.error_code,
                 pending_approval=self.pending_approval,
-                event_offset=max(
-                    0,
-                    _trajectory_event_count(self.messages)
-                    - len(self.tool_calls)
-                    - len(self.tool_results),
-                ),
             )
-            object.__setattr__(self, "execution_plan", plan.to_record())
+            object.__setattr__(self, "execution_plan", plan.to_record() if plan is not None else None)
 
 class ResearchAgentRunner:
     def __init__(
@@ -768,12 +687,7 @@ class ResearchAgentRunner:
         ]
         calls: list[ChatToolCall] = []
         results: list[ChatToolResult] = []
-        progress.refresh_execution_plan(
-            session_id=context.session_id,
-            request=user_message,
-            calls=(),
-            results=(),
-        )
+        progress.refresh_execution_plan(messages)
         await self._checkpoint(checkpoint, messages, calls, results)
         return await self._continue(
             context,
@@ -814,17 +728,11 @@ class ResearchAgentRunner:
             for message in previous_messages
             for request in message.tool_calls
         )
-        progress.execution_plan_event_offset = _trajectory_event_count(previous_messages)
         if not claimed_call_was_persisted:
             progress.requested_tool_calls += 1
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
-        progress.refresh_execution_plan(
-            session_id=context.session_id,
-            request=self._active_user_request(messages),
-            calls=(),
-            results=(),
-        )
+        progress.refresh_execution_plan(messages)
         inherited_completed_writes = capability_policy.completed_write_names(
             messages, self.capabilities,
         )
@@ -855,19 +763,8 @@ class ResearchAgentRunner:
             )
         calls[-1] = call
         results.append(result)
-        if claimed_call_was_persisted:
-            # The pending request was already counted in the saved plan; only
-            # its execution result is new in this continuation.
-            progress.execution_plan_event_offset = max(
-                0, progress.execution_plan_event_offset - 1
-            )
-        progress.refresh_execution_plan(
-            session_id=context.session_id,
-            request=self._active_user_request(messages),
-            calls=tuple(calls),
-            results=tuple(results),
-        )
         messages.append(self._result_message(context, result))
+        progress.refresh_execution_plan(messages)
         await self._checkpoint(checkpoint, messages, calls, results)
         if result.status is ToolResultStatus.SUCCEEDED and call.name in {"record_finding_feedback", "curate_finding"}:
             # These writes finish an exact approved review. Report the persisted
@@ -1206,14 +1103,11 @@ class ResearchAgentRunner:
             elif len(requested) == 1 and capability_policy.evaluate_authorization(requested[0][0].risk).requires_approval:
                 pending = requested[0][0].require_approval()
                 calls[-1] = pending
-                progress.refresh_execution_plan(
-                    session_id=context.session_id,
-                    request=self._active_user_request(messages),
-                    calls=tuple(calls),
-                    results=tuple(results),
-                    run_status=AgentRunStatus.APPROVAL_REQUIRED,
-                    pending_approval=pending,
-                )
+                progress.refresh_execution_plan(messages)
+                if progress.execution_plan is not None:
+                    progress.execution_plan = progress.execution_plan.with_runtime_status(
+                        ResearchExecutionStatus.AWAITING_APPROVAL
+                    )
                 await self._checkpoint(checkpoint, messages, calls, results)
                 progress.trace(context, phase="terminal", termination_reason="approval_required")
                 return AgentRunResult(
@@ -1246,16 +1140,14 @@ class ResearchAgentRunner:
                     })
                 results.append(capability_result)
                 messages.append(self._result_message(context, capability_result))
-                progress_increased = progress.observe(call, capability_result) or progress_increased
-            progress.refresh_execution_plan(
-                session_id=context.session_id,
-                request=self._active_user_request(messages),
-                calls=tuple(calls),
-                results=tuple(results),
-            )
-            progress.consecutive_no_progress = (
-                prior_no_progress + 1 if not progress_increased else 0
-            )
+                if call.name != "update_execution_plan":
+                    progress_increased = progress.observe(call, capability_result) or progress_increased
+            progress.refresh_execution_plan(messages)
+            # Plan edits do not supply new research observations or reset a stalled read loop.
+            if any(call.name != "update_execution_plan" for call, _ in completed):
+                progress.consecutive_no_progress = (
+                    prior_no_progress + 1 if not progress_increased else 0
+                )
             await self._checkpoint(checkpoint, messages, calls, results)
             progress.trace(context, phase="tools", capability_names=tool_names,
                            new_resources=len(progress.resource_refs) - old_resource_count,
@@ -1366,8 +1258,9 @@ class ResearchAgentRunner:
         progress: _RunProgress, *, active_user_message_id: str,
     ) -> ChatModelContext:
         """Compact old operations into provisional notes; the durable trajectory stays intact."""
+        execution_plan = progress.execution_plan.to_record() if progress.execution_plan else None
         overhead = self.context_builder.estimate_tokens({
-            "messages": ChatModelContext(()).provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
+            "messages": ChatModelContext((), execution_plan=execution_plan).provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
             "tools": [spec.model_schema() for spec in tool_specs],
         })
         input_budget = self.limits.max_context_tokens - self.limits.max_model_output_tokens - overhead - 2048
@@ -1384,7 +1277,7 @@ class ResearchAgentRunner:
             available, active_user_message_id=active_user_message_id,
             max_input_tokens=input_budget, working_summary=progress.working_summary,
         )
-        view = replace(view, prior_reading_summary=prior_reading)
+        view = replace(view, prior_reading_summary=prior_reading, execution_plan=execution_plan)
         kept = {message.message_id for message in view.messages}
         omitted = tuple(message for message in available if message.message_id not in kept)
         active = next(message for message in messages if message.message_id == active_user_message_id)
@@ -1402,6 +1295,7 @@ class ResearchAgentRunner:
             for unit in units:
                 candidate = ChatModelContext((active, *batch, *unit), compacting=True,
                                              working_summary=progress.working_summary,
+                                             execution_plan=execution_plan,
                                              active_user_message_id=active_user_message_id)
                 tokens = self.context_builder.estimate_tokens(candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT))
                 if tokens + 8192 + 2048 > self.limits.max_context_tokens:
@@ -1417,6 +1311,7 @@ class ResearchAgentRunner:
                 try:
                     compacted = await self._respond(
                         ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
+                                         execution_plan=execution_plan,
                                          active_user_message_id=active_user_message_id),
                         (), progress, None,
                     )
@@ -1475,7 +1370,8 @@ class ResearchAgentRunner:
         if any(unit[0].message_id not in retained for unit in self.context_builder._protocol_units(remaining)):
             return await self._prepare_model_context(messages, tool_specs, progress,
                                                      active_user_message_id=active_user_message_id)
-        return replace(view, max_context_tokens=self.limits.max_context_tokens, prior_reading_summary=prior_reading)
+        return replace(view, max_context_tokens=self.limits.max_context_tokens,
+                       prior_reading_summary=prior_reading, execution_plan=execution_plan)
 
     def _prior_source_reading(
         self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,

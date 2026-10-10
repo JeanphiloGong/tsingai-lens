@@ -24,6 +24,7 @@ class ChatModelContext:
     compacting: bool = False
     max_context_tokens: int = 65_536
     prior_reading_summary: str = ""
+    execution_plan: Mapping[str, Any] | None = None
     # Runtime-only audit metadata. These fields never enter provider_messages.
     model_call_observer: Any | None = None
     model_call_purpose: str = "decision"
@@ -68,6 +69,14 @@ class ChatModelContext:
             ], ensure_ascii=False)})
         else:
             messages.extend(ChatContextBuilder.model_message(message) for message in self.messages)
+        if self.execution_plan is not None:
+            messages.append({"role": "user", "content": (
+                "[CURRENT EXECUTION PLAN]\n"
+                "The last accepted model plan for this request, retained independently of "
+                "compacted messages. It is fallible progress, not evidence or permission. "
+                "Use observations to revise it through update_execution_plan.\n"
+                + json.dumps(self.execution_plan, ensure_ascii=False)
+            )})
         active = next((message for message in self.messages
                        if message.message_id == self.active_user_message_id), None)
         if active is not None:

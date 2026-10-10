@@ -2418,6 +2418,125 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
     assert user_request in model.contexts[-1][-1].content
 
 
+async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(
+            "update_execution_plan",
+            {
+                "steps": [{
+                    "step_id": "conditions",
+                    "action": "Read matched material and test conditions",
+                    "status": "in_progress",
+                }],
+                "status": "in_progress",
+                "explanation": "Start by matching the paper conditions.",
+            },
+        ),)),
+        ModelTurn(tool_calls=(ModelToolCall(
+            "update_execution_plan",
+            {
+                "steps": [{
+                    "step_id": "conditions",
+                    "action": "Read matched material and test conditions",
+                    "status": "completed",
+                }, {
+                    "step_id": "compare",
+                    "action": "Compare the reported measurements",
+                    "status": "in_progress",
+                }],
+                "status": "in_progress",
+                "explanation": "The conditions are recorded; compare the measurements next.",
+            },
+        ),)),
+        ModelTurn(tool_calls=(ModelToolCall(
+            "update_execution_plan",
+            {
+                "steps": [{
+                    "step_id": "conditions",
+                    "action": "Read matched material and test conditions",
+                    "status": "completed",
+                }, {
+                    "step_id": "compare",
+                    "action": "Compare the reported measurements",
+                    "status": "completed",
+                }],
+                "status": "completed",
+                "explanation": "The requested comparison is supported by the inspected records.",
+            },
+        ),)),
+        ModelTurn(content="The comparison is complete."),
+        discover=("update_execution_plan",),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry(()),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Compare the matched conditions and measurements in these papers.",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.execution_plan is not None
+    assert result.execution_plan["status"] == "completed"
+    assert result.execution_plan["plan_version"] == 4
+    assert [step["status"] for step in result.execution_plan["steps"]] == [
+        "completed", "completed",
+    ]
+    assert any("update_execution_plan" in names for names in model.tool_spec_names)
+
+
+async def test_approval_resume_keeps_the_model_authored_plan() -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    plan_in_progress = {
+        "steps": [{
+            "step_id": "decision",
+            "action": "Record the reviewed objective",
+            "status": "in_progress",
+        }],
+        "status": "in_progress",
+        "explanation": "The reviewed objective is ready for the requested save.",
+    }
+    plan_completed = {
+        "steps": [{
+            "step_id": "decision",
+            "action": "Record the reviewed objective",
+            "status": "completed",
+        }],
+        "status": "completed",
+        "explanation": "The approved objective was saved.",
+    }
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan_in_progress),)),
+        ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan_completed),)),
+        ModelTurn(content="The approved objective was saved."),
+        discover=("update_execution_plan", "create_objective_candidate"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((writer,)))
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the reviewed objective.",
+    )
+
+    assert proposed.pending_approval is not None
+    before = proposed.execution_plan
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+    resumed = await runner.resume_claimed_call(
+        context=_context(), previous_messages=proposed.messages, claimed_call=approved,
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert before is not None and resumed.execution_plan is not None
+    assert resumed.execution_plan["plan_id"] == before["plan_id"]
+    assert resumed.execution_plan["plan_version"] > before["plan_version"]
+    assert resumed.execution_plan["steps"][0]["status"] == "completed"
+
+
 async def test_resource_budget_final_answer_has_time_to_summarize_large_trajectory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2869,7 +2988,7 @@ async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan(
     assert result.status is AgentRunStatus.COMPLETED
     assert any(event["phase"] == "tools" for event in progress_events)
     assert any(event["executed_tool_count"] > 0 for event in progress_events)
-    assert all(isinstance(event["research_plan"], dict) for event in progress_events)
+    assert all(event["research_plan"] is None for event in progress_events)
     assert any(call.name == "read_source" and call.status is ToolCallStatus.SUCCEEDED
                for call in result.tool_calls)
 
@@ -2927,7 +3046,7 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
     assert not evidence_write.executed_arguments
     assert not finding_draft.executed_arguments
-    assert all(isinstance(event["research_plan"], dict) for event in events)
+    assert all(event["research_plan"] is None for event in events)
     assert any(event["executed_tool_count"] > 0 for event in events)
 
 

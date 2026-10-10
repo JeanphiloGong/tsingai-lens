@@ -18,7 +18,7 @@ from application.chat import (
     ToolSpec,
 )
 from application.chat.agent_runner import AgentRunLimits, _RunProgress
-from domain.chat import ChatToolResult, ToolRisk
+from domain.chat import ChatMessage, ChatToolRequest, ChatToolResult, ToolRisk
 
 
 @pytest.fixture
@@ -111,43 +111,96 @@ def test_progress_trace_exposes_versioned_execution_plan() -> None:
     events: list[dict[str, object]] = []
     progress = _RunProgress(AgentRunLimits(), progress_callback=events.append)
     context = AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1")
-    progress.refresh_execution_plan(
-        session_id=context.session_id,
-        request="Compare the exact tensile conditions.",
-        calls=(),
-        results=(),
+    request = ChatMessage.user(
+        message_id="user-1", session_id=context.session_id,
+        content="Compare the exact tensile conditions.", created_at="2026-10-09T00:00:00Z",
     )
+    plan_call = ChatToolRequest(
+        tool_call_id="plan-1", name="update_execution_plan",
+        arguments={
+            "steps": [{"step_id": "read", "action": "Read exact tensile conditions", "status": "in_progress"}],
+            "status": "in_progress", "explanation": "Start with the exact test conditions.",
+        }, position=0,
+    )
+    messages = [request, ChatMessage.assistant_tool_calls(
+        message_id="assistant-1", session_id=context.session_id, content="",
+        tool_calls=(plan_call,), created_at="2026-10-09T00:00:01Z",
+    ), ChatMessage.from_tool_result(
+        message_id="tool-1", session_id=context.session_id, created_at="2026-10-09T00:00:02Z",
+        result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=plan_call.arguments),
+    )]
+    progress.refresh_execution_plan(messages)
     progress.trace(context, phase="plan")
 
     plan = events[-1]["research_plan"]
     assert isinstance(plan, dict)
     assert plan["plan_version"] == 1
     assert plan["status"] == "in_progress"
-    assert [step["status"] for step in plan["steps"][:3]] == [
-        "active", "pending", "pending",
-    ]
+    assert [step["status"] for step in plan["steps"]] == ["in_progress"]
+
+
+def test_progress_log_keeps_model_plan_request_out_of_info_logs(caplog) -> None:
+    events: list[dict[str, object]] = []
+    progress = _RunProgress(AgentRunLimits(), progress_callback=events.append)
+    context = AgentContext(session_id="chat-1", user_id="user-1", collection_id="col-1")
+    request = ChatMessage.user(
+        message_id="user-1", session_id=context.session_id,
+        content="PRIVATE_RESEARCH_REQUEST", created_at="2026-10-09T00:00:00Z",
+    )
+    call = ChatToolRequest(
+        tool_call_id="plan-1", name="update_execution_plan",
+        arguments={
+            "steps": [{"step_id": "read", "action": "Read the exact Source", "status": "in_progress"}],
+            "status": "in_progress", "explanation": "Start with the Source.",
+        }, position=0,
+    )
+    messages = [request, ChatMessage.assistant_tool_calls(
+        message_id="assistant-1", session_id=context.session_id, content="",
+        tool_calls=(call,), created_at="2026-10-09T00:00:01Z",
+    ), ChatMessage.from_tool_result(
+        message_id="tool-1", session_id=context.session_id, created_at="2026-10-09T00:00:02Z",
+        result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=call.arguments),
+    )]
+    progress.refresh_execution_plan(messages)
+
+    with caplog.at_level(logging.INFO, logger="application.chat.agent_runner"):
+        progress.trace(context, phase="plan")
+
+    assert "PRIVATE_RESEARCH_REQUEST" not in caplog.text
+    assert events[-1]["research_plan"]["request"] == "PRIVATE_RESEARCH_REQUEST"
 
 
 def test_execution_plan_keeps_scientific_and_technical_end_states_distinct() -> None:
-    scientific = ResearchExecutionPlan.from_trajectory(
-        session_id="chat-1",
-        request="Draft the supported comparison.",
-        results=(ChatToolResult(
-            tool_call_id="call-1",
-            status="succeeded",
-            data={"draft_status": "abstained"},
-        ),),
-        run_status=AgentRunStatus.COMPLETED,
+    def messages(status: str) -> tuple[ChatMessage, ...]:
+        request = ChatMessage.user(
+            message_id="user-1", session_id="chat-1", content="Research this.",
+            created_at="2026-10-09T00:00:00Z",
+        )
+        call = ChatToolRequest(
+            tool_call_id="plan-1", name="update_execution_plan",
+            arguments={
+                "steps": [{"step_id": "check", "action": "Check support", "status": "blocked"}],
+                "status": status, "explanation": "The available support is insufficient.",
+            }, position=0,
+        )
+        return (request, ChatMessage.assistant_tool_calls(
+            message_id="assistant-1", session_id="chat-1", content="", tool_calls=(call,),
+            created_at="2026-10-09T00:00:01Z",
+        ), ChatMessage.from_tool_result(
+            message_id="tool-1", session_id="chat-1", created_at="2026-10-09T00:00:02Z",
+            result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=call.arguments),
+        ))
+
+    scientific = ResearchExecutionPlan.from_messages(
+        messages=messages("scientific_refusal"), run_status=AgentRunStatus.COMPLETED,
         completion_reason=AgentCompletionReason.MODEL_ANSWER,
     )
-    technical = ResearchExecutionPlan.from_trajectory(
-        session_id="chat-1",
-        request="Read the exact Source.",
-        run_status=AgentRunStatus.FAILED,
+    technical = ResearchExecutionPlan.from_messages(
+        messages=messages("in_progress"), run_status=AgentRunStatus.FAILED,
         error_code="provider_timeout",
     )
 
     assert scientific.status.value == "scientific_refusal"
     assert technical.status.value == "technical_failure"
-    assert scientific.version == 2
+    assert scientific.version == 1
     assert technical.blocking_reason == "provider_timeout"

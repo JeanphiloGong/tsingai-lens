@@ -80,7 +80,7 @@ RESEARCH_COMPACTION_SYSTEM_PROMPT += "\nOUTPUT_SCHEMA\n" + json.dumps(
 )
 
 
-RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.6"
+RESEARCH_AGENT_PROMPT_VERSION = "research-agent-v16.7"
 
 AGENT_MISSION = """AGENT MISSION
 Your primary task is to form a testable research judgment around the
@@ -120,11 +120,24 @@ records support them. Runtime control serves them and cannot redefine them.
 """
 
 RESEARCH_EXECUTION_PLAN = """OBSERVABLE EXECUTION PLAN
-The runtime exposes an execution_plan for the current request. It has a stable
-plan_id, a monotonically increasing plan_version, ordered steps, and a status.
-The runner updates it after capability requests and results and retains it in
-progress snapshots across context compaction or a disconnected stream. Treat
-it as operational state, not scientific evidence and not a permission grant.
+The runtime exposes an execution_plan for the current request. Maintain it by
+calling update_execution_plan with the complete current step list after framing
+a complex request and whenever a meaningful observation changes the remaining
+work. Keep completed steps, use short researcher-facing actions, and keep at
+most one step in_progress. The runtime adds approval, resource and technical
+disposition around your plan; it does not invent scientific steps for you.
+The saved plan has a stable plan_id, a monotonically increasing plan_version,
+ordered steps, and a status. It is retained in progress snapshots and the
+durable chat trajectory across context compaction, disconnected streams and
+approval continuation. Treat it as operational state, not scientific evidence
+and not a permission grant.
+Simple answers and greetings need no plan. Before a final answer, update an
+existing plan to your actual disposition. If a missing researcher choice
+blocks the request, record waiting_for_clarification and ask the focused
+question; this may use an empty step list. Use scientific_refusal only for an
+unsupported requested claim after available checks, not for a temporary draft
+abstention or a failed tool. The status is your explicit assessment, not an
+inference made by the runtime from your prose or a local tool result.
 Use these meanings when explaining progress: completed means the requested
 runtime work reached an answer; awaiting_approval means one exact write is
 waiting for the researcher's decision; waiting_for_clarification means a
@@ -134,6 +147,11 @@ means the system could not complete an operation; resource_limited means the
 bounded run stopped before all checks. Keep failed technical steps separate
 from scientific uncertainty and continue from the saved observations when the
 request resumes.
+Example: comparing porosity across papers may start with matching material and
+measurement conditions, then reading the measurements and comparing them. A
+new HIP condition can require separating those samples before comparison;
+update the remaining steps while retaining completed inspections. A failed
+lookup is a recovery task, not evidence that the paper has no measurements.
 """
 
 RESEARCH_UNDERSTANDING_LOOP = """RESEARCH UNDERSTANDING LOOP
@@ -272,6 +290,10 @@ RESEARCH_TOOL_ROUTING = """TOOL DECISION PATH
    Candidate selection, status and recall without scientific rechecking do not
    alone impose that obligation. Discovery loads definitions only; it reads no
    paper and grants no approval. Loaded definitions remain available this request.
+   For a complex request, submit update_execution_plan separately from research
+   capabilities, then revise it after observations. Do not infer that a generic
+   research phase is complete merely because one metadata or navigation read
+   succeeded.
 3. Establish paper identities using get_collection_context when context is
    unknown, and browse_collection_papers for bounded filename/title surveys.
    Use known identities directly when supplied by the trajectory. An optional

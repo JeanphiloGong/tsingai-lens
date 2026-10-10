@@ -192,6 +192,24 @@ export type ChatProgress = {
 	elapsed_ms?: number;
 	remaining_tool_budget?: number;
 	remaining_token_budget?: number;
+	execution_plan?: ChatExecutionPlan | null;
+};
+
+export type ChatExecutionPlanStep = {
+	step_id: string;
+	action: string;
+	status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+};
+
+export type ChatExecutionPlan = {
+	plan_id: string;
+	plan_version: number;
+	request?: string;
+	status: string;
+	model_status?: string;
+	explanation?: string;
+	blocking_reason?: string | null;
+	steps: ChatExecutionPlanStep[];
 };
 
 export function formatChatElapsed(elapsedMs?: number) {
@@ -221,6 +239,7 @@ export function appendChatProgress(history: ChatProgress[], next: ChatProgress) 
 		previous.executed_tool_count === next.executed_tool_count &&
 		previous.remaining_tool_budget === next.remaining_tool_budget &&
 		previous.remaining_token_budget === next.remaining_token_budget
+		&& previous.execution_plan?.plan_version === next.execution_plan?.plan_version
 	) {
 		return history;
 	}

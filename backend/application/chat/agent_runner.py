@@ -262,6 +262,8 @@ def _research_plan_status(
         AgentCompletionReason.NO_PROGRESS,
     }:
         return ResearchExecutionStatus.RESOURCE_LIMITED
+    if completion_reason is AgentCompletionReason.MODEL_ANSWER and model_status is ResearchExecutionStatus.IN_PROGRESS:
+        return ResearchExecutionStatus.COMPLETED
     return model_status
 
 
@@ -561,6 +563,7 @@ class _RunProgress:
         if self.execution_plan is not None and termination_reason is not None:
             terminal_status = {
                 "approval_required": ResearchExecutionStatus.AWAITING_APPROVAL,
+                "model_answer": ResearchExecutionStatus.COMPLETED,
                 "model_unavailable": ResearchExecutionStatus.TECHNICAL_FAILURE,
                 "provider_timeout": ResearchExecutionStatus.TECHNICAL_FAILURE,
                 "final_answer_unavailable": ResearchExecutionStatus.TECHNICAL_FAILURE,
@@ -574,7 +577,10 @@ class _RunProgress:
                 self.execution_plan = self.execution_plan.with_runtime_status(
                     terminal_status, termination_reason,
                 )
-        payload = {
+        execution_plan_record = (
+            self.execution_plan.to_record() if self.execution_plan is not None else None
+        )
+        log_payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
             "cycle_index": self.model_cycles, "selected_capability_names": capability_names,
             "prompt_tokens": self.prompt_tokens, "completion_tokens": self.completion_tokens,
@@ -591,7 +597,7 @@ class _RunProgress:
             "termination_reason": termination_reason, "final_answer_present": final_answer,
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
             "http_status": http_status, "retry_delay_ms": retry_delay_ms,
-            "research_plan": (
+            "execution_plan": (
                 {
                     "plan_id": self.execution_plan.plan_id,
                     "plan_version": self.execution_plan.version,
@@ -602,12 +608,9 @@ class _RunProgress:
                 if self.execution_plan is not None else None
             ),
         }
-        logger.info("Research Agent cycle %s", json.dumps(payload, separators=(",", ":")))
+        logger.info("Research Agent cycle %s", json.dumps(log_payload, separators=(",", ":")))
         if self.progress_callback is not None:
-            self.progress_callback({
-                **payload,
-                "research_plan": self.execution_plan.to_record() if self.execution_plan else None,
-            })
+            self.progress_callback({**log_payload, "execution_plan": execution_plan_record})
 
 
 @dataclass(frozen=True)

@@ -1111,7 +1111,7 @@ class ChatSessionService:
                 error_code=result.error_code, warnings=result.warnings,
                 progress={
                     **snapshot.progress,
-                    "research_plan": result.execution_plan,
+                    "execution_plan": result.execution_plan,
                 },
             )
             return result

@@ -35,6 +35,21 @@ it('keeps actual document and passage visible without a generated research plan'
 	await expect
 		.element(screen.getByRole('link', { name: /Open source location|打开原文位置/ }))
 		.toHaveAttribute('href', reading.href);
+	await screen.rerender({
+		progress: {
+			phase: 'tools',
+			execution_plan: {
+				plan_id: 'plan-1',
+				plan_version: 1,
+				status: 'in_progress',
+				model_status: 'in_progress',
+				steps: [{ step_id: 'read', action: 'Read the Source', status: 'in_progress' }]
+			}
+		},
+		readings: [reading]
+	});
+	await expect.element(screen.getByTestId('progress-plan')).toBeVisible();
+	await expect.element(screen.getByText('Read the Source')).toBeVisible();
 	await screen.rerender({ readings: [{ ...reading, status: 'failed' }] });
 	expect(screen.container.querySelector('.reading-current.failed')).not.toBeNull();
 });

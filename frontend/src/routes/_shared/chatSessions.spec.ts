@@ -192,4 +192,28 @@ describe('chat progress presentation helpers', () => {
 		expect(appendChatProgress(once, { ...tools, elapsed_ms: 13_000 })).toEqual(once);
 		expect(appendChatProgress(once, { ...tools, executed_tool_count: 3 })).toHaveLength(3);
 	});
+
+	it('keeps a changed execution plan visible in progress history', () => {
+		const initial: ChatProgress = {
+			phase: 'tools',
+			execution_plan: {
+				plan_id: 'plan-1',
+				plan_version: 1,
+				status: 'in_progress',
+				model_status: 'in_progress',
+				steps: [{ step_id: 'read', action: 'Read the Source', status: 'in_progress' }]
+			}
+		};
+		const updated: ChatProgress = {
+			...initial,
+			execution_plan: {
+				...initial.execution_plan!,
+				plan_version: 2,
+				status: 'completed',
+				steps: [{ step_id: 'read', action: 'Read the Source', status: 'completed' }]
+			}
+		};
+
+		expect(appendChatProgress([initial], updated)).toHaveLength(2);
+	});
 });

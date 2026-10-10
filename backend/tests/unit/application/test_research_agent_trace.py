@@ -104,7 +104,7 @@ def test_progress_trace_reports_cumulative_requested_actions_without_uninitializ
 
     assert [event["requested_tool_count"] for event in events] == [2, 3]
     assert [event["executed_tool_count"] for event in events] == [0, 1]
-    assert all(event["research_plan"] is None for event in events)
+    assert all(event["execution_plan"] is None for event in events)
 
 
 def test_progress_trace_exposes_versioned_execution_plan() -> None:
@@ -132,7 +132,7 @@ def test_progress_trace_exposes_versioned_execution_plan() -> None:
     progress.refresh_execution_plan(messages)
     progress.trace(context, phase="plan")
 
-    plan = events[-1]["research_plan"]
+    plan = events[-1]["execution_plan"]
     assert isinstance(plan, dict)
     assert plan["plan_version"] == 2
     assert plan["status"] == "in_progress"
@@ -167,7 +167,7 @@ def test_progress_log_keeps_model_plan_request_out_of_info_logs(caplog) -> None:
         progress.trace(context, phase="plan")
 
     assert "PRIVATE_RESEARCH_REQUEST" not in caplog.text
-    assert events[-1]["research_plan"]["request"] == "PRIVATE_RESEARCH_REQUEST"
+    assert events[-1]["execution_plan"]["request"] == "PRIVATE_RESEARCH_REQUEST"
 
 
 def test_execution_plan_keeps_scientific_and_technical_end_states_distinct() -> None:

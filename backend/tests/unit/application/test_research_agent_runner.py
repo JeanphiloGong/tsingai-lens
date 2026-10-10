@@ -2515,7 +2515,7 @@ async def test_plan_version_advances_after_approved_write_without_model_plan_upd
     assert after["plan_version"] > before["plan_version"]
     assert after["steps"] == before["steps"]
     assert resumed.tool_results[0].status is write_status
-    versions = [before["plan_version"], *(event["research_plan"]["plan_version"] for event in events), after["plan_version"]]
+    versions = [before["plan_version"], *(event["execution_plan"]["plan_version"] for event in events), after["plan_version"]]
     assert versions == sorted(versions)
     recovered = agent_runner_module.ResearchExecutionPlan.from_messages(
         messages=resumed.messages, run_status=resumed.status, completion_reason=resumed.completion_reason,
@@ -2595,6 +2595,35 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
         "completed", "completed",
     ]
     assert any("update_execution_plan" in names for names in model.tool_spec_names)
+
+
+async def test_completed_answer_closes_runtime_plan_when_model_left_it_in_progress() -> None:
+    plan = {
+        "steps": [{
+            "step_id": "inspect",
+            "action": "Inspect the relevant paper conditions",
+            "status": "in_progress",
+        }],
+        "status": "in_progress",
+        "explanation": "Inspect the relevant paper conditions first.",
+    }
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan),)),
+        ModelTurn(content="The available comparison is complete."),
+        discover=("update_execution_plan",),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry(())
+    ).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="Summarize the available comparison.",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.execution_plan is not None
+    assert result.execution_plan["status"] == "completed"
+    assert result.execution_plan["model_status"] == "in_progress"
 
 
 async def test_approval_resume_keeps_the_model_authored_plan() -> None:
@@ -3098,7 +3127,7 @@ async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan(
     assert result.status is AgentRunStatus.COMPLETED
     assert any(event["phase"] == "tools" for event in progress_events)
     assert any(event["executed_tool_count"] > 0 for event in progress_events)
-    assert all(event["research_plan"] is None for event in progress_events)
+    assert all(event["execution_plan"] is None for event in progress_events)
     assert any(call.name == "read_source" and call.status is ToolCallStatus.SUCCEEDED
                for call in result.tool_calls)
 
@@ -3156,7 +3185,7 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
     assert not evidence_write.executed_arguments
     assert not finding_draft.executed_arguments
-    assert all(event["research_plan"] is None for event in events)
+    assert all(event["execution_plan"] is None for event in events)
     assert any(event["executed_tool_count"] > 0 for event in events)
 
 

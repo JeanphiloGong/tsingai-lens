@@ -589,7 +589,7 @@ validation, and it does not turn a model proposal into approval.
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
 `{"content": string}` data and are transient presentation updates. `progress`
 events carry phase, cycle, elapsed time, budget fields, and the current
-`research_plan` while a turn runs; they are presentation updates and are not
+`execution_plan` while a turn runs; they are presentation updates and are not
 scientific trajectory records. The plan has a stable `plan_id`, increasing
 `plan_version`, ordered steps, and one of `in_progress`, `completed`,
 `awaiting_approval`, `waiting_for_clarification`, `scientific_refusal`,

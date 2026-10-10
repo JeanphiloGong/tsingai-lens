@@ -617,7 +617,18 @@ const translations: Record<Language, Translations> = {
 				},
 				sourcePage: 'Page {page}',
 				currentPaper: 'Current paper',
-				searchQuery: 'Search: {query}'
+				searchQuery: 'Search: {query}',
+				planLabel: 'Current research plan',
+				planTitle: 'Current work',
+				planStatus: {
+					in_progress: 'In progress',
+					completed: 'Completed',
+					awaiting_approval: 'Waiting for approval',
+					waiting_for_clarification: 'Needs clarification',
+					scientific_refusal: 'Insufficient support',
+					technical_failure: 'Technical failure',
+					resource_limited: 'Limited by runtime'
+				}
 			},
 			upload: {
 				add: 'Add papers',
@@ -3951,7 +3962,18 @@ const translations: Record<Language, Translations> = {
 				sourceKind: { passage: '原文片段', table: '表格', search: '原文检索', outline: '文档章节' },
 				sourcePage: '第 {page} 页',
 				currentPaper: '当前论文',
-				searchQuery: '检索：{query}'
+				searchQuery: '检索：{query}',
+				planLabel: '当前研究计划',
+				planTitle: '当前工作',
+				planStatus: {
+					in_progress: '进行中',
+					completed: '已完成',
+					awaiting_approval: '等待确认',
+					waiting_for_clarification: '需要澄清',
+					scientific_refusal: '依据不足',
+					technical_failure: '技术失败',
+					resource_limited: '受运行限制'
+				}
 			},
 			upload: {
 				add: '添加论文',

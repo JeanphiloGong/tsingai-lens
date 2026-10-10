@@ -8,12 +8,62 @@ from application.repositories.pipeline_run_repository import (
     ModelUsage,
     TokenUsage,
 )
-from domain.core import ObjectiveFactSet, PreparedDocumentInput, ResearchObjective
+from domain.core import ObjectiveFactSet, PaperContribution, PreparedDocumentInput, ResearchObjective
 from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
-from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
+from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID, _source
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
+
+OBJECTIVE_ID = "objective-laser-power-strength"
+
+
+@pytest.fixture
+async def objective_repository(source_repository):
+    for document_id in ("doc_a", "doc_b"):
+        await source_repository.replace_document(
+            COLLECTION_ID, _source(document_id, title=document_id),
+        )
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    objective = ResearchObjective.from_mapping({
+        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
+        "question": "How does laser power affect tensile strength?",
+        "material_scope": ["Ti-6Al-4V"], "variables": ["laser power"],
+        "outcomes": ["tensile strength"], "seed_document_ids": ["doc_a", "doc_b"],
+    })
+    await repository.replace(COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,)))
+    return repository
+
+
+async def _queue_and_claim(repository):
+    objective, queued = await repository.queue_analysis(
+        COLLECTION_ID, OBJECTIVE_ID,
+        document_inputs=(
+            PreparedDocumentInput("doc_a", "fingerprint-doc-a"),
+            PreparedDocumentInput("doc_b", "fingerprint-doc-b"),
+        ),
+        pipeline_version="objective-analysis.v1", model_name="test-model",
+        prompt_versions={"finding": "v1"},
+    )
+    claimed = await repository.claim_analysis(COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version)
+    assert claimed is not None
+    return objective, claimed
+
+
+def _contribution(version: int, document_id: str) -> PaperContribution:
+    return PaperContribution.from_mapping({
+        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
+        "analysis_version": version, "document_id": document_id,
+        "analysis_status": "analyzed", "relevance": "high",
+        "paper_role": "primary_experiment",
+        "contribution_summary": "Reports a controlled laser-power comparison.",
+        "material_match": ["Ti-6Al-4V"], "changed_variables": ["laser power"],
+        "measured_property_scope": ["tensile strength"],
+        "test_environment_scope": ["room temperature"], "confidence": 0.9,
+        "evidence_disposition": "comparable_evidence",
+        "routed_source_count": 1, "extracted_source_count": 1,
+        "comparable_evidence_count": 1, "failed_source_count": 0,
+    })
 
 
 async def test_finding_http_revision_and_abstention_are_persisted(source_repository, tmp_path):

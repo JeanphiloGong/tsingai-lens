@@ -2,26 +2,61 @@ from __future__ import annotations
 
 import pytest
 
+from domain.core import Finding, ObjectiveEvidence
 from domain.evaluation import FindingCuration, FindingFeedback
 from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
 from infra.persistence.postgres.finding_review_repository import (
     PostgresFindingReviewRepository,
 )
-from tests.integration.persistence.test_postgres_objectives import (
+from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
     OBJECTIVE_ID,
-    _analysis_contributions,
-    _analysis_evidence,
-    _finding,
+    _contribution,
     _queue_and_claim,
 )
 
 
-pytest_plugins = ("tests.integration.persistence.test_postgres_objectives",)
+pytest_plugins = ("tests.integration.persistence.test_postgres_objective_lifecycle",)
 pytestmark = [
     pytest.mark.anyio,
     pytest.mark.filterwarnings("error:DELETE statement has a cartesian product"),
 ]
+
+
+def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
+    return tuple(ObjectiveEvidence.from_mapping({
+        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
+        "analysis_version": version, "document_id": document_id,
+        "evidence_id": f"evidence-{document_id}", "source_kind": "text_window",
+        "source_ref": f"block-{document_id}", "page_numbers": [2],
+        "source_excerpt": "Laser power increased from 100 W to 150 W.",
+        "evidence_role": "direct_result", "selection_status": "extracted",
+        "selection_reason": "Reports the variable and measured result.",
+        "changed_variables": [{"name": "laser power", "baseline_value": 100, "target_value": 150, "unit": "W"}],
+        "comparison": {"baseline_label": "100 W", "target_label": "150 W", "axis_names": ["laser power"], "comparable": True},
+        "reported_result": {
+            "outcome": "tensile strength", "baseline_value": 900, "target_value": 950,
+            "value": 950, "unit": "MPa", "direction": "increase",
+            "result_text": "Tensile strength increased from 900 to 950 MPa.",
+        },
+        "attribution_scope": "isolated_effect", "resolution_status": "resolved", "confidence": 0.9,
+    }) for document_id in ("doc_a", "doc_b"))
+
+
+def _finding(version: int) -> Finding:
+    return Finding.from_mapping({
+        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
+        "analysis_version": version, "finding_id": "finding-strength",
+        "statement": "Higher laser power was associated with higher tensile strength under the reported conditions.",
+        "factors": ["laser power"], "outcome": "tensile strength", "direction": "increase",
+        "assertion_strength": "associative", "attribution_scope": "isolated_effect",
+        "synthesis_status": "agreement", "certainty": 0.75, "display_rank": 0,
+        "limitations": ["Only the reported process windows are comparable."],
+        "paper_contributions": [{
+            "document_id": document_id, "analysis_status": "analyzed",
+            "supporting_evidence_ids": [f"evidence-{document_id}"],
+        } for document_id in ("doc_a", "doc_b")],
+    })
 
 
 async def _publish_next_analysis(objective_repository):
@@ -31,7 +66,7 @@ async def _publish_next_analysis(objective_repository):
         COLLECTION_ID,
         OBJECTIVE_ID,
         version,
-        contributions=_analysis_contributions(version),
+        contributions=tuple(_contribution(version, document_id) for document_id in ("doc_a", "doc_b")),
         evidence_records=_analysis_evidence(version),
         findings=(_finding(version),),
     )

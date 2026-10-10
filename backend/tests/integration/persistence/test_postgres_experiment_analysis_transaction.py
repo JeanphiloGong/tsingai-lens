@@ -26,7 +26,7 @@ from infra.persistence.postgres.objective_experiment_selection_repository import
 from infra.persistence.postgres.paper_experiment_repository import (
     PostgresPaperExperimentRepository,
 )
-from tests.integration.persistence.test_postgres_objectives import (
+from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
     OBJECTIVE_ID,
     _contribution,
@@ -34,7 +34,7 @@ from tests.integration.persistence.test_postgres_objectives import (
 )
 
 
-pytest_plugins = ("tests.integration.persistence.test_postgres_objectives",)
+pytest_plugins = ("tests.integration.persistence.test_postgres_objective_lifecycle",)
 pytestmark = pytest.mark.anyio
 
 

@@ -2080,12 +2080,6 @@ class ResearchAgentRunner:
                 seen_ids.add(request.tool_call_id)
                 handler = self.capabilities.get(request.name)
                 risk = handler.spec.risk if handler is not None else ToolRisk.UNKNOWN
-                if risk is ToolRisk.WRITE:
-                    # Existing writes already have authoritative approval and
-                    # execution state in persistence. The claimed write is
-                    # appended by the caller; historical writes are not
-                    # reconstructed as REQUESTED calls and overwritten.
-                    continue
                 call = ChatToolCall.requested(
                     tool_call_id=request.tool_call_id,
                     session_id=message.session_id,

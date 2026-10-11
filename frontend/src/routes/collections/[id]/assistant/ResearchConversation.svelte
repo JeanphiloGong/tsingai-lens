@@ -702,7 +702,12 @@
 		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
 		else if (snapshot.status === 'failed')
 			error = turnErrorMessage(snapshot.error_code);
-		else if (turnRecovery) notice = $t(`researchAgent.${turnRecovery}Description`);
+		else if (turnRecovery && !['technicalFailure', 'permissionDenied'].includes(turnRecovery))
+			notice = recoveryDescription(turnRecovery);
+	}
+
+	function recoveryDescription(state: typeof turnRecovery) {
+		return state ? $t(`researchAgent.${state}Description`) : '';
 	}
 
 	function turnErrorMessage(errorCode: string | null | undefined) {
@@ -1349,8 +1354,12 @@
 		if (turn.status === 'failed') {
 			error = turnErrorMessage(turn.error_code);
 		}
-		if (turn.status === 'completed' && turnRecovery) {
-			notice = $t(`researchAgent.${turnRecovery}Description`);
+		if (
+			turn.status === 'completed' &&
+			turnRecovery &&
+			!['technicalFailure', 'permissionDenied'].includes(turnRecovery)
+		) {
+			notice = recoveryDescription(turnRecovery);
 		}
 		if (session) {
 			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
@@ -1566,10 +1575,11 @@
 					sessionId={session.session_id}
 				/>{/key}
 		{/if}
-		{#if error}
+		{#if error || turnRecovery === 'technicalFailure' || turnRecovery === 'permissionDenied'}
 			<div class="status status-error" role="alert">
 				{#if turnRecovery === 'technicalFailure'}<strong>{$t('researchAgent.technicalFailure')}</strong>{/if}
-				<span>{error}</span>
+				{#if turnRecovery === 'permissionDenied'}<strong>{$t('researchAgent.permissionDenied')}</strong>{/if}
+				<span>{turnRecovery ? recoveryDescription(turnRecovery) : error}</span>
 				{#if failedSessionId !== null}
 					<button type="button" on:click={() => loadSession(failedSessionId ?? '')}>
 						{$t('researchAgent.retrySession')}
@@ -1583,7 +1593,7 @@
 				<span>{notice}</span>
 			</div>
 		{/if}
-		{#if turnRecovery && session && !checkpointId && !branchDraft && !running && !pendingApproval}
+		{#if turnRecovery && turnRecovery !== 'permissionDenied' && session && !checkpointId && !branchDraft && !running && !pendingApproval}
 			<button class="continue-research" type="button"
 				disabled={loading || sending || deciding || revising || Boolean(recoveringCallId)}
 				on:click={() => sendMessage($t('researchAgent.continueRequest'))}>

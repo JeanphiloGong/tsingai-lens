@@ -1,8 +1,24 @@
-import type { ChatMessage, ChatProgress, ChatTurn, ChatResponseSnapshot } from '../../../_shared/chatSessions';
+import type {
+	ChatExecutionPlan,
+	ChatMessage,
+	ChatProgress,
+	ChatTurn,
+	ChatResponseSnapshot
+} from '../../../_shared/chatSessions';
+
+type RecoveryState = 'resourceLimited' | 'technicalFailure' | 'noProgress' | 'permissionDenied' | null;
 
 export function getTurnRecoveryState(
-	turn: Pick<ChatTurn | ChatResponseSnapshot, 'status' | 'completion_reason'>
-): 'resourceLimited' | 'technicalFailure' | 'noProgress' | null {
+	turn: Pick<ChatTurn | ChatResponseSnapshot, 'status' | 'completion_reason'> & {
+		execution_plan?: ChatExecutionPlan | null;
+		progress?: Pick<ChatProgress, 'execution_plan'>;
+	}
+): RecoveryState {
+	const plan = turn.execution_plan ?? turn.progress?.execution_plan ?? null;
+	if (plan?.status === 'permission_denied') return 'permissionDenied';
+	if (plan?.status === 'stalled') return 'noProgress';
+	if (plan?.status === 'technical_failure') return 'technicalFailure';
+	if (plan?.status === 'resource_limited') return 'resourceLimited';
 	if (turn.status === 'failed' || turn.status === 'interrupted') return 'technicalFailure';
 	if (turn.status !== 'completed') return null;
 	if (turn.completion_reason === 'resource_budget' || turn.completion_reason === 'emergency_ceiling')
@@ -63,7 +79,11 @@ export function getChatSessionActivity(
 ): ChatSessionActivity {
 	if (pendingApprovalId) return 'approval';
 	if (running) return 'running';
-	const completed = new Set(messages.map((message) => message.tool_result?.tool_call_id));
+	const completed = new Set(
+		messages
+			.filter((message) => message.tool_result?.status !== 'queued')
+			.map((message) => message.tool_result?.tool_call_id)
+	);
 	return messages.some((message) =>
 		message.tool_calls.some((call) => !completed.has(call.tool_call_id))
 	)
@@ -75,7 +95,11 @@ export function getRecoveredChatProgress(messages: ChatMessage[], now: number): 
 	const questionIndex = messages.map((message) => message.role).lastIndexOf('user');
 	const currentTurn = questionIndex < 0 ? [] : messages.slice(questionIndex);
 	const calls = currentTurn.flatMap((message) => message.tool_calls);
-	const completed = new Set(currentTurn.map((message) => message.tool_result?.tool_call_id));
+	const completed = new Set(
+		currentTurn
+			.filter((message) => message.tool_result?.status !== 'queued')
+			.map((message) => message.tool_result?.tool_call_id)
+	);
 	const started = Date.parse(currentTurn[0]?.created_at ?? '');
 	return {
 		phase: 'recovering',
@@ -141,10 +165,18 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 				? request.document_ids[0]
 				: null);
 		const sourceRef = request.source_ref ?? request.table_ref;
-		const paperRecords = documentId
-			? records.filter((item) => item.document_id === documentId)
-			: [];
 		const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+		const sourceKind = text(request.source_kind ?? data.source_kind);
+		const sourceDigest = text(request.source_digest ?? data.source_digest);
+		const paperRecords = documentId
+			? records.filter(
+					(item) =>
+						item.document_id === documentId &&
+						(!sourceRef || (item.source_ref ?? item.table_ref) === sourceRef) &&
+						(!sourceKind || !item.source_kind || text(item.source_kind) === sourceKind) &&
+						(!sourceDigest || text(item.source_digest) === sourceDigest)
+					)
+			: [];
 		const internalHref = (value: unknown) => {
 			const href = text(value);
 			return href.startsWith('/collections/') ? href : '';
@@ -161,7 +193,12 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 		const source = sourceRef
 			? (Object.assign(
 					{},
-					...paperRecords.filter((item) => (item.source_ref ?? item.table_ref) === sourceRef)
+					...paperRecords.filter(
+						(item) =>
+							(item.source_ref ?? item.table_ref) === sourceRef &&
+							(!sourceKind || !item.source_kind || text(item.source_kind) === sourceKind) &&
+							(!sourceDigest || text(item.source_digest) === sourceDigest)
+					)
 				) as Record<string, unknown>)
 			: sectionSource;
 		const title =
@@ -178,7 +215,11 @@ export function getCurrentReadings(messages: ChatMessage[]): CurrentReading[] {
 			.slice(questionIndex)
 			.flatMap((message) => message.source_contexts)
 			.find(
-				(item) => item.document_id === documentId && (!sourceRef || item.source_ref === sourceRef)
+					(item) =>
+						item.document_id === documentId &&
+						(!sourceRef || item.source_ref === sourceRef) &&
+						(!sourceKind || !item.source_kind || item.source_kind === sourceKind) &&
+						(!sourceDigest || item.source_digest === sourceDigest)
 			);
 		const resultHref = result?.resource_refs
 			.map((resource) => internalHref(resource.href))

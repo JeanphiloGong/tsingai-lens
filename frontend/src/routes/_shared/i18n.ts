@@ -906,6 +906,11 @@ const translations: Record<Language, Translations> = {
 			responseInterrupted: 'Generation was interrupted. The text shown is incomplete.',
 			responseDisconnected: 'Connection lost. Reconnecting to the response...',
 			technicalFailure: 'Technical failure',
+			technicalFailureDescription:
+				'This research turn stopped because of a technical problem. Completed work is preserved; you can continue the research.',
+			permissionDenied: 'Action not permitted',
+			permissionDeniedDescription:
+				'This action is not permitted in the current session. Completed work is preserved; adjust permissions or continue with a permitted step.',
 			resourceLimited: 'Run resource limit reached',
 			resourceLimitedDescription: 'This turn reached its time, tool or model budget. Completed work is saved; you can continue the unfinished research.',
 			noProgress: 'Research paused',
@@ -4247,6 +4252,9 @@ const translations: Record<Language, Translations> = {
 			responseInterrupted: '回复生成已中断，当前显示的文字尚未完成。',
 			responseDisconnected: '连接已断开，正在重新连接回复...',
 			technicalFailure: '技术失败',
+			technicalFailureDescription: '本轮研究因技术问题停止。已完成的工作已保留，可以继续研究。',
+			permissionDenied: '当前权限不允许执行此操作',
+			permissionDeniedDescription: '当前会话不允许执行此操作。已完成的工作已保留，请调整权限或继续执行允许的步骤。',
 			resourceLimited: '运行资源耗尽',
 			resourceLimitedDescription: '本轮已达到时间、工具调用或模型用量上限。已完成的工作已保存，可以继续未完成的研究。',
 			noProgress: '研究已暂停',

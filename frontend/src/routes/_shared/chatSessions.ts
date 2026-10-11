@@ -211,7 +211,17 @@ export type ChatExecutionPlan = {
 	plan_id: string;
 	plan_version: number;
 	request?: string;
-	status: string;
+	status:
+		| 'in_progress'
+		| 'completed'
+		| 'awaiting_approval'
+		| 'waiting_for_clarification'
+		| 'scientific_refusal'
+		| 'permission_denied'
+		| 'stalled'
+		| 'technical_failure'
+		| 'resource_limited'
+		| string;
 	model_status?: string;
 	explanation?: string;
 	blocking_reason?: string | null;

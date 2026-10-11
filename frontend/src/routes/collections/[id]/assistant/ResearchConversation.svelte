@@ -50,6 +50,7 @@
 	import {
 		getChatSessionActivity,
 		getModelServiceErrorKey,
+		getTurnRecoveryState,
 		type ChatSessionActivity
 	} from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
@@ -144,6 +145,7 @@
 	let deciding = false;
 	let error = '';
 	let notice = '';
+	let turnRecovery: ReturnType<typeof getTurnRecoveryState> = null;
 	let input = '';
 	let appliedReviewKey = '';
 	let pendingSourceContexts: ChatSourceContext[] = [];
@@ -573,6 +575,7 @@
 		loading = false;
 		error = '';
 		notice = '';
+		turnRecovery = null;
 		pendingApproval = null;
 		progress = null;
 		settledExecutionPlan = null;
@@ -695,11 +698,11 @@
 		streamingText = snapshot.content;
 		progress = snapshot.progress;
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
+		turnRecovery = getTurnRecoveryState(snapshot);
 		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
 		else if (snapshot.status === 'failed')
 			error = turnErrorMessage(snapshot.error_code);
-		else if (snapshot.status === 'completed' && snapshot.warnings.length)
-			notice = $t('researchAgent.turnLimited');
+		else if (turnRecovery) notice = $t(`researchAgent.${turnRecovery}Description`);
 	}
 
 	function turnErrorMessage(errorCode: string | null | undefined) {
@@ -720,6 +723,7 @@
 		else {
 			responseSnapshot = null;
 			settledExecutionPlan = null;
+			turnRecovery = null;
 		}
 	}
 
@@ -1147,6 +1151,7 @@
 
 		error = '';
 		notice = '';
+		turnRecovery = null;
 		const acknowledgeSubmission = () => {
 			if (!submitting) return;
 			submitting = false;
@@ -1337,14 +1342,15 @@
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
 		settledExecutionPlan = turn.execution_plan ?? null;
+		turnRecovery = getTurnRecoveryState(turn);
 		if (turn.status === 'rejected') {
 			notice = $t(rejectionNoticeKey(decidedToolName));
 		}
 		if (turn.status === 'failed') {
 			error = turnErrorMessage(turn.error_code);
 		}
-		if (turn.status === 'completed' && turn.warnings?.length) {
-			notice = $t('researchAgent.turnLimited');
+		if (turn.status === 'completed' && turnRecovery) {
+			notice = $t(`researchAgent.${turnRecovery}Description`);
 		}
 		if (session) {
 			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
@@ -1562,6 +1568,7 @@
 		{/if}
 		{#if error}
 			<div class="status status-error" role="alert">
+				{#if turnRecovery === 'technicalFailure'}<strong>{$t('researchAgent.technicalFailure')}</strong>{/if}
 				<span>{error}</span>
 				{#if failedSessionId !== null}
 					<button type="button" on:click={() => loadSession(failedSessionId ?? '')}>
@@ -1571,7 +1578,17 @@
 			</div>
 		{/if}
 		{#if notice}
-			<div class="status status-notice" role="status">{notice}</div>
+			<div class="status status-notice" role="status">
+				{#if turnRecovery}<strong>{$t(`researchAgent.${turnRecovery}`)}</strong>{/if}
+				<span>{notice}</span>
+			</div>
+		{/if}
+		{#if turnRecovery && session && !checkpointId && !branchDraft && !running && !pendingApproval}
+			<button class="continue-research" type="button"
+				disabled={loading || sending || deciding || revising || Boolean(recoveringCallId)}
+				on:click={() => sendMessage($t('researchAgent.continueRequest'))}>
+				<ArrowRight size={16} aria-hidden="true" />{$t('researchAgent.continueResearch')}
+			</button>
 		{/if}
 		<MessageTimeline
 			{collectionId}
@@ -1874,10 +1891,27 @@
 		padding: 10px 12px;
 		border-radius: 6px;
 		font-size: 13px;
+		overflow-wrap: anywhere;
 	}
+	.status strong { display: block; margin-bottom: 4px; }
+	.continue-research {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		align-self: center;
+		margin-top: 8px;
+		padding: 7px 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+	.continue-research:disabled { opacity: 0.5; cursor: default; }
 
 	.status-error {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;

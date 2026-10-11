@@ -85,6 +85,31 @@ describe('answer feedback requests', () => {
 });
 
 describe('chat stream lifecycle', () => {
+	it('leaves a silent stream for recovery but keeps a heartbeating long turn connected', async () => {
+		vi.useFakeTimers();
+		const cancel = vi.fn();
+		let stream!: ReadableStreamDefaultController<Uint8Array>;
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+			new ReadableStream({ start(controller) { stream = controller; }, cancel })
+		));
+		try {
+			const response = streamChatMessage('chat_1', 'Compare the papers', () => {});
+			const rejected = expect(response).rejects.toThrow('error.researchConnectionInactive');
+			// Simulate over six minutes of live heartbeats, beyond the old harness limit.
+			for (let second = 0; second < 400; second += 20) {
+				await vi.advanceTimersByTimeAsync(20_000);
+				stream.enqueue(new TextEncoder().encode(': heartbeat\n\n'));
+			}
+			expect(cancel).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(30_000);
+			await rejected;
+			expect(cancel).toHaveBeenCalledOnce();
+		} finally {
+			fetch.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
 	it('releases an unfinished response when its conversation is left', async () => {
 		const cancel = vi.fn();
 		const textDelta = vi.fn();

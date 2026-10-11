@@ -2286,11 +2286,47 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'The Agent reached its reading limit; the answer above is based on the completed inspection.'
+					'This turn reached its time, tool or model budget. Completed work is saved; you can continue the unfinished research.'
 				)
 			)
 			.toBeInTheDocument();
 		expect(document.querySelector('[role="alert"]')).toBeNull();
+		await browserPage.getByRole('button', { name: 'Continue research', exact: true }).click();
+		expect(fetchMock.mock.calls.some(([input, init]) =>
+			requestMethod(input, init) === 'POST' &&
+			requestBody(input, init)?.message === 'Continue the unfinished research from the saved results, keeping my earlier constraints and deferred actions.'
+		)).toBe(true);
+	});
+
+	it.each([
+		['completed', 'resource_budget', null, 'Run resource limit reached'],
+		['failed', null, 'model_unavailable', 'Technical failure']
+	] as const)('restores %s recovery without an execution plan or warnings', async (status, reason, errorCode, title) => {
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		installApi({ trajectory: {
+			items: [message('saved-question', 'user', 'Compare the papers')],
+			pending_approval: null, feedback: [],
+			response: {
+				response_id: 'saved-response', sequence: 2, started_at: createdAt, updated_at: createdAt,
+				status, completion_reason: reason, error_code: errorCode, warnings: [],
+				message_id: null, message_created_at: null, content: '', progress: { phase: 'waiting' }, checkpoint_message_id: 'saved-question'
+			}
+		} });
+		await renderReady();
+		await expect.element(browserPage.getByText(title, { exact: true })).toBeVisible();
+		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).toBeEnabled();
+	});
+
+	it('does not label an ordinary answer with an auxiliary warning as resource exhaustion', async () => {
+		installApi({ messageTurn: {
+			status: 'completed', completion_reason: 'model_answer', error_code: null,
+			warnings: ['correction_signal_enqueue_failed'], pending_approval: null,
+			messages: [message('ordinary-answer', 'assistant', 'The comparison is complete.')]
+		} });
+		await send('Compare the papers');
+		await expect.element(browserPage.getByText('The comparison is complete.')).toBeVisible();
+		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Run resource limit reached', { exact: true })).not.toBeInTheDocument();
 	});
 
 	it('allows a second question after the first turn is persisted', async () => {

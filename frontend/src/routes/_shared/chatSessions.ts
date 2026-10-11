@@ -454,6 +454,7 @@ async function readChatEvents(
 
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
+	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	let buffer = '';
 	let turn: ChatTurn | null = null;
 	const consume = (block: string) => {
@@ -508,7 +509,15 @@ async function readChatEvents(
 	try {
 		signal?.throwIfAborted();
 		while (true) {
-			const { done, value } = await reader.read();
+			// The server emits heartbeats during model work. A silent connection
+			// must yield to snapshot recovery, without cancelling the research job.
+			const { done, value } = await Promise.race([
+				reader.read(),
+				new Promise<never>((_, reject) => {
+					idleTimer = setTimeout(() => reject(new Error('error.researchConnectionInactive')), 30_000);
+				})
+			]);
+			clearTimeout(idleTimer);
 			signal?.throwIfAborted();
 			buffer += decoder.decode(value, { stream: !done });
 			let boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
@@ -522,6 +531,7 @@ async function readChatEvents(
 		if (buffer.trim()) consume(buffer);
 		return turn;
 	} finally {
+		clearTimeout(idleTimer);
 		signal?.removeEventListener('abort', cancelReader);
 		await reader.cancel().catch(() => {});
 		reader.releaseLock();

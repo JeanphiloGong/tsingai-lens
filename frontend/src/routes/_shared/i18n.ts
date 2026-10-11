@@ -628,6 +628,8 @@ const translations: Record<Language, Translations> = {
 					awaiting_approval: 'Waiting for approval',
 					waiting_for_clarification: 'Needs clarification',
 					scientific_refusal: 'Insufficient support',
+					permission_denied: 'Permission denied',
+					stalled: 'No further progress',
 					technical_failure: 'Technical failure',
 					resource_limited: 'Limited by runtime'
 				}
@@ -903,8 +905,13 @@ const translations: Record<Language, Translations> = {
 				'The model service returned an invalid response. Contact an administrator or try again later. Any retrieved research results were kept.',
 			responseInterrupted: 'Generation was interrupted. The text shown is incomplete.',
 			responseDisconnected: 'Connection lost. Reconnecting to the response...',
-			turnLimited:
-				'The Agent reached its reading limit; the answer above is based on the completed inspection.'
+			technicalFailure: 'Technical failure',
+			resourceLimited: 'Run resource limit reached',
+			resourceLimitedDescription: 'This turn reached its time, tool or model budget. Completed work is saved; you can continue the unfinished research.',
+			noProgress: 'Research paused',
+			noProgressDescription: 'This turn stopped making progress. Completed work is saved; you can refine the question or continue.',
+			continueResearch: 'Continue research',
+			continueRequest: 'Continue the unfinished research from the saved results, keeping my earlier constraints and deferred actions.'
 		},
 		research: {
 			emptyValue: '--',
@@ -3368,6 +3375,7 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: 'Unexpected error.',
 			requestFailed: 'The request could not be completed. Please try again.',
+			researchConnectionInactive: 'The connection stopped responding. Checking saved research progress.',
 			authSessionChanged: 'Your sign-in session changed. Please sign in again.',
 			collectionNotFound: 'This collection does not exist.',
 			graphNotReady:
@@ -3976,6 +3984,8 @@ const translations: Record<Language, Translations> = {
 					awaiting_approval: '等待确认',
 					waiting_for_clarification: '需要澄清',
 					scientific_refusal: '依据不足',
+					permission_denied: '权限受限',
+					stalled: '暂时没有进展',
 					technical_failure: '技术失败',
 					resource_limited: '受运行限制'
 				}
@@ -4236,7 +4246,13 @@ const translations: Record<Language, Translations> = {
 				'模型服务返回了无效响应，请联系管理员或稍后重试。已取得的研究结果已保留。',
 			responseInterrupted: '回复生成已中断，当前显示的文字尚未完成。',
 			responseDisconnected: '连接已断开，正在重新连接回复...',
-			turnLimited: 'Agent 已达到本轮阅读上限；上面的回答仅基于已经完成的检查。'
+			technicalFailure: '技术失败',
+			resourceLimited: '运行资源耗尽',
+			resourceLimitedDescription: '本轮已达到时间、工具调用或模型用量上限。已完成的工作已保存，可以继续未完成的研究。',
+			noProgress: '研究已暂停',
+			noProgressDescription: '本轮暂时无法取得新进展。已完成的工作已保存，可以调整问题或继续研究。',
+			continueResearch: '继续研究',
+			continueRequest: '请从已保存的结果继续未完成的研究，保持我之前的约束和暂缓执行的事项。'
 		},
 		research: {
 			emptyValue: '--',
@@ -6594,6 +6610,7 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: '发生未知错误。',
 			requestFailed: '请求未能完成，请稍后重试。',
+			researchConnectionInactive: '连接暂时没有响应，正在检查已保存的研究进度。',
 			authSessionChanged: '登录状态已发生变化，请重新登录。',
 			collectionNotFound: '该集合不存在。',
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',

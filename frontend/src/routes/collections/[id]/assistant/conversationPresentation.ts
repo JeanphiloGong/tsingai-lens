@@ -1,4 +1,14 @@
-import type { ChatMessage, ChatProgress } from '../../../_shared/chatSessions';
+import type { ChatMessage, ChatProgress, ChatTurn, ChatResponseSnapshot } from '../../../_shared/chatSessions';
+
+export function getTurnRecoveryState(
+	turn: Pick<ChatTurn | ChatResponseSnapshot, 'status' | 'completion_reason'>
+): 'resourceLimited' | 'technicalFailure' | 'noProgress' | null {
+	if (turn.status === 'failed' || turn.status === 'interrupted') return 'technicalFailure';
+	if (turn.status !== 'completed') return null;
+	if (turn.completion_reason === 'resource_budget' || turn.completion_reason === 'emergency_ceiling')
+		return 'resourceLimited';
+	return turn.completion_reason === 'no_progress' ? 'noProgress' : null;
+}
 
 /** Map backend model failures to stable, user-facing translation keys. */
 export function getModelServiceErrorKey(errorCode: string | null | undefined): string | null {

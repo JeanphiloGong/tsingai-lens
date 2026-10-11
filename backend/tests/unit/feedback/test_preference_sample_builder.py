@@ -57,6 +57,20 @@ def _case(snapshot: dict) -> FeedbackCase:
     )
 
 
+@pytest.mark.parametrize("response_b", ["Vary both factors.", ""])
+async def test_conversation_pair_requires_answers_but_not_excerpts(response_b) -> None:
+    result = await PreferenceSampleBuilder().build(dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": "Summarize our fixed-speed comparison.",
+            "response_a": "Vary power at fixed speed.", "response_b": response_b,
+            "suggested_preference": "a", "rationale": "Preserves the fixed condition."}))
+    if response_b:
+        assert isinstance(result, PreferenceBuildCandidate)
+        assert result.content.context == result.content.evidence == ()
+        assert result.content.human_preference is None
+    else:
+        assert result.missing_reasons == ("preference_response_b_missing",)
+
+
 async def test_builder_creates_same_input_pair_without_selecting_for_human() -> None:
     result = await PreferenceSampleBuilder().build(
         dataset=_dataset(),

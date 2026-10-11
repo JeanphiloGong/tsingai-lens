@@ -41,6 +41,21 @@ def _case(snapshot: dict) -> FeedbackCase:
     )
 
 
+@pytest.mark.parametrize("has_criteria", [True, False])
+async def test_conversation_evaluation_does_not_require_paper_excerpts(has_criteria) -> None:
+    result = await EvaluationSampleBuilder().build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": "Summarize our decision.",
+            "evaluation_reference": "Hold scan speed fixed.",
+            "evaluation_criteria": ["Preserve fixed scan speed."] if has_criteria else []}),
+    )
+    if has_criteria:
+        assert isinstance(result, EvaluationBuildCandidate)
+        assert result.content.context == result.content.evidence == ()
+    else:
+        assert result.missing_reasons == ("evaluation_criteria_missing",)
+
+
 async def test_builder_creates_reference_evaluation() -> None:
     result = await EvaluationSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,

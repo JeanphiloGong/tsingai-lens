@@ -16,6 +16,23 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
+async def test_generator_accepts_conversation_without_excerpts(task_type):
+    messages = [{"role": "user", "content": "Summarize our decision."}]
+    class Completions:
+        async def create(self, **request):
+            payload = json.loads(request["messages"][1]["content"])
+            assert payload["context"] == []
+            assert payload["messages"] == messages
+            return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop",
+                message=SimpleNamespace(content='{"missing_reasons":["Decision not supplied"]}'))])
+    value = await OpenAIFeedbackSampleGenerator(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())), model="test-model"
+    ).generate(task_type=task_type, question=messages[-1]["content"], context=(),
+        snapshot={"messages": messages}, construction_spec={})
+    assert value["missing_reasons"] == ["Decision not supplied"]
+
+
 async def test_provider_receives_readable_evidence_and_returns_generated_content():
     async def respond(request):
         body = json.loads(request.content)

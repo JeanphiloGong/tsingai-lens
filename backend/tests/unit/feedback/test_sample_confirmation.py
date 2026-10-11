@@ -174,6 +174,23 @@ def _service(samples: _Samples, cases: _Cases | None = None) -> FeedbackDatasetS
 
 
 @pytest.mark.anyio
+async def test_no_excerpt_candidate_can_be_saved_and_confirmed() -> None:
+    samples = _Samples()
+    samples.sample = replace(samples.sample, status="needs_input", current_revision_id=None)
+    service = _service(samples)
+    content = {"schema_version": "literature-sft.v1",
+        "messages": [{"role": "user", "content": "Summarize the research decision."}],
+        "context": [], "evidence": [], "target": "Compare laser power at fixed scan speed."}
+    saved = await service.update_sample(user_id="user-1", dataset_id="fdset-1", sample_id="sample-1",
+        expected_revision_id=None, expected_generation=1, content=content)
+    assert saved.status == "needs_confirmation"
+    confirmed = await service.confirm_sample(user_id="user-1", dataset_id="fdset-1", sample_id="sample-1",
+        expected_revision_id=saved.current_revision_id)
+    assert confirmed.status == "confirmed"
+    assert samples.appended.provenance["evidence_records"] == []
+    assert samples.appended.provenance["session_id"] == "session-1"
+
+
 async def test_human_edit_appends_revision_and_clears_confirmation() -> None:
     samples = _Samples()
     service = _service(samples)

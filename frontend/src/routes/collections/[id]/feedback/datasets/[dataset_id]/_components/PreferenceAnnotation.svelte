@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { Check, ChevronDown, FileText, Plus, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
-	import { initialAnnotationEvidence } from './annotationInput';
+	import { initialAnnotationEvidence, initialAnnotationMessages } from './annotationInput';
 	import { createEventDispatcher } from 'svelte';
+	$: missingReasons = (sample?.sample.missing_reasons ?? []).filter(reason => reason !== 'readable_evidence_missing');
 	import { t } from '../../../../../../_shared/i18n';
 	import type {
 		DatasetSampleAction,
@@ -56,7 +57,7 @@
 		JSON.stringify(evidence) !== JSON.stringify(currentContent.evidence)
 	));
 	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed' || sample?.sample.status === 'needs_input';
-	$: complete = Boolean(question.trim() && responseA.trim() && responseB.trim() && responseA.trim() !== responseB.trim() && evidence.length && evidence.every(item => item.document_title.trim() && item.text.trim()));
+	$: complete = Boolean(question.trim() && responseA.trim() && responseB.trim() && responseA.trim() !== responseB.trim() && evidence.every(item => item.document_title.trim() && item.text.trim()));
 	$: canConfirm = Boolean(
 		currentRevision &&
 		sample?.sample.status === 'needs_confirmation' &&
@@ -72,7 +73,7 @@
 		if (!sample) return null;
 		return {
 			schema_version: 'literature-preference.v1',
-			messages: currentContent?.messages ?? [{ role: 'user', content: question.trim() }],
+			messages: currentContent?.messages ?? initialAnnotationMessages(sample),
 			context: evidence.map(item => ({ document_title: item.document_title.trim(), text: item.text.trim() })),
 			response_a: responseA.trim(),
 			response_b: responseB.trim(),
@@ -149,10 +150,10 @@
 					<label for={`preference-evidence-title-${index}`}>文献标题</label><input id={`preference-evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} />
 					<label for={`preference-evidence-text-${index}`}>片段</label><textarea id={`preference-evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea>
 					{#if canEdit}<button class="evidence-remove" type="button" aria-label={`${$t('taskDatasets.removeEvidence')} ${index + 1}`} title={$t('taskDatasets.removeEvidence')} on:click={() => evidence = evidence.filter((_, i) => i !== index)} disabled={saving || confirming || acting}><Trash2 size={15} aria-hidden="true" /></button>{/if}
-				</article>{:else}<p class="missing">当前候选没有可读证据，不能确认。</p>{/each}
+				</article>{:else}<p class="aside-note">{$t('taskDatasets.noEvidence')}</p>{/each}
 			</div>
 			{#if canEdit}<button class="evidence-add" type="button" on:click={() => evidence = [...evidence, { document_title: '', text: '' }]} disabled={saving || confirming || acting}><Plus size={15} aria-hidden="true" />{$t('taskDatasets.addEvidence')}</button>{/if}
-			{#if sample.sample.missing_reasons.length}<div class="missing-box"><strong>还需要补充</strong><ul>{#each sample.sample.missing_reasons as reason}<li>{reason}</li>{/each}</ul></div>{/if}
+			{#if missingReasons.length}<div class="missing-box"><strong>还需要补充</strong><ul>{#each missingReasons as reason}<li>{reason}</li>{/each}</ul></div>{/if}
 		</aside>
 	</div>
 {/if}

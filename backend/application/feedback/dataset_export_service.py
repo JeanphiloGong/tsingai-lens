@@ -290,7 +290,7 @@ def _validate_member(
         (item["content"] for item in content.messages if item["role"] == "user"), ""
     )
     issues: list[ExportIssue] = []
-    if not member.provenance.get("evidence_records"):
+    if (content.context or content.evidence) and not member.provenance.get("evidence_records"):
         issues.append(
             ExportIssue(
                 sample_id=member.sample_id,
@@ -395,6 +395,8 @@ def _input_messages(content: SftRevisionContent | PreferenceRevisionContent | Ev
     """Attach the reviewed context to the last user turn, without review targets."""
     messages = [dict(message) for message in content.messages]
     snippets = dict.fromkeys((item["document_title"], item["text"]) for item in content.context)
+    if not snippets:
+        return messages
     material = "\n\n".join(f"文献：{title}\n原文：{text}" for title, text in snippets)
     for message in reversed(messages):
         if message["role"] == "user":

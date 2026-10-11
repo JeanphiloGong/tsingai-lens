@@ -3338,6 +3338,8 @@ const translations: Record<Language, Translations> = {
 		},
 		taskDatasets: {
 			workerRecommendation: 'Worker recommendation',
+			optionalEvidence: 'Paper excerpts (optional)',
+			noEvidence: 'No paper excerpts attached',
 			noRecommendation: 'No recommendation yet',
 			acceptRecommendation: 'Accept recommendation',
 			preferenceChoices: {
@@ -6582,6 +6584,8 @@ const translations: Record<Language, Translations> = {
 		},
 		taskDatasets: {
 			workerRecommendation: 'Worker 建议',
+			optionalEvidence: '论文片段（可选）',
+			noEvidence: '未附加论文片段',
 			noRecommendation: '尚无建议',
 			acceptRecommendation: '采用建议',
 			preferenceChoices: { a: 'A 更好', b: 'B 更好', tie: '相当', unclear: '无法判断' },

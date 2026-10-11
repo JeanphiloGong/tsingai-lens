@@ -436,6 +436,39 @@ async def test_publish_is_idempotent_and_separates_model_file_from_provenance() 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("task_type", ["sft", "preference", "evaluation"])
+async def test_export_without_excerpts_preserves_input_and_identity(task_type) -> None:
+    messages = (
+        {"role": "user", "content": "Hold scan speed fixed."},
+        {"role": "assistant", "content": "We will compare laser power levels."},
+        {"role": "user", "content": "Summarize our decision."},
+    )
+    common = dict(messages=messages, context=(), evidence=())
+    if task_type == "sft":
+        content = SftRevisionContent(schema_version="literature-sft.v1", target="Vary power at fixed speed.", **common)
+    elif task_type == "preference":
+        content = PreferenceRevisionContent(schema_version="literature-preference.v1",
+            response_a="Vary power at fixed speed.", response_b="Vary both power and speed.",
+            suggested_preference=None, human_preference="a", rationale="Preserves the decision.", **common)
+    else:
+        content = EvaluationRevisionContent(schema_version="literature-evaluation.v1",
+            reference="Vary power at fixed speed.", criteria=("Keep scan speed fixed.",), evaluation_mode="reference", **common)
+    member = _content_member(content, sample_id="conversation-1")
+    member = replace(member, revision=replace(member.revision, provenance={
+        "session_id": "session-1", "anchor_message_id": "answer-1", "evidence_records": [],
+    }))
+    service = _service(_Samples(member), _Exports(), replace(_dataset(), task_type=task_type))
+    preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
+    assert preview.issues == ()
+    exported = await service.publish_for_user(user_id="user-1", dataset_id="fdset_export_test",
+        preview_id=preview.preview_id, preview_digest=preview.preview_digest,
+        allow_partial=False, idempotency_key="conversation")
+    row = exported.rows[0]
+    actual = row["prompt"] if task_type == "preference" else row["messages"]
+    assert actual == list(messages) + ([{"role": "assistant", "content": content.target}] if task_type == "sft" else [])
+    assert exported.provenance[0]["session_id"] == "session-1"
+
+
 async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected() -> None:
     content = PreferenceRevisionContent.from_mapping(
         {

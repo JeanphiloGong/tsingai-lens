@@ -12,6 +12,7 @@ from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.sample_revision import SftRevisionContent, strip_internal_references
 from application.feedback.sample_builder_support import (
     question_from_snapshot,
+    messages_from_snapshot,
     readable_sources,
     snapshot_digest,
     SampleContentGenerator,
@@ -70,12 +71,10 @@ class SftSampleBuilder:
 
         readable_sources_value, source_provenance = readable_sources(snapshot, annotation)
         missing: list[str] = []
-        if not readable_sources_value:
-            missing.append("readable_evidence_missing")
 
         target, target_origin = _candidate_target(snapshot, annotation)
         generated = False
-        if readable_sources_value and self.generator is not None and (not target or review_note):
+        if self.generator is not None and (not target or review_note):
             value = await self.generator.generate(
                 task_type="sft", question=question, context=readable_sources_value,
                 snapshot=snapshot, construction_spec=dataset.construction_spec, review_note=review_note,
@@ -94,7 +93,7 @@ class SftSampleBuilder:
 
         content = SftRevisionContent(
             schema_version="literature-sft.v1",
-            messages=({"role": "user", "content": question},),
+            messages=messages_from_snapshot(snapshot),
             context=tuple(readable_sources_value),
             target=target,
             evidence=tuple(readable_sources_value),
@@ -132,6 +131,10 @@ def _candidate_target(
         target = strip_internal_references(value)
         if target:
             return target, origin
+    if snapshot.get("rating") == "helpful":
+        target = strip_internal_references(snapshot.get("answer"))
+        if target:
+            return target, "helpful_answer"
     return "", "missing"
 
 

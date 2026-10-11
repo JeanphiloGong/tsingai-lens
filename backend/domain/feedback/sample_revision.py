@@ -78,10 +78,6 @@ class SftRevisionContent:
             raise ValueError("SFT content requires a user message")
         context = tuple(_model_text(item) for item in self.context)
         evidence = tuple(_model_text(item) for item in self.evidence)
-        if not context:
-            raise ValueError("SFT content requires readable context")
-        if not evidence:
-            raise ValueError("SFT content requires readable evidence")
         target = str(self.target or "").strip()
         if not target:
             raise ValueError("SFT content requires a target")
@@ -136,10 +132,6 @@ class PreferenceRevisionContent:
             raise ValueError("preference content requires a user message")
         context = tuple(_model_text(item, kind="preference context") for item in self.context)
         evidence = tuple(_model_text(item, kind="preference evidence") for item in self.evidence)
-        if not context:
-            raise ValueError("preference content requires readable context")
-        if not evidence:
-            raise ValueError("preference content requires readable evidence")
         response_a = _required_text(self.response_a, "preference response_a")
         response_b = _required_text(self.response_b, "preference response_b")
         if response_a == response_b:
@@ -209,10 +201,6 @@ class EvaluationRevisionContent:
             raise ValueError("evaluation content requires a user message")
         context = tuple(_model_text(item, kind="evaluation context") for item in self.context)
         evidence = tuple(_model_text(item, kind="evaluation evidence") for item in self.evidence)
-        if not context:
-            raise ValueError("evaluation content requires readable context")
-        if not evidence:
-            raise ValueError("evaluation content requires readable evidence")
         mode = str(self.evaluation_mode or "")
         if mode not in {"reference", "rubric"}:
             raise ValueError("evaluation mode must be reference or rubric")

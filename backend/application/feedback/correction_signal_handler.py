@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from application.feedback.analysis_handler import (
     AnalysisInputError,
+    conversation_before_answer,
     read_chat_coverage_audit,
 )
 from application.feedback.source_coverage import build_evidence_coverage
@@ -234,6 +235,7 @@ class CorrectionSignalAnalysisHandler:
         )
         context_snapshot = {
             "question": original_question,
+            "messages": conversation_before_answer(messages, anchor),
             "answer": anchor.content,
             "correction_signal": signal.to_record(),
             "pairing_assessment": pairing_assessment,

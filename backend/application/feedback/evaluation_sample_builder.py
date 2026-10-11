@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from application.feedback.sample_builder_support import (
     question_from_snapshot,
+    messages_from_snapshot,
     readable_sources,
     snapshot_digest,
     SampleContentGenerator,
@@ -60,7 +61,7 @@ class EvaluationSampleBuilder:
         criteria = _criteria(snapshot)
         reference = _reference(snapshot)
         generated = False
-        if sources and self.generator is not None and (not criteria or (mode == "reference" and not reference) or review_note):
+        if self.generator is not None and (not criteria or (mode == "reference" and not reference) or review_note):
             value = await self.generator.generate(
                 task_type="evaluation", question=question, context=sources, snapshot=snapshot,
                 construction_spec=dataset.construction_spec, review_note=review_note,
@@ -80,8 +81,6 @@ class EvaluationSampleBuilder:
                 raise ValueError("sample_generation_evaluation_incomplete")
             generated = True
         missing: list[str] = []
-        if not sources:
-            missing.append("readable_evidence_missing")
         if not criteria:
             missing.append("evaluation_criteria_missing")
         if mode == "reference" and not reference:
@@ -89,7 +88,7 @@ class EvaluationSampleBuilder:
         if missing:
             return EvaluationBuildNeedsInput(tuple(missing))
 
-        messages = ({"role": "user", "content": question},)
+        messages = messages_from_snapshot(snapshot)
         context = tuple(sources)
         content = EvaluationRevisionContent(
             schema_version="literature-evaluation.v1",

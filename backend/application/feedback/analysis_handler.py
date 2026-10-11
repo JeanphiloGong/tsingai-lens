@@ -184,6 +184,8 @@ class FeedbackAnalysisHandler:
         )
         context_snapshot = {
             "question": _previous_user_question(messages, answer),
+            "messages": conversation_before_answer(messages, answer),
+            "rating": feedback.rating,
             "answer": answer.content,
             "requested_scope": list(coverage.requested_scope),
             "inspected_sources": list(coverage.inspected_sources),
@@ -200,11 +202,22 @@ class FeedbackAnalysisHandler:
 
 
 def _previous_user_question(messages: tuple[ChatMessage, ...], answer: ChatMessage) -> str:
-    prior = [
-        message.content for message in messages
-        if message.role is ChatMessageRole.USER and message.created_at <= answer.created_at
-    ]
+    prior = [item["content"] for item in conversation_before_answer(messages, answer) if item["role"] == "user"]
     return prior[-1] if prior else ""
+
+
+def conversation_before_answer(messages: tuple[ChatMessage, ...], answer: ChatMessage) -> list[dict[str, str]]:
+    """Capture visible input turns, excluding the target and all later corrections."""
+    result: list[dict[str, str]] = []
+    for message in messages:
+        if message.message_id == answer.message_id:
+            break
+        if message.role in {ChatMessageRole.USER, ChatMessageRole.ASSISTANT} and message.content and not message.tool_calls:
+            result.append({"role": message.role.value, "content": message.content})
+    # Tool-use commentary after the question is not a prior conversation turn.
+    while result and result[-1]["role"] != "user":
+        result.pop()
+    return result
 
 
 async def read_chat_coverage_audit(

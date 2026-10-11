@@ -31,6 +31,20 @@ def question_from_snapshot(snapshot: Mapping[str, Any]) -> str:
     return strip_internal_references(snapshot.get("question"))
 
 
+def messages_from_snapshot(snapshot: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
+    """Keep the captured pre-answer conversation, with legacy question fallback."""
+    messages = tuple(
+        {"role": item["role"], "content": strip_internal_references(item["content"])}
+        for item in snapshot.get("messages") or ()
+        if isinstance(item, Mapping) and item.get("role") in {"user", "assistant"}
+        and isinstance(item.get("content"), str) and strip_internal_references(item["content"])
+    )
+    question = question_from_snapshot(snapshot)
+    if messages and messages[-1] == {"role": "user", "content": question}:
+        return messages
+    return ({"role": "user", "content": question},)
+
+
 def readable_sources(
     snapshot: Mapping[str, Any], annotation: FeedbackAnnotation | None
 ) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, Any], ...]]:

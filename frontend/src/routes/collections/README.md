@@ -187,8 +187,12 @@ This node owns the Collection route family.
 ## Objective Interaction
 
 The maintained feedback task page opens one fixed task workbench and shows its
-sample queue. SFT and evaluation candidates are generated from the case's
-readable evidence; preference candidates use the original and corrected
+sample queue. SFT and evaluation candidates use the case's conversation and
+available evidence; Helpful answers can seed an unconfirmed SFT candidate.
+Paper excerpts are optional in all three editors and exports. Existing excerpts
+remain editable and traceable; missing excerpts alone never block confirmation.
+Captured conversation history is preserved when saving a first human revision.
+Preference candidates use the original and corrected
 answers when both exist. For SFT, the page keeps the question and readable evidence beside
 an editable candidate answer; saving appends a human revision and confirming
 binds that exact revision. A stale revision returns a conflict without losing

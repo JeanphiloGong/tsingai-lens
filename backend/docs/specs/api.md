@@ -394,11 +394,16 @@ enqueue model work. The sample Worker backfills historical cases in bounded
 batches once at process startup, skips withdrawn cases, and preserves existing
 samples through idempotent collection. The `dataset_sample_build`
 Worker reads the case's frozen context
-and readable evidence, writes an immutable task-specific candidate
+and any available readable evidence, writes an immutable task-specific candidate
 revision, and leaves the sample in `needs_confirmation`. SFT and Evaluation
 builders use the configured model to generate missing answers or criteria from
-the readable evidence. A first Preference build uses the configured model to
-assess the fixed answer pair against its shared readable evidence without
+the conversation and available evidence. A Helpful rating can seed the original
+answer as an SFT candidate, but never confirms it. Negative feedback alone
+cannot make the original answer a target. Captured input messages retain the
+conversation before the rated answer; the target and later corrections are
+excluded. Historical snapshots without messages retain their question input.
+A first Preference build uses the configured model to
+assess the fixed answer pair against its shared input without
 rewriting or swapping either answer. It records `suggested_preference`
 (`a`, `b`, `tie`, or `unclear`) and a nonempty evidence-grounded `rationale`,
 while leaving `human_preference` unset. Missing assessment configuration leaves
@@ -415,7 +420,11 @@ Confirmation saves any local Preference changes first and confirms exactly
 the revision returned by that save through the existing PATCH and confirm
 endpoints; a failed save cannot submit a confirmation. An invalid or
 unchanged result does not become a new confirmed sample.
-Missing evidence or an explicit model abstention produces `needs_input`;
+Paper titles and excerpts are optional for all three tasks. Empty context and
+evidence arrays do not block building, saving, confirmation or export. Supplied
+excerpts must still be complete and retain provenance. Missing task content
+(SFT target, a comparable answer pair, or evaluation criteria/reference) or an
+explicit model abstention produces `needs_input`;
 provider errors and invalid responses produce `build_failed`. No Worker result
 automatically confirms training data. Internal message/source identities stay
 in revision provenance and are not inserted into model-facing context or
@@ -534,6 +543,9 @@ There are no standalone `context` or `evidence` fields in v2 main files.
 The `literature-context.v1` input template inserts each distinct reviewed context
 snippet as `文献：{document_title}\n原文：{text}`, joins snippets with a blank line,
 and prepends them to the last user message followed by `\n\n问题：{original content}`.
+With no context snippets, messages are exported unchanged, without an empty
+literature/question wrapper. Session and anchor provenance remain mandatory;
+evidence provenance is required when context or evidence is included.
 Earlier messages and roles remain unchanged. Evidence used only for review,
 targets, preferences, reference answers, and criteria never enter this input.
 The manifest includes `data_format` (`messages-sft`, `trl-conversational-dpo`,

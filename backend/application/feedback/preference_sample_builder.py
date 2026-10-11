@@ -10,6 +10,7 @@ from application.feedback.sample_builder_support import (
     generation_missing_reasons,
     input_digest,
     question_from_snapshot,
+    messages_from_snapshot,
     readable_sources,
     snapshot_digest,
 )
@@ -57,7 +58,7 @@ class PreferenceSampleBuilder:
         snapshot = dict(case.context_snapshot or {})
         question = question_from_snapshot(snapshot)
         sources, source_provenance = readable_sources(snapshot, annotation)
-        messages = ({"role": "user", "content": question},)
+        messages = messages_from_snapshot(snapshot)
         response_a = strip_internal_references(_first_text(
             snapshot,
             "response_a",
@@ -91,8 +92,6 @@ class PreferenceSampleBuilder:
             return PreferenceBuildNeedsInput(("question_missing",))
         human_review_input = reviewing_previous and previous_revision.author_kind == "human"
         missing: list[str] = []
-        if not sources:
-            missing.append("readable_evidence_missing")
         if not human_review_input and corrected_question and corrected_question != question:
             missing.append("preference_inputs_differ")
         if not human_review_input and snapshot.get("corrected_answer"):

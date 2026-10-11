@@ -108,9 +108,30 @@ async def test_builder_does_not_invent_target_or_evidence() -> None:
 
     assert isinstance(result, SftBuildNeedsInput)
     assert result.missing_reasons == (
-        "readable_evidence_missing",
         "candidate_target_missing",
     )
+
+
+@pytest.mark.parametrize("rating", ["helpful", "not_helpful"])
+async def test_rating_without_paper_excerpts_preserves_conversation(rating) -> None:
+    messages = [
+        {"role": "user", "content": "We need to isolate laser power from scan speed."},
+        {"role": "assistant", "content": "Hold scan speed fixed in the next comparison."},
+        {"role": "user", "content": "Summarize that decision."},
+    ]
+    result = await SftSampleBuilder().build(
+        dataset=_dataset(), sample=_sample(), annotation=None,
+        case=_case({"question": messages[-1]["content"], "messages": messages,
+                    "answer": "Compare power levels at fixed scan speed.", "rating": rating}),
+    )
+    if rating == "helpful":
+        assert isinstance(result, SftBuildCandidate)
+        assert result.content.messages == tuple(messages)
+        assert result.content.context == result.content.evidence == ()
+        assert result.provenance["target_origin"] == "helpful_answer"
+    else:
+        assert isinstance(result, SftBuildNeedsInput)
+        assert result.missing_reasons == ("candidate_target_missing",)
 
 
 async def test_builder_generates_a_target_from_readable_evidence() -> None:

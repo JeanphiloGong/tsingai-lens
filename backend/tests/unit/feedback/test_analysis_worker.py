@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from application.feedback.analysis_handler import FeedbackAnalysisHandler
+from application.feedback.analysis_handler import FeedbackAnalysisHandler, conversation_before_answer
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
 from application.repositories.analysis_job_repository import AnalysisJob
 from domain.chat import ChatMessage, ChatSession
@@ -141,6 +141,19 @@ async def test_worker_creates_candidate_result_and_case_without_mutating_chat() 
     assert cases.results[0].evidence_coverage.coverage_status == "unknown"
     assert cases.cases[0]["context_snapshot"]["answer"] == chat.answer.content
     assert (chat.question, chat.answer) == before
+
+
+def test_conversation_capture_excludes_target_and_later_corrections() -> None:
+    chat = _Chat(feedback=None)
+    followup = replace(chat.question, message_id="followup", content="Summarize that decision.")
+    target = replace(chat.answer, message_id="target", content="Target answer")
+    correction = replace(chat.question, message_id="correction", content="Later correction")
+    history = conversation_before_answer((chat.question, chat.answer, followup, target, correction), target)
+    assert history == [
+        {"role": "user", "content": chat.question.content},
+        {"role": "assistant", "content": chat.answer.content},
+        {"role": "user", "content": followup.content},
+    ]
 
 
 async def test_worker_cancels_withdrawn_feedback_without_case() -> None:

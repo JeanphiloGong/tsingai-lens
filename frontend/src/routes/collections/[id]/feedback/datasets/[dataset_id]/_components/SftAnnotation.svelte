@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Check, ChevronDown, FileText, Plus, RotateCcw, Save, ShieldCheck, Trash2, TriangleAlert } from '@lucide/svelte';
-	import { initialAnnotationEvidence } from './annotationInput';
+	import { initialAnnotationEvidence, initialAnnotationMessages } from './annotationInput';
 	import { createEventDispatcher } from 'svelte';
 	import { t } from '../../../../../../_shared/i18n';
 	import type { DatasetSampleAction, DatasetSampleDetail, SftRevisionContent } from '../../../../../../_shared/feedbackDatasets';
@@ -29,12 +29,13 @@
 		loadedRevisionId = inputKey;
 		const content = sample.current_revision?.content as SftRevisionContent | undefined;
 		question = content?.messages.filter(item => item.role === 'user').at(-1)?.content ?? sample.source_case.question;
-		target = content?.target ?? String(sample.source_case.context_snapshot.corrected_answer ?? sample.source_case.context_snapshot.candidate_target ?? '');
+		target = content?.target ?? String(sample.source_case.context_snapshot.corrected_answer ?? sample.source_case.context_snapshot.candidate_target ?? (sample.source_case.context_snapshot.rating === 'helpful' ? sample.source_case.answer : ''));
 		evidence = content ? content.evidence.map((item) => ({ ...item })) : initialAnnotationEvidence(sample);
 		rebuildReason = '';
 	}
 
 	$: currentRevision = sample?.current_revision ?? null;
+	$: missingReasons = (sample?.sample.missing_reasons ?? []).filter(reason => reason !== 'readable_evidence_missing');
 	$: currentContent = currentRevision?.content as SftRevisionContent | undefined;
 	$: draftChanged = (canEdit && !currentRevision) || Boolean(currentRevision && (
 		target.trim() !== currentContent?.target ||
@@ -42,13 +43,13 @@
 	));
 	$: canConfirm = Boolean(currentRevision && sample?.sample.status === 'needs_confirmation' && !draftChanged && complete && !saving && !confirming && !acting);
 	$: canEdit = sample?.sample.status === 'needs_confirmation' || sample?.sample.status === 'confirmed' || sample?.sample.status === 'needs_input';
-	$: complete = Boolean(question.trim() && target.trim() && evidence.length && evidence.every(item => item.document_title.trim() && item.text.trim()));
+	$: complete = Boolean(question.trim() && target.trim() && evidence.every(item => item.document_title.trim() && item.text.trim()));
 
 	function content(): SftRevisionContent | null {
 		if (!sample) return null;
 		return {
 			schema_version: currentContent?.schema_version ?? 'literature-sft.v1',
-			messages: currentContent?.messages ?? [{ role: 'user', content: question.trim() }],
+			messages: currentContent?.messages ?? initialAnnotationMessages(sample),
 			context: evidence.map(item => ({ document_title: item.document_title.trim(), text: item.text.trim() })),
 			target: target.trim(),
 			evidence: evidence.map((item) => ({
@@ -152,7 +153,7 @@
 		<aside class="evidence-column" aria-labelledby="evidence-title">
 			<div class="section-kicker">核对</div>
 			<h2 id="evidence-title">证据原文</h2>
-			<p class="aside-note">回答只能使用这里显示的可读片段。内部来源编号不会进入训练内容。</p>
+			<p class="aside-note">{$t('taskDatasets.optionalEvidence')}</p>
 			<div class="evidence-list">
 				{#each evidence as item, index}
 					<article class="evidence-card">
@@ -163,14 +164,14 @@
 						{#if canEdit}<button class="evidence-remove" type="button" aria-label={`${$t('taskDatasets.removeEvidence')} ${index + 1}`} title={$t('taskDatasets.removeEvidence')} on:click={() => evidence = evidence.filter((_, i) => i !== index)} disabled={saving || confirming || acting}><Trash2 size={15} aria-hidden="true" /></button>{/if}
 					</article>
 				{:else}
-					<p class="missing">当前候选没有可读证据，不能确认。</p>
+					<p class="aside-note">{$t('taskDatasets.noEvidence')}</p>
 				{/each}
 			</div>
 			{#if canEdit}<button class="evidence-add" type="button" on:click={() => evidence = [...evidence, { document_title: '', text: '' }]} disabled={saving || confirming || acting}><Plus size={15} aria-hidden="true" />{$t('taskDatasets.addEvidence')}</button>{/if}
-			{#if sample.sample.missing_reasons.length}
+			{#if missingReasons.length}
 				<div class="missing-box">
 					<strong>还需要补充</strong>
-					<ul>{#each sample.sample.missing_reasons as reason}<li>{reason}</li>{/each}</ul>
+					<ul>{#each missingReasons as reason}<li>{reason}</li>{/each}</ul>
 				</div>
 			{/if}
 			{#if sample.source_case.omitted_candidates.length}

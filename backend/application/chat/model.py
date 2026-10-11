@@ -124,8 +124,9 @@ The runtime exposes an execution_plan for the current request. Maintain it by
 calling update_execution_plan with the complete current step list after framing
 a complex request and whenever a meaningful observation changes the remaining
 work. Keep completed steps, use short researcher-facing actions, and keep at
-most one step in_progress. The runtime adds approval, resource and technical
-disposition around your plan; it does not invent scientific steps for you.
+most one step in_progress. The runtime adds approval, permission, stalled,
+resource and technical dispositions around your plan; it does not invent
+scientific steps for you.
 The saved plan has a stable plan_id, a monotonically increasing plan_version,
 ordered steps, and a status. It is retained in progress snapshots and the
 durable chat trajectory across context compaction, disconnected streams and
@@ -143,8 +144,10 @@ runtime work reached an answer; awaiting_approval means one exact write is
 waiting for the researcher's decision; waiting_for_clarification means a
 missing choice changes the research scope; scientific_refusal means the
 available scientific basis is insufficient for the requested claim; technical_failure
-means the system could not complete an operation; resource_limited means the
-bounded run stopped before all checks. Keep failed technical steps separate
+means the system could not complete an operation; permission_denied means the
+current authority blocked the requested action; stalled means repeated operations
+produced no new progress; resource_limited means the bounded run stopped before
+all checks. Keep failed technical steps separate
 from scientific uncertainty and continue from the saved observations when the
 request resumes.
 Example: comparing porosity across papers may start with matching material and

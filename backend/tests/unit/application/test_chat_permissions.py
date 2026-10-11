@@ -143,7 +143,7 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
     assert len({call.tool_call_id for call in calls}) == 2
     assert calls[0].decision_basis == "scope_grant"
     assert calls[-1].status.value == ("rejected" if revoke else "succeeded")
-    assert result["execution_plan"]["status"] == ("technical_failure" if revoke else "completed")
+    assert result["execution_plan"]["status"] == ("permission_denied" if revoke else "completed")
     if revoke:
         assert result["execution_plan"]["blocking_reason"] == "permission_write_denied"
     snapshot = await repository.read_response_snapshot(session.session_id)

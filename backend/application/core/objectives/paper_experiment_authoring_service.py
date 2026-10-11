@@ -13,6 +13,7 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentModelOutput,
+    PaperExperimentDraftValidationError,
     ReconciledPaperExperimentOutput,
     prepare_model_output,
 )
@@ -151,13 +152,23 @@ class PaperExperimentAuthoringService:
             source_fingerprint=source_fingerprint,
             source_payloads=source_payloads,
         )
-        output = PaperExperimentModelOutput.from_model_mapping(
-            raw_draft,
-            document_id=document_id,
-            source_fingerprint=source_fingerprint,
-            source_labels=bundle.source_catalog,
-        )
-        reconciled = prepare_model_output(output)
+        try:
+            output = PaperExperimentModelOutput.from_model_mapping(
+                raw_draft,
+                document_id=document_id,
+                source_fingerprint=source_fingerprint,
+                source_labels=bundle.source_catalog,
+            )
+            reconciled = prepare_model_output(output)
+        except PaperExperimentDraftValidationError:
+            raise
+        except ValueError as exc:
+            detail = " ".join(str(exc).split())
+            path = detail.split(" ", 1)[0] if detail.startswith("experiments[") else None
+            raise PaperExperimentDraftValidationError(
+                detail or "PaperExperiment draft failed deterministic validation.",
+                validation_path=path,
+            ) from exc
         if not reconciled.output.experiments:
             raise ValueError("Agent draft contains no source-supported experiment")
         digest = _canonical_digest(

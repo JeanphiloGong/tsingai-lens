@@ -29,6 +29,9 @@ from application.chat import (
     evaluate_authorization,
 )
 import application.chat.agent_runner as agent_runner_module
+from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentDraftValidationError,
+)
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -249,6 +252,63 @@ def _calls_for(result: AgentRunResult, *names: str) -> tuple[ChatToolCall, ...]:
 def _results_for(result: AgentRunResult, *names: str) -> tuple[ChatToolResult, ...]:
     call_ids = {call.tool_call_id for call in _calls_for(result, *names)}
     return tuple(item for item in result.tool_results if item.tool_call_id in call_ids)
+
+
+def test_reconstruct_active_trajectory_retains_completed_write_observations() -> None:
+    writer = ChatToolCall.requested(
+        tool_call_id="call-written",
+        session_id="chat-1",
+        assistant_message_id="msg-write",
+        name="create_research_plan",
+        arguments={"question": "Record the reviewed plan."},
+        risk=ToolRisk.WRITE,
+    )
+    completed = writer.require_approval().approve(
+        user_id="user-1",
+        arguments_digest=writer.arguments_digest,
+        decided_at="2026-09-29T00:00:45+00:00",
+    ).start("2026-09-29T00:01:00+00:00").succeed(
+        "2026-09-29T00:01:01+00:00"
+    )
+    result = ChatToolResult(
+        tool_call_id=writer.tool_call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        data={"saved": True},
+    )
+    messages = (
+        ChatMessage.user(
+            message_id="msg-user",
+            session_id="chat-1",
+            content="Save the reviewed plan.",
+            created_at="2026-09-29T00:00:00+00:00",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="msg-write",
+            session_id="chat-1",
+            content="",
+            tool_calls=(writer.to_request(),),
+            created_at="2026-09-29T00:00:30+00:00",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="msg-result",
+            session_id="chat-1",
+            result=result,
+            created_at="2026-09-29T00:01:01+00:00",
+        ),
+    )
+    writer_capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    calls, results = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="done")),
+        capabilities=CapabilityRegistry((writer_capability,)),
+    )._reconstruct_active_trajectory(messages, approval_reference=completed)
+
+    assert len(calls) == 1
+    assert calls[0].tool_call_id == completed.tool_call_id
+    assert calls[0].name == completed.name
+    assert calls[0].risk is ToolRisk.WRITE
+    assert calls[0].status is ToolCallStatus.SUCCEEDED
+    assert calls[0].decision_user_id == completed.decision_user_id
+    assert results == [result]
 
 
 async def test_greeting_completes_without_calling_a_tool() -> None:
@@ -1196,6 +1256,165 @@ async def test_unknown_batch_member_prevents_every_read_from_executing() -> None
     assert len(read_results) == 2
     assert all(item.status is ToolResultStatus.FAILED for item in read_results)
 
+
+async def test_invalid_read_arguments_do_not_block_other_reads_in_the_same_batch() -> None:
+    read = _Capability("test_read", ToolRisk.READ, _QuestionArguments)
+    model = _Model(
+        ModelTurn(tool_calls=(
+            ModelToolCall(name=read.spec.name, arguments={"question": "paper-a"}),
+            ModelToolCall(name=read.spec.name, arguments={}),
+        )),
+        ModelTurn(content="Paper A was inspected; the second read had invalid arguments."),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((read,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Inspect both papers.",
+    )
+
+    read_results = _results_for(result, read.spec.name)
+    assert len(read_results) == 2
+    assert read.executed_arguments == [{"question": "paper-a"}]
+    assert [item.status for item in read_results] == [
+        ToolResultStatus.SUCCEEDED,
+        ToolResultStatus.FAILED,
+    ]
+    assert read_results[1].error_code == "invalid_tool_arguments"
+
+
+async def test_read_batch_executes_remaining_budget_before_deferring_extra_reads() -> None:
+    read = _Capability("test_read", ToolRisk.READ, _QuestionArguments)
+    model = _Model(
+        ModelTurn(tool_calls=(
+            ModelToolCall(name=read.spec.name, arguments={"question": "paper-a"}),
+            ModelToolCall(name=read.spec.name, arguments={"question": "paper-b"}),
+        )),
+        ModelTurn(content="Only the first read fit within this turn's tool budget."),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((read,)),
+        limits=AgentRunLimits(max_tool_calls=2),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Inspect both papers.",
+    )
+
+    read_results = _results_for(result, read.spec.name)
+    assert read.executed_arguments == [{"question": "paper-a"}]
+    assert read_results[0].status is ToolResultStatus.SUCCEEDED
+    assert read_results[1].error_code == "resource_budget"
+
+
+async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() -> None:
+    read = _Capability(
+        "read_source",
+        ToolRisk.READ,
+        result_data={
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results",
+            "source_digest": "digest-1",
+            "content": "The inspected results report improved elongation.",
+            "content_truncated": False,
+        },
+    )
+    writer = _Capability(
+        "create_objective_candidate",
+        ToolRisk.WRITE,
+        fail_with=RuntimeError("write unavailable"),
+    )
+    source_request = ChatToolRequest(
+        tool_call_id="read-1",
+        name=read.spec.name,
+        arguments={},
+        position=0,
+    )
+    pending_request = ChatToolRequest(
+        tool_call_id="write-1",
+        name=writer.spec.name,
+        arguments={},
+        position=1,
+    )
+    prior_messages = (
+        ChatMessage.user(
+            message_id="user-1",
+            session_id="chat-1",
+            content="Read the paper, then save the reviewed objective.",
+            created_at="2026-10-11T00:00:00Z",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="assistant-1",
+            session_id="chat-1",
+            content="",
+            tool_calls=(source_request, pending_request),
+            created_at="2026-10-11T00:00:01Z",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="tool-1",
+            session_id="chat-1",
+            created_at="2026-10-11T00:00:02Z",
+            result=ChatToolResult(
+                tool_call_id="read-1",
+                status="succeeded",
+                data=read.result_data,
+            ),
+        ),
+    )
+    pending = ChatToolCall.requested(
+        tool_call_id="write-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        name=writer.spec.name,
+        arguments={},
+        risk=ToolRisk.WRITE,
+        position=1,
+    ).require_approval()
+    approved = pending.approve(
+        user_id="user-1",
+        arguments_digest=pending.arguments_digest,
+        decided_at="2026-10-11T00:00:03Z",
+    ).start("2026-10-11T00:00:04Z")
+
+    result = await ResearchAgentRunner(
+        model=_Model(RuntimeError("provider unavailable")),
+        capabilities=CapabilityRegistry((read, writer)),
+    ).resume_claimed_call(
+        context=_context(),
+        previous_messages=prior_messages,
+        claimed_call=approved,
+    )
+
+    assert result.status is AgentRunStatus.FAILED
+    assert "Exact paper Sources read (1)" in result.messages[-1].content
+    assert "Exact paper Sources read (1):" in result.messages[-1].content
+
+
+def test_failure_ledger_separates_draft_argument_errors_from_source_read_failures() -> None:
+    draft = ChatToolCall.requested(
+        tool_call_id="draft-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        name="propose_paper_experiment_draft",
+        arguments={"document_id": "paper-1"},
+        risk=ToolRisk.DRAFT,
+    )
+    _, result = agent_runner_module.ResearchAgentRunner._failure(
+        draft,
+        "invalid_tool_arguments",
+        "The draft arguments are invalid.",
+    )
+
+    ledger = ResearchAgentRunner._reading_ledger([draft], [result])
+
+    assert "Papers with failed exact reads (0): none" in ledger
+    assert "Research action argument errors (1): propose_paper_experiment_draft:paper-1" in ledger
 
 async def test_general_science_discussion_receives_no_capabilities() -> None:
     model = _Model(
@@ -2457,6 +2676,43 @@ async def test_capability_validation_exception_is_actionable_for_model_repair() 
     assert "S001=methods-1" in failure.error_message
 
 
+async def test_paper_experiment_validation_failure_is_structured_for_model_repair() -> None:
+    capability = _Capability(
+        "get_collection_context",
+        ToolRisk.DRAFT,
+        fail_with=PaperExperimentDraftValidationError(
+            "experiments[0] comparison outcome does not match its measurements",
+            validation_path="experiments[0]",
+        ),
+    )
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="get_collection_context", arguments={},
+            ),)),
+            ModelTurn(content="我会按因变量拆分比较并保留完整实验事实。"),
+        ),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+
+    result = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="整理实验草案",
+    )
+
+    failure = next(
+        item for item in result.tool_results if item.error_code == "draft_validation_failed"
+    )
+    assert failure.error_code == "draft_validation_failed"
+    assert failure.data == {
+        "validation_path": "experiments[0]",
+        "repair_hint": (
+            "Keep the full source-supported draft. Each comparison must "
+            "reference measurements for one outcome only; split different "
+            "outcomes into separate comparisons and resubmit the complete draft."
+        ),
+    }
+
+
 async def test_queued_capability_result_returns_to_model_as_a_successful_observation() -> None:
     capability = _Capability(
         "start_objective_analysis",
@@ -2666,7 +2922,11 @@ async def test_plan_version_advances_after_approved_write_without_model_plan_upd
     assert after["plan_id"] == before["plan_id"]
     assert after["plan_version"] > before["plan_version"]
     assert after["steps"] == before["steps"]
-    assert resumed.tool_results[0].status is write_status
+    resumed_write_result = next(
+        item for item in resumed.tool_results
+        if item.tool_call_id == claimed.tool_call_id
+    )
+    assert resumed_write_result.status is write_status
     versions = [before["plan_version"], *(event["execution_plan"]["plan_version"] for event in events), after["plan_version"]]
     assert versions == sorted(versions)
     recovered = agent_runner_module.ResearchExecutionPlan.from_messages(
@@ -2932,8 +3192,12 @@ async def test_approval_resume_inherits_spent_tool_budget() -> None:
 
     assert resumed.status is AgentRunStatus.COMPLETED
     assert resumed.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
-    assert resumed.tool_results[0].status is ToolResultStatus.FAILED
-    assert resumed.tool_results[0].error_code == "resource_budget"
+    resumed_write_result = next(
+        item for item in resumed.tool_results
+        if item.tool_call_id == approved.tool_call_id
+    )
+    assert resumed_write_result.status is ToolResultStatus.FAILED
+    assert resumed_write_result.error_code == "resource_budget"
     assert writer.executed_arguments == []
     assert len(model.contexts) == contexts_before_resume + 1
 

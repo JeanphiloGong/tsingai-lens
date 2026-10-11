@@ -177,6 +177,17 @@ never full arguments, paper bodies, credentials, or hidden reasoning.
 Streaming Chat sends an initial waiting event and a heartbeat every 15 seconds.
 Heartbeats advance elapsed time while retaining the latest cycle and completed
 tool counts. They indicate a live wait, not a new scientific observation.
+The message stream starts a background turn; closing that stream does not
+cancel the job. Response snapshots and trajectory reads recover the same job,
+including after page reload. The frontend abandons an event stream after 30
+seconds without data and reconnects through the existing snapshot/events path.
+This is an idle transport limit, not a total research deadline. Development
+Vite proxying and browser fetch impose no configured whole-turn deadline here.
+External proxies must permit streaming and allow the 15-second heartbeat.
+Acceptance harnesses must wait longer than the configured finite turn budget
+(allow at least 60 seconds for persistence and UI settling), record that budget,
+and distinguish a harness deadline from an HTTP failure. A 360-second harness
+wait cannot validate a 900-second turn's terminal state.
 
 ## Initialize Or Upgrade The Schema
 

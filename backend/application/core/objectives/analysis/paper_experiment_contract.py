@@ -13,6 +13,16 @@ from domain.core.paper_experiment import PaperExperimentRevision, SourceReferenc
 from domain.core.research_objective import ResearchObjective
 
 
+class PaperExperimentDraftValidationError(ValueError):
+    """A model draft failed a deterministic scientific-structure check."""
+
+    error_code = "draft_validation_failed"
+
+    def __init__(self, message: str, *, validation_path: str | None = None) -> None:
+        super().__init__(message)
+        self.validation_path = validation_path
+
+
 # Drafts may carry only content and local cross-reference keys. Formal
 # identity, request ownership, and validation state are assigned after the
 # source-grounded content has been checked.

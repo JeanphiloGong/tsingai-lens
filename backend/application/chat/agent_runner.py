@@ -6,7 +6,7 @@ import json
 import logging
 import traceback
 from asyncio import Semaphore, gather, sleep, wait_for
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -30,6 +30,9 @@ from application.chat.capabilities import (
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
 from application.chat.capabilities.execution_plan import UpdateExecutionPlanToolRequest
 from application.chat.inline_citations import format_inline_citations
+from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentDraftValidationError,
+)
 from application.chat.model import (
     RESEARCH_AGENT_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT,
@@ -267,8 +270,23 @@ class ResearchExecutionStatus(StrEnum):
     AWAITING_APPROVAL = "awaiting_approval"
     WAITING_FOR_CLARIFICATION = "waiting_for_clarification"
     SCIENTIFIC_REFUSAL = "scientific_refusal"
+    PERMISSION_DENIED = "permission_denied"
+    STALLED = "stalled"
     TECHNICAL_FAILURE = "technical_failure"
     RESOURCE_LIMITED = "resource_limited"
+
+
+def _is_permission_failure(reason: str | None) -> bool:
+    normalized = str(reason or "").strip().lower()
+    return normalized in {"tool_permission_denied", "user_rejected"} or normalized.startswith("permission_")
+
+
+def _permission_denial_code(results: Iterable[ChatToolResult]) -> str | None:
+    """Return the first persisted permission block in the active trajectory."""
+    for result in results:
+        if result.status is ToolResultStatus.FAILED and _is_permission_failure(result.error_code):
+            return result.error_code
+    return None
 
 
 def _research_plan_status(
@@ -277,8 +295,11 @@ def _research_plan_status(
     completion_reason: AgentCompletionReason | None,
     pending_approval: bool,
     model_status: ResearchExecutionStatus,
+    error_code: str | None = None,
 ) -> ResearchExecutionStatus:
     if run_status is AgentRunStatus.FAILED:
+        if _is_permission_failure(error_code):
+            return ResearchExecutionStatus.PERMISSION_DENIED
         return ResearchExecutionStatus.TECHNICAL_FAILURE
     if pending_approval:
         return ResearchExecutionStatus.AWAITING_APPROVAL
@@ -287,6 +308,8 @@ def _research_plan_status(
         AgentCompletionReason.EMERGENCY_CEILING,
         AgentCompletionReason.NO_PROGRESS,
     }:
+        if completion_reason is AgentCompletionReason.NO_PROGRESS:
+            return ResearchExecutionStatus.STALLED
         return ResearchExecutionStatus.RESOURCE_LIMITED
     if completion_reason is AgentCompletionReason.MODEL_ANSWER and model_status is ResearchExecutionStatus.IN_PROGRESS:
         return ResearchExecutionStatus.COMPLETED
@@ -351,7 +374,7 @@ class ResearchExecutionPlan:
         return plan.with_runtime_status(_research_plan_status(
             run_status=run_status, completion_reason=completion_reason,
             pending_approval=pending_approval is not None,
-            model_status=model_status,
+            model_status=model_status, error_code=error_code,
         ), error_code)
 
     def with_runtime_status(
@@ -365,7 +388,10 @@ class ResearchExecutionPlan:
             # cannot recreate an older snapshot with a larger version.
             self, status=status,
             blocking_reason=(
-                reason if status is ResearchExecutionStatus.TECHNICAL_FAILURE
+                reason if status in {
+                    ResearchExecutionStatus.TECHNICAL_FAILURE,
+                    ResearchExecutionStatus.PERMISSION_DENIED,
+                }
                 else self.blocking_reason if status in {
                     ResearchExecutionStatus.WAITING_FOR_CLARIFICATION,
                     ResearchExecutionStatus.SCIENTIFIC_REFUSAL,
@@ -638,6 +664,7 @@ class _RunProgress:
                     completion_reason=completion_reason,
                     pending_approval=run_status is AgentRunStatus.APPROVAL_REQUIRED,
                     model_status=self.execution_plan.model_status,
+                    error_code=termination_reason if run_status is AgentRunStatus.FAILED else None,
                 ),
                 termination_reason,
             )
@@ -816,8 +843,12 @@ class ResearchAgentRunner:
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
         progress.refresh_execution_plan(messages)
-        calls = [claimed_call]
-        results: list[ChatToolResult] = []
+        calls, results = self._reconstruct_active_trajectory(
+            messages,
+            exclude_tool_call_id=claimed_call.tool_call_id,
+            approval_reference=claimed_call,
+        )
+        calls.append(claimed_call)
         handler = self.capabilities.get(claimed_call.name)
         if handler is None or handler.spec.risk is not ToolRisk.WRITE:
             call, result = self._failure(
@@ -1087,7 +1118,10 @@ class ResearchAgentRunner:
                         )
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
-                    error_code = exc.reason if exc.reason.startswith(("research_", "context_")) else "model_response_invalid"
+                    error_code = _permission_denial_code(results) or (
+                        exc.reason if exc.reason.startswith(("research_", "context_"))
+                        else "model_response_invalid"
+                    )
                     progress.trace(context, phase="terminal", termination_reason=error_code,
                                    run_status=AgentRunStatus.FAILED)
                     return self._result(
@@ -1180,7 +1214,8 @@ class ResearchAgentRunner:
                         messages,
                         calls,
                         results,
-                        "provider_timeout" if provider_timeout else "model_unavailable",
+                        _permission_denial_code(results)
+                        or ("provider_timeout" if provider_timeout else "model_unavailable"),
                     )
                 break
 
@@ -1198,11 +1233,20 @@ class ResearchAgentRunner:
                     )
                 )
                 await self._checkpoint(checkpoint, messages, calls, results)
-                progress.trace(context, phase="terminal", termination_reason=reason.value, final_answer=True,
-                               run_status=AgentRunStatus.COMPLETED, completion_reason=reason)
+                permission_error = _permission_denial_code(results)
+                terminal_status = AgentRunStatus.FAILED if permission_error else AgentRunStatus.COMPLETED
+                progress.trace(
+                    context,
+                    phase="terminal",
+                    termination_reason=permission_error or reason.value,
+                    final_answer=True,
+                    run_status=terminal_status,
+                    completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
+                )
                 return self._result(
-                    AgentRunStatus.COMPLETED, messages, calls, results,
-                    completion_reason=reason,
+                    terminal_status, messages, calls, results,
+                    error_code=permission_error,
+                    completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
                     warnings=(_INCOMPLETE_SCOPE_WARNING,) if reason is not AgentCompletionReason.MODEL_ANSWER else (),
                 )
 
@@ -1219,11 +1263,48 @@ class ResearchAgentRunner:
             calls.extend(call for call, _ in requested)
             await self._checkpoint(checkpoint, messages, calls, results)
             stop_reason = progress.stop_before_model()
-            if (self.limits.max_tool_calls is not None
-                    and progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls):
+            budget_limited_batch = (
+                self.limits.max_tool_calls is not None
+                and progress.executed_tool_calls + len(requested) > self.limits.max_tool_calls
+            )
+            if budget_limited_batch:
                 stop_reason = AgentCompletionReason.RESOURCE_BUDGET
-            if stop_reason:
-                error = ("resource_budget", "These Sources or actions remain uninspected or unexecuted in this turn.")
+            independent_reads = bool(requested) and all(
+                call.risk is ToolRisk.READ for call, _ in requested
+            )
+            completed_by_id: dict[str, tuple[ChatToolCall, ChatToolResult]] = {}
+            runnable = list(requested)
+            validated_arguments: dict[str, BaseModel] = {}
+            error: tuple[str, str] | None = None
+
+            can_execute_partial_read_batch = (
+                independent_reads
+                and (
+                    stop_reason is None
+                    or (budget_limited_batch and stop_reason is AgentCompletionReason.RESOURCE_BUDGET)
+                )
+            )
+            if can_execute_partial_read_batch:
+                # Validate each read independently. A malformed request should
+                # become its own observation while valid reads continue.
+                runnable = []
+                for call, handler in requested:
+                    call_error, call_arguments = capability_policy.validate_batch(
+                        self.capabilities,
+                        ((call, handler),),
+                        messages,
+                        permission_mode=permission_mode,
+                    )
+                    if call_error:
+                        completed_by_id[call.tool_call_id] = self._failure(call, *call_error)
+                    else:
+                        runnable.append((call, handler))
+                        validated_arguments.update(call_arguments)
+            elif stop_reason:
+                error = (
+                    "resource_budget",
+                    "These Sources or actions remain uninspected or unexecuted in this turn.",
+                )
                 validated_arguments = {}
             else:
                 error, validated_arguments = capability_policy.validate_batch(
@@ -1232,8 +1313,43 @@ class ResearchAgentRunner:
                     messages,
                     permission_mode=permission_mode,
                 )
+
             if error:
                 completed = tuple(self._failure(call, *error) for call, _ in requested)
+            elif can_execute_partial_read_batch:
+                if self.limits.max_tool_calls is not None:
+                    remaining = max(0, self.limits.max_tool_calls - progress.executed_tool_calls)
+                    runnable, deferred = runnable[:remaining], runnable[remaining:]
+                else:
+                    deferred = []
+                for call, _handler in deferred:
+                    completed_by_id[call.tool_call_id] = self._failure(
+                        call,
+                        "resource_budget",
+                        "This read was deferred because the remaining tool budget could not execute the full batch.",
+                    )
+                started = []
+                for call, handler in runnable:
+                    started_call = call.start(_now_iso())
+                    calls[batch_start + next(
+                        index for index, (requested_call, _) in enumerate(requested)
+                        if requested_call.tool_call_id == call.tool_call_id
+                    )] = started_call
+                    started.append((started_call, handler))
+                if started:
+                    await self._checkpoint(checkpoint, messages, calls, results)
+                    progress.executed_tool_calls += len(started)
+                    executed = await self._execute_read_batch(
+                        context,
+                        tuple(started),
+                        progress,
+                        validated_arguments=validated_arguments,
+                    )
+                    completed_by_id.update({call.tool_call_id: (call, result) for call, result in executed})
+                completed = tuple(
+                    completed_by_id[call.tool_call_id]
+                    for call, _handler in requested
+                )
             elif len(requested) == 1 and capability_policy.evaluate_authorization(requested[0][0].risk).requires_approval:
                 pending = requested[0][0].require_approval()
                 calls[-1] = pending
@@ -1287,28 +1403,6 @@ class ResearchAgentRunner:
                            new_resources=len(progress.resource_refs) - old_resource_count,
                            completion_reason=stop_reason,
                            termination_reason=stop_reason.value if stop_reason else None)
-            permission_error = next(
-                (
-                    result.error_code
-                    for _, result in completed
-                    if result.error_code == "tool_permission_denied"
-                ),
-                None,
-            )
-            if permission_error is not None:
-                progress.trace(
-                    context,
-                    phase="terminal",
-                    termination_reason=permission_error,
-                    run_status=AgentRunStatus.FAILED,
-                )
-                return self._result(
-                    AgentRunStatus.FAILED,
-                    messages,
-                    calls,
-                    results,
-                    error_code=permission_error,
-                )
             if stop_reason:
                 return await self._finalize_with_current_evidence(
                     stop_reason, progress, context, messages, calls, results,
@@ -1676,16 +1770,23 @@ class ResearchAgentRunner:
                     results=results,
                 )
             )
+            permission_error = _permission_denial_code(results)
             deadline_reached = progress.remaining_seconds() <= 0
             progress.trace(
                 context, phase="finalize",
-                termination_reason=reason.value if deadline_reached else "final_answer_unavailable",
-                run_status=AgentRunStatus.COMPLETED if deadline_reached else AgentRunStatus.FAILED,
-                completion_reason=reason if deadline_reached else None,
+                termination_reason=permission_error or (reason.value if deadline_reached else "final_answer_unavailable"),
+                run_status=AgentRunStatus.FAILED if permission_error or not deadline_reached else AgentRunStatus.COMPLETED,
+                completion_reason=reason if not permission_error and deadline_reached else None,
             )
             await self._checkpoint(checkpoint, messages, calls, results)
-            if not deadline_reached:
-                return self._result(AgentRunStatus.FAILED, messages, calls, results, "final_answer_unavailable")
+            if permission_error or not deadline_reached:
+                return self._result(
+                    AgentRunStatus.FAILED,
+                    messages,
+                    calls,
+                    results,
+                    permission_error or "final_answer_unavailable",
+                )
             return self._result(
                 AgentRunStatus.COMPLETED, messages, calls, results,
                 completion_reason=reason, warnings=(_INCOMPLETE_SCOPE_WARNING,),
@@ -1700,12 +1801,21 @@ class ResearchAgentRunner:
                 results=results,
             )
         )
-        progress.trace(context, phase="finalize", termination_reason=reason.value, final_answer=True,
-                       run_status=AgentRunStatus.COMPLETED, completion_reason=reason)
+        permission_error = _permission_denial_code(results)
+        terminal_status = AgentRunStatus.FAILED if permission_error else AgentRunStatus.COMPLETED
+        progress.trace(
+            context,
+            phase="finalize",
+            termination_reason=permission_error or reason.value,
+            final_answer=True,
+            run_status=terminal_status,
+            completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
+        )
         await self._checkpoint(checkpoint, messages, calls, results)
         return self._result(
-            AgentRunStatus.COMPLETED, messages, calls, results,
-            completion_reason=reason,
+            terminal_status, messages, calls, results,
+            error_code=permission_error,
+            completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
             warnings=(_INCOMPLETE_SCOPE_WARNING,),
         )
 
@@ -1928,6 +2038,97 @@ class ResearchAgentRunner:
         }
         return len(requested_ids), len(requested_ids & completed_ids)
 
+    def _reconstruct_active_trajectory(
+        self,
+        messages: tuple[ChatMessage, ...] | list[ChatMessage],
+        *,
+        exclude_tool_call_id: str | None = None,
+        approval_reference: ChatToolCall | None = None,
+    ) -> tuple[list[ChatToolCall], list[ChatToolResult]]:
+        """Restore the current request's calls and results before approval resume.
+
+        The persisted chat messages carry tool requests and results, while the
+        approved call carries the authoritative write decision metadata. Rebuild
+        every completed call from the messages. Historical write requests do not
+        serialize approval fields in the assistant message, so use the current
+        approved call as the session-scoped approval reference while restoring
+        their completed state. This keeps the result ledger and execution trace
+        aligned without making a second approval or execution request.
+        """
+        last_user_index = max(
+            (
+                index
+                for index, message in enumerate(messages)
+                if message.role is ChatMessageRole.USER
+            ),
+            default=0,
+        )
+        active = messages[last_user_index:]
+        result_events = {
+            message.tool_call_id: (message.tool_result, message.created_at)
+            for message in active
+            if message.tool_result is not None and message.tool_call_id
+        }
+        calls: list[ChatToolCall] = []
+        seen_ids: set[str] = set()
+        for message in active:
+            if message.role is not ChatMessageRole.ASSISTANT:
+                continue
+            for request in message.tool_calls:
+                if request.tool_call_id == exclude_tool_call_id or request.tool_call_id in seen_ids:
+                    continue
+                seen_ids.add(request.tool_call_id)
+                handler = self.capabilities.get(request.name)
+                risk = handler.spec.risk if handler is not None else ToolRisk.UNKNOWN
+                if risk is ToolRisk.WRITE:
+                    # Existing writes already have authoritative approval and
+                    # execution state in persistence. The claimed write is
+                    # appended by the caller; historical writes are not
+                    # reconstructed as REQUESTED calls and overwritten.
+                    continue
+                call = ChatToolCall.requested(
+                    tool_call_id=request.tool_call_id,
+                    session_id=message.session_id,
+                    assistant_message_id=message.message_id,
+                    name=request.name,
+                    arguments=request.arguments,
+                    risk=risk,
+                    position=request.position,
+                )
+                event = result_events.get(request.tool_call_id)
+                if event is not None:
+                    result, finished_at = event
+                    if result.status is ToolResultStatus.FAILED:
+                        call = call.fail(result.error_code or "capability_failed", finished_at)
+                    else:
+                        if risk is ToolRisk.WRITE:
+                            if approval_reference is None:
+                                # A completed write cannot be represented as a
+                                # valid domain call without its persisted
+                                # approval decision. The resume path always
+                                # supplies that reference; keep an incomplete
+                                # request here for standalone callers.
+                                continue
+                            call = replace(
+                                call,
+                                status=ToolCallStatus.APPROVED,
+                                decision_user_id=approval_reference.decision_user_id,
+                                decision_arguments_digest=call.arguments_digest,
+                                decided_at=approval_reference.decided_at or finished_at,
+                                decision_basis=approval_reference.decision_basis,
+                                authorization_revision=approval_reference.authorization_revision,
+                            )
+                        call = call.start(finished_at).succeed(finished_at)
+                calls.append(call)
+        results = [
+            result
+            for message in active
+            if message.tool_result is not None
+            and message.tool_call_id != exclude_tool_call_id
+            for result in (message.tool_result,)
+        ]
+        return calls, results
+
 
     @staticmethod
     def _active_user_request(messages: list[ChatMessage]) -> str:
@@ -1963,6 +2164,13 @@ class ResearchAgentRunner:
             and call.tool_call_id in successful_result_ids
             for call in calls
         ):
+            return None
+
+        # A later permission block means the turn is incomplete even when an
+        # earlier write succeeded. Let the normal failure path preserve the
+        # blocking reason instead of claiming that the saved write completed
+        # the whole request.
+        if _permission_denial_code(results) is not None:
             return None
 
         chinese = any(
@@ -2029,15 +2237,23 @@ class ResearchAgentRunner:
         chinese: bool = False,
     ) -> str:
         calls_by_id = {call.tool_call_id: call for call in calls}
+        read_tool_names = {
+            "read_source", "inspect_table", "inspect_document_sources", "search_sources",
+        }
         collection_paper_totals: set[int] = set()
         screened_documents: set[str] = set()
         requested_documents = {
             str(call.arguments["document_id"])
-            for call in calls if call.arguments.get("document_id")
+            for call in calls
+            if call.name in read_tool_names and call.arguments.get("document_id")
         }
         read_documents: set[str] = set()
         exact_sources: set[str] = set()
         failed_documents: set[str] = set()
+        read_argument_errors: set[str] = set()
+        action_argument_errors: set[str] = set()
+        failed_writes: set[str] = set()
+        permission_denials: set[str] = set()
         successful_reads: dict[str, list[Mapping[str, Any]]] = {}
         for result in results:
             call = calls_by_id.get(result.tool_call_id)
@@ -2045,7 +2261,22 @@ class ResearchAgentRunner:
             if result.status is ToolResultStatus.FAILED:
                 document_id = str(result.data.get("document_id") or
                                   (call.arguments.get("document_id") if call else "") or "").strip()
-                if document_id and result.error_code not in {"resource_budget", "invalid_tool_batch", "capability_unavailable_for_turn"}:
+                error_code = str(result.error_code or "")
+                label = f"{name or 'unknown'}:{document_id or 'arguments'}"
+                if error_code == "invalid_tool_arguments":
+                    if name in read_tool_names:
+                        read_argument_errors.add(label)
+                    else:
+                        action_argument_errors.add(label)
+                elif error_code.startswith("permission_") or error_code in {
+                    "tool_permission_denied", "user_rejected",
+                }:
+                    permission_denials.add(label)
+                elif call is not None and call.risk is ToolRisk.WRITE:
+                    failed_writes.add(label)
+                elif name in read_tool_names and error_code not in {
+                    "resource_budget", "invalid_tool_batch", "capability_unavailable_for_turn",
+                } and document_id:
                     failed_documents.add(document_id)
                 continue
             if result.status is not ToolResultStatus.SUCCEEDED:
@@ -2078,6 +2309,10 @@ class ResearchAgentRunner:
                 f"已浏览论文信息 ({len(screened_documents)}): {display(screened_documents)}\n"
                 f"已完整读取的原文片段 ({len(exact_sources)}): {display(exact_sources)}\n"
                 f"原文读取曾失败的论文 ({len(failed_documents)}): {display(failed_documents)}\n"
+                f"原文读取参数错误 ({len(read_argument_errors)}): {display(read_argument_errors)}\n"
+                f"研究操作参数错误 ({len(action_argument_errors)}): {display(action_argument_errors)}\n"
+                f"写入操作失败 ({len(failed_writes)}): {display(failed_writes)}\n"
+                f"权限拒绝 ({len(permission_denials)}): {display(permission_denials)}\n"
                 f"尚未完成原文读取的论文 ({len(unread_documents)}): {display(unread_documents)}"
             )
         return (
@@ -2088,6 +2323,14 @@ class ResearchAgentRunner:
             f"{display(exact_sources)}\n"
             f"Papers with failed exact reads ({len(failed_documents)}): "
             f"{display(failed_documents)}\n"
+            f"Source read argument errors ({len(read_argument_errors)}): "
+            f"{display(read_argument_errors)}\n"
+            f"Research action argument errors ({len(action_argument_errors)}): "
+            f"{display(action_argument_errors)}\n"
+            f"Failed write operations ({len(failed_writes)}): "
+            f"{display(failed_writes)}\n"
+            f"Permission denials ({len(permission_denials)}): "
+            f"{display(permission_denials)}\n"
             f"Known papers without an exact read ({len(unread_documents)}): "
             f"{display(unread_documents)}"
         )
@@ -2157,6 +2400,26 @@ class ResearchAgentRunner:
                 if result.status is ToolResultStatus.FAILED
                 else call.succeed(_now_iso())
             )
+        except PaperExperimentDraftValidationError as exc:
+            logger.warning(
+                "Research capability rejected draft tool=%s validation_path=%s",
+                call.name,
+                exc.validation_path or "unknown",
+            )
+            data = {
+                "validation_path": exc.validation_path,
+                "repair_hint": (
+                    "Keep the full source-supported draft. Each comparison must "
+                    "reference measurements for one outcome only; split different "
+                    "outcomes into separate comparisons and resubmit the complete draft."
+                ),
+            }
+            call, result = ResearchAgentRunner._failure(
+                call,
+                exc.error_code,
+                _safe_capability_error_message(exc),
+                data=data,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Research capability failed tool=%s exception_type=%s",
@@ -2204,10 +2467,13 @@ class ResearchAgentRunner:
         call: ChatToolCall,
         code: str,
         message: str,
+        *,
+        data: Mapping[str, Any] | None = None,
     ) -> tuple[ChatToolCall, ChatToolResult]:
         return call.fail(code, _now_iso()), ChatToolResult(
             tool_call_id=call.tool_call_id,
             status=ToolResultStatus.FAILED,
+            data=dict(data or {}),
             error_code=code,
             error_message=message,
         )

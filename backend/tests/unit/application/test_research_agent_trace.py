@@ -204,3 +204,39 @@ def test_execution_plan_keeps_scientific_and_technical_end_states_distinct() -> 
     assert technical.status.value == "technical_failure"
     assert scientific.version == 2
     assert technical.blocking_reason == "provider_timeout"
+
+
+def test_execution_plan_keeps_permission_denial_and_stall_distinct() -> None:
+    def messages(status: str) -> tuple[ChatMessage, ...]:
+        request = ChatMessage.user(
+            message_id="user-1", session_id="chat-1", content="Research this.",
+            created_at="2026-10-09T00:00:00Z",
+        )
+        call = ChatToolRequest(
+            tool_call_id="plan-1", name="update_execution_plan",
+            arguments={
+                "steps": [{"step_id": "check", "action": "Check support", "status": "blocked"}],
+                "status": status, "explanation": "The available support is insufficient.",
+            }, position=0,
+        )
+        return (request, ChatMessage.assistant_tool_calls(
+            message_id="assistant-1", session_id="chat-1", content="", tool_calls=(call,),
+            created_at="2026-10-09T00:00:01Z",
+        ), ChatMessage.from_tool_result(
+            message_id="tool-1", session_id="chat-1", created_at="2026-10-09T00:00:02Z",
+            result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=call.arguments),
+        ))
+
+    denied = ResearchExecutionPlan.from_messages(
+        messages=messages("in_progress"), run_status=AgentRunStatus.FAILED,
+        error_code="permission_write_denied",
+    )
+    stalled = ResearchExecutionPlan.from_messages(
+        messages=messages("in_progress"), run_status=AgentRunStatus.COMPLETED,
+        completion_reason=AgentCompletionReason.NO_PROGRESS,
+    )
+
+    assert denied.status.value == "permission_denied"
+    assert denied.blocking_reason == "permission_write_denied"
+    assert stalled.status.value == "stalled"
+    assert stalled.blocking_reason is None

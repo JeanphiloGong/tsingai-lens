@@ -19,6 +19,9 @@ from application.chat.capabilities.paper_experiment_authoring import (
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
+from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentDraftValidationError,
+)
 from domain.chat import ChatMessage, ChatToolRequest, ChatToolResult
 
 pytestmark = pytest.mark.anyio
@@ -299,6 +302,47 @@ async def test_agent_request_parameters_survive_authoring_prepare() -> None:
         {"name": "strain_rate", "value": 0.001, "unit": "1/s"},
         {"name": "n", "value": 5},
     ]
+
+
+async def test_prepare_reports_comparison_outcome_validation_as_repairable_error() -> None:
+    draft = deepcopy(_draft())
+    experiment = draft["experiments"][0]
+    experiment["measurements"].append({
+        "measurement_key": "m2",
+        "variant_key": "control",
+        "outcome": "hardness",
+        "value": 10,
+        "result_text": None,
+        "unit": "HV",
+        "source_labels": ["S001"],
+    })
+    experiment["comparisons"] = [{
+        "comparison_key": "mixed-outcomes",
+        "baseline_variant_key": "control",
+        "target_variant_key": "control",
+        "outcome": "outcome",
+        "baseline_measurement_keys": ["m1"],
+        "target_measurement_keys": ["m2"],
+        "source_labels": ["S001"],
+        "binding_source_labels": ["S001"],
+    }]
+    service = PaperExperimentAuthoringService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=_SourceRepository(),
+        experiment_analysis_writer=object(),
+    )
+
+    with pytest.raises(PaperExperimentDraftValidationError) as error:
+        await service.prepare(
+            collection_id="collection-1",
+            user_id="user-1",
+            document_id="paper-1",
+            raw_draft=draft,
+        )
+
+    assert error.value.error_code == "draft_validation_failed"
+    assert error.value.validation_path == "experiments[0]"
+    assert "comparison outcome does not match" in str(error.value)
 
 
 class _CollectionService:

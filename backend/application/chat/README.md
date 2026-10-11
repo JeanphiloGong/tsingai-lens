@@ -174,7 +174,9 @@ there is no parallel static list of known capabilities. Removed names are
 ignored. Discovery grants no execution permission. Loaded tools remain
 available after navigation; the model can discover additional tools, revisit a
 completed browse, or answer without a prescribed reader/draft order. The
-`source_inspection_required` flag records the model's assessment, not a gate.
+`source_inspection_required` flag records the model's assessment, not a
+backend gate. It tells the model that the requested judgment needs original
+Source inspection; it does not insert a fixed search -> outline -> read route.
 The next user request starts with a fresh catalog.
 
 Discovery may record model-interpreted `deferred_tool_names` for deliverables
@@ -199,21 +201,19 @@ lineage remain subject to the canonical validator and the user's approval.
 
 Discovery also records whether the request needs a particular paper's claims
 or measurements inspected. That model-selected obligation survives later
-discovery calls within the request. After a survey, it requires Source
-navigation and complete reading, including for a claim attributed to a review;
-paper selection alone does not impose this obligation. This is an execution
-prerequisite, not a determination that the inspected passage supports the claim.
-Source-reading stages use that recorded request rather than comparison or
-reading keywords. Selecting papers for a later comparison therefore remains
-a navigation task. Existing-conclusion review reads the Finding and Evidence
-before the Source requirement can advance to paper inspection.
-The review obtains the prepared outline for linked papers, then reads the exact
-Sources already linked by that Finding before broad navigation. The outline
-reports section headings, pages and counts independently of search filters;
-initial navigation also supplies first Source references for those sections.
-Exact `heading_path` filters and offsets support progressive
-section reading. The current turn's complete Source reads are counted per section;
-reading one passage does not mark the whole paper or scientific check complete.
+discovery calls within the request and guides the next useful Source reads,
+including for a claim attributed to a review. Paper selection alone does not
+impose this obligation, and the flag does not determine that an inspected
+passage supports the claim. The model chooses whether an outline, exact Source,
+search, table, or another registered read is the useful next action. Selecting
+papers for a later comparison therefore remains a navigation task.
+Existing-conclusion review reads the Finding and Evidence before deciding which
+original Sources need checking. Only the PaperExperiment draft validator has a
+deterministic complete-Source prerequisite; an ordinary answer reports the
+available support and gaps without being forced through an authoring pipeline.
+Exact `heading_path` filters and offsets support progressive section reading.
+The current turn's complete Source reads are counted per section; reading one
+passage does not mark the whole paper or scientific check complete.
 The per-paper reading ledger also retains papers from earlier searches in the
 same request, even when later searches narrow their scope. A paper without an
 inspected outline remains visible with unknown prepared coverage; a failed

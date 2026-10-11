@@ -208,12 +208,13 @@ def select_tool_specs(
     )
 
     if permission_mode is ToolPermissionMode.READ_ONLY:
-        loaded_names.difference_update(
+        write_names = {
             name
             for name in loaded_names
             if (handler := capabilities.get(name)) is not None
             and handler.spec.risk is ToolRisk.WRITE
-        )
+        }
+        loaded_names.difference_update(write_names)
 
     allowed_names = loaded_names
 
@@ -226,116 +227,6 @@ def select_tool_specs(
             ),
         )
     return selected
-
-
-def _pending_source_search_candidates(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-) -> tuple[tuple[str, str, str], ...]:
-    # Each query in the latest navigation batch needs one exact read. Search
-    # matches remain alternatives, not a requirement to read every result.
-    for result in successful_results.get("search_sources", ()):
-        candidates: list[tuple[str, str, str]] = []
-        seen: set[tuple[str, str, str]] = set()
-        inspected = False
-        for item in result.get("matches") or ():
-            if not isinstance(item, Mapping):
-                continue
-            candidate = (
-                str(item.get("document_id") or "").strip(),
-                str(item.get("source_kind") or "").strip(),
-                str(item.get("source_ref") or "").strip(),
-            )
-            if all(candidate) and candidate not in seen:
-                seen.add(candidate)
-                candidates.append(candidate)
-                inspected = inspected or has_successful_exact_source_read(
-                    successful_results, (candidate,), source_digest=item.get("source_digest"),
-                )
-        if candidates and not inspected:
-            return tuple(candidates)
-    return ()
-
-
-def _pending_document_overviews(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
-) -> tuple[str, ...]:
-    if not successful_results.get("inspect_published_finding") or not any(
-        item.get("source_inspection_required") is True
-        for item in successful_results.get("discover_research_tools", ())
-    ):
-        return ()
-    inspected = {
-        str(item.get("document", {}).get("document_id") or "")
-        for item in successful_results.get("inspect_document_sources", ())
-        if "document_outline" in item
-    }
-    failed = {
-        str(call.arguments.get("document_id") or "") for call in calls
-        if call.name == "inspect_document_sources" and call.status is ToolCallStatus.FAILED
-    }
-    documents = []
-    for result in successful_results.get("inspect_published_finding", ()):
-        items = [*result.get("evidence", ()), *result.get("replacement_evidence", ())]
-        finding = result.get("finding")
-        if isinstance(finding, Mapping):
-            items.extend(finding.get("paper_contributions", ()))
-        documents.extend(str(item.get("document_id") or "") for item in items if isinstance(item, Mapping))
-    documents.extend(str(item.get("document_id") or "")
-                     for item in successful_results.get("read_source", ()))
-    documents.extend(str(document_id)
-                     for item in successful_results.get("search_sources", ())
-                     for document_id in item.get("document_ids", ()))
-    return tuple(dict.fromkeys(item for item in documents if item and item not in inspected | failed))
-
-
-def _pending_finding_sources(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
-) -> tuple[tuple[str, str, str], ...]:
-    if not any(item.get("source_inspection_required") is True
-               for item in successful_results.get("discover_research_tools", ())):
-        return ()
-    failed = {
-        tuple(str(call.arguments.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
-        for call in calls if call.name == "read_source" and call.status is ToolCallStatus.FAILED
-    }
-    pending = []
-    for result in successful_results.get("inspect_published_finding", ()):
-        for item in (*result.get("evidence", ()), *result.get("replacement_evidence", ())):
-            candidate = tuple(str(item.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
-            if (all(candidate) and candidate not in failed and candidate not in pending
-                    and not has_successful_exact_source_read(successful_results, (candidate,))):
-                pending.append(candidate)
-        finding = result.get("finding")
-        contribution_documents = {
-            str(item.get("document_id") or "").strip()
-            for item in (finding.get("paper_contributions", ()) if isinstance(finding, Mapping) else ())
-            if isinstance(item, Mapping) and item.get("document_id")
-        }
-        read_documents = {identity[0] for identity in complete_source_reads(successful_results)}
-        failed_documents = {
-            str(call.arguments.get("document_id") or "").strip()
-            for call in calls
-            if call.name in {"read_source", "inspect_table"}
-            and call.status is ToolCallStatus.FAILED
-            and call.arguments.get("document_id")
-        }
-        # Contributions without Evidence still need one bounded Source check;
-        # otherwise a challenged paper such as ELI could be silently skipped.
-        for overview in successful_results.get("inspect_document_sources", ()):
-            document = overview.get("document")
-            document_id = str(document.get("document_id") or "").strip() if isinstance(document, Mapping) else ""
-            if not document_id or document_id not in contribution_documents or document_id in read_documents | failed_documents:
-                continue
-            for source in overview.get("sources", ()):
-                if not isinstance(source, Mapping):
-                    continue
-                candidate = tuple(str(source.get(key) or "").strip() for key in ("document_id", "source_kind", "source_ref"))
-                if all(candidate) and candidate not in pending:
-                    pending.append(candidate)
-                    break
-    return tuple(pending)
 
 
 def _section_reading_progress(

@@ -289,6 +289,53 @@ def test_read_only_rejects_a_forged_write_call_before_execution():
     assert write.executed_arguments == []
 
 
+def test_read_only_filters_previously_loaded_writes_without_mutating_loaded_names():
+    read = _Capability("search_sources", ToolRisk.READ)
+    write = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    discover_call = ChatToolRequest(
+        tool_call_id="discover-1",
+        name="discover_research_tools",
+        arguments={"tool_names": [read.spec.name, write.spec.name]},
+        position=0,
+    )
+    messages = [
+        ChatMessage.user(
+            message_id="user-1",
+            session_id="chat-1",
+            content="Continue the source review in read-only mode.",
+            created_at="2026-10-11T00:00:00Z",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="assistant-1",
+            session_id="chat-1",
+            content="",
+            tool_calls=(discover_call,),
+            created_at="2026-10-11T00:00:01Z",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="tool-1",
+            session_id="chat-1",
+            created_at="2026-10-11T00:00:02Z",
+            result=ChatToolResult(
+                tool_call_id="discover-1",
+                status="succeeded",
+                data={
+                    "loaded_tool_names": [read.spec.name, write.spec.name],
+                },
+            ),
+        ),
+    ]
+
+    specs = select_tool_specs(
+        CapabilityRegistry((read, write)),
+        messages,
+        [],
+        permission_mode=ToolPermissionMode.READ_ONLY,
+    )
+
+    assert tuple(spec.name for spec in specs) == (read.spec.name, "discover_research_tools")
+
+
 def test_none_rejects_a_forged_read_call_before_execution():
     read = _Capability("search_sources", ToolRisk.READ)
     call = ChatToolCall.requested(

@@ -2685,6 +2685,52 @@ async def test_finding_draft_does_not_invent_scientific_strength_and_deduplicate
     assert requested[0][0].arguments["supporting_evidence_ids"] == ["evidence-1"]
 
 
+async def test_requested_calls_deduplicates_success_only_in_memory_write() -> None:
+    writer = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    request = ChatToolCall.requested(
+        tool_call_id="call-approved",
+        session_id="chat-1",
+        assistant_message_id="msg-write",
+        name="create_research_plan",
+        arguments={"question": "Record the corrected research plan."},
+        risk=ToolRisk.WRITE,
+    )
+    completed = request.require_approval().approve(
+        user_id="user-1",
+        arguments_digest=request.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z").succeed("2026-10-09T00:00:02Z")
+    result = ChatToolResult(
+        tool_call_id=completed.tool_call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        data={"saved": True},
+    )
+    runner = ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry((writer,)))
+    messages = [ChatMessage.user(
+        message_id="msg-user",
+        session_id="chat-1",
+        content="Save the corrected research plan.",
+        created_at="2026-10-09T00:00:00Z",
+    )]
+    progress = agent_runner_module._RunProgress(runner.limits)
+    progress.start_response()
+
+    requested = runner._requested_calls(
+        _context(),
+        messages,
+        ModelTurn(tool_calls=(ModelToolCall(
+            name="create_research_plan",
+            arguments=completed.arguments,
+        ),)),
+        allowed_names={"create_research_plan"},
+        progress=progress,
+        completed_calls=[completed],
+        completed_results=[result],
+    )
+
+    assert requested == ()
+
+
 async def test_capability_exception_is_sanitized_before_returning_to_model(caplog) -> None:
     capability = _Capability(
         "get_collection_context",
@@ -3197,6 +3243,38 @@ async def test_approval_resume_keeps_the_model_authored_plan() -> None:
     assert resumed.execution_plan["plan_id"] == before["plan_id"]
     assert resumed.execution_plan["plan_version"] > before["plan_version"]
     assert resumed.execution_plan["steps"][0]["status"] == "completed"
+
+
+async def test_approval_resume_drops_a_repeated_successful_write() -> None:
+    writer = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    arguments = {"question": "Record the corrected research plan."}
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_research_plan", arguments),)),
+        # Providers can repeat the exact write after the approval continuation
+        # has already returned its successful observation.
+        ModelTurn(tool_calls=(ModelToolCall("create_research_plan", arguments),)),
+        ModelTurn(content="The corrected research plan was saved."),
+        discover=("create_research_plan",),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((writer,)))
+
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the corrected plan.",
+    )
+    assert proposed.pending_approval is not None
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+
+    resumed = await runner.resume_claimed_call(
+        context=_context(), previous_messages=proposed.messages, claimed_call=approved,
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert writer.executed_arguments == [arguments]
+    assert all(result.error_code != "execution_plan_required" for result in resumed.tool_results)
 
 
 async def test_approval_resume_inherits_time_and_model_budget(

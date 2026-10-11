@@ -119,7 +119,7 @@
 	}
 </script>
 
-<section class="approval" aria-labelledby="approval-title">
+<section class="approval" aria-labelledby="approval-title" data-tool-name={call.name}>
 	<header>
 		<div>
 			<h3 id="approval-title"><FileCheck2 size={18} />{$t('researchAgent.approval.title')}</h3>

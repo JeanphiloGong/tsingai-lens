@@ -1306,6 +1306,8 @@ class ResearchAgentRunner:
                 turn,
                 allowed_names=set(tool_names),
                 progress=progress,
+                completed_calls=calls,
+                completed_results=results,
             )
             # A provider can repeat the exact write it just observed as
             # completed after an approval continuation.  The request ledger
@@ -2090,11 +2092,17 @@ class ResearchAgentRunner:
         *,
         allowed_names: set[str],
         progress: _RunProgress,
+        completed_calls: tuple[ChatToolCall, ...] | list[ChatToolCall] = (),
+        completed_results: tuple[ChatToolResult, ...] | list[ChatToolResult] = (),
     ) -> tuple[tuple[ChatToolCall, Any], ...]:
         assistant_message_id = progress.response_message_id
         requested = []
         seen_requests: set[tuple[str, str]] = set()
-        completed_write_requests = self._completed_write_request_keys(messages)
+        completed_write_requests = self._completed_write_request_keys(
+            messages,
+            calls=completed_calls,
+            results=completed_results,
+        )
         for model_call in turn.tool_calls:
             arguments = dict(model_call.arguments)
             if model_call.name == "curate_finding":
@@ -2149,14 +2157,20 @@ class ResearchAgentRunner:
         return tuple(requested)
 
     def _completed_write_request_keys(
-        self, messages: list[ChatMessage]
+        self,
+        messages: list[ChatMessage],
+        *,
+        calls: tuple[ChatToolCall, ...] | list[ChatToolCall] = (),
+        results: tuple[ChatToolResult, ...] | list[ChatToolResult] = (),
     ) -> set[tuple[str, str]]:
         """Return completed write identities for the active user request.
 
         The identity is the capability name plus its canonical argument JSON.
         Previous user requests are excluded so a later explicit save can still
-        create a new version. This is runtime idempotency, not language intent
-        classification.
+        create a new version. Approval continuations also pass their in-memory
+        call/result ledger because the durable trajectory can briefly contain a
+        tool result without the assistant request that produced it. This is
+        runtime idempotency, not language intent classification.
         """
         last_user_index = max(
             (
@@ -2191,6 +2205,24 @@ class ResearchAgentRunner:
                     request.name,
                     json.dumps(
                         request.arguments,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=True,
+                    ),
+                )
+            )
+        call_by_id = {call.tool_call_id: call for call in calls}
+        for result in results:
+            if result.status is not ToolResultStatus.SUCCEEDED:
+                continue
+            call = call_by_id.get(result.tool_call_id)
+            if call is None or call.risk is not ToolRisk.WRITE:
+                continue
+            completed.add(
+                (
+                    call.name,
+                    json.dumps(
+                        call.arguments,
                         sort_keys=True,
                         separators=(",", ":"),
                         ensure_ascii=True,

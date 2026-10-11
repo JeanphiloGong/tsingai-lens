@@ -717,11 +717,21 @@ def _update_call_row(row: ChatToolCallRow, call: ChatToolCall) -> None:
     row.started_at = _optional_datetime(call.started_at)
     row.finished_at = _optional_datetime(call.finished_at)
     row.error_code = call.error_code
-    row.decision_user_id = call.decision_user_id
-    row.decision_arguments_digest = call.decision_arguments_digest
-    row.decided_at = _optional_datetime(call.decided_at)
-    row.decision_basis = call.decision_basis
-    row.authorization_revision = call.authorization_revision
+    # A reconstructed historical call may only carry its lifecycle status.
+    # Never replace an existing approval decision with empty metadata while a
+    # continuation updates the same row.
+    has_decision = any((
+        call.decision_user_id,
+        call.decision_arguments_digest,
+        call.decided_at,
+        call.authorization_revision,
+    ))
+    if has_decision:
+        row.decision_user_id = call.decision_user_id
+        row.decision_arguments_digest = call.decision_arguments_digest
+        row.decided_at = _optional_datetime(call.decided_at)
+        row.decision_basis = call.decision_basis
+        row.authorization_revision = call.authorization_revision
 
 
 def _session_record(row: ChatSessionRow) -> ChatSession:
@@ -782,7 +792,7 @@ def _message_record(
             "content": row.content,
             "created_at": _iso(row.created_at),
             "tool_call_id": row.tool_call_id,
-            "tool_calls": [request.to_record() for request in requests],
+            "tool_calls": [request.to_record(include_audit=True) for request in requests],
             "tool_result": _result_record(result) if result is not None else None,
             "source_contexts": list(row.source_contexts),
         }

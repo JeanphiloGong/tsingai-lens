@@ -601,7 +601,7 @@ class ProposePaperExperimentDraftCapability:
         for label in sorted(labels):
             source = prepared.output.output.source_labels[label]
             identity = (arguments.document_id, source["source_kind"], source["source_ref"],
-                        prepared.source_digests[source["source_ref"]])
+                        prepared.source_digests[(source["source_kind"], source["source_ref"])])
             if identity not in completed:
                 missing.append({"source_label": label, "source_kind": source["source_kind"], "source_ref": source["source_ref"]})
         if missing:

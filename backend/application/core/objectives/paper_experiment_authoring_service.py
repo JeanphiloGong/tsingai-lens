@@ -31,7 +31,21 @@ class PreparedPaperExperimentDraft:
     output: ReconciledPaperExperimentOutput
     source_fingerprint: str
     draft_digest: str
-    source_digests: Mapping[str, str]
+    source_digests: Mapping[tuple[str, str], str]
+
+
+class PaperExperimentAuthoringError(ValueError):
+    """A recoverable PaperExperiment authoring prerequisite failed."""
+
+    error_code = "paper_experiment_authoring_failed"
+
+
+class PaperExperimentDraftEmptyError(PaperExperimentAuthoringError):
+    error_code = "paper_experiment_draft_empty"
+
+
+class PaperExperimentSourceChangedError(PaperExperimentAuthoringError):
+    error_code = "paper_experiment_source_changed"
 
 
 def _canonical_digest(value: Mapping[str, Any]) -> str:
@@ -45,9 +59,9 @@ def _canonical_digest(value: Mapping[str, Any]) -> str:
     return sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _source_digest_map(payloads: tuple[Mapping[str, Any], ...]) -> dict[str, str]:
+def _source_digest_map(payloads: tuple[Mapping[str, Any], ...]) -> dict[tuple[str, str], str]:
     return {
-        str(source["source_ref"]): sha256(
+        (str(source["source_kind"]), str(source["source_ref"])): sha256(
             str(source["_canonical_content"]).encode("utf-8")
         ).hexdigest()
         for source in payloads
@@ -170,7 +184,9 @@ class PaperExperimentAuthoringService:
                 validation_path=path,
             ) from exc
         if not reconciled.output.experiments:
-            raise ValueError("Agent draft contains no source-supported experiment")
+            raise PaperExperimentDraftEmptyError(
+                "Agent draft contains no source-supported experiment"
+            )
         digest = _canonical_digest(
             {
                 "collection_id": collection_id,
@@ -217,10 +233,14 @@ class PaperExperimentAuthoringService:
             or ""
         ).strip()
         if current_fingerprint != prepared.source_fingerprint:
-            raise ValueError("prepared paper experiment source fingerprint changed; review it again")
+            raise PaperExperimentSourceChangedError(
+                "prepared paper experiment source fingerprint changed; review it again"
+            )
         current_digests = _source_digest_map(_source_payloads(document))
         if current_digests != dict(prepared.source_digests):
-            raise ValueError("prepared paper experiment Source content changed; review it again")
+            raise PaperExperimentSourceChangedError(
+                "prepared paper experiment Source content changed; review it again"
+            )
         async with self.experiment_analysis_transaction_factory.begin() as transaction:
             return await self.experiment_analysis_writer.write_paper_experiment_revisions(
                 experiment_outputs=(prepared.output,),
@@ -229,4 +249,10 @@ class PaperExperimentAuthoringService:
             )
 
 
-__all__ = ["PaperExperimentAuthoringService", "PreparedPaperExperimentDraft"]
+__all__ = [
+    "PaperExperimentAuthoringError",
+    "PaperExperimentDraftEmptyError",
+    "PaperExperimentSourceChangedError",
+    "PaperExperimentAuthoringService",
+    "PreparedPaperExperimentDraft",
+]

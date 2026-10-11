@@ -33,6 +33,9 @@ from application.chat.inline_citations import format_inline_citations
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentDraftValidationError,
 )
+from application.core.objectives.paper_experiment_authoring_service import (
+    PaperExperimentAuthoringError,
+)
 from application.chat.model import (
     RESEARCH_AGENT_SYSTEM_PROMPT,
     RESEARCH_COMPACTION_SYSTEM_PROMPT,
@@ -247,21 +250,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _trajectory_event_count(messages: tuple[ChatMessage, ...]) -> int:
-    """Count durable capability request/result events once each."""
-    request_ids = {
-        request.tool_call_id
-        for message in messages
-        for request in message.tool_calls
-    }
-    result_ids = {
-        message.tool_result.tool_call_id
-        for message in messages
-        if message.tool_result is not None
-    }
-    return len(request_ids) + len(result_ids)
-
-
 class AgentRunStatus(StrEnum):
     COMPLETED = "completed"
     APPROVAL_REQUIRED = "approval_required"
@@ -290,7 +278,11 @@ class ResearchExecutionStatus(StrEnum):
 
 def _is_permission_failure(reason: str | None) -> bool:
     normalized = str(reason or "").strip().lower()
-    return normalized in {"tool_permission_denied", "user_rejected"} or normalized.startswith("permission_")
+    # A user rejection is a completed decision in the conversation. It must
+    # remain in the trajectory for audit and recovery, but it is not a runtime
+    # failure when the assistant can acknowledge it and continue. Explicit
+    # permission blocks are still terminal failures.
+    return normalized == "tool_permission_denied" or normalized.startswith("permission_")
 
 
 def _permission_denial_code(results: Iterable[ChatToolResult]) -> str | None:
@@ -366,13 +358,30 @@ class ResearchExecutionPlan:
                        and message.tool_result.status is ToolResultStatus.SUCCEEDED), None)
         if latest is None:
             return None
-        update = UpdateExecutionPlanToolRequest.model_validate(latest.data)
-        model_status = ResearchExecutionStatus(update.status)
+        plan_version = sum(
+            1 for message in active
+            if message.tool_result is not None
+            and message.tool_result.tool_call_id in plan_call_ids
+            and message.tool_result.status is ToolResultStatus.SUCCEEDED
+        )
+        try:
+            update = UpdateExecutionPlanToolRequest.model_validate(latest.data)
+            model_status = ResearchExecutionStatus(update.status)
+        except (ValidationError, TypeError, ValueError):
+            return cls(
+                plan_id=sha256(f"{active[0].session_id}\x00{active[0].message_id}".encode()).hexdigest()[:20],
+                version=plan_version,
+                request=active[0].content[:4_000],
+                status=ResearchExecutionStatus.TECHNICAL_FAILURE,
+                steps=(),
+                model_status=ResearchExecutionStatus.TECHNICAL_FAILURE,
+                explanation="The saved execution plan could not be restored.",
+                blocking_reason="invalid_execution_plan",
+            )
         plan = cls(
             plan_id=sha256(f"{active[0].session_id}\x00{active[0].message_id}".encode()).hexdigest()[:20],
-            # Every durable request/result, including a pending request and a
-            # failed result, advances the recoverable event sequence.
-            version=max(1, _trajectory_event_count(active)),
+            # Reads and approvals do not replace the model-authored plan.
+            version=plan_version,
             request=active[0].content[:4_000],
             status=model_status,
             steps=tuple(step.model_dump() for step in update.steps),
@@ -487,6 +496,7 @@ class _RunProgress:
     model_call_session_id: str | None = None
     execution_plan: ResearchExecutionPlan | None = None
     plan_update_available: bool = True
+    active_user_message_id: str | None = None
 
     def refresh_execution_plan(
         self,
@@ -733,6 +743,7 @@ class _RunProgress:
                 "context_checkpoint": {
                     "working_summary": self.working_summary,
                     "compacted_message_ids": sorted(self.compacted_message_ids),
+                    "user_message_id": self.active_user_message_id,
                 },
             })
 
@@ -814,8 +825,14 @@ class ResearchAgentRunner:
                 source_contexts=source_contexts,
             ),
         ]
-        if context_checkpoint and set(context_checkpoint.get("compacted_message_ids", ())).issubset(
-            message.message_id for message in previous_messages
+        active_user_message_id = messages[-1].message_id
+        progress.active_user_message_id = active_user_message_id
+        if (
+            context_checkpoint
+            and context_checkpoint.get("user_message_id") == active_user_message_id
+            and set(context_checkpoint.get("compacted_message_ids", ())).issubset(
+                message.message_id for message in previous_messages
+            )
         ):
             progress.restore_persisted_progress({"context_checkpoint": context_checkpoint})
         calls: list[ChatToolCall] = []
@@ -866,11 +883,15 @@ class ResearchAgentRunner:
             progress.requested_tool_calls += 1
         capability_policy.validate_claimed_call(context, claimed_call)
         messages = list(previous_messages)
+        progress.active_user_message_id = next(
+            (message.message_id for message in reversed(messages)
+             if message.role is ChatMessageRole.USER),
+            None,
+        )
         progress.refresh_execution_plan(messages)
         calls, results = self._reconstruct_active_trajectory(
             messages,
             exclude_tool_call_id=claimed_call.tool_call_id,
-            approval_reference=claimed_call,
         )
         calls.append(claimed_call)
         handler = self.capabilities.get(claimed_call.name)
@@ -949,6 +970,11 @@ class ResearchAgentRunner:
         )
         progress.restore_persisted_progress(continuation_progress)
         messages = list(previous_messages)
+        progress.active_user_message_id = next(
+            (message.message_id for message in reversed(messages)
+             if message.role is ChatMessageRole.USER),
+            None,
+        )
         requested_count, executed_count = self._active_turn_action_counts(previous_messages)
         progress.requested_tool_calls = max(progress.requested_tool_calls, requested_count)
         progress.executed_tool_calls = max(progress.executed_tool_calls, executed_count)
@@ -1281,6 +1307,39 @@ class ResearchAgentRunner:
                 allowed_names=set(tool_names),
                 progress=progress,
             )
+            # A provider can repeat the exact write it just observed as
+            # completed after an approval continuation.  The request ledger
+            # filters that duplicate using the completed call's arguments. If
+            # there is no new action left, close the turn from the saved result
+            # instead of asking for a second approval.
+            if turn.tool_calls and not requested:
+                if turn.content:
+                    await self._checkpoint(checkpoint, messages, calls, results)
+                    progress.trace(
+                        context,
+                        phase="terminal",
+                        termination_reason=AgentCompletionReason.MODEL_ANSWER.value,
+                        final_answer=True,
+                        run_status=AgentRunStatus.COMPLETED,
+                        completion_reason=AgentCompletionReason.MODEL_ANSWER,
+                    )
+                    return self._result(
+                        AgentRunStatus.COMPLETED,
+                        messages,
+                        calls,
+                        results,
+                        completion_reason=AgentCompletionReason.MODEL_ANSWER,
+                    )
+                return await self._finalize_with_current_evidence(
+                    AgentCompletionReason.MODEL_ANSWER,
+                    progress,
+                    context,
+                    messages,
+                    calls,
+                    results,
+                    checkpoint=checkpoint,
+                    text_delta_callback=text_delta_callback,
+                )
             progress.requested_tool_calls += len(requested)
             progress.trace(context, phase="model", capability_names=tool_names)
             batch_start = len(calls)
@@ -1336,6 +1395,20 @@ class ResearchAgentRunner:
                     requested,
                     messages,
                     permission_mode=permission_mode,
+                )
+
+            # Validate the requested capability first so specific contract
+            # failures (for example an explicitly deferred Finding or an
+            # uninspected research-plan parent) remain actionable. The plan
+            # gate applies only when the capability call itself is valid.
+            if (
+                error is None
+                and progress.execution_plan is None
+                and self._requires_execution_plan(calls[:batch_start], requested)
+            ):
+                error = (
+                    "execution_plan_required",
+                    "Submit an execution plan before saving the result of this multi-step research request.",
                 )
 
             if error:
@@ -2021,6 +2094,7 @@ class ResearchAgentRunner:
         assistant_message_id = progress.response_message_id
         requested = []
         seen_requests: set[tuple[str, str]] = set()
+        completed_write_requests = self._completed_write_request_keys(messages)
         for model_call in turn.tool_calls:
             arguments = dict(model_call.arguments)
             if model_call.name == "curate_finding":
@@ -2041,6 +2115,12 @@ class ResearchAgentRunner:
             )
             if request_key in seen_requests:
                 continue
+            if (model_call.name, request_key[1]) in completed_write_requests:
+                logger.info(
+                    "Research Agent skipped duplicate completed write tool=%s",
+                    model_call.name,
+                )
+                continue
             if len(requested) >= _MAX_TOOL_CALLS_PER_RESPONSE:
                 logger.warning(
                     "Research Agent tool batch truncated requested=%d retained=%d limit=%d",
@@ -2056,16 +2136,68 @@ class ResearchAgentRunner:
                 risk=registered.spec.risk if registered else ToolRisk.UNKNOWN,
             )
             requested.append((call, registered if model_call.name in allowed_names else None))
-        messages.append(
-            ChatMessage.assistant_tool_calls(
-                message_id=assistant_message_id,
-                session_id=context.session_id,
-                content=turn.content,
-                tool_calls=tuple(call.to_request() for call, _ in requested),
-                created_at=progress.response_created_at,
+        if requested or turn.content:
+            messages.append(
+                ChatMessage.assistant_tool_calls(
+                    message_id=assistant_message_id,
+                    session_id=context.session_id,
+                    content=turn.content,
+                    tool_calls=tuple(call.to_request() for call, _ in requested),
+                    created_at=progress.response_created_at,
+                )
             )
-        )
         return tuple(requested)
+
+    def _completed_write_request_keys(
+        self, messages: list[ChatMessage]
+    ) -> set[tuple[str, str]]:
+        """Return completed write identities for the active user request.
+
+        The identity is the capability name plus its canonical argument JSON.
+        Previous user requests are excluded so a later explicit save can still
+        create a new version. This is runtime idempotency, not language intent
+        classification.
+        """
+        last_user_index = max(
+            (
+                index
+                for index, message in enumerate(messages)
+                if message.role is ChatMessageRole.USER
+            ),
+            default=-1,
+        )
+        active = messages[last_user_index:]
+        requests = {
+            request.tool_call_id: request
+            for message in active
+            if message.role is ChatMessageRole.ASSISTANT
+            for request in message.tool_calls
+        }
+        completed: set[tuple[str, str]] = set()
+        for message in active:
+            result = message.tool_result
+            request = requests.get(message.tool_call_id)
+            if (
+                result is None
+                or result.status is not ToolResultStatus.SUCCEEDED
+                or request is None
+            ):
+                continue
+            handler = self.capabilities.get(request.name)
+            if handler is None or handler.spec.risk is not ToolRisk.WRITE:
+                continue
+            completed.add(
+                (
+                    request.name,
+                    json.dumps(
+                        request.arguments,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=True,
+                    ),
+                )
+            )
+        return completed
 
     @staticmethod
     def _complete_curation_shape(
@@ -2165,22 +2297,45 @@ class ResearchAgentRunner:
         }
         return len(requested_ids), len(requested_ids & completed_ids)
 
+    def _requires_execution_plan(
+        self,
+        calls: list[ChatToolCall],
+        requested: tuple[tuple[ChatToolCall, Any], ...],
+    ) -> bool:
+        """Require a model plan before a multi-stage write reaches approval.
+
+        A direct save is one atomic user action and remains eligible for the
+        normal exact approval flow. Once the same request has already taken a
+        research action, a later write is a multi-stage deliverable: the model
+        must make that remaining work observable before it can be approved.
+        Control capabilities themselves are excluded through the registry so
+        discovery and plan updates do not count as scientific actions.
+        """
+        if len(requested) != 1 or requested[0][0].risk is not ToolRisk.WRITE:
+            return False
+        control_names = {
+            self.capabilities.discovery.spec.name,
+            self.capabilities.execution_plan.spec.name,
+        }
+        prior_actions = [
+            call for call in calls
+            if call.name not in control_names
+            and call.risk in {ToolRisk.READ, ToolRisk.DRAFT, ToolRisk.WRITE}
+        ]
+        return bool(prior_actions)
+
     def _reconstruct_active_trajectory(
         self,
         messages: tuple[ChatMessage, ...] | list[ChatMessage],
         *,
         exclude_tool_call_id: str | None = None,
-        approval_reference: ChatToolCall | None = None,
     ) -> tuple[list[ChatToolCall], list[ChatToolResult]]:
         """Restore the current request's calls and results before approval resume.
 
-        The persisted chat messages carry tool requests and results, while the
-        approved call carries the authoritative write decision metadata. Rebuild
-        every completed call from the messages. Historical write requests do not
-        serialize approval fields in the assistant message, so use the current
-        approved call as the session-scoped approval reference while restoring
-        their completed state. This keeps the result ledger and execution trace
-        aligned without making a second approval or execution request.
+        The persisted chat messages carry tool requests and results. Approval
+        metadata is copied into each request while loading the durable call, so
+        every historical write keeps its own decision identity during a later
+        approval continuation.
         """
         last_user_index = max(
             (
@@ -2223,21 +2378,24 @@ class ResearchAgentRunner:
                         call = call.fail(result.error_code or "capability_failed", finished_at)
                     else:
                         if risk is ToolRisk.WRITE:
-                            if approval_reference is None:
-                                # A completed write cannot be represented as a
-                                # valid domain call without its persisted
-                                # approval decision. The resume path always
-                                # supplies that reference; keep an incomplete
-                                # request here for standalone callers.
+                            if not all((
+                                request.decision_user_id,
+                                request.decision_arguments_digest,
+                                request.decided_at,
+                            )):
+                                # A legacy or malformed trajectory cannot be
+                                # safely reconstructed as an executed write.
+                                # Keep the durable result row intact and leave
+                                # this call out of the in-memory write ledger.
                                 continue
                             call = replace(
                                 call,
                                 status=ToolCallStatus.APPROVED,
-                                decision_user_id=approval_reference.decision_user_id,
-                                decision_arguments_digest=call.arguments_digest,
-                                decided_at=approval_reference.decided_at or finished_at,
-                                decision_basis=approval_reference.decision_basis,
-                                authorization_revision=approval_reference.authorization_revision,
+                                decision_user_id=request.decision_user_id,
+                                decision_arguments_digest=request.decision_arguments_digest,
+                                decided_at=request.decided_at,
+                                decision_basis=request.decision_basis,
+                                authorization_revision=request.authorization_revision,
                             )
                         call = call.start(finished_at).succeed(finished_at)
                 calls.append(call)
@@ -2550,6 +2708,18 @@ class ResearchAgentRunner:
                 exc.error_code,
                 _safe_capability_error_message(exc),
                 data=data,
+            )
+        except PaperExperimentAuthoringError as exc:
+            logger.warning(
+                "Research PaperExperiment authoring prerequisite failed tool=%s error_code=%s",
+                call.name,
+                exc.error_code,
+            )
+            call, result = ResearchAgentRunner._failure(
+                call,
+                exc.error_code,
+                _safe_capability_error_message(exc),
+                data={"recoverable": True},
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(

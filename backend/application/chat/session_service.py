@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from math import isfinite
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -973,7 +974,11 @@ class ChatSessionService:
         elapsed_ms = 0
         if continuation_progress is not None:
             value = continuation_progress.get("elapsed_ms")
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and isfinite(float(value))
+            ):
                 elapsed_ms = max(0, int(value))
         started_at = loop.time() - elapsed_ms / 1000.0
         now = prior_snapshot.started_at if prior_snapshot is not None and continuation_progress is not None else _now_iso()
@@ -1082,9 +1087,6 @@ class ChatSessionService:
                     continuation_progress=continuation_progress,
                 )
             else:
-                prior_context = prior_snapshot.progress.get("context_checkpoint") if prior_snapshot else None
-                if isinstance(prior_context, Mapping):
-                    arguments["context_checkpoint"] = prior_context
                 result = await self.runner.run_turn(
                     **arguments,
                     user_message=message,

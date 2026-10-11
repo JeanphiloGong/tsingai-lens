@@ -424,6 +424,14 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
                     arguments=plan_arguments,
                 ),)
             ),
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="update_execution_plan",
+                arguments={
+                    "steps": [{"step_id": "save", "action": "Save the reviewed plan", "status": "in_progress"}],
+                    "status": "in_progress",
+                    "explanation": "The reviewed plan is ready for approval.",
+                },
+            ),)),
             ModelTurn(
                 content="The research plan draft is ready for approval.",
                 tool_calls=(ModelToolCall(
@@ -596,6 +604,14 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
             ModelTurn(tool_calls=(ModelToolCall(name="inspect_research_plans", arguments={
                 "objective_id": arguments["objective_id"], "plan_id": "exp-agent-1",
             }),)),
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="update_execution_plan",
+                arguments={
+                    "steps": [{"step_id": "save", "action": "Save the revised plan", "status": "in_progress"}],
+                    "status": "in_progress",
+                    "explanation": "The revision is ready for approval.",
+                },
+            ),)),
             ModelTurn(
                 content="The revision is ready for approval.",
                 tool_calls=(ModelToolCall(

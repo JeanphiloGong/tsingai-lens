@@ -24,6 +24,14 @@ class ChatToolRequest:
     name: str
     arguments: Mapping[str, Any]
     position: int
+    # Approval metadata is carried through the in-memory trajectory so an
+    # approval continuation can rebuild calls without borrowing another call's
+    # decision. It is intentionally omitted from the public message record.
+    decision_user_id: str | None = None
+    decision_arguments_digest: str | None = None
+    decided_at: str | None = None
+    decision_basis: str = "explicit"
+    authorization_revision: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_call_id", _required_text(self.tool_call_id, "tool_call_id"))
@@ -39,11 +47,25 @@ class ChatToolRequest:
             name=str(payload.get("name") or ""),
             arguments=payload.get("arguments") or {},
             position=payload["position"],
+            decision_user_id=payload.get("decision_user_id"),
+            decision_arguments_digest=payload.get("decision_arguments_digest"),
+            decided_at=payload.get("decided_at"),
+            decision_basis=payload.get("decision_basis", "explicit"),
+            authorization_revision=payload.get("authorization_revision"),
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {"tool_call_id": self.tool_call_id, "name": self.name,
-                "arguments": deepcopy(dict(self.arguments)), "position": self.position}
+    def to_record(self, *, include_audit: bool = False) -> dict[str, Any]:
+        record = {"tool_call_id": self.tool_call_id, "name": self.name,
+                  "arguments": deepcopy(dict(self.arguments)), "position": self.position}
+        if include_audit:
+            record.update({
+                "decision_user_id": self.decision_user_id,
+                "decision_arguments_digest": self.decision_arguments_digest,
+                "decided_at": self.decided_at,
+                "decision_basis": self.decision_basis,
+                "authorization_revision": self.authorization_revision,
+            })
+        return record
 
 
 @dataclass(frozen=True)

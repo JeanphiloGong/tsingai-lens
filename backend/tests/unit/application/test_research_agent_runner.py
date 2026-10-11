@@ -286,7 +286,7 @@ def test_reconstruct_active_trajectory_retains_completed_write_observations() ->
             message_id="msg-write",
             session_id="chat-1",
             content="",
-            tool_calls=(writer.to_request(),),
+            tool_calls=(completed.to_request(),),
             created_at="2026-09-29T00:00:30+00:00",
         ),
         ChatMessage.from_tool_result(
@@ -300,7 +300,7 @@ def test_reconstruct_active_trajectory_retains_completed_write_observations() ->
     calls, results = ResearchAgentRunner(
         model=_Model(ModelTurn(content="done")),
         capabilities=CapabilityRegistry((writer_capability,)),
-    )._reconstruct_active_trajectory(messages, approval_reference=completed)
+    )._reconstruct_active_trajectory(messages)
 
     assert len(calls) == 1
     assert calls[0].tool_call_id == completed.tool_call_id
@@ -309,6 +309,64 @@ def test_reconstruct_active_trajectory_retains_completed_write_observations() ->
     assert calls[0].status is ToolCallStatus.SUCCEEDED
     assert calls[0].decision_user_id == completed.decision_user_id
     assert results == [result]
+
+
+def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> None:
+    first_request = ChatToolCall.requested(
+        tool_call_id="call-first",
+        session_id="chat-1",
+        assistant_message_id="msg-writes",
+        name="create_research_plan",
+        arguments={"question": "first"},
+        risk=ToolRisk.WRITE,
+        position=0,
+    )
+    first = first_request.require_approval().approve(
+        user_id="reviewer-a",
+        arguments_digest=first_request.arguments_digest,
+        decided_at="2026-09-29T00:00:45+00:00",
+    ).start("2026-09-29T00:01:00+00:00").succeed("2026-09-29T00:01:01+00:00")
+    second_request = ChatToolCall.requested(
+        tool_call_id="call-second",
+        session_id="chat-1",
+        assistant_message_id="msg-writes",
+        name="create_research_plan",
+        arguments={"question": "second"},
+        risk=ToolRisk.WRITE,
+        position=1,
+    )
+    second = second_request.require_approval().approve(
+        user_id="reviewer-b",
+        arguments_digest=second_request.arguments_digest,
+        decided_at="2026-09-29T00:02:45+00:00",
+    ).start("2026-09-29T00:03:00+00:00").succeed("2026-09-29T00:03:01+00:00")
+    messages = (
+        ChatMessage.user(message_id="msg-user", session_id="chat-1", content="Save both.", created_at="2026-09-29T00:00:00+00:00"),
+        ChatMessage.assistant_tool_calls(
+            message_id="msg-writes", session_id="chat-1", content="",
+            tool_calls=(first.to_request(), second.to_request()), created_at="2026-09-29T00:00:30+00:00",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="msg-first-result", session_id="chat-1",
+            result=ChatToolResult(tool_call_id=first.tool_call_id, status="succeeded", data={"saved": True}),
+            created_at="2026-09-29T00:01:01+00:00",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="msg-second-result", session_id="chat-1",
+            result=ChatToolResult(tool_call_id=second.tool_call_id, status="succeeded", data={"saved": True}),
+            created_at="2026-09-29T00:03:01+00:00",
+        ),
+    )
+    capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    calls, _ = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="done")),
+        capabilities=CapabilityRegistry((capability,)),
+    )._reconstruct_active_trajectory(messages)
+
+    assert [(call.tool_call_id, call.decision_user_id, call.decided_at) for call in calls] == [
+        (first.tool_call_id, "reviewer-a", first.decided_at),
+        (second.tool_call_id, "reviewer-b", second.decided_at),
+    ]
 
 
 async def test_greeting_completes_without_calling_a_tool() -> None:
@@ -2400,6 +2458,18 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                     arguments={"question": "Test the supported preheating effect."},
                 ),)
             ),
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="update_execution_plan",
+                arguments={
+                    "steps": [{
+                        "step_id": "save",
+                        "action": "Save the reviewed research plan",
+                        "status": "in_progress",
+                    }],
+                    "status": "in_progress",
+                    "explanation": "The reviewed plan is ready for the researcher's approval.",
+                },
+            ),)),
             ModelTurn(
                 content="The plan draft is ready for your approval.",
                 tool_calls=(ModelToolCall(
@@ -2412,6 +2482,7 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                 "inspect_published_finding",
                 "propose_research_plan",
                 "create_research_plan",
+                "update_execution_plan",
             ),
         ),
         capabilities=CapabilityRegistry((reader, drafter, writer)),
@@ -2425,6 +2496,7 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
 
     assert proposed.status is AgentRunStatus.APPROVAL_REQUIRED
     assert [call.status for call in proposed.tool_calls] == [
+        ToolCallStatus.SUCCEEDED,
         ToolCallStatus.SUCCEEDED,
         ToolCallStatus.SUCCEEDED,
         ToolCallStatus.SUCCEEDED,
@@ -2917,7 +2989,7 @@ async def test_plan_revision_does_not_reset_stalled_source_reads() -> None:
 
 
 @pytest.mark.parametrize("write_status", [ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED, ToolResultStatus.FAILED])
-async def test_plan_version_advances_after_approved_write_without_model_plan_update(write_status) -> None:
+async def test_plan_version_stays_on_model_updates_after_approved_write(write_status) -> None:
     writer = _Capability("create_objective_candidate", ToolRisk.WRITE, result_status=write_status)
     capabilities = CapabilityRegistry((writer,))
     proposed = await ResearchAgentRunner(
@@ -2950,7 +3022,7 @@ async def test_plan_version_advances_after_approved_write_without_model_plan_upd
     after = resumed.execution_plan
     assert after is not None
     assert after["plan_id"] == before["plan_id"]
-    assert after["plan_version"] > before["plan_version"]
+    assert after["plan_version"] == before["plan_version"]
     assert after["steps"] == before["steps"]
     resumed_write_result = next(
         item for item in resumed.tool_results
@@ -3032,7 +3104,7 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
     assert result.status is AgentRunStatus.COMPLETED
     assert result.execution_plan is not None
     assert result.execution_plan["status"] == "completed"
-    assert result.execution_plan["plan_version"] == agent_runner_module._trajectory_event_count(result.messages)
+    assert result.execution_plan["plan_version"] == len(_results_for(result, "update_execution_plan"))
     assert [step["status"] for step in result.execution_plan["steps"]] == [
         "completed", "completed",
     ]
@@ -3712,10 +3784,17 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
         ModelTurn(tool_calls=(ModelToolCall("inspect_published_finding", {}),)),
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
         ModelTurn(tool_calls=(ModelToolCall("create_evidence_draft", {**source, "source_digest": "a" * 64}),)),
+        (ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                    "steps": [{"step_id": "publish", "action": "Save the evidence correction", "status": "in_progress"}],
+                    "status": "in_progress",
+                    "explanation": "The correction is ready for approval.",
+                }),))
+         if request_publication else
+         ModelTurn(content="原始依据把先升后降简化成下降。已形成依据修订草案，保存后还需重新综合结论。")),
         (ModelTurn(tool_calls=(ModelToolCall("create_evidence_version", {**source, "source_digest": "a" * 64}),))
          if request_publication else
          ModelTurn(content="原始依据把先升后降简化成下降。已形成依据修订草案，保存后还需重新综合结论。")),
-        discover=("inspect_published_finding", "read_source", "create_finding_draft", "create_evidence_draft"),
+        discover=("inspect_published_finding", "read_source", "create_finding_draft", "create_evidence_draft", "update_execution_plan"),
         source_inspection_required=True,
     )
     events: list[dict[str, object]] = []
@@ -3736,12 +3815,16 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
         "inspect_published_finding", "read_source", "create_evidence_draft",
     ]
     if request_publication:
+        expected_calls.insert(3, "update_execution_plan")
         expected_calls.append("create_evidence_version")
         assert result.pending_approval.name == "create_evidence_version"
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
     assert not evidence_write.executed_arguments
     assert not finding_draft.executed_arguments
-    assert all(event["execution_plan"] is None for event in events)
+    if request_publication:
+        assert any(event["execution_plan"] is not None for event in events)
+    else:
+        assert all(event["execution_plan"] is None for event in events)
     assert any(event["executed_tool_count"] > 0 for event in events)
 
 
@@ -3772,6 +3855,11 @@ async def test_experiment_save_requires_real_approval_after_source_read_and_draf
         ),
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
         ModelTurn(tool_calls=(ModelToolCall("propose_paper_experiment_draft", draft_arguments),)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [{"step_id": "save", "action": "Save the corrected paper experiment", "status": "in_progress"}],
+            "status": "in_progress",
+            "explanation": "The corrected experiment is ready for approval.",
+        }),)),
         ModelTurn(tool_calls=(ModelToolCall(
             "create_paper_experiment_revision", revision_arguments,
         ),)),
@@ -4375,6 +4463,46 @@ async def test_approved_finding_review_reports_persisted_status_without_model_re
     assert write.executed_arguments == [{}]
 
 
+async def test_approved_write_does_not_request_the_same_write_again() -> None:
+    write = _Capability(
+        "create_paper_experiment_revision",
+        ToolRisk.WRITE,
+        _NoArguments,
+        result_data={"saved": True, "revisions": [{"experiment_version": 2}]},
+    )
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_paper_experiment_revision", {}),)),
+        # Some providers repeat the exact call after receiving its success
+        # result instead of returning the requested confirmation.
+        ModelTurn(tool_calls=(ModelToolCall("create_paper_experiment_revision", {}),)),
+        ModelTurn(content="实验记录已保存，未生成研究结论。"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,)))
+
+    proposed = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="保存这份实验记录，不生成研究结论。",
+    )
+    assert proposed.status is AgentRunStatus.APPROVAL_REQUIRED
+    claimed = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-09-10T00:01:00Z",
+    ).start("2026-09-10T00:01:01Z")
+
+    completed = await runner.resume_claimed_call(
+        context=_context(),
+        previous_messages=proposed.messages,
+        claimed_call=claimed,
+    )
+
+    assert completed.status is AgentRunStatus.COMPLETED
+    assert completed.pending_approval is None
+    assert write.executed_arguments == [{}]
+    assert completed.messages[-1].content == "实验记录已保存，未生成研究结论。"
+
+
 def test_attached_source_context_does_not_force_collection_browse() -> None:
     runner = ResearchAgentRunner(
         model=_Model(ModelTurn(content="可以根据这段来源回答。")),
@@ -4455,12 +4583,28 @@ async def test_research_plan_revision_reads_existing_plan_before_write(user_requ
         ),
         ModelTurn(
             tool_calls=(
+                ModelToolCall(
+                    name="update_execution_plan",
+                    arguments={
+                        "steps": [{
+                            "step_id": "save",
+                            "action": "Save the revised research plan",
+                            "status": "in_progress",
+                        }],
+                        "status": "in_progress",
+                        "explanation": "The revision is ready for approval.",
+                    },
+                ),
+            )
+        ),
+        ModelTurn(
+            tool_calls=(
                 ModelToolCall(name="revise_research_plan", arguments={
                     "objective_id": "objective-1", "parent_plan_id": "plan-1",
                 }),
             )
         ),
-        discover=("inspect_research_plans", "revise_research_plan"),
+        discover=("inspect_research_plans", "revise_research_plan", "update_execution_plan"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -4479,8 +4623,8 @@ async def test_research_plan_revision_reads_existing_plan_before_write(user_requ
 
     assert result.status is AgentRunStatus.APPROVAL_REQUIRED
     assert model.tool_spec_names[:2] == [
-        ("inspect_research_plans", "revise_research_plan"),
-        ("inspect_research_plans", "revise_research_plan"),
+        ("inspect_research_plans", "revise_research_plan", "update_execution_plan"),
+        ("inspect_research_plans", "revise_research_plan", "update_execution_plan"),
     ]
 
 

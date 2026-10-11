@@ -546,7 +546,7 @@ def _prepared_for_capability(draft):
     return SimpleNamespace(
         draft_digest="a" * 64,
         source_fingerprint="prep-1",
-        source_digests={"block-1": sha256(b"Methods").hexdigest()},
+        source_digests={("text_window", "block-1"): sha256(b"Methods").hexdigest()},
         output=SimpleNamespace(output=SimpleNamespace(experiments=(experiment,), source_labels={
             "S001": {"source_ref": "block-1", "source_kind": "text_window"},
         })),
@@ -590,7 +590,7 @@ async def test_experiment_draft_does_not_treat_one_read_as_coverage_for_another_
     draft = _draft()
     prepared = _prepared_for_capability(draft)
     prepared.output.output.source_labels["S002"] = {"source_ref": "results-1", "source_kind": "text_window"}
-    prepared.source_digests["results-1"] = sha256(b"Results").hexdigest()
+    prepared.source_digests["text_window", "results-1"] = sha256(b"Results").hexdigest()
     draft["experiments"][0]["measurements"][0]["source_labels"] = ["S002"]
     result = await ProposePaperExperimentDraftCapability(
         authoring_service=_AuthoringStub(prepared), chat_repository=_ChatRepository(_read_messages()),

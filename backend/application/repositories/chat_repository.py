@@ -47,6 +47,11 @@ class ChatSessionBusyError(RuntimeError):
         super().__init__("the research response is still running; retry when it finishes")
 
 
+class ChatSessionHasBranchesError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("delete this conversation's branches before deleting their source")
+
+
 @dataclass(frozen=True)
 class ChatModelCall:
     call_id: str
@@ -84,6 +89,18 @@ class ChatResponseSnapshot:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class ChatSessionSummary:
+    """A session plus the first-question projection used by history indexes."""
+
+    session: ChatSession
+    title: str | None = None
+
+    def __post_init__(self) -> None:
+        first_line = (self.title or "").strip().split("\n", 1)[0].strip()
+        object.__setattr__(self, "title", first_line[:160] or None)
+
+
 class ChatRepository(Protocol):
     async def read_permission(self, session_id: str, user_id: str) -> dict[str, Any]: ...
 
@@ -112,9 +129,13 @@ class ChatRepository(Protocol):
 
     async def delete_session(self, *, session_id: str, user_id: str) -> None: ...
 
+    async def set_session_pin(
+        self, *, session_id: str, user_id: str, is_pinned: bool,
+    ) -> ChatSession: ...
+
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
-    ) -> tuple[ChatSession, ...]: ...
+    ) -> tuple[ChatSessionSummary, ...]: ...
 
     async def read_messages(
         self, session_id: str
@@ -151,6 +172,10 @@ class ChatRepository(Protocol):
     async def read_tool_call(
         self, tool_call_id: str
     ) -> ChatToolCall | None: ...
+
+    async def abort_running_tool_calls(
+        self, *, session_id: str, error_code: str, finished_at: str
+    ) -> tuple[ChatToolCall, ...]: ...
 
     async def save_trajectory(
         self,

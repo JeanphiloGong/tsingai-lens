@@ -56,11 +56,12 @@ export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export DOCUMENT_PREPARATION_MAX_CONCURRENCY=3
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
-export LENS_AGENT_MAX_TURN_SECONDS=0
-export LENS_AGENT_MAX_TOOL_CALLS=0
-export LENS_AGENT_MAX_MODEL_TOKENS=0
+export LENS_AGENT_MAX_TURN_SECONDS=300
+export LENS_AGENT_MAX_TOOL_CALLS=96
+export LENS_AGENT_MAX_MODEL_TOKENS=1000000
 export LENS_AGENT_NO_PROGRESS_LIMIT=2
-export LENS_AGENT_EMERGENCY_MAX_CYCLES=0
+export LENS_AGENT_EMERGENCY_MAX_CYCLES=64
+export LENS_AGENT_MAX_MODEL_RETRIES=5
 export LENS_AGENT_MAX_REQUEST_SECONDS=180
 export LENS_AGENT_CONTEXT_TOKENS=65536
 export LENS_AGENT_MAX_PARALLEL_READS=4
@@ -103,9 +104,11 @@ streamed response, the runner retries up to five times when no user-visible
 text was received. A sixth invalid response returns `model_response_invalid`;
 this is distinct from provider connectivity or availability failure.
 The `LENS_AGENT_*` variables above are optional. Whole-turn seconds, tool calls,
-cumulative model tokens and total model cycles default to no ceiling; unset or
-zero disables those four limits. Positive values enable an operator-selected
-limit. Other settings require finite positive values (integers for counts).
+cumulative model tokens and total model cycles default to 300 seconds, 96 calls,
+1,000,000 reported tokens and 64 cycles. Zero explicitly disables these four
+limits. Other settings require finite positive values (integers for counts).
+Retries share `LENS_AGENT_MAX_MODEL_RETRIES` across the turn and approvals,
+honor `Retry-After`, and use bounded exponential backoff with jitter.
 Invalid values are logged and use their defaults. These limits protect one
 technical turn and do not measure scientific completeness. A new Source can
 continue beyond six decisions. A batch with only previously seen observations
@@ -120,12 +123,12 @@ Each model/read request is bounded by `LENS_AGENT_MAX_REQUEST_SECONDS` and model
 requests also respect `LLM_REQUEST_TIMEOUT_SECONDS`. If a whole-turn deadline
 is explicitly enabled, all requests share it. Finalization also respects
 `LENS_AGENT_MAX_FINALIZATION_SECONDS` and any remaining whole-turn time.
-An awaited model timeout returns `failed` with `provider_timeout` when the
-whole-turn deadline is exhausted. A transient provider timeout or connection
+Exhausting the whole-turn deadline preserves `resource_budget`, even when no
+time remains for a generated summary. A transient provider timeout or connection
 failure that returns before that deadline is retried up to five times, sharing
 the remaining turn time. If a read uses the remaining time, its completed peers
-remain visible and the unavailable final answer is reported as
-`final_answer_unavailable`. Approved writes retain
+remain visible with that same resource-limited disposition. An independent
+summary-generation failure remains `final_answer_unavailable`. Approved writes retain
 their existing completion and exact-approval rules; they are not forcibly
 cancelled mid-mutation. Durable checkpoint I/O can also outlive the model/read
 deadline.
@@ -174,6 +177,18 @@ never full arguments, paper bodies, credentials, or hidden reasoning.
 Streaming Chat sends an initial waiting event and a heartbeat every 15 seconds.
 Heartbeats advance elapsed time while retaining the latest cycle and completed
 tool counts. They indicate a live wait, not a new scientific observation.
+The message stream starts a background turn; closing that stream does not
+cancel the job. Response snapshots and trajectory reads recover the same job,
+including after page reload. The frontend abandons an event stream after 30
+seconds without data and reconnects through the existing snapshot/events path.
+This is an idle transport limit, not a total research deadline. Development
+Vite proxying and browser fetch impose no configured whole-turn deadline here.
+External proxies must permit streaming and allow the 15-second heartbeat.
+Acceptance harnesses must wait longer than the configured finite turn budget
+(allow at least 60 seconds for persistence and UI settling), record that budget,
+and distinguish a harness deadline from an HTTP failure. The shipped 360-second
+harness wait validates the 300-second default; raise the harness wait whenever an
+operator deliberately configures a longer turn budget.
 
 ## Initialize Or Upgrade The Schema
 

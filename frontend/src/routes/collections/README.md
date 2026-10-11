@@ -81,10 +81,19 @@ This node owns the Collection route family.
 - `collections/[id]/assistant/+page.svelte`
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact
-  write approval. A bounded final answer remains visible with a limited-reading
-  notice when the Agent reaches its step limit; only a failed turn is presented
-  as an error. A pending Source from the document reader is reviewable and
+  write approval. Resource-budget completion, stalled progress, and technical
+  failure have distinct notices and a Continue research action, even without
+  an execution plan. Completion reason, not the presence of arbitrary warnings,
+  determines these notices. Continuing sends a new message in the same session
+  preserving the researcher's previous constraints; it never approves a write.
+  Silent event streams yield after 30 seconds to snapshot recovery while the
+  same backend job continues. Reopening restores both results and terminal
+  recovery controls. A pending Source from the document reader is reviewable and
   removable before submission, then persists on the sent user message.
+  The current execution plan remains visible after the turn ends, including
+  approval, clarification, insufficient support, and technical failure. The
+  final turn supplies this view immediately; reopening the conversation restores
+  it from the response snapshot. Only active runs show live progress controls.
   While a turn runs or reconnects, the progress area shows the current paper,
   page, section and passage excerpt from actual Source requests and results.
   Parallel reads remain separate. Pending, received and failed reads have

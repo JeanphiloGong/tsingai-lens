@@ -4,10 +4,55 @@ This package owns the collection-bound Research Agent conversation. It turns
 an authenticated user's message into resource-bounded model decisions, ordered
 typed capability calls, and a durable, reviewable trajectory.
 
-The prompt frames conversation as professional research collaboration: explain
-the research question, supporting observations, limits, progress, and next
-researcher decision. Ordinary replies translate tool and status identifiers
-into that research meaning, including when explaining pending approval.
+The prompt frames conversation as professional research collaboration around a
+research decision. It keeps the research question, current understanding,
+traceable facts, and runtime control distinct. Ordinary replies translate tool
+and status identifiers into that research meaning, including when explaining
+pending approval.
+
+## Initialization Prompt
+
+`model.py` owns the runtime prompt and its version. Named sections cover identity,
+collaboration and continuity, research information, tool decisions, scientific
+reading, recovery, write authority, response style, and boundary examples. They
+compose one system message; this README does not duplicate the prompt text.
+The registered capability descriptions and schemas remain authoritative for
+available tools and their specific fields, prerequisites, and write contracts.
+
+The reference scenario is a researcher deciding what to investigate, combining
+scientific knowledge, user materials, paper Sources, calculations and
+comparisons, then deciding what evidence or experiment is needed next. Filename
+and Profile help select candidates; Paper Map is optional navigation. When
+canonical Source is readable, missing maps or unrecognized abstract headings do
+not block original section reading or automatically require expert review.
+Preparation progress, classification failure with readable Source, actual read
+failure, unread content, and information absent from inspected content have
+different next actions.
+Ordinary Source reading also grounds any filename/content conflict note in the
+inspected content; it adds no preparation stage or identity-checking tool call.
+
+Scientific background knowledge is available by default for explanations and
+hypotheses. Explicit restrictions to supplied materials also constrain their
+scientific premises while preserving reasoning and arithmetic from those
+materials. A restriction on web search alone does not impose that knowledge
+boundary. Context compaction preserves the researcher's explicit restrictions.
+
+When complete Source reads reconstruct an actual paper experiment, the Agent may
+propose a PaperExperiment draft for review without a confirmed Objective or
+published Objective analysis. The formal paper-fact path is complete Source ->
+PaperExperiment draft -> researcher review -> PaperExperiment revision. A later
+Objective analysis selects one or more fixed revisions -> comparison or Finding.
+Future validation experiments are proposals, not PaperExperiment records, and
+runtime checkpoints or tool status are never scientific evidence.
+
+Prompt validation combines protocol/authorization regressions with opt-in live
+model scenarios using real Source fixtures. It checks actual reads, recovery,
+attribution, continuation, and final answers rather than treating prompt-string
+assertions as proof of model behavior. The warning-generation policy is owned
+by the browsing capability and tracked separately from this prompt refactor.
+The opt-in knowledge-scope checks compare ordinary discussion, no-web requests,
+and supplied-material-only requests using the same controlled trend. They check
+that arithmetic remains possible and mechanisms use only the allowed premises.
 
 ## Start Here
 
@@ -49,7 +94,7 @@ Evidence, Finding, or Analysis record; it calls the Source and Core services.
 | Context selection | `context_builder.py` | none |
 | Model/tool loop | `agent_runner.py` | none; execution only |
 | Tool discovery and execution prerequisites | `capabilities/tool_discovery.py` and `capability_policy.py` | approval only |
-| Explicit write requests | `intent_policy.py` | no execution authority |
+| Tool discovery and requested actions | `tool_discovery.py`, `model.py` | model selects registered capabilities; no execution authority |
 | Objective, Evidence, Finding data | `application/core/` | Core services |
 
 When adding a capability, define its typed input/output and approval risk first;
@@ -58,7 +103,8 @@ do not add scientific state to the Chat trajectory.
 Agent-authored experiment records use `propose_paper_experiment_draft` followed
 by the separately approved `create_paper_experiment_revision`. The capability
 does not own experiment persistence: it reloads canonical Sources and delegates
-identity, revision, Selection, and atomic graph writes to `application/core/`.
+identity, revision, and atomic paper-revision writes to `application/core/`.
+Saving a revision does not create an Objective Selection or publish an analysis.
 
 ## Main Flow
 
@@ -82,6 +128,14 @@ A new Finding's empty feedback list cannot erase an older version's reviews.
 Source context attached from the document reader is resolved against the
 canonical Source before the model runs. A quote is inspection material, not
 Evidence or permission to mutate a scientific record.
+
+Collection paper screening prefers an explicitly labelled abstract section.
+When a parser retains `Abstract:` or an equivalent dash/Chinese label at the
+start of a paragraph instead of in its heading, browsing reads that paragraph
+as the bounded abstract excerpt. Reference-section entries and incidental
+mentions are excluded from this paragraph-label path. Excerpts remain screening
+signals tied to the existing Document reference, not an exact Source read or
+scientific Evidence; genuinely missing abstracts remain explicit limitations.
 
 Repeated identical calls within one model response execute once. Retained calls
 are assigned contiguous positions so checkpointed requests and results stay paired.
@@ -112,7 +166,7 @@ search” is conversational guidance for the model, not an authorization switch.
 
 `discover_research_tools` is an ordinary typed function call, not a provider's
 native ToolSearch API. Its short catalog comes from registered read/draft/write
-handlers. It loads up to six named schemas per call and performs no scientific
+handlers. It loads the requested registered schemas per call and performs no scientific
 read, write, or approval. Successful results retain selected names only for
 the active user request; definitions always come from the current registry.
 The registry and each tool's risk are the authority for catalog membership;
@@ -120,8 +174,15 @@ there is no parallel static list of known capabilities. Removed names are
 ignored. Discovery grants no execution permission. Loaded tools remain
 available after navigation; the model can discover additional tools, revisit a
 completed browse, or answer without a prescribed reader/draft order. The
-`source_inspection_required` flag records the model's assessment, not a gate.
+`source_inspection_required` flag records the model's assessment, not a
+backend gate. It tells the model that the requested judgment needs original
+Source inspection; it does not insert a fixed search -> outline -> read route.
 The next user request starts with a fresh catalog.
+
+Discovery may record model-interpreted `deferred_tool_names` for deliverables
+the researcher excluded. These names stay excluded for the active request,
+including approval continuation; they neither grant authority nor prescribe
+a research sequence. No user-phrase matching decides this scope.
 
 Persistence intent is scoped to the requested action: saving error feedback
 while declining curation or publication exposes only the feedback write.
@@ -129,9 +190,10 @@ Read-only requests and a prohibition on all saving still disable every write.
 Feedback and curation keep separate exact-argument approvals. Their explicit
 save requests require the actual approval-producing tool call; a prose request
 for confirmation is not a completed deliverable. Discovery remains available
-when the target needs identification. Their successful
-approval replies render the saved result directly, without a model continuation
-that could incorrectly report another pending approval.
+when the target needs identification. After an approved feedback or curation
+write, the runner resumes the same research loop so remaining requested work
+can finish. If response generation then fails, the saved result remains
+authoritative while the turn stays `failed` with the technical error.
 Before a curation write, the runner carries forward the complete Finding envelope
 from the exact inspection. Only the proposed scientific wording and other
 reviewed fields may change; identity, Evidence bindings, paper coverage, and
@@ -139,21 +201,19 @@ lineage remain subject to the canonical validator and the user's approval.
 
 Discovery also records whether the request needs a particular paper's claims
 or measurements inspected. That model-selected obligation survives later
-discovery calls within the request. After a survey, it requires Source
-navigation and complete reading, including for a claim attributed to a review;
-paper selection alone does not impose this obligation. This is an execution
-prerequisite, not a determination that the inspected passage supports the claim.
-Source-reading stages use that recorded request rather than comparison or
-reading keywords. Selecting papers for a later comparison therefore remains
-a navigation task. Existing-conclusion review reads the Finding and Evidence
-before the Source requirement can advance to paper inspection.
-The review obtains the prepared outline for linked papers, then reads the exact
-Sources already linked by that Finding before broad navigation. The outline
-reports section headings, pages and counts independently of search filters;
-initial navigation also supplies first Source references for those sections.
-Exact `heading_path` filters and offsets support progressive
-section reading. The current turn's complete Source reads are counted per section;
-reading one passage does not mark the whole paper or scientific check complete.
+discovery calls within the request and guides the next useful Source reads,
+including for a claim attributed to a review. Paper selection alone does not
+impose this obligation, and the flag does not determine that an inspected
+passage supports the claim. The model chooses whether an outline, exact Source,
+search, table, or another registered read is the useful next action. Selecting
+papers for a later comparison therefore remains a navigation task.
+Existing-conclusion review reads the Finding and Evidence before deciding which
+original Sources need checking. Only the PaperExperiment draft validator has a
+deterministic complete-Source prerequisite; an ordinary answer reports the
+available support and gaps without being forced through an authoring pipeline.
+Exact `heading_path` filters and offsets support progressive section reading.
+The current turn's complete Source reads are counted per section; reading one
+passage does not mark the whole paper or scientific check complete.
 The per-paper reading ledger also retains papers from earlier searches in the
 same request, even when later searches narrow their scope. A paper without an
 inspected outline remains visible with unknown prepared coverage; a failed
@@ -305,14 +365,23 @@ separately. Explicit evidence, evaluation against real research scenarios and
 researcher review remain necessary to assess scientific correctness.
 
 Whole-turn time, tool-call count, cumulative model tokens and total model cycles
-have no default ceiling. Their optional environment settings accept a positive
-limit; unset or zero disables that ceiling. Usage remains observable telemetry.
+default to 300 seconds, 96 calls, 1,000,000 reported tokens and 64 cycles.
+Their environment settings accept a positive limit; zero explicitly disables
+that ceiling. Approval waiting time is excluded; active usage survives approval.
 Individual model/read requests retain a 180-second timeout, cancellation and
-the repeated-observation guard.
+the repeated-observation guard. Context compaction is runtime memory rather
+than evidence: when the provider cannot produce its optional working-notes
+JSON, the runner keeps bounded raw records with their message IDs and
+continues from the durable trajectory. A failed compaction counter is reset
+for each approval or Continue slice so a recoverable context failure cannot
+block later work.
 Provider failures use structured HTTP status, known stream error codes and
 chained transport exceptions. HTTP 408/429/5xx and known transient stream or
 connection failures receive up to five retries with exponential jittered
-backoff; authentication, malformed requests, exhausted quota and unclassified
+backoff and `Retry-After`. The retry allowance is shared across the turn and its
+approval continuations. Missing streamed tool arguments retry without streaming
+before executing any tool; partial visible text is not replayed as a new answer.
+Authentication, malformed requests, exhausted quota and unclassified
 errors stop visibly. Successful tool observations remain in the trajectory
 during retries. Trace records contain normalized reasons, status, attempt and
 delay. Failure logs may add a bounded message only for low-risk structural
@@ -341,6 +410,13 @@ uncertainties and next actions. It validates references before retiring those
 operations from model input. The full trajectory remains in storage. Working
 notes are not primary evidence, approval or published results. Source claims require
 their actual passages. A failed compaction preserves history and fails visibly.
+Working notes and retired message IDs are checkpointed in the existing response
+snapshot for approval and interruption recovery, without copying notes to logs.
+Pinned execution hints retain draft references and saved revision identities;
+full scientific payloads remain in durable tool results. Identical, current,
+unexpired experiment drafts reuse their stored reference after Source validation.
+Unknown document identities return `document_not_found` with navigation advice;
+only known papers without Source content return `document_sources_not_ready`.
 Recent user requests receive a reserved share of the context before tool
 outputs. Adding one paper or deferring a review preserves other paper choices;
 compaction retains those choices separately from Agent recommendations.
@@ -455,6 +531,17 @@ If execution stops unexpectedly, partial text remains explicitly incomplete.
 Snapshots support observation of the research work; they do not replace source
 checks, certify a scientific stage, or automatically restart interrupted work.
 
+Each complex run may expose a model-authored `execution_plan` in progress
+snapshots and the turn response. The Agent updates it through the registered
+`update_execution_plan` capability after framing the request and when new
+observations change the remaining work. The runtime recovers the latest plan
+from the ordered trajectory and assigns `plan_version` from durable capability
+request/result events, including pending and failed events, then adds approval,
+resource, and technical status without inventing a version;
+it does not infer research steps from a metadata read or a local draft result.
+Simple answers may have no plan. It is operational state only; it never becomes
+Evidence, permission, or a Finding.
+
 ## Key Areas
 
 - `session_service.py`: owns session reads, source-context validation, turn
@@ -466,30 +553,29 @@ checks, certify a scientific stage, or automatically restart interrupted work.
   deadlines and output allowances for both decisions and answer-only
   finalization. Technical limits permit finalization with scope warnings only
   while turn time remains. A response or finalization failure remains a failure
-  unless an approved durable write in the current continuation already has a
-  matching successful result. In that case, the runner checkpoints a short
-  deterministic confirmation and returns `completed` with a non-blocking
-  warning; the persisted write remains authoritative.
+  even when an approved durable write in the current continuation already has a
+  matching successful result. The runner checkpoints a short deterministic
+  confirmation that the saved result remains authoritative, while preserving the
+  technical failure status for the incomplete turn.
 - `context_builder.py`: selects a bounded, protocol-safe conversation context
   while pinning the active question and keeping whole request/result batches
   together. Selection uses the token capacity remaining after request overhead
   and answer/reading reserves. Explicit character/message caps remain available
   to local callers; the production default uses token capacity. The same model
   message representation is counted and transmitted. Omitted operations have
-  validated provisional working notes while stored history remains complete.
+  validated provisional working notes while stored history remains complete;
+  the runner may retain bounded raw records when optional note synthesis is
+  unavailable.
 - `model.py`: defines the asynchronous provider-neutral model contract,
   request timeout/output limits, reported usage (including invalid responses),
   and the Research Agent instructions. Implementations must propagate
   cancellation and close in-flight streams without background thread work.
-- `intent_policy.py`: supplies explicit write-request vocabulary and research
-  prerequisite signals. Its legacy read-name groups do not grant read access.
-  It has no model, persistence, or capability side effects.
-- `capability_policy.py`: selects discovered tools from the request and completed
+- `capability_policy.py`: selects tools loaded by discovery and completed
   observations, validates batches and exact Source prerequisites, and maps
   capability risk to automatic execution or exact user approval. The Runner
   consumes these decisions; it does not define a second permission path.
 - `capabilities/tool_discovery.py`: derives the short catalog from registered
-  read/draft handlers and validates selected names against that catalog.
+  read/draft/write handlers and validates selected names against that catalog.
 - `capabilities/`: contains the explicit typed capability registry and handlers
   for collection and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.
@@ -513,14 +599,18 @@ end-to-end scenario that preserves Source traceability.
 
 ## Changing This Module
 
-For ordinary response wording, start with `model.py`; for request vocabulary,
-start with `intent_policy.py`. For prerequisite reads or approval, use
-`capability_policy.py`. Change `agent_runner.py` only when execution order,
-continuation, checkpointing, or stopping behavior must change.
+For ordinary response wording and tool-selection guidance, start with
+`model.py`. For tool visibility, Source prerequisites, or approval, use
+`tool_discovery.py` and `capability_policy.py`. Change `agent_runner.py` only
+when execution order, continuation, checkpointing, or stopping behavior must
+change.
 
 To add a capability, implement its typed handler under `capabilities/` and
-register it in the existing registry. Read/draft handlers enter the catalog
-automatically; writes need explicit request and approval policy.
+register it in the existing registry. Read, draft, and write handlers enter the
+current discovery catalog automatically. The model selects a registered action
+from its description and the conversation; the backend then enforces its risk,
+permission mode, typed contract, and scientific prerequisites. Writes still
+require the exact approval or scoped grant required by their risk.
 The handler calls the owning Source, Core, or Goal service. The Runner does not
 need a branch for each new capability. A read or draft returns an observation;
 an approved write may persist a scientific resource through its existing owner.

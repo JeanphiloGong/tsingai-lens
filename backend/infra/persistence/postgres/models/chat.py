@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -45,6 +46,9 @@ class ChatSessionRow(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false",
+    )
     root_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     parent_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     fork_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

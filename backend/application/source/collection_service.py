@@ -156,10 +156,18 @@ class CollectionService:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record
 
+    async def collection_belongs_to_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> bool:
+        return await self.repository.collection_belongs_to_user(
+            collection_id, owner_user_id
+        )
+
     async def get_agent_default_permission_for_user(
         self, collection_id: str, owner_user_id: str
     ) -> dict[str, Any]:
-        await self.get_collection_for_user(collection_id, owner_user_id)
+        if not await self.collection_belongs_to_user(collection_id, owner_user_id):
+            raise FileNotFoundError(f"collection not found: {collection_id}")
         return permission_record(
             await self.repository.read_agent_default_permission(collection_id)
         )

@@ -424,6 +424,14 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
                     arguments=plan_arguments,
                 ),)
             ),
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="update_execution_plan",
+                arguments={
+                    "steps": [{"step_id": "save", "action": "Save the reviewed plan", "status": "in_progress"}],
+                    "status": "in_progress",
+                    "explanation": "The reviewed plan is ready for approval.",
+                },
+            ),)),
             ModelTurn(
                 content="The research plan draft is ready for approval.",
                 tool_calls=(ModelToolCall(
@@ -460,7 +468,11 @@ async def test_research_plan_write_waits_for_exact_approval_after_draft() -> Non
     )
 
     assert completed.status.value == "completed"
-    assert completed.tool_results[0].data["plan"]["plan_id"] == "exp-agent-1"
+    saved_plan = max(
+        (item for item in completed.tool_results if item.data.get("plan")),
+        key=lambda item: item.data["plan"].get("plan_version", 0),
+    )
+    assert saved_plan.data["plan"]["plan_id"] == "exp-agent-1"
     assert len(plan_service.calls) == 1
     assert plan_service.calls[0]["created_by"] == "user-1"
     assert plan_service.calls[0]["created_by_tool_call_id"] == (
@@ -592,6 +604,14 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
             ModelTurn(tool_calls=(ModelToolCall(name="inspect_research_plans", arguments={
                 "objective_id": arguments["objective_id"], "plan_id": "exp-agent-1",
             }),)),
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="update_execution_plan",
+                arguments={
+                    "steps": [{"step_id": "save", "action": "Save the revised plan", "status": "in_progress"}],
+                    "status": "in_progress",
+                    "explanation": "The revision is ready for approval.",
+                },
+            ),)),
             ModelTurn(
                 content="The revision is ready for approval.",
                 tool_calls=(ModelToolCall(
@@ -627,7 +647,11 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
     )
 
     assert completed.status.value == "completed"
-    assert completed.tool_results[0].data["plan"]["plan_version"] == 2
+    saved_plan = max(
+        (item for item in completed.tool_results if item.data.get("plan")),
+        key=lambda item: item.data["plan"].get("plan_version", 0),
+    )
+    assert saved_plan.data["plan"]["plan_version"] == 2
     assert plan_service.calls[0]["plan_id"] == "exp-agent-1"
     assert plan_service.calls[0]["updated_by"] == "user-1"
     assert plan_service.calls[0]["updated_by_tool_call_id"] == (

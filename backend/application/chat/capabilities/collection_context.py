@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -16,6 +18,7 @@ from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 _OBJECTIVE_LIMIT = 12
 _PAPER_LIMIT = 12
 _ABSTRACT_LIMIT = 1_200
+logger = logging.getLogger(__name__)
 
 
 class GetCollectionContextToolRequest(BaseModel):
@@ -141,6 +144,14 @@ class BrowseCollectionPapersCapability:
             "before selecting a paper by title or filename. Returns preparation state, document type, bounded "
             "Paper Map materials, processes, variables, outcomes, and an abstract "
             "excerpt when an explicitly labelled abstract Source is available. "
+            "Profile, Paper Map and abstract availability are optional navigation "
+            "signals: inspect available document Sources directly when they are missing. "
+            "source_status reports prepared content availability, not a completed read. "
+            "Follow next_offset for later papers; an empty filename query match does "
+            "not establish scientific absence. Missing map or abstract metadata does "
+            "not establish an unreadable or irrelevant paper. When Source content is "
+            "ready, use inspect_document_sources to inspect its outline and relevant "
+            "body directly; a Paper Map is optional navigation. "
             "These are screening signals only, not Evidence, and this capability "
             "does not change the formal analysis scope."
         ),
@@ -202,14 +213,32 @@ class BrowseCollectionPapersCapability:
             arguments.offset : arguments.offset + arguments.limit
         ]
         paper_records: list[dict[str, Any]] = []
-        warnings: list[str] = []
         for record, profile in visible_candidates:
             document_id = str(record.get("document_id") or "")
             paper_map = maps_by_id.get(document_id)
-            source_document = await self.source_artifact_repository.read_document(
-                context.collection_id,
-                document_id,
-            )
+            source_document = None
+            try:
+                source_document = await self.source_artifact_repository.read_document(
+                    context.collection_id,
+                    document_id,
+                )
+            except Exception:
+                logger.warning(
+                    "Paper screening Source read failed document_id=%s",
+                    document_id,
+                    exc_info=True,
+                )
+                source_status = "read_failed"
+            else:
+                if source_document is not None:
+                    source_status = "available"
+                else:
+                    source_status = {
+                        "processing": "preparing",
+                        "stored": "not_prepared",
+                        "uploaded": "not_prepared",
+                        "failed": "preparation_failed",
+                    }.get(str(record.get("status") or ""), "unavailable")
             abstract_excerpt, abstract_status = self._abstract_excerpt(source_document)
             screening_limitations: list[str] = []
             if profile is None:
@@ -222,11 +251,6 @@ class BrowseCollectionPapersCapability:
                 screening_limitations.append(
                     "No explicitly labelled Abstract Source was available for this paper."
                 )
-            if screening_limitations:
-                warnings.append(
-                    f"{document_id}: screening context is incomplete; retain the paper "
-                    "for researcher review instead of treating it as irrelevant."
-                )
             paper_records.append(
                 self._paper_record(
                     record,
@@ -234,6 +258,7 @@ class BrowseCollectionPapersCapability:
                     paper_map,
                     abstract_excerpt=abstract_excerpt,
                     abstract_status=abstract_status,
+                    source_status=source_status,
                     screening_limitations=screening_limitations,
                 )
             )
@@ -241,16 +266,10 @@ class BrowseCollectionPapersCapability:
         next_offset = arguments.offset + len(visible_candidates)
         if next_offset >= len(candidates):
             next_offset = None
-        if arguments.query and not candidates:
-            warnings.append(
-                "No visible filename or title contains this literal identity query. "
-                "Retry with query omitted to browse paper identities; this is not "
-                "evidence that the collection lacks a relevant study."
-            )
-        if next_offset is not None:
-            warnings.append(
-                f"{len(candidates) - next_offset} additional paper(s) remain on later pages."
-            )
+        failed_source_count = sum(
+            paper["source_status"] in {"preparation_failed", "unavailable", "read_failed"}
+            for paper in paper_records
+        )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
@@ -283,7 +302,14 @@ class BrowseCollectionPapersCapability:
                     for item in paper_records
                 ),
             ),
-            warnings=tuple(dict.fromkeys(warnings)),
+            warnings=(
+                (
+                    f"Prepared Source content is unavailable for {failed_source_count} paper(s) "
+                    "on this page. Check each paper's source_status; this is not scientific absence.",
+                )
+                if failed_source_count
+                else ()
+            ),
         )
 
     @staticmethod
@@ -305,6 +331,7 @@ class BrowseCollectionPapersCapability:
         *,
         abstract_excerpt: str | None,
         abstract_status: str,
+        source_status: str,
         screening_limitations: list[str],
     ) -> dict[str, Any]:
         document_id = str(record.get("document_id") or "")
@@ -342,6 +369,7 @@ class BrowseCollectionPapersCapability:
                 or None
             ),
             "status": str(record.get("status") or "unknown"),
+            "source_status": source_status,
             "document_type": str(getattr(profile, "doc_type", None) or "uncertain"),
             "profile_confidence": getattr(profile, "confidence", None),
             "paper_role": str(getattr(paper_map, "doc_role", None) or "unknown"),
@@ -378,15 +406,29 @@ class BrowseCollectionPapersCapability:
     def _abstract_excerpt(document: Any) -> tuple[str | None, str]:
         if document is None:
             return None, "source_not_ready"
-        for block in sorted(
+        blocks = sorted(
             getattr(document, "blocks", ()) or (),
             key=lambda item: getattr(item, "block_order", 0),
-        ):
+        )
+        for block in blocks:
             heading = str(getattr(block, "heading_path", "") or "").casefold()
             if "abstract" not in heading and "摘要" not in heading:
                 continue
             text = " ".join(str(getattr(block, "text", "") or "").split()).strip()
             if text:
+                return text[:_ABSTRACT_LIMIT], "found"
+        # Some parsers keep the Abstract label in the paragraph, not its heading.
+        for block in blocks:
+            heading = str(getattr(block, "heading_path", "") or "")
+            if re.search(r"\b(?:references|bibliography)\b|参考文献", heading, re.IGNORECASE):
+                continue
+            match = re.match(
+                r"^\s*(?:abstract\b|摘要)\s*[:：—–-]\s*(\S.*)$",
+                str(getattr(block, "text", "") or ""),
+                re.IGNORECASE | re.DOTALL,
+            )
+            if match:
+                text = " ".join(match.group(1).split())
                 return text[:_ABSTRACT_LIMIT], "found"
         return None, "not_found"
 

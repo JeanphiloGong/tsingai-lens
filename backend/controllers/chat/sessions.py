@@ -18,7 +18,10 @@ from application.chat.session_service import (
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
-from application.repositories.chat_repository import ChatSessionBusyError
+from application.repositories.chat_repository import (
+    ChatSessionBusyError,
+    ChatSessionHasBranchesError,
+)
 from controllers.chat.schemas import (
     ChatBranchRequest,
     ChatMessageFeedbackRequest,
@@ -32,6 +35,7 @@ from controllers.chat.schemas import (
     ChatResponseSnapshotResponse,
     ChatSessionCreateRequest,
     ChatSessionListResponse,
+    ChatSessionPinRequest,
     ChatSessionResponse,
     ChatToolCallResponse,
     ChatToolDecisionRequest,
@@ -115,7 +119,9 @@ async def list_chat_sessions(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ChatSessionListResponse(
         items=[
-            ChatSessionResponse.model_validate(item, from_attributes=True)
+            ChatSessionResponse.model_validate(item.session, from_attributes=True).model_copy(
+                update={"title": item.title}
+            )
             for item in sessions
         ],
         limit=limit,
@@ -162,6 +168,23 @@ async def get_chat_session(
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
+@router.put(
+    "/{session_id}/pin",
+    response_model=ChatSessionResponse,
+    summary="Pin or unpin one owned Chat session",
+)
+async def set_chat_session_pin(
+    session_id: str, payload: ChatSessionPinRequest, request: Request,
+) -> ChatSessionResponse:
+    try:
+        session = await request.app.state.chat_session_service.set_session_pin_for_user(
+            session_id, await current_user_id(request), is_pinned=payload.is_pinned,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
+
+
 @router.delete(
     "/{session_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -172,12 +195,22 @@ async def delete_chat_session(session_id: str, request: Request) -> None:
         await request.app.state.chat_session_service.delete_session_for_user(
             session_id, await current_user_id(request)
         )
-    except ChatSessionNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except (ChatSessionNotFoundError, FileNotFoundError) as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=_session_not_found(
+                exc if isinstance(exc, ChatSessionNotFoundError) else ChatSessionNotFoundError(session_id)
+            ),
+        ) from exc
     except ChatSessionBusyError as exc:
         raise HTTPException(
             status_code=409,
             detail={"code": "chat_session_busy", "message": str(exc)},
+        ) from exc
+    except ChatSessionHasBranchesError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "chat_session_has_branches", "message": str(exc)},
         ) from exc
 
 
@@ -522,6 +555,7 @@ def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:
         status=str(turn["status"]),
         completion_reason=turn.get("completion_reason"),
         warnings=list(turn.get("warnings") or ()),
+        execution_plan=turn.get("execution_plan"),
         messages=[_message_response(item) for item in turn.get("messages") or ()],
         pending_approval=(
             ChatToolCallResponse.model_validate(pending, from_attributes=True)

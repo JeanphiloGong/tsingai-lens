@@ -8,7 +8,6 @@ from application.chat import (
     ModelTurn,
     ResearchAgentRunner,
     ToolSpec,
-    intent_policy,
 )
 from application.chat.session_service import ChatSessionService
 from domain.chat import ToolPermissionMode, ToolRisk
@@ -49,12 +48,12 @@ async def test_session_permission_controls_actual_write(mode, expected):
     assert result["status"] == expected, [(c.name, c.error_code) for c in repository.calls.values()]
     calls = [call for call in repository.calls.values() if call.name == write.spec.name]
     if mode == "read_only":
-        assert not calls
+        # The write schema is hidden from discovery. A forged model call is
+        # still retained as a denied trajectory event for auditability.
+        assert len(calls) == 1
+        assert calls[0].status.value == "failed"
+        assert calls[0].error_code == "tool_permission_denied"
         assert not write.executed
-        assert any(
-            call.error_code == "tool_permission_denied"
-            for call in repository.calls.values()
-        )
         return
     assert len(calls) == 1
     if mode == "auto":
@@ -65,7 +64,7 @@ async def test_session_permission_controls_actual_write(mode, expected):
         assert not write.executed
 
 
-async def test_no_save_request_overrides_automatic_grant():
+async def test_automatic_grant_is_not_reinterpreted_from_user_phrases():
     repository = MemoryChatRepository()
     write = _WriteCapability()
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
@@ -79,8 +78,7 @@ async def test_no_save_request_overrides_automatic_grant():
         expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
     result = await service.post_message_for_user(session.session_id, "user-1", message="Inspect this feedback, do not save anything.")
     assert result["status"] == "completed"
-    assert not write.executed
-    assert any(call.error_code == "current_request_prohibits_tool" for call in repository.calls.values())
+    assert write.executed
 
 
 @pytest.mark.parametrize("revoke", [False, True])
@@ -104,6 +102,14 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
         "create_research_plan", ToolRisk.WRITE, _Question
     )
     model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [
+                {"step_id": "correct", "action": "Save the verified correction", "status": "in_progress"},
+                {"step_id": "follow_up", "action": "Record the next experiment", "status": "pending"},
+            ],
+            "status": "in_progress",
+            "explanation": "Apply the reviewed correction before recording the next experiment.",
+        }),)),
         ModelTurn(tool_calls=(ModelToolCall(
             finding_write.spec.name, {"question": "Publish the revised Finding"},
         ),)),
@@ -123,7 +129,9 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
         finding_write.spec.name, plan_write.spec.name,
     ],
         expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
-    result = await service.post_message_for_user(session.session_id, "user-1", message="Apply the two corrections.")
+    stream = await service.stream_message_for_user(session.session_id, "user-1", message="Apply the two corrections.")
+    events = [event async for event in stream]
+    result = next(event["turn"] for event in events if event["type"] == "turn")
     assert result["status"] == ("failed" if revoke else "completed")
     assert len(finding_write.executed_arguments) == 1
     assert len(plan_write.executed_arguments) == (0 if revoke else 1)
@@ -135,6 +143,14 @@ async def test_each_automatic_write_rechecks_current_permission(revoke):
     assert len({call.tool_call_id for call in calls}) == 2
     assert calls[0].decision_basis == "scope_grant"
     assert calls[-1].status.value == ("rejected" if revoke else "succeeded")
+    assert result["execution_plan"]["status"] == ("permission_denied" if revoke else "completed")
+    if revoke:
+        assert result["execution_plan"]["blocking_reason"] == "permission_write_denied"
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot.status == result["status"]
+    assert snapshot.progress["execution_plan"] == result["execution_plan"]
+    last_progress = [event["progress"] for event in events if event["type"] == "progress"][-1]
+    assert last_progress["execution_plan"] == result["execution_plan"]
 
 
 async def test_permission_controller_enforces_owner_and_revision():
@@ -264,7 +280,7 @@ def test_automatic_permission_covers_every_registered_write_action() -> None:
         "create_research_plan",
         "revise_research_plan",
     }
-    assert AUTO_ACTIONS == intent_policy.WRITE_CAPABILITIES == expected
+    assert AUTO_ACTIONS == expected
     permission = change_permission(
         None,
         mode="auto",

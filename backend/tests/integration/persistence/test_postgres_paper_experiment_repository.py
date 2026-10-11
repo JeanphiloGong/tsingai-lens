@@ -14,6 +14,8 @@ from application.repositories.collection_repository import (
 from application.repositories.paper_experiment_repository import (
     PaperExperimentRevisionConflictError,
 )
+from application.core.objectives.analysis.experiment_analysis_writer import ExperimentAnalysisWriter
+from tests.unit.application.test_experiment_analysis_writer import _physical_split_experiment
 from domain.core.paper_experiment import PaperExperimentRevision
 from domain.source import Collection, Document
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
@@ -76,6 +78,59 @@ async def paper_experiment_repository(postgres_session_factory):
         updated_at=NOW.isoformat(),
     )
     return PostgresPaperExperimentRepository(postgres_session_factory)
+
+
+async def test_source_only_batch_rolls_back_every_revision_on_write_failure(
+    paper_experiment_repository, postgres_session_factory, monkeypatch,
+):
+    repository = paper_experiment_repository
+    writer = ExperimentAnalysisWriter(
+        paper_experiment_repository=repository,
+        experiment_analysis_repository=object(),
+    )
+    output = _physical_split_experiment("paper-experiment-doc", distinct_boundary=True)
+    add_revision = repository.add_revision
+    calls = 0
+
+    async def fail_second(revision, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("second revision failed")
+        return await add_revision(revision, **kwargs)
+
+    monkeypatch.setattr(repository, "add_revision", fail_second)
+    with pytest.raises(RuntimeError, match="second revision failed"):
+        async with postgres_session_factory.begin() as transaction:
+            await writer.write_paper_experiment_revisions(
+                experiment_outputs=(output,), transaction=transaction,
+            )
+    assert calls == 2
+    assert await repository.list_latest_for_document("paper-experiment-doc") == ()
+
+
+async def test_source_only_concurrent_saves_without_objective_are_idempotent(
+    paper_experiment_repository, postgres_session_factory,
+):
+    repository = paper_experiment_repository
+    writer = ExperimentAnalysisWriter(
+        paper_experiment_repository=repository,
+        experiment_analysis_repository=object(),
+    )
+    output = _physical_split_experiment("paper-experiment-doc", distinct_boundary=True)
+
+    async def save():
+        async with postgres_session_factory.begin() as transaction:
+            return await writer.write_paper_experiment_revisions(
+                experiment_outputs=(output,), transaction=transaction,
+                created_by="experiment-owner",
+            )
+
+    first, second = await asyncio.gather(save(), save())
+    assert len(first.revisions) == len(second.revisions) == 2
+    assert {item.revision_id for item in first.revisions} == {item.revision_id for item in second.revisions}
+    assert first.selections == first.findings == ()
+    assert len(await repository.list_latest_for_document("paper-experiment-doc")) == 2
 
 
 def _revision(version: int = 1) -> PaperExperimentRevision:

@@ -1,166 +1,94 @@
-"""Reuse and targeted reread rules for PaperExperiment revisions."""
+"""Conservative reuse of all stored experiments covering a routed paper read."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
-from inspect import isawaitable
-from typing import Awaitable, Callable, Iterable
+from typing import Sequence
 
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    _normalized_term,
+    _selection_slices,
+    _term_matches,
+)
+from application.core.objectives.analysis.paper_experiment_extraction import (
+    PaperExperimentSourceBundle,
+)
 from application.repositories.paper_experiment_repository import (
-    PaperExperimentRepository,
     StoredPaperExperimentRevision,
 )
 from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.research_objective import ResearchObjective
 
 
-@dataclass(frozen=True)
-class PaperExperimentReadRequest:
-    """The smallest scientific scope needed by one analysis read."""
+def reusable_paper_experiments(
+    candidates: Sequence[StoredPaperExperimentRevision],
+    *,
+    objective: ResearchObjective,
+    bundle: PaperExperimentSourceBundle,
+) -> tuple[PaperExperimentRevision, ...]:
+    """Reuse fixed facts only when the current read can be fully accounted for.
 
-    document_id: str
-    outcomes: tuple[str, ...] = ()
-    required_context_names: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.document_id.strip():
-            raise ValueError("experiment read requires document_id")
-        object.__setattr__(
-            self,
-            "outcomes",
-            _unique_terms(self.outcomes),
-        )
-        object.__setattr__(
-            self,
-            "required_context_names",
-            _unique_terms(self.required_context_names),
-        )
-
-
-@dataclass(frozen=True)
-class PaperExperimentReadResult:
-    stored: StoredPaperExperimentRevision
-    created_revision: bool
-    reread_required: bool
-
-
-RevisionBuilder = Callable[
-    [StoredPaperExperimentRevision | None, int],
-    PaperExperimentRevision | Awaitable[PaperExperimentRevision],
-]
-
-
-class PaperExperimentReuseService:
-    """Choose a fixed revision, creating only a bounded successor when needed."""
-
-    def __init__(self, repository: PaperExperimentRepository) -> None:
-        self.repository = repository
-
-    async def read_or_reread(
-        self,
-        request: PaperExperimentReadRequest,
-        *,
-        build_revision: RevisionBuilder,
-        created_by: str | None = None,
-        created_at: datetime | None = None,
-    ) -> PaperExperimentReadResult:
-        candidates = await self.repository.list_latest_for_document(request.document_id)
-        latest = next(
-            (
-                item
-                for item in candidates
-                if item.revision.document_id == request.document_id
-                and _has_required_content(item.revision, request)
-            ),
-            None,
-        )
-        if latest is not None:
-            return PaperExperimentReadResult(
-                stored=latest,
-                created_revision=False,
-                reread_required=False,
-            )
-
-        existing = next(
-            (
-                item
-                for item in candidates
-                if item.revision.document_id == request.document_id
-            ),
-            None,
-        )
-        version = (
-            existing.revision.experiment_version + 1 if existing is not None else 1
-        )
-        revision = build_revision(existing, version)
-        if isawaitable(revision):
-            revision = await revision
-        _validate_successor(existing, revision, request.document_id, version)
-        stored = await self.repository.add_revision(
-            revision,
-            created_by=created_by,
-            created_at=created_at,
-        )
-        return PaperExperimentReadResult(
-            stored=stored,
-            created_revision=True,
-            reread_required=existing is not None,
-        )
-
-
-def _has_required_content(
-    revision: PaperExperimentRevision,
-    request: PaperExperimentReadRequest,
-) -> bool:
-    available_outcomes = {
-        item.outcome.casefold() for item in revision.measurements
+    Free-text constraints require fresh scientific assessment. Missing source
+    coverage or any unresolved experiment also returns control to extraction;
+    a single matching result must not hide other experiments in the paper.
+    """
+    if not candidates or not bundle.source_catalog or bundle.omitted_source_refs:
+        return ()
+    if objective.constraints:
+        return ()
+    current_sources = {
+        (str(item["source_kind"]), str(item["source_ref"])): str(item["quote"]).strip()
+        for item in bundle.source_catalog.values()
     }
-    if not set(request.outcomes).issubset(available_outcomes):
-        return False
-    if not request.required_context_names:
-        return True
-    context_names: set[str] = set()
-    for variant in revision.variants:
-        context_names.update(
-            item.name.casefold()
-            for item in (*variant.subject_attributes, *variant.intervention_attributes, *variant.state)
+    covered: set[tuple[str, str]] = set()
+    outcomes: set[str] = set()
+    revisions: list[PaperExperimentRevision] = []
+    for stored in candidates:
+        revision = stored.revision
+        if (
+            stored.archived_at is not None
+            or revision.document_id != bundle.document_id
+            or revision.source_fingerprint != bundle.source_fingerprint
+            or revision.identity_status == "unknown"
+            or any("boundary_scope" not in issue for issue in revision.unresolved_issues)
+        ):
+            return ()
+        material_values = {
+            _normalized_term(attribute.value)
+            for variant in revision.variants
+            for attribute in variant.subject_attributes
+        }
+        if any(_normalized_term(material) not in material_values for material in objective.material_scope):
+            return ()
+        slices = _selection_slices(revision, objective)
+        if not slices or any(
+            not any(
+                selection.comparison_keys
+                and any(_term_matches(factor, variable) for factor in selection.factor_key)
+                for selection in slices
+            )
+            for variable in objective.variables
+        ):
+            return ()
+        outcomes.update(_normalized_term(item.outcome) for item in slices)
+        owners = (
+            revision, *revision.variants, *revision.test_conditions,
+            *revision.measurements, *revision.comparisons,
+            *revision.reported_interpretations,
         )
-    for test in revision.test_conditions:
-        context_names.update(item.name.casefold() for item in test.parameters)
-    return set(request.required_context_names).issubset(context_names)
-
-
-def _validate_successor(
-    existing: StoredPaperExperimentRevision | None,
-    revision: PaperExperimentRevision,
-    document_id: str,
-    expected_version: int,
-) -> None:
-    if revision.document_id != document_id:
-        raise ValueError("reread revision belongs to another document")
-    if revision.experiment_version != expected_version:
-        raise ValueError("reread revision must use the next experiment version")
-    if existing is not None:
-        if revision.experiment_id != existing.revision.experiment_id:
-            raise ValueError("reread must preserve experiment identity")
-    elif not revision.experiment_id.strip():
-        raise ValueError("new experiment requires experiment identity")
-
-
-def _unique_terms(values: Iterable[str]) -> tuple[str, ...]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        term = str(value).strip()
-        key = term.casefold()
-        if term and key not in seen:
-            seen.add(key)
-            result.append(key)
-    return tuple(result)
-
-
-__all__ = [
-    "PaperExperimentReadRequest",
-    "PaperExperimentReadResult",
-    "PaperExperimentReuseService",
-]
+        for owner in owners:
+            for field_name in ("source_refs", "binding_source_refs"):
+                for source in getattr(owner, field_name, ()):
+                    key = (source.source_kind, source.source_ref)
+                    if (
+                        source.document_id != bundle.document_id
+                        or source.source_fingerprint != bundle.source_fingerprint
+                        or current_sources.get(key) != source.quote.strip()
+                    ):
+                        return ()
+                    covered.add(key)
+        revisions.append(revision)
+    if covered != set(current_sources) or not {
+        _normalized_term(item) for item in objective.outcomes
+    } <= outcomes:
+        return ()
+    return tuple(revisions)

@@ -116,6 +116,16 @@ class PostgresCollectionRepository:
                 await _documents_for_collection(session, collection_id),
             )
 
+    async def collection_belongs_to_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> bool:
+        statement = select(Collection.collection_id).where(
+            Collection.collection_id == collection_id,
+            Collection.owner_user_id == owner_user_id,
+        )
+        async with self.session_factory() as session:
+            return await session.scalar(statement) is not None
+
     async def read_document(
         self,
         collection_id: str,

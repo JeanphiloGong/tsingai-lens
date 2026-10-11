@@ -18,8 +18,11 @@ selected ready Documents
   -> lightweight PaperMap (lazy, for discovery navigation)
   -> Objective candidates
 
-confirmed Objective + selected ready Documents
+prepared Source + complete reads
   -> Source-grounded PaperExperiment revisions
+
+confirmed Objective + selected ready Documents
+  -> reuse or create PaperExperiment revisions
   -> ObjectiveExperimentSelection
   -> optional cross-paper ComparisonGroup
   -> Finding
@@ -30,15 +33,17 @@ owns its current preparation status and current Source and Profile. A Paper Map
 is a lazy, document-scoped navigation artifact built by Objective discovery or
 analysis for the explicitly selected ready Documents. Adding or retrying one
 paper never rebuilds unrelated papers or maps.
-Objective analysis persists a new immutable PaperExperiment revision and
-Objective selection for each completed run; it does not reuse a runtime
-per-document Evidence checkpoint. A later supplement creates a successor
+Objective analysis selects fixed PaperExperiment revisions, reusing suitable
+stored facts or extracting and persisting new revisions as needed. It does not
+reuse a runtime per-document Evidence checkpoint. A later supplement creates a successor
 revision while earlier Findings keep their original selection references.
 
-The Research Agent can also author one paper experiment directly after reading
-complete Sources. It first proposes a review-only Draft, then an approved write
-creates the same immutable revision and Selection graph through the canonical
-writer. This Agent path does not publish a Finding automatically.
+The Research Agent can also author one or more paper-local experiments directly
+after reading complete Sources. It first proposes a review-only Draft, then an
+approved write creates immutable revisions through the canonical writer. This
+paper-fact path does not require or publish an Objective analysis and does not
+create a Selection or Finding automatically. A later Objective analysis can
+reuse revisions from one or more papers.
 
 ## Ownership Map
 

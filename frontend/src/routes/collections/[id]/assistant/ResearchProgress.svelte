@@ -10,6 +10,7 @@
 		type ChatProgress
 	} from '../../../_shared/chatSessions';
 	export let progress: ChatProgress;
+	export let active = true;
 	export let progressHistory: ChatProgress[] = [];
 	export let readings: CurrentReading[] = [];
 	let progressHistoryExpanded = false;
@@ -19,12 +20,20 @@
 	);
 	$: actionSummary = actionNames.join(' · ');
 	$: actionCounts = getChatProgressActions(progress);
+	$: executionPlan = progress.execution_plan;
 	function progressLabel(value: ChatProgress) {
+		if (value.phase === 'model_retry') {
+			return $t('researchAgent.progress.model_retry', {
+				attempt: value.retry_attempt ?? value.retry_count ?? 1,
+				seconds: Math.ceil((value.retry_delay_ms ?? 0) / 1000)
+			});
+		}
 		return $t(`researchAgent.progress.${value.phase}`, { cycle: value.cycle_index ?? 0 });
 	}
 </script>
 
 <div class="assistant-progress" data-testid="research-progress">
+	{#if active}
 	<button
 		class="progress-current"
 		type="button"
@@ -49,6 +58,24 @@
 			{#if actionCounts}<span>{$t('researchAgent.progress.actions', actionCounts)}</span>{/if}
 		</div>
 	{/if}
+	{/if}
+	{#if executionPlan}
+		<div class="progress-plan" data-testid="progress-plan" aria-label="{$t('researchAgent.progress.planLabel')}">
+			<div class="progress-plan__header">
+				<strong>{$t('researchAgent.progress.planTitle')}</strong>
+				<span>{$t(`researchAgent.progress.planStatus.${executionPlan.status}`)}</span>
+			</div>
+			<ol>
+				{#each executionPlan.steps as step (step.step_id)}
+					<li class:complete={step.status === 'completed'}>
+						{#if step.status === 'completed'}<Check size={12} />{:else}<span class="plan-step-dot" aria-hidden="true"></span>{/if}
+						<span>{step.action}</span>
+					</li>
+				{/each}
+			</ol>
+		</div>
+	{/if}
+	{#if active}
 	{#each readings as reading (reading.toolCallId)}
 		<div
 			class="reading-current"
@@ -91,6 +118,7 @@
 			{/each}
 		</ol>
 	{/if}
+	{/if}
 </div>
 
 <style>
@@ -132,6 +160,39 @@
 		margin: 0 0 4px 14px;
 		color: var(--text-secondary);
 		line-height: 18px;
+	}
+	.progress-plan {
+		margin: 4px 0 8px 14px;
+		padding: 8px 10px;
+		border-left: 2px solid var(--brand-primary);
+		background: var(--surface-secondary);
+	}
+	.progress-plan__header {
+		display: flex;
+		justify-content: space-between;
+		gap: 8px;
+		color: var(--text-primary);
+	}
+	.progress-plan ol {
+		margin: 6px 0 0;
+		padding: 0;
+		list-style: none;
+	}
+	.progress-plan li {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		margin-top: 4px;
+	}
+	.progress-plan li.complete {
+		color: var(--text-secondary);
+	}
+	.plan-step-dot {
+		width: 6px;
+		height: 6px;
+		flex: 0 0 6px;
+		border: 1px solid currentColor;
+		border-radius: 50%;
 	}
 	.progress-action {
 		color: var(--text-primary);

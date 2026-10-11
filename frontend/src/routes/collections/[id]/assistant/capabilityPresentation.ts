@@ -77,11 +77,50 @@ export function numberValue(data: Record<string, unknown>, key: string) {
 	const value = data[key];
 	return typeof value === 'number' ? value : 0;
 }
+
+export function paperSourceIssues(message: ChatMessage | null) {
+	const result = message?.tool_result;
+	if (!Array.isArray(result?.data.papers)) return [];
+	return result.data.papers.flatMap((value) => {
+		if (!value || typeof value !== 'object') return [];
+		const paper = value as Record<string, unknown>;
+		const status = String(paper.source_status ?? '');
+		if (
+			!['preparing', 'not_prepared', 'preparation_failed', 'unavailable', 'read_failed'].includes(
+				status
+			)
+		) {
+			return [];
+		}
+		const documentId = String(paper.document_id ?? '');
+		const resource = result.resource_refs.find(
+			(ref) => ref.resource_type === 'document' && ref.resource_id === documentId
+		);
+		const title = [paper.title, paper.filename].find(
+			(text) => typeof text === 'string' && text.trim() && text !== documentId
+		);
+		return [
+			{
+				documentId,
+				title: typeof title === 'string' ? title : '',
+				status,
+				failed: ['preparation_failed', 'unavailable', 'read_failed'].includes(status),
+				href: resource?.href?.startsWith('/collections/')
+					? (resource.href as `/collections/${string}`)
+					: null
+			}
+		];
+	});
+}
+
 export function resultSummary(message: ChatMessage, toolName: string | null, translate: Translate) {
 	const result = message.tool_result;
 	if (!result) return '';
 	const name = toolName;
 	if (result.status === 'failed') {
+		if (result.error_code === 'document_sources_not_ready') {
+			return translate('researchAgent.capability.paperSourceUnavailable');
+		}
 		return translate('researchAgent.capability.failed', { name: capabilityName(name, translate) });
 	}
 	if (result.status === 'queued') {
@@ -98,6 +137,24 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 			objectives: numberValue(result.data, 'objective_count')
 		});
 	}
+	if (name === 'browse_collection_papers') {
+		const count = numberValue(result.data, 'returned_paper_count');
+		if (count === 0 && result.data.query) {
+			return translate('researchAgent.capability.paperQueryNoMatch');
+		}
+		return translate(
+			typeof result.data.next_offset === 'number'
+				? 'researchAgent.capability.paperBrowseMore'
+				: 'researchAgent.capability.paperBrowseCount',
+			{
+				count,
+				remaining: Math.max(
+					0,
+					numberValue(result.data, 'paper_total') - numberValue(result.data, 'next_offset')
+				)
+			}
+		);
+	}
 	if (name === 'inspect_document_sources') {
 		return translate('researchAgent.capability.documentSourceCount', {
 			count: numberValue(result.data, 'match_total')
@@ -113,7 +170,10 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 		const documentTitle =
 			(typeof result.data.document_title === 'string' && result.data.document_title.trim()) ||
 			(typeof result.data.title === 'string' && result.data.title.trim()) ||
-			(document && typeof document === 'object' && 'title' in document && typeof document.title === 'string'
+			(document &&
+			typeof document === 'object' &&
+			'title' in document &&
+			typeof document.title === 'string'
 				? document.title.trim()
 				: '');
 		const location =
@@ -122,7 +182,9 @@ export function resultSummary(message: ChatMessage, toolName: string | null, tra
 			'';
 		const page = typeof result.data.page === 'number' ? ` · p. ${result.data.page}` : '';
 		return translate('researchAgent.capability.sourceReadSummary', {
-			source: [documentTitle, location].filter(Boolean).join(' · ') + page || translate('researchAgent.capability.sourcePassage')
+			source:
+				[documentTitle, location].filter(Boolean).join(' · ') + page ||
+				translate('researchAgent.capability.sourcePassage')
 		});
 	}
 	if (name === 'inspect_table') {

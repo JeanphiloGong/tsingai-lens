@@ -9,9 +9,6 @@ import pytest
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
-from application.core.objectives.paper_experiment_authoring_service import (
-    PaperExperimentAuthoringService,
-)
 from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.research_objective import (
@@ -271,8 +268,7 @@ async def test_selection_version_rolls_back_and_marks_running_snapshot_failed():
     assert repository.failed["expected_status"] == "running"
 
 
-@pytest.mark.parametrize("origin", ["human_authored", "agent_authored"])
-async def test_authored_publication_preserves_coverage_with_real_repository(origin):
+async def test_authored_publication_preserves_coverage_with_real_repository():
     repository = MemoryObjectiveRepository()
     objective = replace(_objective(), active_analysis_version=None)
     await repository.replace(
@@ -305,49 +301,29 @@ async def test_authored_publication_preserves_coverage_with_real_repository(orig
     )
     transactions = _Transactions()
     writer = _Writer()
-    if origin == "human_authored":
-        service = FindingAuthoringService(
-            collection_service=_Collection(), objective_repository=repository,
-            experiment_query_service=_Query(), experiment_analysis_writer=writer,
-            experiment_analysis_transaction_factory=transactions,
-        )
-        await service.create_selection_version(
-            collection_id="collection-1", objective_id="objective-1",
-            source_analysis_version=1, selection_ids=("selection-1",),
-            created_by_user_id="user-1",
-        )
-    else:
-        async def write_experiment(**kwargs):
-            writer.call = kwargs
-            return SimpleNamespace(revisions=(), selections=(), groups=(), findings=())
-
-        writer.write_single_experiment_revision = write_experiment
-        service = PaperExperimentAuthoringService(
-            collection_service=_Collection(), source_artifact_repository=None,
-            objective_repository=repository, experiment_analysis_writer=writer,
-            experiment_analysis_transaction_factory=transactions,
-        )
-        await service.write(
-            prepared=SimpleNamespace(objective=objective, analysis=source, output=None),
-            collection_id="collection-1", created_by="user-1",
-            created_by_tool_call_id="call-1",
-        )
+    service = FindingAuthoringService(
+        collection_service=_Collection(), objective_repository=repository,
+        experiment_query_service=_Query(), experiment_analysis_writer=writer,
+        experiment_analysis_transaction_factory=transactions,
+    )
+    await service.create_selection_version(
+        collection_id="collection-1", objective_id="objective-1",
+        source_analysis_version=1, selection_ids=("selection-1",),
+        created_by_user_id="user-1",
+    )
 
     published = await repository.read_analysis("collection-1", "objective-1", 2)
     assert published.status == "succeeded"
-    assert published.origin == origin
+    assert published.origin == "human_authored"
     assert published.scientific_record_source == "experiment_graph"
     assert published.source_analysis_version == 1
     assert published.created_by_user_id == "user-1"
-    assert published.created_by_tool_call_id == (
-        "call-1" if origin == "agent_authored" else None
-    )
+    assert published.created_by_tool_call_id is None
     with pytest.raises(ValueError, match="source analysis version is stale"):
         await repository.queue_analysis(
             "collection-1", "objective-1", document_inputs=inputs,
             pipeline_version="test", model_name=None, prompt_versions={},
-            origin=origin, source_analysis_version=1, created_by_user_id="user-1",
-            created_by_tool_call_id="call-2" if origin == "agent_authored" else None,
+            origin="human_authored", source_analysis_version=1, created_by_user_id="user-1",
         )
     assert await repository.list_contributions("collection-1", "objective-1", 2) == tuple(
         replace(item, analysis_version=2) for item in coverage

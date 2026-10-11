@@ -3,6 +3,7 @@ import type { ChatMessage, ChatToolResult } from '../../../_shared/chatSessions'
 import {
 	buildChatPresentation,
 	getChatSessionActivity,
+	getTurnRecoveryState,
 	getModelServiceErrorKey,
 	getRecoveredChatProgress,
 	getCurrentReadings,
@@ -22,6 +23,49 @@ describe('getModelServiceErrorKey', () => {
 			'researchAgent.modelServiceUnavailable'
 		);
 		expect(getModelServiceErrorKey('invalid_tool_batch')).toBeNull();
+	});
+});
+
+describe('getTurnRecoveryState', () => {
+	it('uses the persisted execution plan disposition for permission and stalled turns', () => {
+		expect(
+			getTurnRecoveryState({
+				status: 'failed',
+				completion_reason: null,
+				execution_plan: {
+					plan_id: 'plan-1',
+					plan_version: 2,
+					status: 'permission_denied',
+					steps: []
+				}
+			})
+		).toBe('permissionDenied');
+		expect(
+			getTurnRecoveryState({
+				status: 'completed',
+				completion_reason: 'model_answer',
+				progress: {
+					execution_plan: {
+						plan_id: 'plan-2',
+						plan_version: 3,
+						status: 'stalled',
+						steps: []
+					}
+				}
+			})
+		).toBe('noProgress');
+		expect(
+			getTurnRecoveryState({
+				status: 'completed',
+				completion_reason: 'model_answer',
+				execution_plan: {
+					plan_id: 'plan-3',
+					plan_version: 4,
+					status: 'resource_limited',
+					steps: []
+				}
+			})
+		).toBe('resourceLimited');
 	});
 });
 
@@ -160,6 +204,61 @@ describe('buildChatPresentation', () => {
 		).toMatchObject({ status: 'failed', excerpt: '' });
 	});
 
+	it('does not reuse an older Source version with the same reference', () => {
+		const read = message('read-v2', 'assistant', {
+			toolCallId: 'read-v2',
+			toolName: 'read_source'
+		});
+		read.tool_calls[0].arguments = {
+			document_id: 'paper-a',
+			source_kind: 'text_window',
+			source_ref: 'results-1'
+		};
+		const old = message('old-result', 'tool', {
+			toolResult: {
+				...result('old-read'),
+				data: {
+					document_id: 'paper-a',
+					source_kind: 'text_window',
+					source_ref: 'results-1',
+					source_digest: 'old-digest',
+					page: 2,
+					content: 'Old parsed Source content.'
+				}
+			}
+		});
+		const current = message('current-result', 'tool', {
+			toolResult: {
+				...result('read-v2'),
+				data: {
+					document_id: 'paper-a',
+					source_kind: 'text_window',
+					source_ref: 'results-1',
+					source_digest: 'new-digest',
+					page: 8,
+					content: 'Current reparsed Source content.'
+				}
+			}
+		});
+		const papers = message('papers', 'tool', {
+			toolResult: {
+				...result('papers'),
+				data: {
+					papers: [
+						{ document_id: 'paper-a', filename: 'Paper A', source_ref: 'results-1', source_digest: 'old-digest' },
+						{ document_id: 'paper-a', filename: 'Paper A', source_ref: 'results-1', source_digest: 'new-digest' }
+					]
+				}
+			}
+		});
+
+		expect(getCurrentReadings([message('question', 'user'), papers, old, read, current])[0]).toMatchObject({
+			status: 'received',
+			page: '8',
+			excerpt: 'Current reparsed Source content.'
+		});
+	});
+
 	it('does not attach a different paper or source to a parallel pending read', () => {
 		const question = message('question', 'user');
 		const search = message('search-result', 'tool', {
@@ -266,6 +365,13 @@ describe('buildChatPresentation', () => {
 				null
 			)
 		).toBe('idle');
+		expect(
+			getChatSessionActivity(
+				[request, message('queued-result', 'tool', { toolResult: result('write', 'queued') })],
+				false,
+				null
+			)
+		).toBe('recovering');
 	});
 
 	it('shows a partially completed reading group as in progress', () => {

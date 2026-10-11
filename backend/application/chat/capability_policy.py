@@ -13,7 +13,6 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from application.chat import intent_policy
 from application.chat.capabilities.contracts import AgentContext, ToolSpec
 from application.chat.capabilities.registry import CapabilityRegistry
 from domain.chat import (
@@ -51,20 +50,22 @@ def validate_batch(
 ) -> tuple[tuple[str, str] | None, dict[str, BaseModel]]:
     permission_mode = ToolPermissionMode(permission_mode)
     successful_results = active_successful_results_by_name(messages)
-    latest_user = next(
-        (message for message in reversed(messages) if message.role is ChatMessageRole.USER),
-        None,
-    )
-    request_text = str(latest_user.content if latest_user is not None else "").casefold()
-    _, forbidden_writes = intent_policy._write_request_scope(request_text)
     validated_arguments: dict[str, BaseModel] = {}
     for call, handler in requested:
+        if any(call.name in result.get("deferred_tool_names", ())
+               for result in successful_results.get("discover_research_tools", ())):
+            return (
+                ("action_deferred_for_request",
+                 "This action was explicitly deferred for this user request. Continue the requested work without it; a plan update or write approval does not expand the request."),
+                validated_arguments,
+            )
         if (
             call.name == "discover_research_tools"
             and permission_mode is ToolPermissionMode.READ_ONLY
             and any(
                 isinstance(name, str)
-                and name in intent_policy.WRITE_CAPABILITIES
+                and (candidate := capabilities.get(name)) is not None
+                and candidate.spec.risk is ToolRisk.WRITE
                 for name in (call.arguments.get("tool_names") or ())
             )
         ):
@@ -88,14 +89,6 @@ def validate_batch(
                 (
                     "tool_permission_denied",
                     "The current tool permission mode does not allow this research action.",
-                ),
-                validated_arguments,
-            )
-        if call.risk is ToolRisk.WRITE and call.name in forbidden_writes:
-            return (
-                (
-                    "current_request_prohibits_tool",
-                    "The current request prohibits this research action.",
                 ),
                 validated_arguments,
             )
@@ -173,21 +166,20 @@ def select_tool_specs(
     messages: list[ChatMessage],
     calls: list[ChatToolCall],
     *,
-    inherited_completed_writes: set[str] | None = None,
     permission_mode: ToolPermissionMode | str = ToolPermissionMode.CONFIRM,
 ) -> tuple[ToolSpec, ...]:
     """Select currently available tool definitions for the next model turn.
 
     Visibility is derived from the active discovery/results trajectory. The
-    request permission mode and same-continuation write de-duplication remain
-    deterministic backend boundaries; research-stage ordering is left to the
-    model.
+    permission mode is a deterministic backend boundary; research-stage
+    ordering and whether another resource needs the same capability remain
+    model decisions.
     """
     permission_mode = ToolPermissionMode(permission_mode)
     if permission_mode is ToolPermissionMode.NONE:
         return ()
 
-    specs = capabilities.specs
+    specs = (*capabilities.specs, capabilities.execution_plan.spec)
 
     def select_names(names: set[str] | frozenset[str]) -> tuple[ToolSpec, ...]:
         return tuple(
@@ -210,162 +202,31 @@ def select_tool_specs(
     loaded_names.update(
         set(successful_results).intersection(capabilities.discovery.tools)
     )
+    loaded_names.difference_update(
+        name for result in successful_results.get("discover_research_tools", ())
+        for name in result.get("deferred_tool_names", ())
+    )
 
-    latest_user = next(
-        (
-            message
-            for message in reversed(messages)
-            if message.role is ChatMessageRole.USER
-        ),
-        None,
-    )
-    user_text = str(latest_user.content if latest_user is not None else "").casefold()
-    requested_names = intent_policy.capability_names_for_intent(
-        user_text,
-        has_source_context=bool(
-            latest_user is not None and latest_user.source_contexts
-        ),
-        prior_tool_names={
-            request.name
-            for message in messages
-            for request in message.tool_calls
-        },
-    )
     if permission_mode is ToolPermissionMode.READ_ONLY:
-        requested_names.difference_update(intent_policy.WRITE_CAPABILITIES)
-        loaded_names.difference_update(
+        write_names = {
             name
             for name in loaded_names
             if (handler := capabilities.get(name)) is not None
             and handler.spec.risk is ToolRisk.WRITE
-        )
+        }
+        loaded_names.difference_update(write_names)
 
-    completed_writes = {
-        call.name
-        for call in calls
-        if call.risk is ToolRisk.WRITE
-        and call.status is ToolCallStatus.SUCCEEDED
-    }
-    completed_writes.update(inherited_completed_writes or ())
-    allowed_names = loaded_names | requested_names.intersection(
-        intent_policy.WRITE_CAPABILITIES
-    )
-    allowed_names.difference_update(completed_writes)
+    allowed_names = loaded_names
 
     selected = select_names(allowed_names)
     if capabilities.discovery.tools:
-        return (*selected, capabilities.discovery.spec)
+        return (
+            *selected,
+            capabilities.discovery.spec_for_permission(
+                allow_writes=permission_mode is not ToolPermissionMode.READ_ONLY,
+            ),
+        )
     return selected
-
-
-def _pending_source_search_candidates(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-) -> tuple[tuple[str, str, str], ...]:
-    # Each query in the latest navigation batch needs one exact read. Search
-    # matches remain alternatives, not a requirement to read every result.
-    for result in successful_results.get("search_sources", ()):
-        candidates: list[tuple[str, str, str]] = []
-        seen: set[tuple[str, str, str]] = set()
-        inspected = False
-        for item in result.get("matches") or ():
-            if not isinstance(item, Mapping):
-                continue
-            candidate = (
-                str(item.get("document_id") or "").strip(),
-                str(item.get("source_kind") or "").strip(),
-                str(item.get("source_ref") or "").strip(),
-            )
-            if all(candidate) and candidate not in seen:
-                seen.add(candidate)
-                candidates.append(candidate)
-                inspected = inspected or has_successful_exact_source_read(
-                    successful_results, (candidate,), source_digest=item.get("source_digest"),
-                )
-        if candidates and not inspected:
-            return tuple(candidates)
-    return ()
-
-
-def _pending_document_overviews(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
-) -> tuple[str, ...]:
-    if not successful_results.get("inspect_published_finding") or not any(
-        item.get("source_inspection_required") is True
-        for item in successful_results.get("discover_research_tools", ())
-    ):
-        return ()
-    inspected = {
-        str(item.get("document", {}).get("document_id") or "")
-        for item in successful_results.get("inspect_document_sources", ())
-        if "document_outline" in item
-    }
-    failed = {
-        str(call.arguments.get("document_id") or "") for call in calls
-        if call.name == "inspect_document_sources" and call.status is ToolCallStatus.FAILED
-    }
-    documents = []
-    for result in successful_results.get("inspect_published_finding", ()):
-        items = [*result.get("evidence", ()), *result.get("replacement_evidence", ())]
-        finding = result.get("finding")
-        if isinstance(finding, Mapping):
-            items.extend(finding.get("paper_contributions", ()))
-        documents.extend(str(item.get("document_id") or "") for item in items if isinstance(item, Mapping))
-    documents.extend(str(item.get("document_id") or "")
-                     for item in successful_results.get("read_source", ()))
-    documents.extend(str(document_id)
-                     for item in successful_results.get("search_sources", ())
-                     for document_id in item.get("document_ids", ()))
-    return tuple(dict.fromkeys(item for item in documents if item and item not in inspected | failed))
-
-
-def _pending_finding_sources(
-    successful_results: Mapping[str, list[Mapping[str, Any]]],
-    calls: list[ChatToolCall] | tuple[ChatToolCall, ...] = (),
-) -> tuple[tuple[str, str, str], ...]:
-    if not any(item.get("source_inspection_required") is True
-               for item in successful_results.get("discover_research_tools", ())):
-        return ()
-    failed = {
-        tuple(str(call.arguments.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
-        for call in calls if call.name == "read_source" and call.status is ToolCallStatus.FAILED
-    }
-    pending = []
-    for result in successful_results.get("inspect_published_finding", ()):
-        for item in (*result.get("evidence", ()), *result.get("replacement_evidence", ())):
-            candidate = tuple(str(item.get(key) or "") for key in ("document_id", "source_kind", "source_ref"))
-            if (all(candidate) and candidate not in failed and candidate not in pending
-                    and not has_successful_exact_source_read(successful_results, (candidate,))):
-                pending.append(candidate)
-        finding = result.get("finding")
-        contribution_documents = {
-            str(item.get("document_id") or "").strip()
-            for item in (finding.get("paper_contributions", ()) if isinstance(finding, Mapping) else ())
-            if isinstance(item, Mapping) and item.get("document_id")
-        }
-        read_documents = {identity[0] for identity in complete_source_reads(successful_results)}
-        failed_documents = {
-            str(call.arguments.get("document_id") or "").strip()
-            for call in calls
-            if call.name in {"read_source", "inspect_table"}
-            and call.status is ToolCallStatus.FAILED
-            and call.arguments.get("document_id")
-        }
-        # Contributions without Evidence still need one bounded Source check;
-        # otherwise a challenged paper such as ELI could be silently skipped.
-        for overview in successful_results.get("inspect_document_sources", ()):
-            document = overview.get("document")
-            document_id = str(document.get("document_id") or "").strip() if isinstance(document, Mapping) else ""
-            if not document_id or document_id not in contribution_documents or document_id in read_documents | failed_documents:
-                continue
-            for source in overview.get("sources", ()):
-                if not isinstance(source, Mapping):
-                    continue
-                candidate = tuple(str(source.get(key) or "").strip() for key in ("document_id", "source_kind", "source_ref"))
-                if all(candidate) and candidate not in pending:
-                    pending.append(candidate)
-                    break
-    return tuple(pending)
 
 
 def _section_reading_progress(
@@ -603,7 +464,35 @@ def stage_instruction(
     for name in ("create_finding_draft", "propose_paper_experiment_draft", "propose_research_plan"):
         values = successful_results.get(name, ())
         if values:
-            drafts[name] = values[-1]
+            # Full payloads remain in paired tool results and durable drafts.
+            # Repeating them in a pinned instruction can exhaust the context.
+            keys = ("draft_id", "draft_digest", "document_id", "objective_id", "draft_status",
+                    "experiment_count", "source_fingerprint", "source_snapshots", "persistence")
+            latest = values[-1]
+            drafts[name] = {key: latest[key] for key in keys if key in latest}
+            if isinstance(latest.get("draft"), Mapping):
+                drafts[name]["draft"] = {
+                    key: latest["draft"][key]
+                    for key in ("draft_id", "source_analysis_version", "selection_ids", "finding_id")
+                    if key in latest["draft"]
+                }
+    experiment_drafts = successful_results.get("propose_paper_experiment_draft", ())
+    if experiment_drafts:
+        by_document = {}
+        for draft in experiment_drafts:
+            if draft.get("document_id"):
+                by_document[draft["document_id"]] = {
+                    key: draft[key] for key in ("document_id", "draft_id", "draft_digest", "experiment_count", "source_fingerprint")
+                    if key in draft
+                }
+        observations["paper_experiment_drafts"] = list(by_document.values())
+    saved_revisions = successful_results.get("create_paper_experiment_revision", ())
+    if saved_revisions:
+        observations["saved_paper_experiments"] = [
+            {key: revision[key] for key in ("document_id", "experiment_id", "experiment_version") if key in revision}
+            for result in saved_revisions
+            for revision in result.get("revisions", ()) if isinstance(revision, Mapping)
+        ]
     if drafts:
         observations["latest_transient_results"] = drafts
     elif prior_experiment_draft and set(tool_names).intersection({
@@ -630,32 +519,6 @@ def stage_instruction(
         "source locators and repair details; choose the next action for the active request.\n"
         + json.dumps(observations, ensure_ascii=False)
     )
-
-def completed_write_names(messages: list[ChatMessage]) -> set[str]:
-    """Find writes completed before an approval continuation resumed.
-
-    A fresh user message starts a new intent turn, so its call list is empty
-    and these names are intentionally not carried over by ``run_turn``.
-    Approval resumption has no new user message, though, and must preserve
-    the same trajectory's write boundary while the model chooses its next
-    read or draft step.
-    """
-    names_by_call_id = {
-        request.tool_call_id: request.name
-        for message in messages
-        for request in message.tool_calls
-    }
-    return {
-        name
-        for message in messages
-        if message.role is ChatMessageRole.TOOL
-        and message.tool_result is not None
-        and message.tool_result.status
-        in {ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED}
-        for name in (names_by_call_id.get(message.tool_call_id),)
-        if name in intent_policy.WRITE_CAPABILITIES
-    }
-
 
 def _successful_results_by_name(
     messages: list[ChatMessage],

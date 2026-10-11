@@ -1,9 +1,9 @@
-"""Source-grounded Agent authoring for one PaperExperiment revision."""
+"""Source-grounded Agent authoring for one paper's experiment revisions."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Mapping
 
@@ -13,30 +13,39 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentModelOutput,
+    PaperExperimentDraftValidationError,
     ReconciledPaperExperimentOutput,
     prepare_model_output,
 )
 from application.core.objectives.analysis.paper_experiment_extraction import (
     build_source_bundle,
 )
-from application.repositories.objective_repository import (
-    ObjectiveAnalysis,
-    ObjectiveRepository,
-)
 from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.repositories.transaction import RepositoryTransactionFactory
 from application.source.collection_service import CollectionService
-from domain.core.research_objective import ResearchObjective
 
 
 @dataclass(frozen=True)
 class PreparedPaperExperimentDraft:
-    objective: ResearchObjective
-    analysis: ObjectiveAnalysis
+    collection_id: str
     output: ReconciledPaperExperimentOutput
     source_fingerprint: str
     draft_digest: str
-    source_digests: Mapping[str, str]
+    source_digests: Mapping[tuple[str, str], str]
+
+
+class PaperExperimentAuthoringError(ValueError):
+    """A recoverable PaperExperiment authoring prerequisite failed."""
+
+    error_code = "paper_experiment_authoring_failed"
+
+
+class PaperExperimentDraftEmptyError(PaperExperimentAuthoringError):
+    error_code = "paper_experiment_draft_empty"
+
+
+class PaperExperimentSourceChangedError(PaperExperimentAuthoringError):
+    error_code = "paper_experiment_source_changed"
 
 
 def _canonical_digest(value: Mapping[str, Any]) -> str:
@@ -48,6 +57,15 @@ def _canonical_digest(value: Mapping[str, Any]) -> str:
         default=str,
     )
     return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _source_digest_map(payloads: tuple[Mapping[str, Any], ...]) -> dict[tuple[str, str], str]:
+    return {
+        (str(source["source_kind"]), str(source["source_ref"])): sha256(
+            str(source["_canonical_content"]).encode("utf-8")
+        ).hexdigest()
+        for source in payloads
+    }
 
 
 def _source_payloads(document: Any) -> tuple[Mapping[str, Any], ...]:
@@ -100,20 +118,18 @@ def _source_payloads(document: Any) -> tuple[Mapping[str, Any], ...]:
 
 
 class PaperExperimentAuthoringService:
-    """Validate an Agent draft and hand one revision to the canonical writer."""
+    """Validate paper facts and save the reviewed revisions independently."""
 
     def __init__(
         self,
         *,
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
-        objective_repository: ObjectiveRepository,
         experiment_analysis_writer: ExperimentAnalysisWriter,
         experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.source_artifact_repository = source_artifact_repository
-        self.objective_repository = objective_repository
         self.experiment_analysis_writer = experiment_analysis_writer
         self.experiment_analysis_transaction_factory = experiment_analysis_transaction_factory
 
@@ -122,33 +138,10 @@ class PaperExperimentAuthoringService:
         *,
         collection_id: str,
         user_id: str,
-        objective_id: str,
         document_id: str,
         raw_draft: Mapping[str, Any],
     ) -> PreparedPaperExperimentDraft:
         await self.collection_service.get_collection_for_user(collection_id, user_id)
-        objective = await self.objective_repository.read_objective(
-            collection_id, objective_id
-        )
-        if objective is None:
-            raise FileNotFoundError(
-                f"research objective not found: {collection_id}/{objective_id}"
-            )
-        if objective.confirmation_status != "confirmed":
-            raise ValueError("confirm the research objective before authoring an experiment")
-        if objective.active_analysis_version is None:
-            raise ValueError(
-                "start and publish an active Objective analysis before authoring an experiment"
-            )
-        analysis = await self.objective_repository.read_analysis(
-            collection_id,
-            objective_id,
-            objective.active_analysis_version,
-        )
-        if analysis is None:
-            raise ValueError("active Objective analysis could not be loaded")
-        if analysis.status != "succeeded":
-            raise ValueError("active Objective analysis is not a completed snapshot")
         document = await self.source_artifact_repository.read_document(
             collection_id, document_id
         )
@@ -173,37 +166,42 @@ class PaperExperimentAuthoringService:
             source_fingerprint=source_fingerprint,
             source_payloads=source_payloads,
         )
-        output = PaperExperimentModelOutput.from_model_mapping(
-            raw_draft,
-            document_id=document_id,
-            source_fingerprint=source_fingerprint,
-            source_labels=bundle.source_catalog,
-        )
-        reconciled = prepare_model_output(output, objective=objective)
+        try:
+            output = PaperExperimentModelOutput.from_model_mapping(
+                raw_draft,
+                document_id=document_id,
+                source_fingerprint=source_fingerprint,
+                source_labels=bundle.source_catalog,
+            )
+            reconciled = prepare_model_output(output)
+        except PaperExperimentDraftValidationError:
+            raise
+        except ValueError as exc:
+            detail = " ".join(str(exc).split())
+            path = detail.split(" ", 1)[0] if detail.startswith("experiments[") else None
+            raise PaperExperimentDraftValidationError(
+                detail or "PaperExperiment draft failed deterministic validation.",
+                validation_path=path,
+            ) from exc
         if not reconciled.output.experiments:
-            raise ValueError("Agent draft contains no source-supported experiment")
+            raise PaperExperimentDraftEmptyError(
+                "Agent draft contains no source-supported experiment"
+            )
         digest = _canonical_digest(
             {
                 "collection_id": collection_id,
-                "objective_id": objective_id,
-                "source_analysis_version": analysis.analysis_version,
                 "document_id": document_id,
                 "source_fingerprint": source_fingerprint,
+                "source_catalog": bundle.source_catalog,
                 "draft": raw_draft,
             }
         )
         return PreparedPaperExperimentDraft(
-            objective=objective,
-            analysis=analysis,
+            collection_id=collection_id,
             output=reconciled,
             source_fingerprint=source_fingerprint,
             draft_digest=digest,
-            source_digests={
-                str(source["source_ref"]): sha256(
-                    str(source["_canonical_content"]).encode("utf-8")
-                ).hexdigest()
-                for source in source_payloads
-            },
+            source_digests=_source_digest_map(source_payloads),
         )
 
     async def write(
@@ -212,67 +210,49 @@ class PaperExperimentAuthoringService:
         prepared: PreparedPaperExperimentDraft,
         collection_id: str,
         created_by: str,
-        created_by_tool_call_id: str,
     ) -> ExperimentAnalysisWriteResult:
         if self.experiment_analysis_transaction_factory is None:
             raise RuntimeError(
-                "PaperExperiment authoring requires a shared analysis transaction"
+                "PaperExperiment authoring requires an atomic revision transaction"
             )
-        coverage = await self.objective_repository.list_contributions(
-            collection_id, prepared.objective.objective_id,
-            prepared.analysis.analysis_version,
+        if prepared.collection_id != collection_id:
+            raise ValueError("prepared paper experiment belongs to another collection")
+        await self.collection_service.get_collection_for_user(collection_id, created_by)
+        document_record = await self.collection_service.get_document(
+            collection_id, prepared.output.output.document_id
         )
-        _objective, queued = await self.objective_repository.queue_analysis(
-            collection_id,
-            prepared.objective.objective_id,
-            document_inputs=prepared.analysis.document_inputs,
-            pipeline_version=prepared.analysis.pipeline_version,
-            model_name=prepared.analysis.model_name,
-            prompt_versions=dict(prepared.analysis.prompt_versions),
-            origin="agent_authored",
-            created_by_user_id=created_by,
-            created_by_tool_call_id=created_by_tool_call_id,
-            source_analysis_version=prepared.analysis.analysis_version,
+        document = await self.source_artifact_repository.read_document(
+            collection_id, prepared.output.output.document_id
         )
-        claimed = await self.objective_repository.claim_analysis(
-            collection_id,
-            prepared.objective.objective_id,
-            queued.analysis_version,
-        )
-        if claimed is None:
-            raise ValueError("agent experiment analysis snapshot could not be claimed")
-        try:
-            async with self.experiment_analysis_transaction_factory.begin() as transaction:
-                result = await self.experiment_analysis_writer.write_single_experiment_revision(
-                    collection_id=collection_id,
-                    objective=prepared.objective,
-                    analysis=claimed,
-                    experiment_output=prepared.output,
-                    create_selection=True,
-                    created_by=created_by,
-                    transaction=transaction,
-                )
-                await self.objective_repository.publish_experiment_analysis(
-                    collection_id,
-                    prepared.objective.objective_id,
-                    claimed.analysis_version,
-                    contributions=tuple(
-                        replace(item, analysis_version=claimed.analysis_version)
-                        for item in coverage
-                    ),
-                    transaction=transaction,
-                )
-        except Exception as exc:
-            await self.objective_repository.fail_analysis(
-                collection_id,
-                prepared.objective.objective_id,
-                claimed.analysis_version,
-                error_code="authored_experiment_publish_failed",
-                error_message=str(exc),
-                expected_status="running",
+        if document is None:
+            raise FileNotFoundError("prepared Source document is no longer available")
+        current_fingerprint = str(
+            document_record.document.preparation_fingerprint
+            or document_record.document.source_fingerprint
+            or document.metadata.get("source_fingerprint")
+            or ""
+        ).strip()
+        if current_fingerprint != prepared.source_fingerprint:
+            raise PaperExperimentSourceChangedError(
+                "prepared paper experiment source fingerprint changed; review it again"
             )
-            raise
-        return result
+        current_digests = _source_digest_map(_source_payloads(document))
+        if current_digests != dict(prepared.source_digests):
+            raise PaperExperimentSourceChangedError(
+                "prepared paper experiment Source content changed; review it again"
+            )
+        async with self.experiment_analysis_transaction_factory.begin() as transaction:
+            return await self.experiment_analysis_writer.write_paper_experiment_revisions(
+                experiment_outputs=(prepared.output,),
+                created_by=created_by,
+                transaction=transaction,
+            )
 
 
-__all__ = ["PaperExperimentAuthoringService", "PreparedPaperExperimentDraft"]
+__all__ = [
+    "PaperExperimentAuthoringError",
+    "PaperExperimentDraftEmptyError",
+    "PaperExperimentSourceChangedError",
+    "PaperExperimentAuthoringService",
+    "PreparedPaperExperimentDraft",
+]

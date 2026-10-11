@@ -180,7 +180,7 @@ function installApi({
 	uploadDocument,
 	prepareDocument
 }: {
-	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval'>;
+	trajectory?: Pick<ChatTrajectory, 'items' | 'feedback' | 'pending_approval' | 'response'>;
 	messageTurn?: ChatTurn;
 	messageDeltas?: string[];
 	messageDelayMs?: number;
@@ -192,7 +192,7 @@ function installApi({
 		const path = requestPath(input);
 		const method = requestMethod(input, init);
 		if (path === '/api/v1/chat-sessions' && method === 'GET') {
-			return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
+			return Promise.resolve(jsonResponse({ items: [session], limit: 12, offset: 0 }));
 		}
 		if (path === '/api/v1/collections/col_123/objectives' && method === 'GET') {
 			return Promise.resolve(
@@ -515,7 +515,16 @@ describe('collections/[id]/assistant Research Agent', () => {
 				const path = requestPath(input);
 				const method = requestMethod(input, init);
 				if (path === '/api/v1/chat-sessions' && method === 'GET') {
-					return jsonResponse({ items: [], limit: 12, offset: 0 });
+					return jsonResponse({
+						items: Array.from({ length: created }, (_, index) => ({
+							...session,
+							session_id: `chat_${index + 1}`,
+							title: index === 0 ? originalQuestion.content : 'Check specimen counts',
+							status: index === 0 && !completed ? 'running' : 'idle'
+						})).reverse(),
+						limit: 12,
+						offset: 0
+					});
 				}
 				if (path === '/api/v1/chat-sessions' && method === 'POST') {
 					return jsonResponse({ ...session, session_id: `chat_${++created}` }, 201);
@@ -636,6 +645,431 @@ describe('collections/[id]/assistant Research Agent', () => {
 		expect(document.querySelector('.conversation-header')?.textContent).not.toContain(
 			'Research Agent'
 		);
+	});
+
+	it.each([null, 'New conversation'])(
+		'restores server history titles and the selected session with cached title %s',
+		async (cachedTitle) => {
+			const oldSession = { ...session, session_id: 'chat_old' };
+			const newSession = { ...session, session_id: 'chat_new', status: 'idle' };
+			const question = 'Compare LPBF tensile conditions';
+			const oldQuestion = message('old-question', 'user', question, {
+				session_id: oldSession.session_id
+			});
+			if (cachedTitle) {
+				localStorage.setItem(
+					'lens.chatSessionHistory.researcher_1:col_123',
+					JSON.stringify([{ ...oldSession, title: cachedTitle }])
+				);
+			}
+			fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				const method = requestMethod(input, init);
+				if (path === '/api/v1/chat-sessions' && method === 'GET') {
+					return jsonResponse({
+						items: [
+							{ ...oldSession, title: question, status: 'idle' },
+							{ ...newSession, title: null }
+						],
+						limit: 12,
+						offset: 0
+					});
+				}
+				if (path === '/api/v1/chat-sessions' && method === 'POST') {
+					return jsonResponse(newSession, 201);
+				}
+				if (path === `/api/v1/chat-sessions/${oldSession.session_id}` && method === 'GET') {
+					return jsonResponse({
+						...oldSession,
+						title: question,
+						status: 'idle'
+					});
+				}
+				if (
+					path === `/api/v1/chat-sessions/${oldSession.session_id}/messages` &&
+					method === 'GET'
+				) {
+					return jsonResponse({
+						items: [oldQuestion],
+						feedback: [],
+						pending_approval: null,
+						running: false
+					});
+				}
+				return jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500);
+			});
+
+			await renderReady();
+			if (window.innerWidth <= 820) {
+				await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+			}
+			const oldConversation = browserPage.getByRole('button', { name: new RegExp(question) });
+			await expect.element(oldConversation).toBeVisible();
+			expect(
+				fetchMock.mock.calls.filter(([input]) => requestPath(input).endsWith('/messages'))
+			).toHaveLength(0);
+			await oldConversation.click();
+			await expect.element(browserPage.getByTestId('user-message')).toHaveTextContent(question);
+			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
+				oldSession.session_id
+			);
+			expect(
+				fetchMock.mock.calls.filter(([input, init]) => requestMethod(input, init) === 'POST')
+			).toHaveLength(1);
+			expect(
+				fetchMock.mock.calls.some(
+					([input, requestInit]) =>
+						requestPath(input) === `/api/v1/chat-sessions/${oldSession.session_id}/messages` &&
+						requestMethod(input, requestInit) === 'GET'
+				)
+			).toBe(true);
+		}
+	);
+
+	it.each([false, true])('pins and unpins history without switching the conversation (embedded=%s)', async (embedded) => {
+		const old = { ...session, session_id: 'chat_old', title: 'Compare LPBF conditions',
+			updated_at: '2026-08-19T07:00:00+00:00', is_pinned: false };
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				return Promise.resolve(jsonResponse({ items: old.is_pinned ? [old, session] : [session, old], limit: 12, offset: 0 }));
+			}
+			if (path === '/api/v1/chat-sessions/chat_old/pin') {
+				expect(requestMethod(input, init)).toBe('PUT');
+				old.is_pinned = JSON.parse(String(init?.body)).is_pinned;
+				return Promise.resolve(jsonResponse(old));
+			}
+			return original(input, init);
+		});
+		const view = render(Conversation, { embedded });
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
+		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		const row = () => Array.from(document.querySelectorAll(embedded ? '.embedded-history-item' : '.history-item'))
+			.find((element) => element.textContent?.includes(old.title))!;
+		await vi.waitFor(() => expect(row()).toBeDefined());
+		await userEvent.click(row().querySelector('button[aria-label="Pin conversation"]')!);
+		await vi.waitFor(() => expect(row().querySelector('button[aria-label="Unpin conversation"]')).not.toBeNull());
+		const readCache = () => JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!);
+		expect(readCache()[0]).toMatchObject({ session_id: 'chat_old', is_pinned: true });
+		expect(localStorage.getItem(`lens.chatSession.researcher_1:col_123${embedded ? ':documents' : ''}`)).toBe('chat_1');
+		// Reload from the server with an empty presentation cache, as on a second browser.
+		await view.unmount();
+		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+		render(Conversation, { embedded });
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
+		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		await vi.waitFor(() => expect(row().querySelector('button[aria-label="Unpin conversation"]')).not.toBeNull());
+		await userEvent.click(row().querySelector('button[aria-label="Unpin conversation"]')!);
+		await vi.waitFor(() => expect(readCache().at(-1)).toMatchObject({ session_id: 'chat_old', is_pinned: false }));
+		expect(fetchMock.mock.calls.some(([input]) => requestPath(input).includes('chat_old/messages'))).toBe(false);
+	});
+
+	it.each([false, true])('loads only the next ten history entries when scrolling (embedded=%s)', async (embedded) => {
+		const items = [session, ...Array.from({ length: 24 }, (_, index) => ({
+			...session, session_id: `chat_older_${index}`, title: `Comparison ${index}`,
+			updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString()
+		}))];
+		const offsets: number[] = [];
+		let failNextPage = true;
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				const url = new URL(String(input), 'http://localhost');
+				const limit = Number(url.searchParams.get('limit'));
+				const offset = Number(url.searchParams.get('offset') ?? 0);
+				expect(limit).toBe(10);
+				offsets.push(offset);
+				if (offset === 10 && failNextPage) {
+					failNextPage = false;
+					return Promise.resolve(jsonResponse({ detail: 'History temporarily unavailable' }, 503));
+				}
+				return Promise.resolve(jsonResponse({ items: items.slice(offset, offset + limit), limit, offset }));
+			}
+			return original(input, init);
+		});
+		render(Conversation, { embedded });
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+		if (embedded) await browserPage.getByRole('button', { name: 'Conversation history', exact: true }).click();
+		else if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		const container = document.querySelector(embedded ? '.embedded-history' : '.history-list') as HTMLElement;
+		const rowCount = () => container.querySelectorAll(embedded ? '.embedded-history-item' : '.history-item').length;
+		await vi.waitFor(() => expect(rowCount()).toBe(10));
+		container.scrollTop = container.scrollHeight;
+		container.dispatchEvent(new Event('scroll'));
+		await expect.element(browserPage.getByText('The request could not be completed. Please try again.', { exact: true })).toBeVisible();
+		expect(rowCount()).toBe(10);
+		await browserPage.getByRole('button', { name: 'Load more conversations', exact: true }).click();
+		await vi.waitFor(() => expect(rowCount()).toBe(20));
+		container.scrollTop = container.scrollHeight;
+		container.dispatchEvent(new Event('scroll'));
+		await vi.waitFor(() => expect(rowCount()).toBe(25));
+		expect(new Set(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!).map((item: { session_id: string }) => item.session_id)).size).toBe(25);
+		expect(offsets).toContain(10);
+		expect(offsets).toContain(20);
+		expect(container.querySelector('button[aria-label="Load more conversations"]')).toBeNull();
+	});
+
+	it('keeps history unchanged and permits retry after a pin request fails', async () => {
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) =>
+			requestPath(input).endsWith('/pin')
+				? Promise.resolve(jsonResponse({ detail: 'Pin could not be saved' }, 500))
+				: original(input, init));
+		await renderReady();
+		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Pin conversation', exact: true }).click();
+		await expect.element(browserPage.getByText('The request could not be completed. Please try again.', { exact: true })).toBeVisible();
+		await expect.element(browserPage.getByRole('button', { name: 'Pin conversation', exact: true })).toBeEnabled();
+		expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[0].is_pinned).toBe(false);
+	});
+
+	it('rechecks page boundaries after unpinning when the first refresh fails', async () => {
+		const old = { ...session, session_id: 'chat_old', title: 'Pinned old comparison',
+			is_pinned: true, updated_at: '2026-08-18T08:00:00+00:00' };
+		const others = Array.from({ length: 20 }, (_, index) => ({ ...session,
+			session_id: `comparison_${index}`, title: `Comparison ${index}`,
+			updated_at: new Date(Date.parse(createdAt) - (index + 1) * 1000).toISOString() }));
+		let failRefresh = false;
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path === '/api/v1/chat-sessions/chat_old/pin') {
+				old.is_pinned = false;
+				failRefresh = true;
+				return Promise.resolve(jsonResponse(old));
+			}
+			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				if (failRefresh) {
+					failRefresh = false;
+					return Promise.resolve(jsonResponse({}, 503));
+				}
+				const offset = Number(new URL(String(input), 'http://localhost').searchParams.get('offset') ?? 0);
+				const ordered = old.is_pinned ? [old, session, ...others] : [session, ...others, old];
+				return Promise.resolve(jsonResponse({ items: ordered.slice(offset, offset + 10), limit: 10, offset }));
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		await browserPage.getByRole('button', { name: 'Unpin conversation', exact: true }).click();
+		await expect.element(browserPage.getByRole('button', { name: 'Load more conversations', exact: true })).toBeEnabled();
+		(document.querySelector('button[aria-label="Load more conversations"]') as HTMLButtonElement).click();
+		const readIds = () => JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+			.map((item: { session_id: string }) => item.session_id);
+		await vi.waitFor(() => expect(readIds()).toEqual([session, ...others].slice(0, 20).map((item) => item.session_id)));
+	});
+
+	it.each(['pin', 'page'])('ignores a late history %s response after logout', async (operation) => {
+		const items = [session, ...Array.from({ length: 9 }, (_, index) => ({
+			...session, session_id: `chat_${index + 2}`, title: `Comparison ${index}`
+		}))];
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		let finish!: (response: Response) => void;
+		let pendingSignal: AbortSignal | null | undefined;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			if (path.endsWith('/auth/logout')) return Promise.resolve(jsonResponse({}));
+			if (path.endsWith('/pin') || String(input).includes('offset=10')) {
+				pendingSignal = init?.signal;
+				return new Promise<Response>((resolve) => { finish = resolve; });
+			}
+			if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				return Promise.resolve(jsonResponse({ items, limit: 10, offset: 0 }));
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		if (window.innerWidth <= 820) await browserPage.getByRole('button', { name: 'Show history', exact: true }).click();
+		if (operation === 'pin') {
+			const firstPin = document.querySelector('.history-item button[aria-label="Pin conversation"]')!;
+			await userEvent.click(firstPin);
+		} else {
+			(document.querySelector('button[aria-label="Load more conversations"]') as HTMLButtonElement).click();
+		}
+		await vi.waitFor(() => expect(finish).toBeDefined());
+		await logout();
+		expect(pendingSignal?.aborted).toBe(true);
+		finish(jsonResponse(operation === 'pin' ? { ...session, is_pinned: true }
+			: { items: [{ ...session, session_id: 'private_late', title: 'Private late comparison' }], limit: 10, offset: 10 }));
+		await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeDisabled();
+		expect(document.querySelectorAll('.history-item')).toHaveLength(0);
+		expect(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')).toBeNull();
+	});
+
+	it.each([false, true])(
+		'keeps a newly created session when parallel history arrives first (embedded=%s)',
+		async (embedded) => {
+			installApi();
+			const original = fetchMock.getMockImplementation()!;
+			let finishCreation: ((response: Response) => void) | undefined;
+			let historyRequested = false;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				if (requestPath(input) === '/api/v1/chat-sessions') {
+					if (requestMethod(input, init) === 'GET') {
+						historyRequested = true;
+						return Promise.resolve(jsonResponse({ items: [], limit: 12, offset: 0 }));
+					}
+					if (requestMethod(input, init) === 'POST') {
+						return new Promise<Response>((resolve) => { finishCreation = resolve; });
+					}
+				}
+				return original(input, init);
+			});
+			render(Conversation, { embedded });
+			await vi.waitFor(() => expect(finishCreation).toBeTypeOf('function'));
+			expect(historyRequested).toBe(true);
+			finishCreation!(jsonResponse(session, 201));
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!))
+				.toEqual([expect.objectContaining({ session_id: session.session_id })]);
+		}
+	);
+
+	it('removes server-deleted conversations from cached history', async () => {
+		const deleted = { ...session, session_id: 'chat_deleted', title: 'Deleted comparison' };
+		localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify([deleted]));
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				return Promise.resolve(jsonResponse({ items: [session], limit: 12, offset: 0 }));
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		expect(
+			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+		).toEqual([expect.objectContaining({ session_id: session.session_id })]);
+		expect(
+			fetchMock.mock.calls.some(([input]) => requestPath(input).includes('chat_deleted'))
+		).toBe(false);
+	});
+
+	it.each(['focus', 'embedded history'])(
+		'refreshes remote conversation additions, deletions, and status on %s',
+		async (trigger) => {
+			const remote = {
+				...session,
+				session_id: 'chat_remote',
+				title: 'Compare tensile conditions',
+				status: 'idle'
+			};
+			let items: Array<Record<string, unknown>> = [session];
+			installApi();
+			const original = fetchMock.getMockImplementation()!;
+			fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+				const path = requestPath(input);
+				if (path === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+					return Promise.resolve(jsonResponse({ items, limit: 12, offset: 0 }));
+				}
+				if (path === '/api/v1/chat-sessions/chat_remote/messages') {
+					return Promise.resolve(
+						jsonResponse({ items: [], feedback: [], pending_approval: null, running: true })
+					);
+				}
+				return original(input, init);
+			});
+			render(Conversation, { embedded: trigger === 'embedded history' });
+			await expect.element(browserPage.getByLabelText('Message', { exact: true })).toBeEnabled();
+			const refresh = async () => {
+				if (trigger === 'focus') window.dispatchEvent(new Event('focus'));
+				else await browserPage.getByRole('button', { name: 'Conversation history' }).click();
+			};
+			items = [session, remote];
+			await refresh();
+			await vi.waitFor(() =>
+				expect(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+				).toHaveLength(2)
+			);
+			expect(fetchMock.mock.calls.some(([input]) => requestPath(input).endsWith('/messages'))).toBe(
+				false
+			);
+			if (trigger === 'embedded history') await refresh();
+			items = [session, { ...remote, status: 'running' }];
+			await refresh();
+			await vi.waitFor(() =>
+				expect(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+						.find((item: { session_id: string }) => item.session_id === remote.session_id).status
+				).toBe('running')
+			);
+			if (trigger === 'embedded history') await refresh();
+			items = [session];
+			await refresh();
+			await vi.waitFor(() =>
+				expect(
+					JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+				).toHaveLength(1)
+			);
+			expect(
+				localStorage.getItem(
+					`lens.chatSession.researcher_1:col_123${trigger === 'embedded history' ? ':documents' : ''}`
+				)
+			).toBe(session.session_id);
+			expect(
+				fetchMock.mock.calls.filter(([input, init]) => requestMethod(input, init) === 'POST')
+			).toHaveLength(1);
+		}
+	);
+
+	it('keeps cached history when the server index is unavailable', async () => {
+		const cached = { ...session, session_id: 'chat_cached', title: 'Compare specimen orientation' };
+		localStorage.setItem('lens.chatSessionHistory.researcher_1:col_123', JSON.stringify([cached]));
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestPath(input) === '/api/v1/chat-sessions' && requestMethod(input, init) === 'GET') {
+				return Promise.resolve(jsonResponse({ detail: 'Temporarily unavailable' }, 503));
+			}
+			return original(input, init);
+		});
+		await renderReady();
+		expect(
+			JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+		).toEqual(expect.arrayContaining([
+			expect.objectContaining({ session_id: session.session_id }),
+			expect.objectContaining({ session_id: cached.session_id, title: cached.title })
+		]));
+	});
+
+	it('explains why a conversation with saved versions cannot be deleted', async () => {
+		installApi();
+		const original = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			if (requestMethod(input, init) === 'DELETE') {
+				return Promise.resolve(
+					jsonResponse({ detail: { code: 'chat_session_has_branches' } }, 409)
+				);
+			}
+			return original(input, init);
+		});
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+		try {
+			await renderReady();
+			if (window.innerWidth <= 820)
+				await browserPage.getByRole('button', { name: 'Show history' }).click();
+			await browserPage.getByRole('button', { name: 'Delete conversation' }).click();
+			await expect
+				.element(browserPage.getByRole('alert'))
+				.toHaveTextContent('Delete those versions first.');
+			expect(localStorage.getItem('lens.chatSession.researcher_1:col_123')).toBe(
+				session.session_id
+			);
+			expect(
+				JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)
+			).toHaveLength(1);
+		} finally {
+			confirm.mockRestore();
+		}
 	});
 
 	it.each(['manual', 'automatic', 'read failure'])(
@@ -1351,7 +1785,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 			});
 			render(Page);
 			await vi.waitFor(() =>
-				expect(fetchMock).toHaveBeenCalledTimes(stage === 'trajectory' ? 2 : 1)
+				expect(fetchMock).toHaveBeenCalledTimes(stage === 'trajectory' ? 3 : 2)
 			);
 			setPage({
 				params: { id: 'col_456' },
@@ -1852,11 +2286,47 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(
 				browserPage.getByText(
-					'The Agent reached its reading limit; the answer above is based on the completed inspection.'
+					'This turn reached its time, tool or model budget. Completed work is saved; you can continue the unfinished research.'
 				)
 			)
 			.toBeInTheDocument();
 		expect(document.querySelector('[role="alert"]')).toBeNull();
+		await browserPage.getByRole('button', { name: 'Continue research', exact: true }).click();
+		expect(fetchMock.mock.calls.some(([input, init]) =>
+			requestMethod(input, init) === 'POST' &&
+			requestBody(input, init)?.message === 'Continue the unfinished research from the saved results, keeping my earlier constraints and deferred actions.'
+		)).toBe(true);
+	});
+
+	it.each([
+		['completed', 'resource_budget', null, 'Run resource limit reached'],
+		['failed', null, 'model_unavailable', 'Technical failure']
+	] as const)('restores %s recovery without an execution plan or warnings', async (status, reason, errorCode, title) => {
+		localStorage.setItem('lens.chatSession.researcher_1:col_123', session.session_id);
+		installApi({ trajectory: {
+			items: [message('saved-question', 'user', 'Compare the papers')],
+			pending_approval: null, feedback: [],
+			response: {
+				response_id: 'saved-response', sequence: 2, started_at: createdAt, updated_at: createdAt,
+				status, completion_reason: reason, error_code: errorCode, warnings: [],
+				message_id: null, message_created_at: null, content: '', progress: { phase: 'waiting' }, checkpoint_message_id: 'saved-question'
+			}
+		} });
+		await renderReady();
+		await expect.element(browserPage.getByText(title, { exact: true })).toBeVisible();
+		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).toBeEnabled();
+	});
+
+	it('does not label an ordinary answer with an auxiliary warning as resource exhaustion', async () => {
+		installApi({ messageTurn: {
+			status: 'completed', completion_reason: 'model_answer', error_code: null,
+			warnings: ['correction_signal_enqueue_failed'], pending_approval: null,
+			messages: [message('ordinary-answer', 'assistant', 'The comparison is complete.')]
+		} });
+		await send('Compare the papers');
+		await expect.element(browserPage.getByText('The comparison is complete.')).toBeVisible();
+		await expect.element(browserPage.getByRole('button', { name: 'Continue research' })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Run resource limit reached', { exact: true })).not.toBeInTheDocument();
 	});
 
 	it('allows a second question after the first turn is persisted', async () => {
@@ -1887,6 +2357,59 @@ describe('collections/[id]/assistant Research Agent', () => {
 					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
 			)
 		).toHaveLength(2);
+	});
+
+	it.each([
+		['completed', 'completed', 'Completed'],
+		['approval_required', 'awaiting_approval', 'Waiting for approval'],
+		['completed', 'waiting_for_clarification', 'Needs clarification'],
+		['completed', 'scientific_refusal', 'Insufficient support'],
+		['failed', 'technical_failure', 'Technical failure']
+	] as const)('keeps the %s / %s plan visible after the turn and after reopening', async (status, planStatus, label) => {
+		const pending = status === 'approval_required' ? pendingCall() : null;
+		const items = [message('plan-question', 'user', 'Compare the tensile conditions.')];
+		if (pending) {
+			items.push(message(pending.assistant_message_id, 'assistant', '', {
+				tool_calls: [{ tool_call_id: pending.tool_call_id, name: pending.name, arguments: pending.arguments, position: 0 }]
+			}));
+		} else {
+			items.push(message('plan-answer', 'assistant', 'The temperature must be specified for this comparison.'));
+		}
+		const executionPlan = {
+			plan_id: 'plan-1', plan_version: 4, status: planStatus,
+			steps: [{ step_id: 'temperature', action: 'Check the reported tensile temperature', status: 'blocked' as const }]
+		};
+		const turn: ChatTurn = {
+			status, completion_reason: status === 'completed' ? 'model_answer' : null,
+			warnings: [], messages: items, pending_approval: pending,
+			error_code: status === 'failed' ? 'permission_write_denied' : null,
+			execution_plan: executionPlan
+		};
+		installApi({ messageTurn: turn });
+		const screen = render(Page);
+		const composer = browserPage.getByLabelText('Message', { exact: true });
+		await expect.element(composer).toBeEnabled();
+		await send('Compare the tensile conditions.', composer);
+		const plan = browserPage.getByTestId('progress-plan');
+		await expect.element(plan).toHaveTextContent(label);
+		await expect.element(plan).toHaveTextContent('Check the reported tensile temperature');
+		expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
+		expect(document.querySelector('.progress-current')).toBeNull();
+		await screen.unmount();
+		installApi({ trajectory: {
+			items, pending_approval: pending, feedback: [],
+			response: {
+				response_id: 'response-plan', sequence: 5, started_at: createdAt, updated_at: createdAt,
+				status, message_id: null, message_created_at: null, content: '',
+				progress: { phase: 'terminal', execution_plan: executionPlan },
+				checkpoint_message_id: items.at(-1)!.message_id,
+				completion_reason: turn.completion_reason, error_code: turn.error_code, warnings: []
+			}
+		} });
+		render(Page);
+		await expect.element(plan).toHaveTextContent(label);
+		expect(document.querySelectorAll('[data-testid="progress-plan"]')).toHaveLength(1);
+		expect(document.querySelector('.progress-current')).toBeNull();
 	});
 
 	it('shows assistant text before the persisted turn finishes streaming', async () => {

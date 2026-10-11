@@ -146,6 +146,28 @@ stays disabled while that result is unconfirmed, and recovery never resubmits a
 write. Leaving the session or account cancels its timer and request and ignores
 late results.
 
+History initially requests 10 sessions. Scrolling near the bottom requests only
+the next page of 10 and appends it, deduplicating session identities. A load-more
+action also supports short viewports and retries. No subsequent pages are
+prefetched. A failed page preserves loaded entries and the same next-page offset.
+Successful index refreshes replace the already loaded window with the server's
+current ordering, removing entries deleted elsewhere. Index failures retain
+the cache. Returning focus to the window, opening embedded history, and polling
+background activity refresh the index so remote conversations and status
+changes become visible without loading idle trajectories. A failed background
+trajectory read is retried while recovery is needed. Deletion conflicts retain
+the current conversation and explain whether execution is running or dependent
+conversation versions must be deleted first.
+
+The standalone sidebar and embedded history provide pin/unpin icon buttons.
+Pin state is saved by the server and is shared across browsers. Pinned sessions
+precede ordinary sessions; both groups use most-recent activity order. Pinning
+does not switch conversations, send a message, or change the activity timestamp.
+The control shows pending state and updates after a successful save; failures
+retain the previous state and allow retry. A successful pin change refreshes
+the loaded window before continuing pagination. Responses from a previous
+account or Collection cannot update the current history or cache.
+
 The selected session ID and a small presentation-only history are stored under:
 
 ```text
@@ -169,10 +191,12 @@ An unavailable session read preserves its history entry and offers a retry of
 that exact session. Only an explicit `404` removes the missing session and
 creates a replacement; network errors and other HTTP failures remain visible.
 
-The server trajectory is authoritative. Browser storage remembers which
-session to load, how to label it in the local history list, and up to 12 pending
-Source blocks from the document reader. Pending blocks are shown above the
-composer and can be removed individually. They are cleared after the complete persisted turn
+The server trajectory is authoritative. The collection session list supplies
+each saved conversation's first-question title, so history labels remain
+available on a new browser or after local storage is cleared. Browser storage
+remembers which session to load and up to 12 pending Source blocks from the
+document reader. Pending blocks are shown above the composer and can be removed
+individually. They are cleared after the complete persisted turn
 returns, or when recovery after an interrupted stream confirms that the sent
 message and its Source locators were persisted. If persistence cannot be
 confirmed, the pending Source remains available for retry. This check also runs
@@ -564,6 +588,19 @@ not provider calls, prompts, model reasoning, JSON payloads, or retry mechanics.
 A checkpointed capability request without a result remains visible as prepared
 research activity after reload.
 
+Paper browsing treats optional preparation metadata as navigation context. A
+missing Document Profile, Paper Map, insufficient map, or labelled abstract
+does not open a warning when the paper's canonical Source is available. Normal
+pagination and a literal filename/title query with no matches stay ordinary
+navigation feedback. When Source content is genuinely unavailable, preparation
+failed, or a Source read failed, the activity opens one grouped review section
+with each paper's visible title or filename, the specific state, and its
+existing document link. Papers still being prepared or not yet prepared appear
+in a separate neutral pending group. These statuses describe technical
+availability only; they do not establish scientific irrelevance or absence.
+Paper and other record links are labelled as referenced records; only a group
+consisting entirely of canonical Source links is labelled as exact Sources.
+
 One assistant message can contain an ordered `tool_calls` batch. The browser
 matches each request to its own result by durable call ID and preserves request
 order, even when reads finish concurrently. An individual failed read does not
@@ -697,7 +734,10 @@ The focused browser suite covers:
     Objective-analysis presentation.
 18. consecutive routine capability work compressed into one collapsed activity
     disclosure, with warnings opened automatically;
-19. Objective drafts and other reviewable research results kept visible as
+19. paper browsing keeps missing optional metadata and ordinary pagination
+    collapsed, while grouping actual Source failures by paper and separating
+    preparation-pending papers;
+20. Objective drafts and other reviewable research results kept visible as
     standalone artifacts while the underlying tool mechanics stay secondary.
 
 The page audit additionally verifies desktop and mobile framing, accessible

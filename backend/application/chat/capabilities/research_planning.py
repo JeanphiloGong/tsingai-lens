@@ -105,6 +105,9 @@ class CreateResearchPlanToolRequest(ProposeResearchPlanToolRequest):
     source_snapshots: list[ResearchPlanSourceSnapshot] = Field(
         min_length=1,
         max_length=8,
+        description=("Copy source_snapshots exactly from the reviewed propose_research_plan result. "
+                     "Fingerprints are canonical opaque values, not fields to invent or summarize. "
+                     "If unavailable, inspect the sources and prepare a fresh draft before requesting approval."),
     )
 
 
@@ -204,7 +207,16 @@ class ProposeResearchPlanCapability:
             "published research question. The draft must specify hypothesis, variables, "
             "controls, fixed conditions, measurements, replication, analysis, acceptance, "
             "feasibility, safety, and limitations, and cite exact current Finding and "
-            "Evidence IDs. This call does not persist or authorize the plan."
+            "Evidence IDs. Inspect those Findings and their exact Evidence first; "
+            "a technical extraction failure is a recovery task, not a scientific "
+            "gap. Distinguish literature-derived choices, researcher-supplied "
+            "constraints, proposed validation levels and unresolved expert choices. "
+            "A power/sample ceiling is not a selected setpoint or proof of adequate "
+            "statistical power. Identify observations that support, challenge or "
+            "leave the hypothesis unresolved; equipment and standards compliance "
+            "need inspected support or expert confirmation. Create this actual "
+            "structured draft when requested, rather than stopping at prose. This "
+            "call does not persist or authorize the plan."
         ),
         risk=ToolRisk.DRAFT,
         input_model=ProposeResearchPlanToolRequest,
@@ -627,8 +639,10 @@ async def _approved_plan_draft(
             resource_refs=current.resource_refs,
             error_code="research_plan_source_stale",
             error_message=(
-                "The Finding or Evidence changed after the plan was drafted; "
-                "review the current sources before saving it."
+                "The supplied source snapshots do not match the current canonical snapshots. "
+                "This can mean stale sources or incorrectly copied fingerprints. Inspect the "
+                "current sources, reuse source_snapshots exactly from the resulting draft, "
+                "and request approval for the corrected save arguments. Do not invent fingerprints."
             ),
         )
     return current, current_snapshots, None

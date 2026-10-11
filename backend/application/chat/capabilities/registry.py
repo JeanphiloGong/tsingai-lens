@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from application.chat.capabilities.contracts import CapabilityHandler, ToolSpec
+from application.chat.capabilities.execution_plan import UpdateExecutionPlanCapability
 from application.chat.capabilities.tool_discovery import DiscoverResearchToolsCapability
 
 
@@ -13,12 +14,13 @@ class CapabilityRegistry:
             name = handler.spec.name.strip()
             if not name:
                 raise ValueError("capability name cannot be empty")
-            if name == "discover_research_tools":
-                raise ValueError("reserved capability name: discover_research_tools")
+            if name in {"discover_research_tools", "update_execution_plan"}:
+                raise ValueError(f"reserved capability name: {name}")
             if name in self._handlers:
                 raise ValueError(f"duplicate capability: {name}")
             self._handlers[name] = handler
-        self.discovery = DiscoverResearchToolsCapability(self.specs)
+        self.execution_plan = UpdateExecutionPlanCapability()
+        self.discovery = DiscoverResearchToolsCapability((*self.specs, self.execution_plan.spec))
 
     @property
     def specs(self) -> tuple[ToolSpec, ...]:
@@ -27,6 +29,8 @@ class CapabilityRegistry:
     def get(self, name: str) -> CapabilityHandler | None:
         if name == self.discovery.spec.name:
             return self.discovery
+        if name == self.execution_plan.spec.name:
+            return self.execution_plan
         return self._handlers.get(str(name).strip())
 
 

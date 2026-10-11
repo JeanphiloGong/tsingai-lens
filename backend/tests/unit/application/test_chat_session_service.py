@@ -37,6 +37,7 @@ from domain.chat import (
     ChatToolCall,
     ChatToolResult,
     ToolCallStatus,
+    ToolResultStatus,
     ToolRisk,
 )
 from domain.source import SourceBlock, SourceDocument
@@ -82,11 +83,22 @@ class _WriteCapability:
 
 
 class _CollectionService:
+    def __init__(self) -> None:
+        self.full_reads = 0
+
+    async def collection_belongs_to_user(
+        self,
+        collection_id: str,
+        user_id: str,
+    ) -> bool:
+        return collection_id == "col-1" and user_id == "user-1"
+
     async def get_collection_for_user(
         self,
         collection_id: str,
         user_id: str,
     ) -> dict:
+        self.full_reads += 1
         if collection_id != "col-1" or user_id != "user-1":
             raise FileNotFoundError("collection not found")
         return {"collection_id": collection_id, "owner_user_id": user_id}
@@ -287,6 +299,17 @@ async def test_chat_session_service_persists_ordinary_conversation() -> None:
     assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
     with pytest.raises(ChatSessionNotFoundError):
         await service.get_session_for_user(session.session_id, "user-2")
+
+
+async def test_chat_session_access_uses_collection_owner_probe() -> None:
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="answer")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+
+    await service.get_session_for_user(session.session_id, "user-1")
+    await service.list_sessions_for_user(collection_id="col-1", user_id="user-1")
+
+    assert service.collection_service.full_reads == 0
 
 
 class _FailingAnalysisJobs:
@@ -737,6 +760,149 @@ async def test_interrupted_response_keeps_partial_text_without_claiming_it_compl
         await service.stream_updates_for_user(session.session_id, "user-2", response_id=saved["response"].response_id)
 
 
+async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume() -> None:
+    repository = _Repository()
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _EmptyArguments(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+    class _BlockingReadCapability(_WriteCapability):
+        spec = ToolSpec(
+            name="inspect_document_sources",
+            description="Inspect prepared document sources.",
+            risk=ToolRisk.READ,
+            input_model=_EmptyArguments,
+        )
+
+        async def execute(self, context: AgentContext, arguments: BaseModel) -> ChatToolResult:
+            started.set()
+            await release.wait()
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.SUCCEEDED,
+                data={"sources": []},
+            )
+
+    capability = _BlockingReadCapability()
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(
+            name=capability.spec.name,
+            arguments={},
+        ),)),
+    )
+    service = _service(model, repository, capability)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    stream = await service.stream_message_for_user(
+        session.session_id,
+        "user-1",
+        message="Inspect the prepared paper sources.",
+    )
+
+    async def drain() -> list[dict[str, Any]]:
+        return [event async for event in stream]
+
+    consumer = asyncio.create_task(drain())
+    try:
+        async with asyncio.timeout(5):
+            await started.wait()
+        active = tuple(service._active_stream_tasks)
+        assert active
+        for task in active:
+            task.cancel()
+        await consumer
+    finally:
+        release.set()
+        await asyncio.gather(consumer, return_exceptions=True)
+
+    call = next(
+        item for item in repository.calls.values()
+        if item.name == capability.spec.name
+    )
+    assert call.status is ToolCallStatus.FAILED
+    assert call.error_code == "chat_response_interrupted"
+    assert repository.results[call.tool_call_id].error_code == "chat_response_interrupted"
+    saved = await service.get_trajectory_for_user(session.session_id, "user-1")
+    assert saved["running"] is False
+    assert saved["response"].status == "interrupted"
+
+    model.turns.clear()
+    model.turns.append(ModelTurn(content="The interrupted source inspection can be resumed."))
+    resumed = await service.post_message_for_user(
+        session.session_id,
+        "user-1",
+        message="Continue from the interrupted inspection.",
+    )
+    assert resumed["status"] == "completed"
+    assert resumed["messages"][-1].content == "The interrupted source inspection can be resumed."
+
+
+async def test_new_request_recovers_a_running_call_left_by_a_dead_worker() -> None:
+    repository = _Repository()
+    model = _Model(ModelTurn(content="The previous interruption was recovered."))
+    service = _service(model, repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    user_message = ChatMessage.user(
+        message_id="user-1-message",
+        session_id=session.session_id,
+        content="Inspect the prepared paper sources.",
+        created_at="2026-10-10T00:00:00Z",
+    )
+    assistant_message = ChatMessage.assistant_tool_calls(
+        message_id="assistant-1",
+        session_id=session.session_id,
+        content="",
+        tool_calls=(ChatToolCall.requested(
+            tool_call_id="call-orphaned",
+            session_id=session.session_id,
+            assistant_message_id="assistant-1",
+            name="inspect_document_sources",
+            arguments={},
+            risk=ToolRisk.READ,
+        ).to_request(),),
+        created_at="2026-10-10T00:00:01Z",
+    )
+    running = ChatToolCall.requested(
+        tool_call_id="call-orphaned",
+        session_id=session.session_id,
+        assistant_message_id="assistant-1",
+        name="inspect_document_sources",
+        arguments={},
+        risk=ToolRisk.READ,
+    ).start("2026-10-10T00:00:02Z")
+    await repository.save_trajectory(
+        session=session,
+        messages=(user_message, assistant_message),
+        tool_calls=(running,),
+        tool_results=(),
+    )
+    await repository.save_response_snapshot(
+        session.session_id,
+        ChatResponseSnapshot(
+            response_id="response-orphaned",
+            sequence=1,
+            started_at="2026-10-10T00:00:00Z",
+            updated_at="2026-10-10T00:00:02Z",
+            status="running",
+        ),
+    )
+
+    result = await service.post_message_for_user(
+        session.session_id,
+        "user-1",
+        message="Continue after the interruption.",
+    )
+
+    assert result["status"] == "completed"
+    assert result["messages"][-1].content == "The previous interruption was recovered."
+    assert repository.calls["call-orphaned"].status is ToolCallStatus.FAILED
+    assert repository.results["call-orphaned"].error_code == "chat_response_interrupted"
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot is not None
+    assert snapshot.status == "completed"
+
+
 @pytest.mark.parametrize("transition", ["starts", "completes", "stops"])
 async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(transition, monkeypatch) -> None:
     repository = _Repository()
@@ -803,7 +969,7 @@ async def test_approved_continuation_captures_text_without_repeating_the_write()
         await decision
 
 
-async def test_approved_write_response_failure_is_a_completed_session_turn() -> None:
+async def test_approved_write_response_failure_preserves_saved_result_but_fails_turn() -> None:
     repository = _Repository()
     capability = _WriteCapability()
     service = _service(
@@ -828,7 +994,7 @@ async def test_approved_write_response_failure_is_a_completed_session_turn() -> 
         retryable=False,
     ))
 
-    completed = await service.decide_tool_call_for_user(
+    failed = await service.decide_tool_call_for_user(
         session.session_id,
         pending.tool_call_id,
         "user-1",
@@ -836,20 +1002,20 @@ async def test_approved_write_response_failure_is_a_completed_session_turn() -> 
         decision="approved",
     )
 
-    assert completed["status"] == "completed"
-    assert completed["completion_reason"] == "model_answer"
-    assert completed["error_code"] is None
-    assert completed["warnings"]
-    assert completed["messages"][-1].content == (
+    assert failed["status"] == "failed"
+    assert failed["completion_reason"] is None
+    assert failed["error_code"] == "context_window_exceeded"
+    assert failed["warnings"]
+    assert failed["messages"][-1].content == (
         "已批准的操作已完成并保存。详细回复暂时无法生成；请以已保存的结果为准。"
     )
     assert len(capability.executed) == 1
     assert repository.calls[pending.tool_call_id].status is ToolCallStatus.SUCCEEDED
     snapshot = await repository.read_response_snapshot(session.session_id)
     assert snapshot is not None
-    assert snapshot.status == "completed"
-    assert snapshot.error_code is None
-    assert snapshot.warnings == completed["warnings"]
+    assert snapshot.status == "failed"
+    assert snapshot.error_code == "context_window_exceeded"
+    assert snapshot.warnings == failed["warnings"]
 
 
 async def test_chat_session_service_checkpoints_every_agent_step() -> None:
@@ -924,7 +1090,9 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     )
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((read,)),
-        limits=AgentRunLimits(max_elapsed_seconds=0.05, max_model_tokens=100),
+        # Leave enough setup time to reach the deliberately hanging third call;
+        # the whole-turn budget still cancels it promptly.
+        limits=AgentRunLimits(max_elapsed_seconds=0.5, max_model_tokens=100),
     )
     service = ChatSessionService(repository=repository, collection_service=collection,
                                  source_artifact_repository=sources, runner=runner)
@@ -935,9 +1103,12 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     )
     events = [event async for event in stream]
     result = events[-1]["turn"]
-    assert result["status"] == ("failed" if ending == "timeout" else "completed")
+    # A request deadline now preserves the completed Source read and returns a
+    # resource-limited completion so the researcher can continue from evidence.
+    assert result["status"] == "completed"
     if ending == "timeout":
-        assert result["error_code"] == "provider_timeout"
+        assert result["completion_reason"] == "resource_budget"
+        assert result["error_code"] is None
         assert cancelled.is_set()
         assert not any(event["type"] == "text_delta" for event in events)
     else:
@@ -1052,7 +1223,8 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
                 ),)
-            )
+            ),
+            ModelTurn(content="已记录你的拒绝，未创建目标。"),
         ),
         repository,
         capability,
@@ -1072,9 +1244,15 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
         decision="rejected",
     )
 
-    assert result["status"] == "rejected"
+    assert result["status"] == "completed"
+    assert result["messages"][-1].content == "已记录你的拒绝，未创建目标。"
     assert capability.executed == []
     assert repository.results[pending.tool_call_id].error_code == "user_rejected"
-    assert (
-        await service.list_messages_for_user(session.session_id, "user-1")
-    )[-1].role == "tool"
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot is not None
+    assert snapshot.status == "completed"
+    messages = await service.list_messages_for_user(session.session_id, "user-1")
+    assert any(
+        message.role == "tool" and message.tool_call_id == pending.tool_call_id
+        for message in messages
+    )

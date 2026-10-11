@@ -1,32 +1,24 @@
-# Lens
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/lens_lockup-dark.png">
+    <img src="assets/readme/lens_lockup.png" alt="Lens" width="320">
+  </picture>
+</h1>
 
-<p align="center">
-  <img src="assets/readme/lens_lockup.png" alt="Lens brand lockup">
-</p>
+Lens is a research system in development. Its purpose is to help a researcher
+study a question until the available knowledge and methods support a useful,
+understandable judgment.
 
-Lens is an evidence-first research system in development.
+Lens starts from a researcher's problem and existing knowledge, then uses the
+available papers, source material, tools, and analysis methods to reduce the
+important uncertainty around that problem. It can identify useful papers,
+inspect the relevant parts of their sources, reconstruct facts and conditions,
+compare results, expose gaps, and help decide what to investigate next.
 
-Its current product is a collection-bound workspace for reconstructing,
-grounding, and comparing scientific evidence. Its long-term direction is an
-autonomous research loop that can move from a research goal through evidence,
-hypotheses, experiments, and updated decisions.
-
-It helps researchers turn a set of papers into reviewable document profiles,
-evidence views, and comparison tables, so results stay connected to their
-original context instead of being flattened into unsupported summaries.
-
-Today, Lens is built for workflows where the key question is not only:
-
-> "What does this paper say?"
-
-but also:
-
-> "Which results are actually comparable, under what conditions, and with what evidence?"
-
-The longer-term question is:
-
-> "What does the system know, what remains uncertain, and what action would
-> most reduce the uncertainty around the research goal?"
+Source, Evidence, PaperExperiment, Comparison, and Finding are the research
+state that makes this work traceable, reviewable, and reusable. They support the
+research process; they are not a substitute for understanding the question the
+researcher is trying to answer.
 
 <p align="center">
   <img src="assets/readme/lens_overview.png" alt="Lens overview workflow" width="960">
@@ -34,520 +26,203 @@ The longer-term question is:
 
 ---
 
-## Why Lens Exists
-
-Scientific literature contains many useful results, but those results are often
-difficult to compare directly.
-
-In materials science and other experimental fields, a reported value is rarely
-meaningful by itself. It depends on the material system, synthesis route,
-processing parameters, test method, sample state, baseline, and many other
-conditions.
-
-For example, two papers may both report a tensile strength, residual stress,
-conductivity, capacity, catalytic activity, or bandgap, but the results may
-not be comparable if the sample preparation, test conditions, or baseline
-definitions are different.
-
-Lens is built to make this problem explicit.
-
-It focuses on:
-
-- organizing paper collections
-- extracting research facts with source evidence
-- exposing missing experimental context
-- helping users review whether results are comparable
-- preserving traceback from comparison views back to the original paper
-
-Lens is not meant to be a generic paper chatbot, a science news feed, a broad
-scientific search portal, or a marketplace of domain tools. Its product center
-is the research state that connects source evidence to decisions. Search,
-external tools, simulations, and experiments are inputs or execution
-dependencies around that state.
-
-## What Lens Helps Users Do
-
-Lens v1 focuses on collection-level literature comparison.
-
-A typical user workflow is:
-
-1. Create or import a paper collection.
-2. Inspect document profiles for each paper.
-3. Review extracted evidence and source-grounded facts.
-4. Compare reported results across papers.
-5. Check missing conditions, baselines, and comparability warnings.
-6. Trace each comparison item back to the original text, table, figure, or
-   source location.
-
-The main user-facing surfaces are:
-
-### Document Profiles
-
-Document profiles summarize what kind of paper a document is and what types of
-information it may contain.
-
-They help users quickly understand whether a paper is experimental,
-computational, review-like, method-focused, benchmark-like, or mixed.
-
-### Evidence Views
-
-Evidence views show extracted claims, methods, measurements, and observations
-together with their source evidence.
-
-They are intended to help users audit the system's output rather than blindly
-trust an AI-generated summary.
-
-### Comparison Views
-
-Comparison views organize results across a collection.
-
-They are designed to show not only values, but also the material context,
-process conditions, test conditions, baselines, uncertainty, and warnings that
-affect comparability.
-
-## Current Scope And Long-Term Vision
-
-Lens v1 is the evidence and comparison foundation for a future autonomous
-research loop. It is not yet an autonomous scientist.
-
-The current product direction includes:
-
-- paper collection management
-- document-level profiling
-- evidence-grounded extraction
-- comparison-oriented result organization
-- source traceback
-- comparability warnings
-- user-reviewable comparison tables
-
-The boundary is deliberate:
-
-- **Current product:** a collection-bound, reviewable workflow for Source,
-  Evidence, comparability, and Finding.
-- **Long-term vision:** a system that receives a research goal, constraints, and
-  available resources, then maintains research state and selects the next
-  useful action.
-- **Current limitation:** hypothesis generation, experiment selection, external
-  execution, and autonomous continuation remain future capabilities. Human
-  review and authorization remain required while those boundaries are built.
-
-## Example Use Cases
-
-### Literature Comparison For A Research Project
-
-A researcher collects 20-50 papers on a material system and wants to compare
-reported properties without manually building a spreadsheet from scratch.
-
-Lens helps extract candidate facts, organize them into comparison views, and
-expose which rows need human review.
-
-### Materials Parameter Landscape Review
-
-A researcher wants to understand how processing parameters relate to measured
-properties across a literature corpus.
-
-Lens can help organize process-property evidence while preserving links to the
-original papers.
-
-### Research Planning
-
-A researcher wants to identify which experimental conditions have already been
-tested and where the literature has gaps.
-
-Lens can help reveal missing baselines, underexplored parameter ranges, and
-inconsistent test conditions.
-
-### Evidence-Backed Technical Review
-
-A team preparing a review, proposal, or internal technical report needs a
-traceable comparison table rather than a loose narrative summary.
-
-Lens helps keep each comparison item connected to its evidence.
-
-## Materials Science Focus
-
-Lens is especially useful for materials research because materials results are
-highly context-dependent.
-
-A reported property often depends on:
-
-- material composition
-- phase or microstructure
-- synthesis or fabrication route
-- processing parameters
-- post-treatment
-- sample geometry
-- test method
-- test environment
-- baseline or control condition
-- measurement direction
-- reporting convention
-
-For example, in metal additive manufacturing, values such as density, porosity,
-residual stress, hardness, yield strength, elongation, fatigue life, and
-surface roughness cannot be interpreted without process and test context.
-
-Lens aims to make these dependencies explicit in the comparison workflow.
-
-## Core Principles
-
-### Evidence First
-
-Every important extracted fact should be traceable to source evidence.
-
-Lens should prefer fewer high-confidence, reviewable facts over broad but
-speculative coverage.
-
-### Comparison Over Summarization
-
-Lens is not optimized for producing fluent summaries.
-
-It is optimized for helping researchers decide whether results from different
-papers can be compared responsibly.
-
-### Collection First
-
-The primary unit of work is a paper collection, not a single isolated document.
-
-A single paper can contain useful facts, but the value of Lens appears when
-those facts are placed into a collection-level comparison workflow.
-
-### Reviewable By Humans
-
-Lens should support human review, correction, and judgment.
-
-The system should make uncertainty visible rather than hide it behind
-confident-sounding prose.
-
-### Domain-Aware, But Extensible
-
-Lens is designed with materials research in mind, but the broader pattern can
-apply to other experimental and technical research domains where evidence,
-conditions, baselines, and comparability matter.
-
-## Research System Direction
-
-The roadmap is one research loop, not a list of unrelated product categories.
-Lens is being developed toward an autonomous research system, with the current
-Evidence and comparison layer serving as its first reliable state boundary.
-
-<p align="center">
-  <img src="assets/readme/lens_roadmap.png" alt="Lens roadmap" width="960">
-</p>
+## The Research Problem
+
+A useful research result cannot be separated from the conditions that produced
+it. Two papers may report the same measurement while using different materials,
+processing routes, sample states, baselines, or test methods. A fluent summary
+can hide those differences and make an unsupported comparison sound certain.
+
+Lens helps the researcher work through that problem:
+
+- clarify what needs to be understood or decided
+- find the papers and source passages that can answer it
+- reconstruct the facts, variables, conditions, and measurements
+- compare only the parts that the available information supports
+- distinguish reported facts, interpretations, hypotheses, and unknowns
+- preserve the source trail for each important judgment
+- identify the next useful inspection or research action
+
+The product is collection-bound in its current phase. A collection provides the
+papers and prepared sources that the researcher can investigate together. The
+Research Agent helps navigate and reason over that material, while the Core
+artifacts preserve the durable research state.
+
+## Current Product
+
+Lens v1 is a reviewable workspace for researching questions across a collection
+of papers. Its primary acceptance surface is the collection comparison
+workspace, where a researcher can see which results are comparable, which
+conditions are missing, and which judgments need review.
+
+The current workflow is:
 
 ```text
-Research goal + constraints + resources
-                |
-                v
-        Define the research question
-                |
-                v
- Literature -> Source -> Evidence -> Scientific state
-                                      |
-                                      v
-                              Identify knowledge gaps
-                                      |
-                                      v
-                                  Hypothesis
-                                      |
-                                      v
-                         Select the next useful experiment
-                                      |
-                                      v
-              Simulation / software / laboratory / human execution
-                                      |
-                                      v
-                         Observation -> Evidence -> State update
-                                      |
-                                      +------> next action
+Paper collection
+  -> document preparation and Source
+  -> Document Profile
+  -> researcher selects ready papers
+  -> optional Paper Map for navigation
+  -> research question and Objective
+  -> source inspection
+  -> PaperExperiment facts and source bindings
+  -> comparison and Finding
+  -> review, correction, and next decision
 ```
 
-The long-term objective is not to produce a report and stop. It is to keep a
-research objective moving until the goal is resolved, the hypothesis space is
-exhausted, the evidence is sufficient, the budget is exhausted, or no useful
-next experiment remains. This is a future direction, not a claim about the
-current v1 implementation.
+Paper preparation and Paper Map construction are separate stages. A Paper Map
+is a lazy navigation aid for locating materials, processes, variables, outcomes,
+and relevant source units. It is not a prerequisite for reading a prepared
+paper. When a map is absent or incomplete, the researcher or Agent can still
+inspect the document outline and read the relevant source passages directly.
 
-The following directions describe the long-term system vision. They are not
-claims about current v1 capabilities.
+The current product includes:
 
-### 1. Reusable Research State
+- paper collection management and independent document preparation
+- document profiles for paper type and preparation state
+- canonical Source reading with section, page, table, and figure context
+- research-question and Objective scope formation
+- source-grounded PaperExperiment revisions for experimental facts
+- comparison views that retain conditions, baselines, and uncertainty
+- Finding review and source traceback
+- a collection-bound Research Agent for read-only investigation and
+  reviewable drafts, with explicit approval for durable writes
 
-The research loop needs reusable, evidence-backed state rather than a flat
-collection of summaries. Paper collections are the first source of that state.
+## Research State
 
-In materials science, this could support structured databases for:
+The system records different kinds of information for different purposes:
 
-- material systems
-- synthesis and processing routes
-- experimental parameters
-- characterization methods
-- measured properties
-- baselines and controls
-- uncertainty and comparability annotations
-- source evidence and provenance
+| Object | Role in the research process |
+| --- | --- |
+| `Source` | Prepared content from the original paper, including passages, tables, captions, and source locations. |
+| `DocumentProfile` | A coarse description of the paper and its preparation state. It helps route work but is not scientific evidence. |
+| `PaperMap` | Optional navigation metadata for a paper's scope, variables, outcomes, and source coverage. It helps find what to read but is not Evidence. |
+| `PaperExperiment` | A reusable, source-grounded reconstruction of one paper's experiment, conditions, variants, and measurements. |
+| `Comparison` | A view of facts across papers with their comparability and unresolved conditions made explicit. |
+| `Finding` | A reviewable research conclusion connected to fixed selections and source-grounded facts. |
 
-The database should not be a simple table of values.
+The Agent may use titles, filenames, profiles, maps, and search results to choose
+where to look. Formal scientific claims must remain grounded in inspected
+Sources and the corresponding structured records. A missing artifact, failed
+read, and information that the paper never reports are different states and
+must remain different in the research record.
 
-It should preserve enough context to answer questions such as:
+## Research Agent
 
-- What exactly was measured?
-- Under what conditions?
-- Compared against what baseline?
-- Was the value directly reported or derived?
-- Is this result comparable with another result?
-- Where is the source evidence?
+The Research Agent is a collection-bound research collaborator. Its job is to
+understand what the researcher wants to know, choose useful next actions, and
+continue the investigation with the available material and tools.
 
-For materials applications, this direction could eventually support
-domain-specific databases for areas such as:
+For a source-backed question, it can:
 
-- metal additive manufacturing
-- battery materials
-- catalysts
-- semiconductors
-- polymers
-- ceramics
-- two-dimensional materials
-- photovoltaic and optoelectronic materials
+1. identify candidate papers by title, filename, profile, or conversation
+   context;
+2. inspect document outlines and choose relevant sections;
+3. read complete passages, tables, and captions, following continuation pages
+   when needed;
+4. organize each paper's result, conditions, baseline, measurement, and source;
+5. compare supported parts across papers and explain what remains uncertain;
+6. prepare a structured draft for a researcher to review.
 
-The key requirement is that every state update remains evidence-backed,
-reviewable, and replaceable when new observations contradict it. This is an
-internal substrate for the research loop, not a general scientific data portal.
+The Agent does not treat a filename, a Paper Map, a search match, or a fluent
+answer as proof. It does not turn a technical failure into a scientific
+conclusion. Durable experiment, Finding, and research-plan writes retain the
+existing user approval boundary.
 
-### 2. Evaluation And Benchmark Assets
+## Current Boundary
 
-The research loop needs evaluation and benchmark assets for testing extraction,
-grounding, comparability, hypothesis, and decision behavior.
+Lens v1 is not a generic paper-chat product, a science news feed, a universal
+scientific search engine, or an autonomous scientist. Current limitations
+include:
 
-Many scientific AI benchmarks suffer from unclear provenance, inconsistent
-labels, missing experimental context, or weak links to the original source.
+- external retrieval, simulation, laboratory execution, and result ingestion
+  are not a completed Lens workflow;
+- human review remains required for scientific corrections and durable writes;
+- a paper can remain unresolved when its prepared source is incomplete or the
+  required fact is not reported;
+- protocol and experiment planning outputs are conditional downstream value,
+  not the primary acceptance surface;
+- materials science is the first proving vertical, not the permanent product
+  boundary.
 
-Lens aims to help build benchmarks where each data point includes:
+The system should be useful even when a collection is mixed, review-heavy, or
+unable to produce a protocol. It should say when a result is insufficient,
+not comparable, or not extractable instead of manufacturing certainty.
 
-- source paper
-- source evidence
-- material identity
-- experimental or computational conditions
-- target property
-- value and unit
-- uncertainty or range if available
-- baseline definition
-- data quality flags
-- comparability status
+## Materials Science First
 
-For the materials proving vertical, this could support evaluation tasks such as:
+Materials research is the first proving vertical because a reported property
+usually depends on several linked conditions:
 
-- property prediction
-- process-property modeling
-- synthesis condition recommendation
-- structure-property relation learning
-- experiment outcome prediction
-- literature-grounded model evaluation
-
-The benchmark direction should be developed carefully.
-
-A benchmark is only useful if the labels are trustworthy, the conditions are
-explicit, and the evaluation task reflects a real research problem.
-
-These assets are evaluation infrastructure, not a separate benchmark marketplace.
-Their value comes from transparent provenance, explicit conditions, and a task
-that represents a real research decision.
-
-### 3. Hypothesis And Experiment Loop
-
-In the longer term, Lens could connect literature-derived evidence with a
-hypothesis and experiment loop.
-
-The goal is to identify the knowledge gap blocking the research objective,
-generate hypotheses connected to existing Evidence, and select the next useful
-experiment under cost, time, risk, and resource constraints. External tools,
-simulations, laboratories, and human operators may execute that experiment;
-Lens owns the research state around it.
-
-A possible workflow is:
-
-1. Extract candidate material-process-property relationships from the
-   literature.
-2. Identify the experimental conditions behind those claims.
-3. Detect missing controls, weak baselines, or inconsistent measurements.
-4. Select hypotheses that are worth validating.
-5. Generate a proposed validation experiment plan.
-6. Track new experimental results against literature expectations.
-7. Update the evidence base with validated or contradicted outcomes.
-
-For example, in metal additive manufacturing, Lens could help identify process
-windows reported to reduce porosity or residual stress, then organize a
-validation plan that specifies:
-
-- alloy
-- powder state
-- machine/process type
-- laser power
-- scan speed
-- hatch spacing
-- layer thickness
-- build orientation
-- post-processing
-- characterization method
-- mechanical test conditions
-- expected outcome
+- material composition and state
+- synthesis or fabrication route
+- processing and post-treatment
+- sample geometry and orientation
+- test method and environment
 - comparison baseline
-- safety and feasibility constraints
+- measurement units and reporting convention
 
-The system should remain human-supervised.
+Lens is designed to make those dependencies visible while keeping the broader
+research pattern extensible to other experimental and technical domains.
 
-Automated validation is valuable only when the proposed experiment is
-technically feasible, safe, measurable, and tied to a clear hypothesis.
+## Longer-Term Direction
 
-### 4. Experiment Candidate Generation
+The longer-term direction is a supervised research loop that can move from a
+research goal through existing knowledge, hypotheses, experiment choices, new
+observations, and updated decisions. The loop is deliberately incremental:
 
-An experiment candidate is an intermediate research object, not a generic
-protocol or a separate laboratory platform.
+```text
+Research problem and constraints
+              |
+              v
+Available knowledge and methods
+              |
+              v
+Source-grounded research state
+              |
+              v
+Judgment, uncertainty, and knowledge gap
+              |
+              v
+Next useful investigation or experiment
+              |
+              v
+New observation -> updated research state
+```
 
-That direction should mirror how experienced materials researchers work rather
-than falling back to generic protocol generation.
-
-In practice, that means helping the user:
-
-- identify the materials problem and target decision
-- reconstruct sample variants and the real controlled variables in a paper
-- extract process parameters, post-processing, test conditions, and baselines
-- connect structure and defect evidence to property outcomes
-- judge what is actually comparable and what is missing or weak
-- propose the next experiment matrix, control groups, characterization chain,
-  and decision criteria
-
-Given a research goal and a literature collection, the system could construct
-candidate experiments by combining:
-
-- prior literature evidence
-- known parameter ranges
-- reported failure cases
-- relevant baselines
-- standard characterization methods
-- domain constraints
-- available equipment
-- cost and time limits
-
-The output should not be a generic protocol.
-
-A useful experimental plan should include:
-
-- research objective
-- hypothesis
-- material system
-- sample variants and controlled variables
-- sample preparation route
-- parameter matrix
-- control groups
-- baselines and comparison target
-- measurement methods
-- characterization methods
-- expected signals
-- expected mechanism or evidence chain
-- decision criteria
-- risk factors
-- required metadata
-- data management plan
-
-For AI-assisted materials research, this is especially important because model
-recommendations are often not experimentally actionable unless they are
-translated into concrete, testable, and measurable plans.
-
-Lens can provide the literature-grounded context and uncertainty record needed
-for that translation.
-
-### 5. Autonomous Research Loop
-
-A longer-term direction is to connect literature extraction, evidence state,
-hypothesis generation, experiment selection, execution, and validation into an
-autonomous research loop.
-
-A possible loop is:
-
-1. Receive a research goal, constraints, and available resources.
-2. Build or update the current world model from evidence-backed facts.
-3. Identify the knowledge gap blocking the objective.
-4. Generate hypotheses connected to existing Evidence.
-5. Select the experiment with the highest expected information value within the
-   available budget and safety constraints.
-6. Execute through simulation, scientific software, a laboratory, or a human
-   operator.
-7. Convert observations into source-grounded Evidence and update the state.
-8. Repeat until the objective is achieved, the hypothesis space is exhausted,
-   the evidence is sufficient, the budget is exhausted, or no useful next
-   experiment remains.
-
-This direction requires strong safeguards:
-
-- high-quality provenance
-- domain-specific schemas
-- uncertainty tracking
-- human approval
-- experimental safety checks
-- reproducibility standards
-- clear separation between reported, derived, inferred, and validated facts
-
-Lens should approach this direction incrementally.
-
-The foundation must be reliable evidence and comparison infrastructure before
-closed-loop autonomy becomes credible. Lens is not claiming that this loop is
-already complete.
-
-### Product Boundary
-
-Lens does not aim to be a general-purpose science portal, news feed, universal
-search engine, tool marketplace, or generic project-management workspace.
-Those systems may provide inputs or execution services around Lens. Lens owns
-the research state that connects evidence to hypotheses, experiments, and
-decisions.
-
-This boundary keeps the current product focused while leaving room to build
-toward an Autonomous Research OS without presenting a broad platform before
-the underlying research loop is reliable.
+This is a future direction, not a claim that Lens already runs experiments or
+continues autonomously without review. The current v1 evidence and comparison
+workflow is the foundation that makes the future loop credible.
 
 ## Documentation
 
-For user-facing documentation, start here:
+Start with [`docs/README.md`](docs/README.md) for the shared documentation map.
 
-- [`docs/README.md`](docs/README.md)
+Product scope and contracts:
 
-For product scope and artifact contracts, see:
+- [`docs/contracts/lens-v1-definition.md`](docs/contracts/lens-v1-definition.md)
+- [`docs/contracts/lens-core-artifact-contracts.md`](docs/contracts/lens-core-artifact-contracts.md)
+- [`docs/overview/lens-mission-positioning.md`](docs/overview/lens-mission-positioning.md)
 
-- `docs/contracts/`
+Architecture and decisions:
 
-For architecture and implementation details, see:
+- [`docs/architecture/lens-v1-architecture-boundary.md`](docs/architecture/lens-v1-architecture-boundary.md)
+- [`docs/architecture/paper-facts-and-comparison-current-state.md`](docs/architecture/paper-facts-and-comparison-current-state.md)
+- [`docs/decisions/rfc-collection-bound-research-agent.md`](docs/decisions/rfc-collection-bound-research-agent.md)
 
-- `docs/architecture/`
-- `backend/docs/`
-- `frontend/docs/`
-
-For backend and frontend setup, see:
+Module setup and contracts:
 
 - [`backend/README.md`](backend/README.md)
 - [`frontend/README.md`](frontend/README.md)
-
-For self-hosted deployment with published Docker images, see:
-
 - [`deploy/README.md`](deploy/README.md)
 
 ## Development Status
 
-Lens is under active development.
+Lens is under active development. Product contracts and architecture documents
+describe the current boundary; implementation details and experimental
+interfaces may continue to change as the system is tested on real research
+collections.
 
-The project is still evolving, and some interfaces, artifacts, and workflows
-may change as the system is tested on real research collections.
-
-The most important development goal is to keep the product direction stable
-while allowing the internal implementation to improve.
-
-## Guiding Statement
-
-Lens exists to help researchers compare scientific results responsibly.
-
-A result should not be separated from its evidence, conditions, baseline, and
-uncertainty.
-
-The goal is not just to extract more facts.
-
-The goal is to make research comparison more reliable.
+The project is successful when it helps a researcher make a better-supported
+judgment, understand why that judgment holds, see what remains uncertain, and
+continue the investigation without losing the path back to the original source.

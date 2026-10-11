@@ -46,13 +46,18 @@ changes; ordinary follow-up questions never enter this queue. It does not
 modify Chat messages or create a training target. Use `--interval <seconds>`
 for an explicit polling loop; no hidden FastAPI background task is started.
 
-The PaperExperiment Draft path is exercised by the Objective analysis
-application service, not by a standalone script in this directory. The service
-builds a bounded Source bundle, calls the configured provider, reconciles
-candidate boundaries, and writes an immutable revision only after deterministic
-binding checks. Live-provider validation artifacts live outside the production
-script surface; do not add a probe link here unless the script exists and its
-input, model, and output contract are documented.
+The PaperExperiment Draft path has two application-owned entry points, not a
+standalone script in this directory. After complete Source reads, the Agent
+may propose and save paper-reported experiment facts without a confirmed
+Objective or a published Objective analysis; that write creates immutable
+revisions only and does not create Objective Selections, ComparisonGroups, or
+Findings. Objective analysis builds a bounded Source bundle, may reuse all
+eligible fixed revisions for the routed Sources, or calls the configured
+provider when extraction is needed, then reconciles candidate boundaries and
+applies deterministic binding checks before creating Objective selections.
+Live-provider validation artifacts live outside the production script surface;
+do not add a probe link here unless the script exists and its input, model, and
+output contract are documented.
 
 ## Dataset Sample Worker
 

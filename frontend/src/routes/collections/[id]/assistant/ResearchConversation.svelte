@@ -10,6 +10,7 @@
 	import {
 		createChatSession,
 		deleteChatSession,
+		setChatSessionPin,
 		listChatSessions,
 		branchChatMessage,
 		clearPendingChatSourceContexts,
@@ -29,6 +30,7 @@
 		type ChatMessageFeedback,
 		type ChatMessage,
 		type ChatProgress,
+		type ChatExecutionPlan,
 		type ChatResponseSnapshot,
 		type ChatTrajectory,
 		type ChatSession,
@@ -48,6 +50,7 @@
 	import {
 		getChatSessionActivity,
 		getModelServiceErrorKey,
+		getTurnRecoveryState,
 		type ChatSessionActivity
 	} from './conversationPresentation';
 	import IconButton from '../../../_shared/IconButton.svelte';
@@ -61,7 +64,10 @@
 		Clock3,
 		CircleAlert,
 		GitBranch,
-		ArrowRight
+		ArrowRight,
+		Pin,
+		PinOff,
+		ChevronDown
 	} from '@lucide/svelte';
 
 	export let embedded = false;
@@ -98,6 +104,7 @@
 		created_at: string;
 		updated_at: string;
 		status: ChatSessionActivity;
+		is_pinned: boolean;
 	};
 
 	let session: ChatSession | null = null;
@@ -114,12 +121,22 @@
 	let sessionActivities: Record<string, ChatSessionActivity> = {};
 	let historyTimer: ReturnType<typeof setTimeout> | undefined;
 	let historyLoading = false;
+	let historyGeneration = 0;
+	const historyPageSize = 10;
+	let historyPageOffset = 0;
+	let historyHasMore = false;
+	let historyPageLoading = false;
+	let historyPageError = false;
+	let historyNeedsRefresh = false;
+	let pinningSessionId = '';
 	let loading = false;
 	let sending = false;
 	let submitting = false;
 	let deletingSessionId = '';
-	$: sessionNavigationDisabled = loading || submitting || deciding || revising || Boolean(deletingSessionId);
+	$: sessionNavigationDisabled =
+		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId);
 	let progress: ChatProgress | null = null;
+	let settledExecutionPlan: ChatExecutionPlan | null = null;
 	let progressHistory: ChatProgress[] = [];
 	let streamingText = '';
 	let responseSnapshot: ChatResponseSnapshot | null = null;
@@ -128,6 +145,7 @@
 	let deciding = false;
 	let error = '';
 	let notice = '';
+	let turnRecovery: ReturnType<typeof getTurnRecoveryState> = null;
 	let input = '';
 	let appliedReviewKey = '';
 	let pendingSourceContexts: ChatSourceContext[] = [];
@@ -283,25 +301,35 @@
 					status:
 						item.status === 'running' || item.status === 'approval'
 							? item.status
-							: 'idle'
-				}))
-				.slice(0, 12);
+							: 'idle',
+					is_pinned: item.is_pinned === true
+				}));
 		} catch {
 			return [];
 		}
 	}
 
 	function writeHistory(nextHistory: StoredChatSession[]) {
-		history = nextHistory.slice(0, 12);
+		history = nextHistory.sort(
+			(a, b) =>
+				Number(b.is_pinned) - Number(a.is_pinned) ||
+				Date.parse(b.updated_at) - Date.parse(a.updated_at) ||
+				(a.session_id < b.session_id ? 1 : a.session_id > b.session_id ? -1 : 0)
+		);
 		if (!browser) return;
 		window.localStorage.setItem(historyStorageKey(), JSON.stringify(history));
 	}
 
+	function titleFromText(text: string) {
+		const firstLine = text.trim().split('\n')[0]?.trim() ?? '';
+		if (!firstLine) return $t('researchAgent.untitledSession');
+		return firstLine.length > 38 ? `${firstLine.slice(0, 38)}...` : firstLine;
+	}
+
 	function titleFromMessages(nextMessages: ChatMessage[]) {
 		const firstUserMessage = nextMessages.find((message) => message.role === 'user');
-		const text = firstUserMessage?.content.trim() ?? '';
-		if (!text) return $t('researchAgent.untitledSession');
-		return text.length > 38 ? `${text.slice(0, 38)}...` : text;
+		const text = firstUserMessage?.content ?? '';
+		return titleFromText(text);
 	}
 
 	function upsertHistory(nextSession: ChatSession, title = '') {
@@ -318,63 +346,155 @@
 						: previous?.title || $t('researchAgent.untitledSession')),
 				created_at: nextSession.created_at,
 				updated_at: nextSession.updated_at,
-				status: nextSession.status
+				status: nextSession.status,
+				is_pinned: previous?.is_pinned ?? nextSession.is_pinned === true
 			},
 			...existing
 		]);
 	}
 
-	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
+	async function fetchServerHistory(
+		generation: number,
+		ownerCollectionId: string,
+		count = historyPageSize
+	) {
+		const historyRequest = ++historyGeneration;
 		try {
-			const response = await listChatSessions(ownerCollectionId, {
-				limit: 12,
-				signal: sessionController?.signal
-			});
-			const stored = readHistory();
-			// The list is a navigation index. Do not download every trajectory just
-			// to derive sidebar titles; a trajectory is loaded when selected.
-			const serverHistory = response.items.map((item) => {
-				const previous = stored.find((entry) => entry.session_id === item.session_id);
-				const status: ChatSessionActivity =
-					item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
-				const title =
-					item.session_id === session?.session_id && messages.length
-						? titleFromMessages(messages)
-						: previous?.title || $t('researchAgent.untitledSession');
-				return {
-					session_id: item.session_id,
-					title,
-					created_at: item.created_at,
-					updated_at: item.updated_at,
-					status
-				};
-			});
-			if (!isCurrentSession(generation, ownerCollectionId)) return;
-			sessionActivities = {
-				...sessionActivities,
-				...Object.fromEntries(serverHistory.map((item) => [item.session_id, item.status]))
-			};
-			const serverIds = new Set(serverHistory.map((entry) => entry.session_id));
-			writeHistory([
-				...serverHistory,
-				...stored.filter((entry) => !serverIds.has(entry.session_id))
-			]);
+			const items: ChatSession[] = [];
+			let hasMore = false;
+			// Refresh only pages already opened; initial recovery requests one page.
+			do {
+				const response = await listChatSessions(ownerCollectionId, {
+					limit: historyPageSize,
+					offset: items.length,
+					signal: sessionController?.signal
+				});
+				if (!isCurrentSession(generation, ownerCollectionId) || historyRequest !== historyGeneration)
+					return null;
+				items.push(...response.items);
+				hasMore = response.items.length === historyPageSize;
+			} while (hasMore && items.length < count);
+			return { items, hasMore };
 		} catch {
 			// The existing local history remains usable when the list request is unavailable.
+			return null;
 		}
 	}
 
-	async function refreshHistoryActivities() {
-		if (!session || loading || historyLoading || destroyed) return;
+	function applyServerHistory(
+		items: ChatSession[],
+		generation: number,
+		ownerCollectionId: string,
+		append = false,
+		hasMore = items.length === historyPageSize
+	) {
+		if (!isCurrentSession(generation, ownerCollectionId)) return;
+		const stored = readHistory();
+		// The list is a navigation index. Do not download every trajectory just
+		// to derive sidebar titles; a trajectory is loaded when selected.
+		const serverHistory = items.map((item) => {
+			const previous = stored.find((entry) => entry.session_id === item.session_id);
+			const status: ChatSessionActivity =
+				item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
+			const title =
+				item.session_id === session?.session_id && messages.length
+					? titleFromMessages(messages)
+					: item.title?.trim()
+						? titleFromText(item.title)
+						: previous?.title || $t('researchAgent.untitledSession');
+			return {
+				session_id: item.session_id,
+				title,
+				created_at: item.created_at,
+				updated_at: item.updated_at,
+				status,
+				is_pinned: item.is_pinned === true
+			};
+		});
+		sessionActivities = {
+			...sessionActivities,
+			...Object.fromEntries(serverHistory.map((item) => [item.session_id, item.status]))
+		};
+		const receivedIds = new Set(items.map((item) => item.session_id));
+		const retained = append ? stored.filter((item) => !receivedIds.has(item.session_id)) : [];
+		writeHistory([...retained, ...serverHistory]);
+		historyPageOffset = append ? historyPageOffset + items.length : items.length;
+		historyHasMore = hasMore;
+		historyPageError = false;
+		if (!append) historyNeedsRefresh = false;
+		if (session) {
+			const current = items.find((item) => item.session_id === session?.session_id);
+			if (current) session = { ...session, is_pinned: current.is_pinned === true };
+		}
+	}
+
+	async function refreshServerHistory(generation: number, ownerCollectionId: string) {
+		const result = await fetchServerHistory(
+			generation, ownerCollectionId, Math.max(historyPageSize, historyPageOffset)
+		);
+		if (result) applyServerHistory(result.items, generation, ownerCollectionId, false, result.hasMore);
+		return result !== null;
+	}
+
+	async function loadMoreHistory(): Promise<void> {
+		if ((!historyHasMore && !historyNeedsRefresh) || historyPageLoading || historyLoading || sessionNavigationDisabled || destroyed) return;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		historyPageLoading = true;
+		historyPageError = false;
+		error = '';
+		if (historyNeedsRefresh) {
+			const refreshed = await refreshServerHistory(generation, ownerCollectionId);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			historyPageLoading = false;
+			if (!refreshed) {
+				historyPageError = true;
+				error = $t('error.requestFailed');
+				return;
+			}
+			return loadMoreHistory();
+		}
+		const historyRequest = ++historyGeneration;
+		try {
+			const response = await listChatSessions(ownerCollectionId, {
+				limit: historyPageSize,
+				offset: historyPageOffset,
+				signal: sessionController?.signal
+			});
+			if (!isCurrentSession(generation, ownerCollectionId) || historyRequest !== historyGeneration) return;
+			applyServerHistory(response.items, generation, ownerCollectionId, true);
+		} catch (err) {
+			if (isCurrentSession(generation, ownerCollectionId) && historyRequest === historyGeneration) {
+				historyPageError = true;
+				error = errorMessage(err);
+			}
+		} finally {
+			if (isCurrentSession(generation, ownerCollectionId) && historyRequest === historyGeneration)
+				historyPageLoading = false;
+		}
+	}
+
+	function loadMoreOnScroll(event: Event) {
+		const list = event.currentTarget as HTMLElement;
+		if (!historyPageError && list.scrollHeight - list.scrollTop - list.clientHeight < 80)
+			void loadMoreHistory();
+	}
+
+	async function refreshHistoryActivities(refreshIndex = true) {
+		if (!session || loading || historyLoading || historyPageLoading || destroyed || deletingSessionId || pinningSessionId) return;
 		const generation = sessionGeneration;
 		const ownerCollectionId = collectionId;
 		clearTimeout(historyTimer);
 		historyLoading = true;
 		history = readHistory();
+		if (refreshIndex) await refreshServerHistory(generation, ownerCollectionId);
+		if (!isCurrentSession(generation, ownerCollectionId)) return;
 		const candidates = history.filter(
 			(item) =>
 				item.session_id !== session?.session_id &&
-				['running', 'approval', 'recovering'].includes(sessionActivities[item.session_id])
+				['running', 'approval', 'recovering', 'unavailable'].includes(
+					sessionActivities[item.session_id]
+				)
 		);
 		await Promise.all(
 			candidates.map(async (item) => {
@@ -422,6 +542,13 @@
 		clearTimeout(historyTimer);
 		historyLoading = false;
 		recoveringCallId = null;
+		historyPageLoading = false;
+		historyPageOffset = 0;
+		historyPageError = false;
+		historyHasMore = false;
+		historyNeedsRefresh = false;
+		pinningSessionId = '';
+		deletingSessionId = '';
 		recoveryLoading = false;
 		recoveryError = '';
 		sessionController?.abort();
@@ -448,8 +575,10 @@
 		loading = false;
 		error = '';
 		notice = '';
+		turnRecovery = null;
 		pendingApproval = null;
 		progress = null;
+		settledExecutionPlan = null;
 		pendingSourceContexts = [];
 		history = [];
 		if (!userId || !activeCollectionId) return;
@@ -459,10 +588,14 @@
 		loading = true;
 		pendingSourceContexts = readPendingChatSourceContexts(userId, activeCollectionId);
 		history = readHistory();
+		// The history endpoint is an independent navigation index. Start it with
+		// session recovery so the page does not wait for a serial request waterfall.
+		const initialHistoryPromise = fetchServerHistory(generation, activeCollectionId);
 
 		try {
 			const storedSessionId = requestedSessionId || readStoredSessionId();
 			let nextSession: ChatSession | null = null;
+			let createdSession = false;
 			if (storedSessionId) {
 				try {
 					nextSession = await fetchChatSession(storedSessionId, controller.signal);
@@ -481,6 +614,7 @@
 			if (nextSession === null) {
 				nextSession = await createChatSession(activeCollectionId, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
+				createdSession = true;
 				messages = [];
 			} else {
 				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
@@ -502,7 +636,14 @@
 			onSourcesChanged();
 			storeSessionId(nextSession.session_id);
 			upsertHistory(nextSession);
-			await refreshServerHistory(generation, activeCollectionId);
+			const initialHistory = await initialHistoryPromise;
+			if (initialHistory) {
+				applyServerHistory(
+					initialHistory.items, generation, activeCollectionId, false, initialHistory.hasMore
+				);
+			}
+			if (createdSession && isCurrentSession(generation, activeCollectionId))
+				upsertHistory(nextSession);
 			scheduleRecovery();
 		} catch (err) {
 			if (!isCurrentSession(generation, activeCollectionId)) return;
@@ -514,7 +655,7 @@
 		} finally {
 			if (isCurrentSession(generation, activeCollectionId)) {
 				loading = false;
-				void refreshHistoryActivities();
+				void refreshHistoryActivities(false);
 			}
 		}
 	}
@@ -553,14 +694,20 @@
 		)
 			return;
 		responseSnapshot = snapshot;
+		settledExecutionPlan = snapshot.status === 'running' ? null : (snapshot.progress.execution_plan ?? null);
 		streamingText = snapshot.content;
 		progress = snapshot.progress;
 		progressHistory = appendChatProgress(progressHistory, snapshot.progress);
+		turnRecovery = getTurnRecoveryState(snapshot);
 		if (snapshot.status === 'interrupted') error = $t('researchAgent.responseInterrupted');
 		else if (snapshot.status === 'failed')
 			error = turnErrorMessage(snapshot.error_code);
-		else if (snapshot.status === 'completed' && snapshot.warnings.length)
-			notice = $t('researchAgent.turnLimited');
+		else if (turnRecovery && !['technicalFailure', 'permissionDenied'].includes(turnRecovery))
+			notice = recoveryDescription(turnRecovery);
+	}
+
+	function recoveryDescription(state: typeof turnRecovery) {
+		return state ? $t(`researchAgent.${state}Description`) : '';
 	}
 
 	function turnErrorMessage(errorCode: string | null | undefined) {
@@ -578,7 +725,11 @@
 		loadFeedback(trajectory.feedback);
 		pendingApproval = trajectory.pending_approval;
 		if (trajectory.response) acceptSnapshot(trajectory.response);
-		else responseSnapshot = null;
+		else {
+			responseSnapshot = null;
+			settledExecutionPlan = null;
+			turnRecovery = null;
+		}
 	}
 
 	async function resumeResponse() {
@@ -727,26 +878,62 @@
 		if (preserveDraft && userId === owner && activeSessionId === sessionId) input = draft;
 	}
 
+	async function toggleSessionPin(sessionId: string) {
+		if (sessionNavigationDisabled) return;
+		const item = history.find((entry) => entry.session_id === sessionId);
+		if (!item) return;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		pinningSessionId = sessionId;
+		historyGeneration += 1;
+		historyPageLoading = false;
+		error = '';
+		try {
+			const saved = await setChatSessionPin(sessionId, !item.is_pinned, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			historyGeneration += 1;
+			historyNeedsRefresh = true;
+			writeHistory(history.map((entry) =>
+				entry.session_id === sessionId ? { ...entry, is_pinned: saved.is_pinned } : entry
+			));
+			if (session?.session_id === sessionId) session = { ...session, is_pinned: saved.is_pinned };
+			await refreshServerHistory(generation, ownerCollectionId);
+		} catch (err) {
+			if (isCurrentSession(generation, ownerCollectionId)) error = errorMessage(err);
+		} finally {
+			if (isCurrentSession(generation, ownerCollectionId)) pinningSessionId = '';
+		}
+	}
+
 	async function removeSession(sessionId: string) {
 		if (sessionNavigationDisabled || !browser) return;
 		const item = history.find((entry) => entry.session_id === sessionId);
 		if (!item || !window.confirm($t('researchAgent.deleteSessionConfirm', { title: item.title }))) return;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
 		deletingSessionId = sessionId;
 		error = '';
 		try {
 			await deleteChatSession(sessionId, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			historyGeneration += 1;
+			historyPageLoading = false;
+			historyNeedsRefresh = true;
 			const remaining = history.filter((entry) => entry.session_id !== sessionId);
 			writeHistory(remaining);
-			if (sessionId !== activeSessionId) return;
+			if (sessionId !== activeSessionId) {
+				await refreshServerHistory(generation, ownerCollectionId);
+				return;
+			}
 			clearStoredSessionId();
 			session = null;
 			messages = [];
 			pendingApproval = null;
 			await loadSession(remaining[0]?.session_id ?? '');
 		} catch (err) {
-			error = errorMessage(err);
+			if (isCurrentSession(generation, ownerCollectionId)) error = errorMessage(err);
 		} finally {
-			deletingSessionId = '';
+			if (isCurrentSession(generation, ownerCollectionId)) deletingSessionId = '';
 		}
 	}
 
@@ -959,6 +1146,7 @@
 		};
 		messages = [...messages, optimisticMessage, streamingMessage];
 		responseSnapshot = null;
+		settledExecutionPlan = null;
 		streamingText = '';
 		if (!isRevision) input = '';
 		sending = true;
@@ -968,6 +1156,7 @@
 
 		error = '';
 		notice = '';
+		turnRecovery = null;
 		const acknowledgeSubmission = () => {
 			if (!submitting) return;
 			submitting = false;
@@ -1157,14 +1346,20 @@
 		const knownIds = new Set(prior.map((message) => message.message_id));
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
+		settledExecutionPlan = turn.execution_plan ?? null;
+		turnRecovery = getTurnRecoveryState(turn);
 		if (turn.status === 'rejected') {
 			notice = $t(rejectionNoticeKey(decidedToolName));
 		}
 		if (turn.status === 'failed') {
 			error = turnErrorMessage(turn.error_code);
 		}
-		if (turn.status === 'completed' && turn.warnings?.length) {
-			notice = $t('researchAgent.turnLimited');
+		if (
+			turn.status === 'completed' &&
+			turnRecovery &&
+			!['technicalFailure', 'permissionDenied'].includes(turnRecovery)
+		) {
+			notice = recoveryDescription(turnRecovery);
 		}
 		if (session) {
 			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
@@ -1268,6 +1463,12 @@
 			onNewSession={startNewSession}
 			onSwitchSession={switchSession}
 			onDeleteSession={removeSession}
+			onTogglePin={toggleSessionPin}
+			{pinningSessionId}
+			{historyHasMore}
+			{historyPageLoading}
+			{historyPageError}
+			onLoadMoreHistory={loadMoreHistory}
 			{formatHistoryTime}
 		/>
 	{/if}
@@ -1298,30 +1499,64 @@
 				>
 			</div>
 			{#if showHistory}
-				<nav class="embedded-history" aria-label={$t('researchAgent.historyTitle')}>
+				<nav
+					class="embedded-history"
+					aria-label={$t('researchAgent.historyTitle')}
+					on:scroll={loadMoreOnScroll}
+				>
 					{#each history as item (item.session_id)}
 						{@const activity = sessionActivities[item.session_id]}
-						<button
-							type="button"
-							class:active={item.session_id === activeSessionId}
-							disabled={sessionNavigationDisabled}
-							on:click={() => {
-								void switchSession(item.session_id);
-								showHistory = false;
-							}}
-							><span class="embedded-history-title">{item.title}</span>
-							{#if activity && activity !== 'idle'}
-								<span class="session-state" data-state={activity}>
-									{#if activity === 'running'}<LoaderCircle
-											size={12}
-										/>{:else if activity === 'unavailable'}<CircleAlert size={12} />{:else}<Clock3
-											size={12}
-										/>{/if}
-									<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
-								</span>
-							{/if}
-						</button>
+						<div class="embedded-history-item">
+							<button
+								class="embedded-history-select"
+								type="button"
+								title={item.title}
+								class:active={item.session_id === activeSessionId}
+								disabled={sessionNavigationDisabled}
+								on:click={() => {
+									void switchSession(item.session_id);
+									showHistory = false;
+								}}
+							>
+								<span class="embedded-history-title">{item.title}</span>
+								{#if activity && activity !== 'idle'}
+									<span class="session-state" data-state={activity}>
+										{#if activity === 'running'}<LoaderCircle size={12} />
+										{:else if activity === 'unavailable'}<CircleAlert size={12} />
+										{:else}<Clock3 size={12} />{/if}
+										<span>{$t(`researchAgent.sessionState.${activity}`)}</span>
+									</span>
+								{/if}
+							</button>
+							<button
+								class="embedded-pin"
+								class:pinned={item.is_pinned}
+								type="button"
+								disabled={sessionNavigationDisabled}
+								aria-label={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
+								title={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
+								aria-pressed={item.is_pinned}
+								aria-busy={pinningSessionId === item.session_id}
+								on:click={() => toggleSessionPin(item.session_id)}
+							>
+								{#if pinningSessionId === item.session_id}<LoaderCircle size={14} />
+								{:else if item.is_pinned}<PinOff size={14} aria-hidden="true" />
+								{:else}<Pin size={14} aria-hidden="true" />{/if}
+							</button>
+						</div>
 					{/each}
+					{#if historyHasMore}
+						<button
+							class="embedded-load-more"
+							type="button"
+							disabled={sessionNavigationDisabled || historyPageLoading}
+							aria-label={$t('researchAgent.loadMoreSessions')}
+							on:click={loadMoreHistory}
+						>
+							{#if historyPageLoading}<LoaderCircle size={14} />{:else}<ChevronDown size={14} />{/if}
+							{$t('researchAgent.loadMoreSessions')}
+						</button>
+					{/if}
 				</nav>
 			{/if}
 		{:else if conversationTitle || queryObjectiveId || branchDraft}
@@ -1340,9 +1575,11 @@
 					sessionId={session.session_id}
 				/>{/key}
 		{/if}
-		{#if error}
+		{#if error || turnRecovery === 'technicalFailure' || turnRecovery === 'permissionDenied'}
 			<div class="status status-error" role="alert">
-				<span>{error}</span>
+				{#if turnRecovery === 'technicalFailure'}<strong>{$t('researchAgent.technicalFailure')}</strong>{/if}
+				{#if turnRecovery === 'permissionDenied'}<strong>{$t('researchAgent.permissionDenied')}</strong>{/if}
+				<span>{turnRecovery ? recoveryDescription(turnRecovery) : error}</span>
 				{#if failedSessionId !== null}
 					<button type="button" on:click={() => loadSession(failedSessionId ?? '')}>
 						{$t('researchAgent.retrySession')}
@@ -1351,7 +1588,17 @@
 			</div>
 		{/if}
 		{#if notice}
-			<div class="status status-notice" role="status">{notice}</div>
+			<div class="status status-notice" role="status">
+				{#if turnRecovery}<strong>{$t(`researchAgent.${turnRecovery}`)}</strong>{/if}
+				<span>{notice}</span>
+			</div>
+		{/if}
+		{#if turnRecovery && turnRecovery !== 'permissionDenied' && session && !checkpointId && !branchDraft && !running && !pendingApproval}
+			<button class="continue-research" type="button"
+				disabled={loading || sending || deciding || revising || Boolean(recoveringCallId)}
+				on:click={() => sendMessage($t('researchAgent.continueRequest'))}>
+				<ArrowRight size={16} aria-hidden="true" />{$t('researchAgent.continueResearch')}
+			</button>
 		{/if}
 		<MessageTimeline
 			{collectionId}
@@ -1370,6 +1617,7 @@
 			pendingApproval={checkpointId ? null : pendingApproval}
 			progress={checkpointId ? null : progress}
 			progressHistory={checkpointId ? [] : progressHistory}
+			executionPlan={checkpointId ? null : settledExecutionPlan}
 			recoveringCallId={checkpointId ? null : recoveringCallId}
 			recoveryLoading={!checkpointId && recoveryLoading}
 			recoveryError={checkpointId ? '' : recoveryError}
@@ -1653,10 +1901,27 @@
 		padding: 10px 12px;
 		border-radius: 6px;
 		font-size: 13px;
+		overflow-wrap: anywhere;
 	}
+	.status strong { display: block; margin-bottom: 4px; }
+	.continue-research {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		align-self: center;
+		margin-top: 8px;
+		padding: 7px 12px;
+		border: 1px solid var(--border-default);
+		border-radius: 4px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+	.continue-research:disabled { opacity: 0.5; cursor: default; }
 
 	.status-error {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
 		gap: 12px;
@@ -1759,6 +2024,29 @@
 	.embedded-history button.active,
 	.embedded-history button:hover {
 		background: var(--bg-subtle);
+	}
+	.embedded-history-item {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 32px;
+		align-items: center;
+	}
+	.embedded-history .embedded-pin {
+		display: grid;
+		place-items: center;
+		width: 28px;
+		height: 28px;
+		padding: 0;
+		border-radius: 6px;
+		color: var(--text-tertiary);
+	}
+	.embedded-history .embedded-pin.pinned {
+		color: var(--brand-primary);
+	}
+	.embedded-history .embedded-load-more {
+		display: flex;
+		justify-content: center;
+		font-size: 12px;
+		color: var(--text-secondary);
 	}
 	.embedded :global(.message-scroll) {
 		padding-inline: 16px;

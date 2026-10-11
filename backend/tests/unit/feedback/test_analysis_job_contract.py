@@ -23,6 +23,9 @@ class _Collections:
             raise FileNotFoundError("collection not found")
         return {"collection_id": collection_id}
 
+    async def collection_belongs_to_user(self, collection_id: str, user_id: str):
+        return collection_id == "collection-1" and user_id == "user-1"
+
 
 class _Chat:
     def __init__(self) -> None:

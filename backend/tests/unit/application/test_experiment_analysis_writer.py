@@ -409,6 +409,10 @@ def _physical_split_experiment(
 
 
 class _RevisionRepository:
+    async def read_revision(self, experiment_id, experiment_version, *, transaction=None):
+        self.transaction_handles.append(transaction)
+        return self.records.get((experiment_id, experiment_version))
+
     def __init__(self):
         self.records: dict[tuple[str, int], StoredPaperExperimentRevision] = {}
         self.next_id = 1
@@ -529,6 +533,36 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
     assert first.findings == second.findings
     assert first.findings[0].paper_contributions == ()
     assert len(analyses.graphs) == 2
+
+
+async def test_source_only_writer_saves_multiple_paper_experiments_without_selection():
+    writer, revisions, _ = _writer()
+    output = _physical_split_experiment("paper-a", distinct_boundary=True)
+
+    result = await writer.write_paper_experiment_revisions(
+        experiment_outputs=(output,),
+        transaction=object(),
+        created_by="user-1",
+    )
+
+    assert len(result.revisions) == 2
+    assert {item.revision.document_id for item in result.revisions} == {"paper-a"}
+    assert len({item.revision.experiment_id for item in result.revisions}) == 2
+    assert result.selections == ()
+    assert result.groups == ()
+    assert result.findings == ()
+    assert len(revisions.records) == 2
+
+
+async def test_source_only_batch_validates_all_experiments_before_writing():
+    writer, revisions, graphs = _writer()
+    output = _physical_split_experiment("paper-a", distinct_boundary=False)
+    with pytest.raises(ValueError, match="identity collision"):
+        await writer.write_paper_experiment_revisions(
+            experiment_outputs=(output,), transaction=object(),
+        )
+    assert revisions.records == {}
+    assert graphs.graphs == []
 
 
 async def test_authored_selection_revision_preserves_parent_limits_and_provenance():
@@ -731,23 +765,20 @@ async def test_writer_keeps_selection_for_exact_partial_protocol() -> None:
     assert test_condition.missing_parameters == ("fixture alignment",)
 
 
-async def test_single_experiment_writer_commits_revision_and_selection_only():
+async def test_source_only_writer_commits_revision_without_selection():
     writer, revisions, analyses = _writer()
-    result = await writer.write_single_experiment_revision(
-        collection_id="collection-1",
-        objective=_objective(),
-        analysis=_analysis(),
-        experiment_output=_comparison_experiment("paper-a"),
-        create_selection=True,
+    result = await writer.write_paper_experiment_revisions(
+        experiment_outputs=(_comparison_experiment("paper-a"),),
+        transaction=object(),
         created_by="agent-user",
     )
 
     assert len(result.revisions) == 1
-    assert len(result.selections) == 1
+    assert result.selections == ()
     assert result.groups == ()
     assert result.findings == ()
     assert len(revisions.records) == 1
-    assert analyses.graphs[0].findings == ()
+    assert analyses.graphs == []
 
 
 async def test_writer_passes_one_transaction_to_every_graph_repository():

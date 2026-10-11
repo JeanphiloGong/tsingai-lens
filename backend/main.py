@@ -251,6 +251,7 @@ def _parse_agent_run_limits() -> AgentRunLimits:
         "max_model_tokens": "LENS_AGENT_MAX_MODEL_TOKENS",
         "max_consecutive_no_progress": "LENS_AGENT_NO_PROGRESS_LIMIT",
         "emergency_max_model_cycles": "LENS_AGENT_EMERGENCY_MAX_CYCLES",
+        "max_model_retries": "LENS_AGENT_MAX_MODEL_RETRIES",
         "max_request_seconds": "LENS_AGENT_MAX_REQUEST_SECONDS",
         "max_context_tokens": "LENS_AGENT_CONTEXT_TOKENS",
         "max_parallel_reads": "LENS_AGENT_MAX_PARALLEL_READS",
@@ -261,7 +262,9 @@ def _parse_agent_run_limits() -> AgentRunLimits:
         default = getattr(defaults, field_name)
         try:
             raw = os.getenv(env_name, "").strip()
-            if default is None and (not raw or raw == "0"):
+            if raw == "0" and field_name in {
+                "max_elapsed_seconds", "max_tool_calls", "max_model_tokens", "emergency_max_model_cycles",
+            }:
                 values[field_name] = None
                 continue
             parser = float if field_name.endswith("_seconds") else int
@@ -483,7 +486,6 @@ async def build_application_runtime(
             paper_experiment_authoring_service = PaperExperimentAuthoringService(
                 collection_service=collection_service,
                 source_artifact_repository=source_artifact_repository,
-                objective_repository=objective_repository,
                 experiment_analysis_writer=experiment_analysis_writer,
                 experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
             )
@@ -693,6 +695,7 @@ async def build_application_runtime(
             paper_map_repository=paper_map_repository,
             objective_repository=objective_repository,
             objective_input_service=objective_input_service,
+            paper_experiment_repository=paper_experiment_repository,
         )
         document_markdown_service = DocumentMarkdownService(
             collection_service=collection_service,
@@ -1188,7 +1191,7 @@ def create_app(
     )
     app = FastAPI(
         title="TsingAI-Lens API",
-		version="0.13.5",
+		version="0.13.6",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

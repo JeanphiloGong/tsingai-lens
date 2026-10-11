@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 
 from application.chat import ToolSpec
 from application.chat.model import (
+    AGENT_MISSION,
     ModelUsage,
     ModelResponseError,
     ModelTurn,
@@ -107,6 +108,23 @@ def _message() -> ChatMessage:
     )
 
 
+@pytest.mark.parametrize("arguments", [None, "", "{}"])
+async def test_stream_distinguishes_missing_arguments_from_explicit_empty_object(arguments):
+    client, _ = _client([_stream_chunk(tool_calls=[SimpleNamespace(
+        index=0, type="function", function=SimpleNamespace(name="inspect", arguments=arguments),
+    )])])
+    model = OpenAIChatModel(client=client, model="test-model")
+    kwargs = dict(context=ChatModelContext((_message(),)), tool_specs=(), text_delta_callback=lambda _: None)
+    if arguments == "{}":
+        turn = await model.respond(**kwargs)
+        assert turn.tool_calls[0].arguments == {}
+    else:
+        with pytest.raises(ModelResponseError) as error:
+            await model.respond(**kwargs)
+        assert error.value.reason == "stream_tool_arguments_missing"
+        assert error.value.retryable and not error.value.partial_content
+
+
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("effort", [None, "", " none ", "low"])
 async def test_chat_forwards_the_configured_reasoning_effort(monkeypatch, stream, effort):
@@ -157,70 +175,100 @@ async def test_context_compaction_rejects_executable_tools():
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
 
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v15.27"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v16.8"
+    for section in (
+        "AGENT MISSION",
+        "FOUR-LAYER RESPONSIBILITY MODEL",
+        "RESEARCH UNDERSTANDING LOOP",
+        "COLLABORATION AND CONTINUITY",
+        "INPUT AND RESEARCH INFORMATION",
+        "TOOL DECISION PATH",
+        "SCIENTIFIC READING AND COMPARISON",
+        "LIMITATIONS AND RECOVERY",
+        "DRAFTS AND SAVED RECORDS",
+        "RESEARCHER-FACING OUTPUT",
+        "BOUNDARY EXAMPLES",
+    ):
+        assert section in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "supporting source" in prompt
-    assert "Never expose registered tool names" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "never restart the greeting or capability introduction" in prompt
-    assert "Use onboarding only for an actual greeting" in prompt
-    assert "A paper survey and a Source search are navigation steps" in prompt
-    assert "complete, untruncated canonical content and its digest" in prompt
-    assert "the actual transient plan draft before answering" in prompt
-    assert "Never describe an unmentioned value as researcher-specified" in prompt
+    assert "never restart the greeting or capability introduction" in prompt.lower()
+    assert "Use onboarding only for greetings or identity/capability questions" in prompt
+    assert "registered tool catalog and loaded parameter schemas define available actions" in prompt
+    assert "Search matches, snippets and headings locate content but are not complete reads" in prompt
+    assert "propose the actual structured PaperExperiment draft" in prompt
+    assert "Use only canonical identities and versions" in prompt
     assert "insufficient map" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "inspect that paper's Sources" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "it is not verified Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "inspect the exact complete Finding" in prompt
-    assert "does not create a new Finding" in prompt
-    assert "Never reconstruct a complete Finding from a summary" in prompt
-    assert "record or correct Evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "exact complete Source" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "`read_source`" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "create_paper_experiment_revision" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "propose_paper_experiment_draft" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Finding draft" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Source-to-experiment write" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "analysis authored by you" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "publish_agent_objective_analysis" not in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "fixed Selection/ComparisonGroup references" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "derive_objective" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "propose_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "create_research_plan" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "technical extraction failure" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "inspect the outline or available body" in prompt.lower()
+    assert "Paper Map is optional scope/navigation information" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Raw text or your prose does not create those records" in prompt
+    assert "exact eligible selections" not in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Conversation intent does not create a grant" in prompt
+    assert "no action is saved before a successful write result" in prompt
+    assert "Technical completion is not scientific support" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "Never expose hidden chain-of-thought" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "candidate creation" in RESEARCH_AGENT_SYSTEM_PROMPT.lower()
-    assert "confirm_objective" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert (
-        "candidate creation, objective confirmation, and analysis start"
-        in RESEARCH_AGENT_SYSTEM_PROMPT.lower()
-    )
+    assert "Question candidate creation, confirmation and analysis start are distinct actions" in prompt
+    assert "Saving a paper experiment never creates or requests a Finding by implication" in prompt
+    assert "complete only the experiment path" in prompt
+    assert "do not wait for a fixed user keyword" in prompt
+    assert "backend permission mode, tool risk and prerequisite validation remain authoritative" in prompt
+    assert "create_paper_experiment_revision" not in RESEARCH_AGENT_SYSTEM_PROMPT
+
+
+def test_prompt_uses_the_research_decision_mission_and_four_layer_model() -> None:
+    prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
+    normalized = prompt.casefold()
+
+    assert AGENT_MISSION.startswith("AGENT MISSION")
+    assert "form a testable research judgment around the researcher's research decision" in prompt
+    assert "relevant scientific knowledge, user materials, paper originals and available tools" in prompt
+    assert "reduce key uncertainty" in prompt
+    assert "adjust the research question, hypotheses, reading strategy, calculations and comparisons" in normalized
+    assert "Research question layer" in prompt
+    assert "Research understanding layer" in prompt
+    assert "Traceable fact layer" in prompt
+    assert "Runtime control layer" in prompt
+    assert "runtime observations never become scientific evidence" in normalized
+    assert "through traceable cross-paper comparison" not in AGENT_MISSION
+
+
+def test_prompt_defines_paper_experiment_maturity_and_formal_lifecycle() -> None:
+    prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
+
+    assert "only records experiments actually reported by the paper" in prompt
+    assert "Do not create a PaperExperiment merely to create an object" in prompt
+    assert "When complete Source reads make a reusable paper-local" in prompt
+    assert "complete Source -> PaperExperiment draft -> researcher review -> PaperExperiment revision" in prompt
+    assert "later Objective analysis creates selections and cross-paper comparisons" in prompt
+    assert "Future validation experiments are proposals, not PaperExperiment records" in prompt
+    assert "propose the actual structured PaperExperiment draft" in prompt
 
 
 def test_prompt_splits_multi_outcome_interest_before_scope_screening() -> None:
     prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
     assert (
-        "split it into separate focused questions before scope screening"
+        "one question per outcome"
         in prompt
     )
-    assert "one intervention question and exactly one outcome" in prompt
-    assert "Outcomes never belong in the variables list" in prompt
-    assert "preview each focused question separately" in prompt
-    assert "Preserve every material explicitly named" in prompt
-    assert "do not leave scientific scope only" in prompt
-    assert "uncertainty, not grounds to exclude a same-material paper" in prompt
+    assert "split it into one focused question per outcome before scope screening" in prompt
+    assert "Preserve the shared intervention" in prompt
+    assert "materials and explicit constraints" in prompt
+    assert "an outcome is not a variable" in prompt
+    assert "changing an outcome does not replace the intervention" in prompt
 
 
 def test_prompt_separates_product_questions_from_collection_reads() -> None:
-    assert "application's purpose" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "without calling a tool" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "current collection's contents" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Use the collection overview when they are unknown" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "Choose navigation" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "search snippets are navigation, not full-source evidence" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "researcher may add" in RESEARCH_AGENT_SYSTEM_PROMPT
-    assert "one highest-information clarification question" in RESEARCH_AGENT_SYSTEM_PROMPT
+    prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
+    assert "Lens purpose/capability questions directly when no collection fact is needed" in prompt
+    assert "This system" in prompt
+    assert "Lens unless the user asks about its papers" in prompt
+    assert "get_collection_context when context is unknown" in prompt
+    assert "literal filename/title query is not semantic relevance search" in prompt
+    assert "Search matches, snippets and headings locate content" in prompt
+    assert "Adding or deferring a paper changes only that paper" in prompt
+    assert "one highest-information clarification question" in prompt
 
 
 def test_openai_chat_model_uses_the_global_model_setting(monkeypatch) -> None:

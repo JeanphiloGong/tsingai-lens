@@ -268,18 +268,6 @@ def test_prepare_model_output_generates_response_local_series_key() -> None:
     payload["experiments"][0].pop("series_key", None)
     prepared = prepare_model_output(
         PaperExperimentModelOutput.from_mapping(payload),
-        objective=ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-1",
-                "objective_id": "objective-1",
-                "question": "Does preheating affect elongation?",
-                "material_scope": ["316L"],
-                "variables": ["preheating"],
-                "outcomes": ["elongation"],
-                "seed_document_ids": ["doc-1"],
-                "confidence": 1.0,
-            }
-        ),
     )
     assert prepared.output.experiments[0].payload["series_key"].startswith("draft_")
 
@@ -1354,17 +1342,6 @@ def test_prepare_model_output_generates_local_series_key_when_model_omits_it() -
     payload["experiments"][0].pop("series_key", None)
     prepared = prepare_model_output(
         PaperExperimentModelOutput.from_mapping(payload),
-        objective=ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-1",
-                "objective_id": "objective-1",
-                "question": "Does preheating affect elongation?",
-                "material_scope": ["316L"],
-                "variables": ["preheating"],
-                "outcomes": ["elongation"],
-                "confidence": 1.0,
-            }
-        ),
     )
 
     assert prepared.output.experiments[0].payload["series_key"].startswith("draft_")

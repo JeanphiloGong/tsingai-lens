@@ -37,6 +37,125 @@ test.describe('page interaction audit', () => {
 	});
 
 	for (const width of [390, 1440]) {
+		test(`groups paper source failures without optional metadata warnings at ${width}px`, async ({
+			page
+		}) => {
+			await page.setViewportSize({ width, height: 950 });
+			const errors: string[] = [];
+			page.on('pageerror', (error) => errors.push(error.message));
+			await page.addInitScript(() => {
+				localStorage.setItem('retrieval.lang', 'en');
+				localStorage.setItem('lens.chatSession.user_1:col_123', 'chat_1');
+			});
+			const papers = [
+				{
+					document_id: 'doc_1',
+					filename: 'P002-preheating.pdf',
+					source_status: 'available',
+					map_status: 'not_available',
+					abstract_status: 'not_found'
+				},
+				{
+					document_id: 'doc_read_failed',
+					filename: 'Heat treatment of additively manufactured stainless steel.pdf',
+					source_status: 'read_failed'
+				},
+				{
+					document_id: 'doc_preparing',
+					filename: 'Tensile test conditions.pdf',
+					source_status: 'preparing'
+				}
+			];
+			await page.route('**/api/v1/chat-sessions?*', (route) =>
+				route.fulfill(json({ items: [chatSession()], limit: 12, offset: 0 }))
+			);
+			await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, (route) =>
+				route.fulfill(
+					json({
+						items: [
+							agentMessage(
+								'browse-question',
+								'user',
+								'Find the preheating paper and inspect its experimental conditions.'
+							),
+							agentMessage('browse-call', 'assistant', '', {
+								tool_calls: [
+									{
+										tool_call_id: 'browse-papers',
+										name: 'browse_collection_papers',
+										arguments: {},
+										position: 0
+									}
+								]
+							}),
+							agentMessage('browse-result', 'tool', '', {
+								tool_call_id: 'browse-papers',
+								tool_result: {
+									tool_call_id: 'browse-papers',
+									status: 'succeeded',
+									error_code: null,
+									error_message: null,
+									data: { papers, returned_paper_count: 3, paper_total: 100, next_offset: 3 },
+									warnings: ['Prepared Source content is unavailable for 1 paper(s) on this page.'],
+									resource_refs: papers.map((paper) => ({
+										resource_type: 'document',
+										resource_id: paper.document_id,
+										href: `/collections/${collectionId}/documents/${paper.document_id}`
+									}))
+								}
+							}),
+							agentMessage(
+								'browse-answer',
+								'assistant',
+								'The preheating paper is available for inspection. One other paper cannot currently be read and another is still being prepared.'
+							)
+						],
+						pending_approval: null,
+						feedback: [],
+						running: false
+					})
+				)
+			);
+			await page.goto(`/collections/${collectionId}/assistant`);
+			const activity = page.getByTestId('research-activity');
+			await expect(activity).toHaveAttribute('open', '');
+			await expect(activity).toContainText(
+				'3 papers listed on this page; 97 remain on later pages'
+			);
+			const failures = activity.locator('.paper-source-issues.failed');
+			await failures.locator('summary').click();
+			await expect(failures).toContainText('Original content read failed');
+			await expect(failures.getByRole('link', { name: 'View paper' })).toHaveAttribute(
+				'href',
+				`/collections/${collectionId}/documents/doc_read_failed`
+			);
+			const pending = activity.locator('.paper-source-issues:not(.failed)');
+			await pending.locator('summary').click();
+			await expect(pending).toContainText('Preparation in progress');
+			const resources = activity.locator('.resource-group');
+			await expect(resources.locator('summary')).toHaveText('3 referenced records');
+			await resources.locator('summary').click();
+			await expect(resources.getByRole('link', { name: 'P002-preheating.pdf' })).toHaveAttribute(
+				'href',
+				`/collections/${collectionId}/documents/doc_1`
+			);
+			await resources.locator('summary').click();
+			await expect(activity).not.toContainText('doc_read_failed');
+			await expect(activity).not.toContainText('Prepared Source content is unavailable');
+			await expectNoHorizontalOverflow(page);
+			expect(
+				await failures.locator('summary').evaluate((node) => getComputedStyle(node).display)
+			).not.toBe('grid');
+			if (screenshotDir)
+				await page.screenshot({
+					path: join(screenshotDir, `paper-source-failures-${width}.png`),
+					fullPage: true
+				});
+			expect(errors).toEqual([]);
+		});
+	}
+
+	for (const width of [390, 1440]) {
 		test(`resumes partial response text on the same message at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 950 });
 			const errors: string[] = [];

@@ -2,6 +2,15 @@ import { expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import ResearchProgress from './ResearchProgress.svelte';
 
+it('shows retry delay and context preservation as technical progress', async () => {
+	const screen = render(ResearchProgress, {
+		progress: { phase: 'model_retry', retry_attempt: 2, retry_delay_ms: 2500 }
+	});
+	await expect.element(screen.getByRole('status')).toHaveTextContent(/Retry 2 in 3s|3 秒后第 2 次重试/);
+	await screen.rerender({ progress: { phase: 'context_compaction' } });
+	await expect.element(screen.getByRole('status')).toHaveTextContent(/Preserving research progress|正在整理并保留研究进展/);
+});
+
 it('keeps actual document and passage visible without a generated research plan', async () => {
 	const reading = {
 		toolCallId: 'read-1',
@@ -35,6 +44,21 @@ it('keeps actual document and passage visible without a generated research plan'
 	await expect
 		.element(screen.getByRole('link', { name: /Open source location|打开原文位置/ }))
 		.toHaveAttribute('href', reading.href);
+	await screen.rerender({
+		progress: {
+			phase: 'tools',
+			execution_plan: {
+				plan_id: 'plan-1',
+				plan_version: 1,
+				status: 'in_progress',
+				model_status: 'in_progress',
+				steps: [{ step_id: 'read', action: 'Read the Source', status: 'in_progress' }]
+			}
+		},
+		readings: [reading]
+	});
+	await expect.element(screen.getByTestId('progress-plan')).toBeVisible();
+	await expect.element(screen.getByText('Read the Source')).toBeVisible();
 	await screen.rerender({ readings: [{ ...reading, status: 'failed' }] });
 	expect(screen.container.querySelector('.reading-current.failed')).not.toBeNull();
 });

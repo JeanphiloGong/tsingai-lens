@@ -3,6 +3,8 @@ from application.chat.agent_runner import (
     AgentRunLimits,
     AgentRunResult,
     AgentRunStatus,
+    ResearchExecutionPlan,
+    ResearchExecutionStatus,
     ResearchAgentRunner,
 )
 from application.chat.capability_policy import AuthorizationDecision, evaluate_authorization
@@ -32,6 +34,8 @@ __all__ = [
     "AgentRunLimits",
     "AgentRunResult",
     "AgentRunStatus",
+    "ResearchExecutionPlan",
+    "ResearchExecutionStatus",
     "AuthorizationDecision",
     "CapabilityExecutionContext",
     "CapabilityHandler",

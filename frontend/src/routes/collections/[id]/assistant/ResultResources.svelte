@@ -22,7 +22,7 @@
 			(document && typeof document === 'object'
 				? text((document as SourceRecord).title) || text((document as SourceRecord).filename)
 				: '');
-		return [data.sources, data.matches].flatMap((value) =>
+		return [data.sources, data.matches, data.papers].flatMap((value) =>
 			Array.isArray(value)
 				? value
 						.filter((item): item is SourceRecord => Boolean(item) && typeof item === 'object')
@@ -35,6 +35,9 @@
 	}
 
 	function resourceSource(resource: ChatResourceRef, records: SourceRecord[]) {
+		if (resource.resource_type === 'document') {
+			return records.find((record) => text(record.document_id) === resource.resource_id);
+		}
 		return records.find(
 			(record) =>
 				text(record.source_ref) === resource.resource_id ||
@@ -53,7 +56,9 @@
 				? text((document as SourceRecord).title) || text((document as SourceRecord).filename)
 				: '');
 		if (resource.resource_type === 'document') {
-			return documentTitle || $t('researchAgent.resource.document');
+			return documentTitle && documentTitle !== resource.resource_id
+				? documentTitle
+				: $t('researchAgent.resource.document');
 		}
 		if (resource.resource_type !== 'source') {
 			const labels: Record<string, string> = {
@@ -108,7 +113,14 @@
 		{:else}
 			<details class="resource-group">
 				<summary>
-					<span>{$t('researchAgent.resource.sourceCount', { count: resources.length })}</span>
+					<span
+						>{$t(
+							resources.every((resource) => resource.resource_type === 'source')
+								? 'researchAgent.resource.sourceCount'
+								: 'researchAgent.resource.recordCount',
+							{ count: resources.length }
+						)}</span
+					>
 					<ChevronDown size={14} aria-hidden="true" />
 				</summary>
 				<div class="resource-list">

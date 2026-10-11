@@ -27,6 +27,29 @@ SourceType = Literal["text", "table", "figure"]
 ReadableSourceKind = Literal["text_window", "table", "figure"]
 
 
+async def _unavailable_document_sources(
+    collection_service: Any, context: CapabilityExecutionContext, document_ids: list[str],
+) -> ChatToolResult:
+    missing = []
+    for document_id in document_ids:
+        try:
+            await collection_service.get_document(context.collection_id, document_id)
+        except FileNotFoundError:
+            missing.append(document_id)
+    return ChatToolResult(
+        tool_call_id=context.tool_call_id, status="failed",
+        error_code="document_not_found" if missing else "document_sources_not_ready",
+        error_message=(
+            "These document identifiers are not in this collection. Use browse_collection_papers "
+            "to locate the papers and copy their exact document_id; this does not establish "
+            "that the papers lack Source content."
+            if missing else "These papers exist, but their canonical Source content is not prepared."
+        ),
+        data={"missing_document_ids": missing,
+              "unprepared_document_ids": [item for item in document_ids if item not in missing]},
+    )
+
+
 class InspectDocumentSourcesToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -154,15 +177,7 @@ class ReadSourceCapability:
             arguments.document_id,
         )
         if document is None:
-            return ChatToolResult(
-                tool_call_id=context.tool_call_id,
-                status="failed",
-                error_code="document_sources_not_ready",
-                error_message=(
-                    "The requested paper has no prepared Source content in this "
-                    "collection. Prepare the paper before reading it."
-                ),
-            )
+            return await _unavailable_document_sources(self.collection_service, context, [arguments.document_id])
 
         source = self._source_record(document, arguments)
         if source is None:
@@ -348,14 +363,7 @@ class SearchSourcesCapability:
             if document_id not in documents_by_id
         ]
         if missing:
-            return ChatToolResult(
-                tool_call_id=context.tool_call_id,
-                status="failed",
-                error_code="document_sources_not_ready",
-                error_message=(
-                    "Prepared Source content is unavailable for: " + ", ".join(missing)
-                ),
-            )
+            return await _unavailable_document_sources(self.collection_service, context, missing)
 
         selected_types = set(arguments.source_types)
         matches: list[dict[str, Any]] = []
@@ -486,12 +494,7 @@ class InspectTableCapability:
             arguments.document_id,
         )
         if document is None:
-            return ChatToolResult(
-                tool_call_id=context.tool_call_id,
-                status="failed",
-                error_code="document_sources_not_ready",
-                error_message="The requested paper has no prepared Source content.",
-            )
+            return await _unavailable_document_sources(self.collection_service, context, [arguments.document_id])
         table = next(
             (item for item in document.tables if item.table_id == arguments.table_ref),
             None,
@@ -689,15 +692,7 @@ class InspectDocumentSourcesCapability:
             arguments.document_id,
         )
         if document is None:
-            return ChatToolResult(
-                tool_call_id=context.tool_call_id,
-                status="failed",
-                error_code="document_sources_not_ready",
-                error_message=(
-                    "The requested paper has no prepared Source content in this "
-                    "collection. Prepare the paper before inspecting it."
-                ),
-            )
+            return await _unavailable_document_sources(self.collection_service, context, [arguments.document_id])
 
         sources = [
             *(

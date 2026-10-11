@@ -6,10 +6,12 @@ from dataclasses import replace
 from application.repositories.chat_repository import (
     ChatModelCall,
     ChatResponseSnapshot,
+    ChatSessionSummary,
     ChatSessionBusyError,
+    ChatSessionHasBranchesError,
     ModelCallOutcome,
 )
-from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
+from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult, ToolCallStatus
 from domain.chat.feedback import ChatMessageFeedback
 from domain.chat.permissions import (
     change_permission,
@@ -88,12 +90,52 @@ class MemoryChatRepository:
     async def read_session(self, session_id: str) -> ChatSession | None:
         return self.sessions.get(session_id)
 
+    async def list_sessions(
+        self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
+    ) -> tuple[ChatSessionSummary, ...]:
+        sessions = sorted(
+            (
+                session
+                for session in self.sessions.values()
+                if session.user_id == user_id and session.collection_id == collection_id
+            ),
+            key=lambda session: (session.is_pinned, session.updated_at, session.session_id),
+            reverse=True,
+        )
+        return tuple(
+            ChatSessionSummary(
+                session=session,
+                title=next(
+                    (
+                        message.content
+                        for message in self.messages.get(session.session_id, ())
+                        if message.role.value == "user"
+                    ),
+                    None,
+                ),
+            )
+            for session in sessions[offset : offset + limit]
+        )
+
+    async def set_session_pin(
+        self, *, session_id: str, user_id: str, is_pinned: bool,
+    ) -> ChatSession:
+        session = self.sessions.get(session_id)
+        if session is None or session.user_id != user_id:
+            raise FileNotFoundError("chat session not found")
+        pinned = replace(session, is_pinned=is_pinned)
+        self.sessions[session_id] = pinned
+        return pinned
+
     async def delete_session(self, *, session_id: str, user_id: str) -> None:
         session = self.sessions.get(session_id)
         if session is None or session.user_id != user_id:
             raise FileNotFoundError("chat session not found")
         if session_id in self.active_sessions:
             raise ChatSessionBusyError()
+        if any(item.parent_session_id == session_id or item.root_session_id == session_id
+               for item in self.sessions.values()):
+            raise ChatSessionHasBranchesError()
         self.sessions.pop(session_id, None)
         self.messages.pop(session_id, None)
         self.response_snapshots.pop(session_id, None)
@@ -185,6 +227,15 @@ class MemoryChatRepository:
     async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
         return self.calls.get(tool_call_id)
 
+    async def abort_running_tool_calls(self, *, session_id: str, error_code: str, finished_at: str):
+        aborted = []
+        for tool_call_id, call in tuple(self.calls.items()):
+            if call.session_id == session_id and call.status is ToolCallStatus.RUNNING:
+                call = call.fail(error_code, finished_at)
+                self.calls[tool_call_id] = call
+                aborted.append(call)
+        return tuple(aborted)
+
     async def save_trajectory(
         self,
         *,
@@ -193,7 +244,9 @@ class MemoryChatRepository:
         tool_calls: tuple[ChatToolCall, ...],
         tool_results: tuple[ChatToolResult, ...],
     ) -> None:
-        self.sessions[session.session_id] = session
+        self.sessions[session.session_id] = replace(
+            session, is_pinned=self.sessions[session.session_id].is_pinned,
+        )
         self.messages[session.session_id] = messages
         for call in tool_calls:
             self.proposed_revisions.setdefault(call.tool_call_id, permission_record(self.permissions.get(session.session_id))["revision"])

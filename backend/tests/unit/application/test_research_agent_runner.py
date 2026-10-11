@@ -11,7 +11,7 @@ from typing import Any, ClassVar
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from application.chat import capability_policy, intent_policy
+from application.chat import capability_policy
 from application.chat import (
     AgentContext,
     AgentCompletionReason,
@@ -29,6 +29,9 @@ from application.chat import (
     evaluate_authorization,
 )
 import application.chat.agent_runner as agent_runner_module
+from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentDraftValidationError,
+)
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -38,8 +41,52 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
+from domain.chat.permissions import AUTO_ACTIONS
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+def skip_retry_delays(monkeypatch):
+    async def no_wait(_delay):
+        pass
+    monkeypatch.setattr(agent_runner_module, "sleep", no_wait)
+
+
+def test_provider_overload_without_http_status_is_retryable() -> None:
+    import httpx
+    from openai import APIError
+    error = APIError("Our servers are currently overloaded. Please try again later.",
+                     request=httpx.Request("POST", "https://example.test"), body=None)
+
+    details = agent_runner_module._provider_failure_details(error)
+
+    assert details["retryable"] is True
+    assert details["reason"] == "transient_provider_error"
+
+
+def test_provider_retry_after_is_preserved_without_exposing_response_body() -> None:
+    class Response:
+        status_code = 503
+        headers = {"retry-after": "2.5"}
+
+    class ProviderError(RuntimeError):
+        response = Response()
+
+    details = agent_runner_module._provider_failure_details(ProviderError("temporary failure"))
+
+    assert details["retryable"] is True
+    assert details["http_status"] == 503
+    assert details["retry_after_seconds"] == 2.5
+
+
+def test_default_run_limits_bound_an_unconfigured_turn() -> None:
+    limits = AgentRunLimits()
+
+    assert limits.max_elapsed_seconds is not None
+    assert limits.max_tool_calls is not None
+    assert limits.max_model_tokens is not None
+    assert limits.emergency_max_model_cycles is not None
 
 
 @pytest.fixture
@@ -207,6 +254,121 @@ def _results_for(result: AgentRunResult, *names: str) -> tuple[ChatToolResult, .
     return tuple(item for item in result.tool_results if item.tool_call_id in call_ids)
 
 
+def test_reconstruct_active_trajectory_retains_completed_write_observations() -> None:
+    writer = ChatToolCall.requested(
+        tool_call_id="call-written",
+        session_id="chat-1",
+        assistant_message_id="msg-write",
+        name="create_research_plan",
+        arguments={"question": "Record the reviewed plan."},
+        risk=ToolRisk.WRITE,
+    )
+    completed = writer.require_approval().approve(
+        user_id="user-1",
+        arguments_digest=writer.arguments_digest,
+        decided_at="2026-09-29T00:00:45+00:00",
+    ).start("2026-09-29T00:01:00+00:00").succeed(
+        "2026-09-29T00:01:01+00:00"
+    )
+    result = ChatToolResult(
+        tool_call_id=writer.tool_call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        data={"saved": True},
+    )
+    messages = (
+        ChatMessage.user(
+            message_id="msg-user",
+            session_id="chat-1",
+            content="Save the reviewed plan.",
+            created_at="2026-09-29T00:00:00+00:00",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="msg-write",
+            session_id="chat-1",
+            content="",
+            tool_calls=(completed.to_request(),),
+            created_at="2026-09-29T00:00:30+00:00",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="msg-result",
+            session_id="chat-1",
+            result=result,
+            created_at="2026-09-29T00:01:01+00:00",
+        ),
+    )
+    writer_capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    calls, results = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="done")),
+        capabilities=CapabilityRegistry((writer_capability,)),
+    )._reconstruct_active_trajectory(messages)
+
+    assert len(calls) == 1
+    assert calls[0].tool_call_id == completed.tool_call_id
+    assert calls[0].name == completed.name
+    assert calls[0].risk is ToolRisk.WRITE
+    assert calls[0].status is ToolCallStatus.SUCCEEDED
+    assert calls[0].decision_user_id == completed.decision_user_id
+    assert results == [result]
+
+
+def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> None:
+    first_request = ChatToolCall.requested(
+        tool_call_id="call-first",
+        session_id="chat-1",
+        assistant_message_id="msg-writes",
+        name="create_research_plan",
+        arguments={"question": "first"},
+        risk=ToolRisk.WRITE,
+        position=0,
+    )
+    first = first_request.require_approval().approve(
+        user_id="reviewer-a",
+        arguments_digest=first_request.arguments_digest,
+        decided_at="2026-09-29T00:00:45+00:00",
+    ).start("2026-09-29T00:01:00+00:00").succeed("2026-09-29T00:01:01+00:00")
+    second_request = ChatToolCall.requested(
+        tool_call_id="call-second",
+        session_id="chat-1",
+        assistant_message_id="msg-writes",
+        name="create_research_plan",
+        arguments={"question": "second"},
+        risk=ToolRisk.WRITE,
+        position=1,
+    )
+    second = second_request.require_approval().approve(
+        user_id="reviewer-b",
+        arguments_digest=second_request.arguments_digest,
+        decided_at="2026-09-29T00:02:45+00:00",
+    ).start("2026-09-29T00:03:00+00:00").succeed("2026-09-29T00:03:01+00:00")
+    messages = (
+        ChatMessage.user(message_id="msg-user", session_id="chat-1", content="Save both.", created_at="2026-09-29T00:00:00+00:00"),
+        ChatMessage.assistant_tool_calls(
+            message_id="msg-writes", session_id="chat-1", content="",
+            tool_calls=(first.to_request(), second.to_request()), created_at="2026-09-29T00:00:30+00:00",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="msg-first-result", session_id="chat-1",
+            result=ChatToolResult(tool_call_id=first.tool_call_id, status="succeeded", data={"saved": True}),
+            created_at="2026-09-29T00:01:01+00:00",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="msg-second-result", session_id="chat-1",
+            result=ChatToolResult(tool_call_id=second.tool_call_id, status="succeeded", data={"saved": True}),
+            created_at="2026-09-29T00:03:01+00:00",
+        ),
+    )
+    capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    calls, _ = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="done")),
+        capabilities=CapabilityRegistry((capability,)),
+    )._reconstruct_active_trajectory(messages)
+
+    assert [(call.tool_call_id, call.decision_user_id, call.decided_at) for call in calls] == [
+        (first.tool_call_id, "reviewer-a", first.decided_at),
+        (second.tool_call_id, "reviewer-b", second.decided_at),
+    ]
+
+
 async def test_greeting_completes_without_calling_a_tool() -> None:
     capability = _Capability("get_collection_context", ToolRisk.READ)
     model = _Model(ModelTurn(content="你好，我可以帮助你分析当前文献集合。"))
@@ -359,7 +521,7 @@ async def test_new_sources_may_continue_beyond_six_model_decisions() -> None:
     assert len(read.executed_arguments) == 7
 
 
-async def test_default_limits_allow_long_investigation_with_reported_usage() -> None:
+async def test_explicit_unbounded_limits_allow_long_investigation_with_reported_usage() -> None:
     read = _Capability("get_collection_context", ToolRisk.READ, _QuestionArguments)
     model = _Model(
         *(ModelTurn(tool_calls=(ModelToolCall(
@@ -368,7 +530,9 @@ async def test_default_limits_allow_long_investigation_with_reported_usage() -> 
         ModelTurn(content="The inspected comparisons are ready for review."),
     )
     traces = []
-    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,)),
+                                     limits=AgentRunLimits(max_elapsed_seconds=None, max_tool_calls=None,
+                                                           max_model_tokens=None, emergency_max_model_cycles=None)).run_turn(
         context=_context(), previous_messages=(), user_message="Inspect the collection.",
         progress_callback=traces.append,
     )
@@ -525,6 +689,90 @@ async def test_provider_retries_are_visible_in_progress_trace() -> None:
     assert all(item["retry_reason"] == "empty_response" for item in retries)
 
 
+async def test_missing_stream_arguments_retry_nonstreaming_before_any_tool_executes():
+    callbacks = []
+    tool = _Capability("get_collection_context", ToolRisk.READ)
+
+    class Model(_Model):
+        async def respond(self, **kwargs):
+            callbacks.append(kwargs.get("text_delta_callback") is not None)
+            return await super().respond(**kwargs)
+
+    model = Model(
+        ModelResponseError("missing", reason="stream_tool_arguments_missing"),
+        ModelTurn(tool_calls=(ModelToolCall(tool.spec.name, {}),)),
+        ModelTurn(content="The collection was inspected."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((tool,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Inspect this collection.",
+        text_delta_callback=lambda _: None,
+    )
+    assert result.status is AgentRunStatus.COMPLETED
+    assert callbacks[:3] == [True, False, True]  # Fallback discovery, then a new decision.
+    assert len(tool.executed_arguments) == 1
+
+
+async def test_retry_allowance_is_shared_across_successful_tool_cycles():
+    tool = _Capability("get_collection_context", ToolRisk.READ)
+    traces = []
+    model = _Model(
+        ModelResponseError("empty", reason="empty_response"),
+        ModelTurn(tool_calls=(ModelToolCall(tool.spec.name, {}),)),
+        ModelResponseError("empty", reason="empty_response"),
+        ModelTurn(content="Must not be reached."),
+    )
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry((tool,)), limits=AgentRunLimits(max_model_retries=1),
+    ).run_turn(context=_context(), previous_messages=(), user_message="Inspect collection.", progress_callback=traces.append)
+    assert result.status is AgentRunStatus.FAILED
+    assert len(tool.executed_arguments) == 1
+    assert len([trace for trace in traces if trace["phase"] == "model_retry"]) == 1
+
+
+def test_checkpoint_restores_usage_and_compacted_context_without_logging_notes(caplog):
+    original = agent_runner_module._RunProgress(AgentRunLimits())
+    original.model_tokens = 123
+    original.retry_count = 2
+    original.working_summary = '{"scope":"private provisional notes"}'
+    original.compacted_message_ids = {"m1", "m2"}
+    payloads = []
+    original.progress_callback = payloads.append
+    original.trace(_context(), phase="context_compaction")
+    restored = agent_runner_module._RunProgress(AgentRunLimits())
+    restored.restore_persisted_progress(payloads[-1])
+    assert restored.model_tokens == 123
+    assert restored.retry_count == 2
+    assert restored.working_summary == original.working_summary
+    assert restored.compacted_message_ids == {"m1", "m2"}
+    assert "private provisional notes" not in caplog.text
+
+
+async def test_request_timeout_is_independent_from_prior_active_turn_time(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
+    progress = agent_runner_module._RunProgress(AgentRunLimits(max_elapsed_seconds=600, max_request_seconds=180))
+    model = _Model(ModelTurn(content="Done."), ModelTurn(content="Done."))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()), limits=progress.limits)
+    context = agent_runner_module.ChatModelContext((ChatMessage.user(
+        message_id="u", session_id="chat-1", content="Explain.", created_at="2026-10-10T00:00:00Z",
+    ),))
+    now[0] = 200
+    await runner._respond(context, (), progress, None)
+    now[0] = 550
+    await runner._respond(context, (), progress, None)
+    assert [timeout for timeout, _ in model.request_limits] == [180, 50]
+
+
+def test_stage_hint_keeps_all_draft_references_without_copying_full_payloads():
+    drafts = [{"document_id": f"p{n}", "draft_id": f"d{n}", "draft_digest": str(n) * 64,
+               "draft": {"experiments": ["full scientific payload" * 10000]}} for n in (1, 2)]
+    hint = capability_policy.stage_instruction((), [], successful_results={"propose_paper_experiment_draft": drafts})
+    assert len(hint) < 3000
+    observed = json.loads(hint.split("\n", 1)[1])
+    assert [item["draft_id"] for item in observed["paper_experiment_drafts"]] == ["d1", "d2"]
+    assert "full scientific payload" not in hint
+
+
 @pytest.mark.parametrize("tokens", [100, 120])
 async def test_usage_exhaustion_preserves_final_text_without_another_request(tokens: int) -> None:
     model = _Model(ModelTurn(content="Only the first paper was inspected.",
@@ -616,8 +864,9 @@ async def test_timed_out_model_is_cancelled_without_starting_finalization() -> N
     ).run_turn(context=_context(), previous_messages=(), user_message="Hello",
                text_delta_callback=deltas.append)
 
-    assert result.status is AgentRunStatus.FAILED
-    assert result.error_code == "provider_timeout"
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    assert result.error_code is None
     assert model.calls == 1
     assert cancelled.is_set()
     assert deltas == []
@@ -712,7 +961,7 @@ def test_provider_error_cause_and_permanent_quota_are_distinguished():
     ({"code": "insufficient_quota", "type": "server_error"}, False),
     ({"code": "invalid_api_key"}, False),
     ({"code": ["malformed"]}, False),
-    ({"message": "unknown provider error"}, False),
+    ({"message": "unknown provider error"}, True),
 ])
 def test_stream_api_error_uses_known_structured_codes_without_status(body, retryable):
     import httpx
@@ -776,6 +1025,26 @@ async def test_retryable_api_error_stops_after_initial_attempt_and_five_retries(
     assert len(model.request_limits) == 6
     assert len([event for event in events if event["phase"] == "model_retry"]) == 5
     assert events[-1]["retry_reason"] == "transient_provider_error"
+
+
+async def test_provider_stream_failure_retries_as_non_streaming_request():
+    import httpx
+    from openai import APIError
+    model = _Model(
+        APIError("stream upstream overloaded", request=httpx.Request("POST", "https://example.test"), body={"type": "upstream_error"}),
+        ModelTurn(content="The provider recovered without streaming."),
+    )
+    callbacks = []
+    class Wrapped(_Model):
+        async def respond(self, **kwargs):
+            callbacks.append(kwargs.get("text_delta_callback") is not None)
+            return await super().respond(**kwargs)
+    wrapped = Wrapped(model.turns[0], model.turns[1])
+    result = await ResearchAgentRunner(model=wrapped, capabilities=CapabilityRegistry(())).run_turn(
+        context=_context(), previous_messages=(), user_message="Answer briefly.", text_delta_callback=lambda _: None,
+    )
+    assert result.status is AgentRunStatus.COMPLETED
+    assert callbacks[:2] == [True, False]
 
 
 async def test_finalization_uses_remaining_time_and_its_own_output_limit(monkeypatch) -> None:
@@ -846,7 +1115,9 @@ async def test_read_deadline_preserves_successes_without_starting_a_summary() ->
         limits=AgentRunLimits(max_elapsed_seconds=0.02),
     ).run_turn(context=_context(), previous_messages=(), user_message="Compare the two papers.")
 
-    assert result.error_code == "final_answer_unavailable"
+    assert result.error_code is None
+    assert result.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    assert result.warnings
     assert cancelled.is_set()
     assert len(model.contexts) == 1
     read_results = _results_for(result, read.spec.name)
@@ -1043,6 +1314,165 @@ async def test_unknown_batch_member_prevents_every_read_from_executing() -> None
     assert len(read_results) == 2
     assert all(item.status is ToolResultStatus.FAILED for item in read_results)
 
+
+async def test_invalid_read_arguments_do_not_block_other_reads_in_the_same_batch() -> None:
+    read = _Capability("test_read", ToolRisk.READ, _QuestionArguments)
+    model = _Model(
+        ModelTurn(tool_calls=(
+            ModelToolCall(name=read.spec.name, arguments={"question": "paper-a"}),
+            ModelToolCall(name=read.spec.name, arguments={}),
+        )),
+        ModelTurn(content="Paper A was inspected; the second read had invalid arguments."),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((read,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Inspect both papers.",
+    )
+
+    read_results = _results_for(result, read.spec.name)
+    assert len(read_results) == 2
+    assert read.executed_arguments == [{"question": "paper-a"}]
+    assert [item.status for item in read_results] == [
+        ToolResultStatus.SUCCEEDED,
+        ToolResultStatus.FAILED,
+    ]
+    assert read_results[1].error_code == "invalid_tool_arguments"
+
+
+async def test_read_batch_executes_remaining_budget_before_deferring_extra_reads() -> None:
+    read = _Capability("test_read", ToolRisk.READ, _QuestionArguments)
+    model = _Model(
+        ModelTurn(tool_calls=(
+            ModelToolCall(name=read.spec.name, arguments={"question": "paper-a"}),
+            ModelToolCall(name=read.spec.name, arguments={"question": "paper-b"}),
+        )),
+        ModelTurn(content="Only the first read fit within this turn's tool budget."),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((read,)),
+        limits=AgentRunLimits(max_tool_calls=2),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Inspect both papers.",
+    )
+
+    read_results = _results_for(result, read.spec.name)
+    assert read.executed_arguments == [{"question": "paper-a"}]
+    assert read_results[0].status is ToolResultStatus.SUCCEEDED
+    assert read_results[1].error_code == "resource_budget"
+
+
+async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() -> None:
+    read = _Capability(
+        "read_source",
+        ToolRisk.READ,
+        result_data={
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results",
+            "source_digest": "digest-1",
+            "content": "The inspected results report improved elongation.",
+            "content_truncated": False,
+        },
+    )
+    writer = _Capability(
+        "create_objective_candidate",
+        ToolRisk.WRITE,
+        fail_with=RuntimeError("write unavailable"),
+    )
+    source_request = ChatToolRequest(
+        tool_call_id="read-1",
+        name=read.spec.name,
+        arguments={},
+        position=0,
+    )
+    pending_request = ChatToolRequest(
+        tool_call_id="write-1",
+        name=writer.spec.name,
+        arguments={},
+        position=1,
+    )
+    prior_messages = (
+        ChatMessage.user(
+            message_id="user-1",
+            session_id="chat-1",
+            content="Read the paper, then save the reviewed objective.",
+            created_at="2026-10-11T00:00:00Z",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="assistant-1",
+            session_id="chat-1",
+            content="",
+            tool_calls=(source_request, pending_request),
+            created_at="2026-10-11T00:00:01Z",
+        ),
+        ChatMessage.from_tool_result(
+            message_id="tool-1",
+            session_id="chat-1",
+            created_at="2026-10-11T00:00:02Z",
+            result=ChatToolResult(
+                tool_call_id="read-1",
+                status="succeeded",
+                data=read.result_data,
+            ),
+        ),
+    )
+    pending = ChatToolCall.requested(
+        tool_call_id="write-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        name=writer.spec.name,
+        arguments={},
+        risk=ToolRisk.WRITE,
+        position=1,
+    ).require_approval()
+    approved = pending.approve(
+        user_id="user-1",
+        arguments_digest=pending.arguments_digest,
+        decided_at="2026-10-11T00:00:03Z",
+    ).start("2026-10-11T00:00:04Z")
+
+    result = await ResearchAgentRunner(
+        model=_Model(RuntimeError("provider unavailable")),
+        capabilities=CapabilityRegistry((read, writer)),
+    ).resume_claimed_call(
+        context=_context(),
+        previous_messages=prior_messages,
+        claimed_call=approved,
+    )
+
+    assert result.status is AgentRunStatus.FAILED
+    assert "Exact paper Sources read (1)" in result.messages[-1].content
+    assert "Exact paper Sources read (1):" in result.messages[-1].content
+
+
+def test_failure_ledger_separates_draft_argument_errors_from_source_read_failures() -> None:
+    draft = ChatToolCall.requested(
+        tool_call_id="draft-1",
+        session_id="chat-1",
+        assistant_message_id="assistant-1",
+        name="propose_paper_experiment_draft",
+        arguments={"document_id": "paper-1"},
+        risk=ToolRisk.DRAFT,
+    )
+    _, result = agent_runner_module.ResearchAgentRunner._failure(
+        draft,
+        "invalid_tool_arguments",
+        "The draft arguments are invalid.",
+    )
+
+    ledger = ResearchAgentRunner._reading_ledger([draft], [result])
+
+    assert "Papers with failed exact reads (0): none" in ledger
+    assert "Research action argument errors (1): propose_paper_experiment_draft:paper-1" in ledger
 
 async def test_general_science_discussion_receives_no_capabilities() -> None:
     model = _Model(
@@ -1242,14 +1672,6 @@ async def test_literature_based_opinion_exposes_source_reading_capabilities() ->
     assert all({"browse_collection_papers", "search_sources", "read_source"}.issubset(names)
                for names in model.tool_spec_names)
 
-    explicit_search = intent_policy.capability_names_for_intent(
-        "请搜索相关论文然后谈谈判断。",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-    assert "search_sources" in explicit_search
-
-
 async def test_literature_based_opinion_completion_does_not_certify_source_support() -> None:
     unsupported_answer = "不读取原文也可以判断能量输入降低了孔隙率。"
     runner = ResearchAgentRunner(
@@ -1327,32 +1749,6 @@ async def test_experiment_draft_requires_a_complete_matching_source_read(read_do
     assert result.tool_results[-1].error_code == "source_read_incomplete"
 
 
-async def test_continuation_does_not_restore_finding_draft_capabilities() -> None:
-    allowed = intent_policy.capability_names_for_intent(
-        "继续看一下",
-        has_source_context=False,
-        prior_tool_names={"query_published_findings"},
-    )
-
-    assert "query_published_findings" in allowed
-    assert "inspect_published_finding" in allowed
-    assert "create_finding_draft" not in allowed
-    assert "create_evidence_draft" not in allowed
-    assert "derive_objective" not in allowed
-
-
-async def test_standalone_status_query_does_not_expose_paper_browsing() -> None:
-    allowed = intent_policy.capability_names_for_intent(
-        "查看当前状态",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "inspect_research_process" in allowed
-    assert "get_collection_context" in allowed
-    assert "browse_collection_papers" not in allowed
-
-
 async def test_research_plan_question_does_not_expose_finding_writes() -> None:
     model = _Model(ModelTurn(content="我会先根据现有证据拟定研究方案草案。"),
                    discover=("propose_research_plan",))
@@ -1363,7 +1759,7 @@ async def test_research_plan_question_does_not_expose_finding_writes() -> None:
                 _Capability(
                     name,
                     ToolRisk.READ
-                    if name not in intent_policy.WRITE_CAPABILITIES
+                    if name not in AUTO_ACTIONS
                     else ToolRisk.WRITE,
                 )
                 for name in (
@@ -1617,7 +2013,10 @@ async def test_objective_write_is_hidden_until_the_user_requests_persistence() -
         )
     ]
 
-    save_model = _Model(ModelTurn(content="我会准备保存这个候选目标。"))
+    save_model = _Model(
+        ModelTurn(content="我会准备保存这个候选目标。"),
+        discover=("create_objective_candidate",),
+    )
     save_runner = ResearchAgentRunner(model=save_model, capabilities=capabilities)
     await save_runner.run_turn(
         context=_context(),
@@ -1631,7 +2030,10 @@ async def test_objective_write_is_hidden_until_the_user_requests_persistence() -
 
 
 async def test_candidate_creation_with_explicit_stop_hides_confirmation_and_analysis() -> None:
-    model = _Model(ModelTurn(content="我只会准备候选目标的创建动作。"))
+    model = _Model(
+        ModelTurn(content="我只会准备候选目标的创建动作。"),
+        discover=("create_objective_candidate",),
+    )
     runner = ResearchAgentRunner(
         model=model,
         capabilities=CapabilityRegistry(
@@ -1938,7 +2340,7 @@ async def test_approved_write_resumes_exact_call_before_returning_to_model() -> 
         ),
     ),
 )
-async def test_successful_approved_write_survives_unavailable_detailed_response(
+async def test_successful_approved_write_preserves_result_but_fails_when_response_unavailable(
     model_failure: Exception,
     limits: AgentRunLimits | None,
 ) -> None:
@@ -1987,9 +2389,9 @@ async def test_successful_approved_write_survives_unavailable_detailed_response(
         claimed_call=approved.start("2026-09-29T00:01:01+00:00"),
     )
 
-    assert result.status is AgentRunStatus.COMPLETED
-    assert result.completion_reason is AgentCompletionReason.MODEL_ANSWER
-    assert result.error_code is None
+    assert result.status is AgentRunStatus.FAILED
+    assert result.completion_reason is None
+    assert result.error_code is not None
     assert result.tool_calls[0].status is ToolCallStatus.SUCCEEDED
     assert result.tool_results[0].status is ToolResultStatus.SUCCEEDED
     assert result.warnings == (
@@ -2056,6 +2458,18 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                     arguments={"question": "Test the supported preheating effect."},
                 ),)
             ),
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="update_execution_plan",
+                arguments={
+                    "steps": [{
+                        "step_id": "save",
+                        "action": "Save the reviewed research plan",
+                        "status": "in_progress",
+                    }],
+                    "status": "in_progress",
+                    "explanation": "The reviewed plan is ready for the researcher's approval.",
+                },
+            ),)),
             ModelTurn(
                 content="The plan draft is ready for your approval.",
                 tool_calls=(ModelToolCall(
@@ -2064,7 +2478,12 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
                 ),),
             ),
             ModelTurn(content="The approved plan draft has been saved."),
-            discover=("inspect_published_finding", "propose_research_plan"),
+            discover=(
+                "inspect_published_finding",
+                "propose_research_plan",
+                "create_research_plan",
+                "update_execution_plan",
+            ),
         ),
         capabilities=CapabilityRegistry((reader, drafter, writer)),
     )
@@ -2077,6 +2496,7 @@ async def test_read_then_draft_then_write_stops_at_exact_approval_boundary() -> 
 
     assert proposed.status is AgentRunStatus.APPROVAL_REQUIRED
     assert [call.status for call in proposed.tool_calls] == [
+        ToolCallStatus.SUCCEEDED,
         ToolCallStatus.SUCCEEDED,
         ToolCallStatus.SUCCEEDED,
         ToolCallStatus.SUCCEEDED,
@@ -2240,7 +2660,7 @@ async def test_finding_draft_repair_receives_actionable_selection_error() -> Non
     assert any(item.data.get("draft") == {**corrected, "comparison_group_ids": []} for item in result.tool_results)
 
 
-async def test_finding_draft_normalizes_conservative_strength_and_duplicate_evidence() -> None:
+async def test_finding_draft_does_not_invent_scientific_strength_and_deduplicates_evidence() -> None:
     from application.chat.agent_runner import _RunProgress
 
     runner = ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(()))
@@ -2261,8 +2681,54 @@ async def test_finding_draft_normalizes_conservative_strength_and_duplicate_evid
         _context(), messages, turn, allowed_names={"create_finding_draft"},
         progress=progress,
     )
-    assert requested[0][0].arguments["assertion_strength"] == "descriptive"
+    assert "assertion_strength" not in requested[0][0].arguments
     assert requested[0][0].arguments["supporting_evidence_ids"] == ["evidence-1"]
+
+
+async def test_requested_calls_deduplicates_success_only_in_memory_write() -> None:
+    writer = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    request = ChatToolCall.requested(
+        tool_call_id="call-approved",
+        session_id="chat-1",
+        assistant_message_id="msg-write",
+        name="create_research_plan",
+        arguments={"question": "Record the corrected research plan."},
+        risk=ToolRisk.WRITE,
+    )
+    completed = request.require_approval().approve(
+        user_id="user-1",
+        arguments_digest=request.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z").succeed("2026-10-09T00:00:02Z")
+    result = ChatToolResult(
+        tool_call_id=completed.tool_call_id,
+        status=ToolResultStatus.SUCCEEDED,
+        data={"saved": True},
+    )
+    runner = ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry((writer,)))
+    messages = [ChatMessage.user(
+        message_id="msg-user",
+        session_id="chat-1",
+        content="Save the corrected research plan.",
+        created_at="2026-10-09T00:00:00Z",
+    )]
+    progress = agent_runner_module._RunProgress(runner.limits)
+    progress.start_response()
+
+    requested = runner._requested_calls(
+        _context(),
+        messages,
+        ModelTurn(tool_calls=(ModelToolCall(
+            name="create_research_plan",
+            arguments=completed.arguments,
+        ),)),
+        allowed_names={"create_research_plan"},
+        progress=progress,
+        completed_calls=[completed],
+        completed_results=[result],
+    )
+
+    assert requested == ()
 
 
 async def test_capability_exception_is_sanitized_before_returning_to_model(caplog) -> None:
@@ -2328,6 +2794,43 @@ async def test_capability_validation_exception_is_actionable_for_model_repair() 
     assert "S001=methods-1" in failure.error_message
 
 
+async def test_paper_experiment_validation_failure_is_structured_for_model_repair() -> None:
+    capability = _Capability(
+        "get_collection_context",
+        ToolRisk.DRAFT,
+        fail_with=PaperExperimentDraftValidationError(
+            "experiments[0] comparison outcome does not match its measurements",
+            validation_path="experiments[0]",
+        ),
+    )
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(ModelToolCall(
+                name="get_collection_context", arguments={},
+            ),)),
+            ModelTurn(content="我会按因变量拆分比较并保留完整实验事实。"),
+        ),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+
+    result = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="整理实验草案",
+    )
+
+    failure = next(
+        item for item in result.tool_results if item.error_code == "draft_validation_failed"
+    )
+    assert failure.error_code == "draft_validation_failed"
+    assert failure.data == {
+        "validation_path": "experiments[0]",
+        "repair_hint": (
+            "Keep the full source-supported draft. Each comparison must "
+            "reference measurements for one outcome only; split different "
+            "outcomes into separate comparisons and resubmit the complete draft."
+        ),
+    }
+
+
 async def test_queued_capability_result_returns_to_model_as_a_successful_observation() -> None:
     capability = _Capability(
         "start_objective_analysis",
@@ -2343,6 +2846,7 @@ async def test_queued_capability_result_returns_to_model_as_a_successful_observa
                 ),)
             ),
             ModelTurn(content="分析任务已启动，你可以稍后查看研究目标结果。"),
+            discover=("start_objective_analysis",),
         ),
         capabilities=CapabilityRegistry((capability,)),
     )
@@ -2354,9 +2858,15 @@ async def test_queued_capability_result_returns_to_model_as_a_successful_observa
     )
 
     assert result.status is AgentRunStatus.COMPLETED
-    assert result.tool_calls[0].status is ToolCallStatus.SUCCEEDED
-    assert result.tool_results[0].status is ToolResultStatus.QUEUED
-    assert result.tool_results[0].resource_refs[0].resource_type == "objective_analysis"
+    queued_call = next(
+        call for call in result.tool_calls if call.name == "start_objective_analysis"
+    )
+    queued_result = next(
+        item for item in result.tool_results if item.tool_call_id == queued_call.tool_call_id
+    )
+    assert queued_call.status is ToolCallStatus.SUCCEEDED
+    assert queued_result.status is ToolResultStatus.QUEUED
+    assert queued_result.resource_refs[0].resource_type == "objective_analysis"
     assert result.messages[-1].content.startswith("分析任务已启动")
 
 
@@ -2432,6 +2942,444 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
     assert model.contexts[-1][-1].role.value == "user"
     assert "ACTIVE RESEARCH REQUEST" in model.contexts[-1][-1].content
     assert user_request in model.contexts[-1][-1].content
+
+
+def test_resource_limited_failure_answer_is_distinct_from_technical_failure() -> None:
+    messages = [
+        ChatMessage.user(
+            message_id="user-1",
+            session_id="session-1",
+            content="请继续研究这组论文。",
+            created_at="2026-09-10T00:00:00Z",
+        )
+    ]
+
+    resource_answer = ResearchAgentRunner._failure_answer(
+        messages, [], [], resource_limited=True,
+    )
+    technical_answer = ResearchAgentRunner._failure_answer(messages, [], [])
+
+    assert "运行资源上限" in resource_answer
+    assert "技术中断" not in resource_answer
+    assert "技术中断" in technical_answer
+
+
+def test_context_budget_reserves_provider_token_safety_margin() -> None:
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="完成。")),
+        capabilities=CapabilityRegistry(()),
+        limits=AgentRunLimits(max_context_tokens=65_536),
+    )
+
+    assert runner._effective_context_tokens() == 61_440
+
+
+@pytest.mark.parametrize("kind", ["repeated", "invalid", "reworded", "changing"])
+async def test_plan_only_loop_reaches_no_progress(kind: str) -> None:
+    class PlanningModel(_Model):
+        async def respond(self, *, context, tool_specs, **kwargs):
+            if not tool_specs:
+                return ModelTurn(content="The paper conditions remain uninspected.")
+            return await super().respond(context=context, tool_specs=tool_specs, **kwargs)
+
+    turns = []
+    for index in range(8):
+        arguments = {
+            "steps": [{
+                "step_id": "conditions",
+                "action": f"Inspect paper {index}" if kind == "changing" else "Inspect paper conditions",
+                "status": "in_progress",
+            }],
+            "status": "in_progress",
+            "explanation": f"Inspection is still needed ({index})." if kind == "reworded" else "Inspection is needed.",
+        }
+        if kind == "invalid":
+            arguments["steps"] = []
+        turns.append(ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", arguments),)))
+    model = PlanningModel(*turns, ModelTurn(content="The paper conditions remain uninspected."))
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(())).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="Compare the papers' material and test conditions.",
+    )
+
+    assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
+    plan_results = _results_for(result, "update_execution_plan")
+    assert len(plan_results) == (2 if kind == "invalid" else 3)
+    assert all(item.status is (ToolResultStatus.FAILED if kind == "invalid" else ToolResultStatus.SUCCEEDED)
+               for item in plan_results)
+    assert result.warnings
+
+
+async def test_plan_revision_does_not_reset_stalled_source_reads() -> None:
+    read = _Capability("read_source", ToolRisk.READ, result_data={
+        "content": "Both samples use LPBF Ti-6Al-4V; test temperature is not reported here.",
+    })
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [{"step_id": "temperature", "action": "Find the test temperature", "status": "in_progress"}],
+            "status": "in_progress", "explanation": "The inspected passage omits the temperature.",
+        }),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {}),)),
+        ModelTurn(content="The test temperature remains unresolved after rereading the same passage."),
+        discover=("read_source", "update_execution_plan"),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((read,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Check whether the test temperatures match.",
+    )
+
+    assert result.completion_reason is AgentCompletionReason.NO_PROGRESS
+    assert len(_results_for(result, "read_source")) == 3
+    assert len(_results_for(result, "update_execution_plan")) == 1
+
+
+@pytest.mark.parametrize("write_status", [ToolResultStatus.SUCCEEDED, ToolResultStatus.QUEUED, ToolResultStatus.FAILED])
+async def test_plan_version_stays_on_model_updates_after_approved_write(write_status) -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE, result_status=write_status)
+    capabilities = CapabilityRegistry((writer,))
+    proposed = await ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                "steps": [{"step_id": "save", "action": "Save the reviewed objective", "status": "in_progress"}],
+                "status": "in_progress", "explanation": "The researcher requested saving the reviewed objective.",
+            }),)),
+            ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+            discover=("update_execution_plan", "create_objective_candidate"),
+        ),
+        capabilities=capabilities,
+    ).run_turn(context=_context(), previous_messages=(), user_message="Save the reviewed objective.")
+    assert proposed.pending_approval is not None
+    before = proposed.execution_plan
+    assert before is not None
+    claimed = proposed.pending_approval.approve(
+        user_id="user-1", arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-10T00:00:00Z",
+    ).start("2026-10-10T00:00:01Z")
+    events = []
+    resumed = await ResearchAgentRunner(
+        model=_Model(ModelTurn(content="The save operation returned; its recorded status is authoritative.")),
+        capabilities=capabilities,
+    ).resume_claimed_call(
+        context=_context(), previous_messages=proposed.messages, claimed_call=claimed,
+        progress_callback=events.append,
+    )
+
+    after = resumed.execution_plan
+    assert after is not None
+    assert after["plan_id"] == before["plan_id"]
+    assert after["plan_version"] == before["plan_version"]
+    assert after["steps"] == before["steps"]
+    resumed_write_result = next(
+        item for item in resumed.tool_results
+        if item.tool_call_id == claimed.tool_call_id
+    )
+    assert resumed_write_result.status is write_status
+    versions = [before["plan_version"], *(event["execution_plan"]["plan_version"] for event in events), after["plan_version"]]
+    assert versions == sorted(versions)
+    recovered = agent_runner_module.ResearchExecutionPlan.from_messages(
+        messages=resumed.messages, run_status=resumed.status, completion_reason=resumed.completion_reason,
+    )
+    assert recovered is not None
+    assert recovered.to_record() == after
+
+
+async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
+    read = _Capability("read_source", ToolRisk.READ, _QuestionArguments,
+                       result_data={"document_id": "paper-1", "source_ref": "results"})
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(
+            "update_execution_plan",
+            {
+                "steps": [{
+                    "step_id": "conditions",
+                    "action": "Read matched material and test conditions",
+                    "status": "in_progress",
+                }],
+                "status": "in_progress",
+                "explanation": "Start by matching the paper conditions.",
+            },
+        ),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {"question": "material and conditions"}),)),
+        ModelTurn(tool_calls=(ModelToolCall(
+            "update_execution_plan",
+            {
+                "steps": [{
+                    "step_id": "conditions",
+                    "action": "Read matched material and test conditions",
+                    "status": "completed",
+                }, {
+                    "step_id": "compare",
+                    "action": "Compare the reported measurements",
+                    "status": "in_progress",
+                }],
+                "status": "in_progress",
+                "explanation": "The conditions are recorded; compare the measurements next.",
+            },
+        ),)),
+        ModelTurn(tool_calls=(ModelToolCall("read_source", {"question": "reported measurements"}),)),
+        ModelTurn(tool_calls=(ModelToolCall(
+            "update_execution_plan",
+            {
+                "steps": [{
+                    "step_id": "conditions",
+                    "action": "Read matched material and test conditions",
+                    "status": "completed",
+                }, {
+                    "step_id": "compare",
+                    "action": "Compare the reported measurements",
+                    "status": "completed",
+                }],
+                "status": "completed",
+                "explanation": "The requested comparison is supported by the inspected records.",
+            },
+        ),)),
+        ModelTurn(content="The comparison is complete."),
+        discover=("update_execution_plan", "read_source"),
+    )
+
+    result = await ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((read,)),
+    ).run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="Compare the matched conditions and measurements in these papers.",
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.execution_plan is not None
+    assert result.execution_plan["status"] == "completed"
+    assert result.execution_plan["plan_version"] == len(_results_for(result, "update_execution_plan"))
+    assert [step["status"] for step in result.execution_plan["steps"]] == [
+        "completed", "completed",
+    ]
+    assert any("update_execution_plan" in names for names in model.tool_spec_names)
+
+
+@pytest.mark.parametrize("model_status, expected", [
+    ("in_progress", "completed"),
+    ("completed", "completed"),
+    ("waiting_for_clarification", "waiting_for_clarification"),
+    ("scientific_refusal", "scientific_refusal"),
+])
+async def test_streamed_and_final_plan_preserve_the_same_research_outcome(model_status, expected) -> None:
+    plan = {
+        "steps": [{
+            "step_id": "inspect",
+            "action": "Inspect the relevant paper conditions",
+            "status": "completed" if model_status == "completed" else "in_progress",
+        }],
+        "status": model_status,
+        "explanation": "Inspect the relevant paper conditions first.",
+    }
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan),)),
+        ModelTurn(content="The available comparison is complete."),
+        discover=("update_execution_plan",),
+    )
+
+    events = []
+    result = await ResearchAgentRunner(
+        model=model, capabilities=CapabilityRegistry(())
+    ).run_turn(
+        context=_context(), previous_messages=(),
+        user_message="Summarize the available comparison.",
+        progress_callback=events.append,
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.execution_plan is not None
+    assert result.execution_plan["status"] == expected
+    assert result.execution_plan["model_status"] == model_status
+    assert events[-1]["execution_plan"] == result.execution_plan
+
+
+async def test_approval_resume_keeps_the_model_authored_plan() -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    plan_in_progress = {
+        "steps": [{
+            "step_id": "decision",
+            "action": "Record the reviewed objective",
+            "status": "in_progress",
+        }],
+        "status": "in_progress",
+        "explanation": "The reviewed objective is ready for the requested save.",
+    }
+    plan_completed = {
+        "steps": [{
+            "step_id": "decision",
+            "action": "Record the reviewed objective",
+            "status": "completed",
+        }],
+        "status": "completed",
+        "explanation": "The approved objective was saved.",
+    }
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan_in_progress),)),
+        ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", plan_completed),)),
+        ModelTurn(content="The approved objective was saved."),
+        discover=("update_execution_plan", "create_objective_candidate"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((writer,)))
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the reviewed objective.",
+    )
+
+    assert proposed.pending_approval is not None
+    before = proposed.execution_plan
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+    resumed = await runner.resume_claimed_call(
+        context=_context(), previous_messages=proposed.messages, claimed_call=approved,
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert before is not None and resumed.execution_plan is not None
+    assert resumed.execution_plan["plan_id"] == before["plan_id"]
+    assert resumed.execution_plan["plan_version"] > before["plan_version"]
+    assert resumed.execution_plan["steps"][0]["status"] == "completed"
+
+
+async def test_approval_resume_drops_a_repeated_successful_write() -> None:
+    writer = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
+    arguments = {"question": "Record the corrected research plan."}
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_research_plan", arguments),)),
+        # Providers can repeat the exact write after the approval continuation
+        # has already returned its successful observation.
+        ModelTurn(tool_calls=(ModelToolCall("create_research_plan", arguments),)),
+        ModelTurn(content="The corrected research plan was saved."),
+        discover=("create_research_plan",),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((writer,)))
+
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the corrected plan.",
+    )
+    assert proposed.pending_approval is not None
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+
+    resumed = await runner.resume_claimed_call(
+        context=_context(), previous_messages=proposed.messages, claimed_call=approved,
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert writer.executed_arguments == [arguments]
+    assert all(result.error_code != "execution_plan_required" for result in resumed.tool_results)
+
+
+async def test_approval_resume_inherits_time_and_model_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+        ModelTurn(content="The approved objective was saved."),
+    )
+    limits = AgentRunLimits(
+        max_request_seconds=10.0,
+        max_elapsed_seconds=10.0,
+        max_model_tokens=100,
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((writer,)),
+        limits=limits,
+    )
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the reviewed objective.",
+    )
+    assert proposed.pending_approval is not None
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+
+    observed_timeouts: list[float] = []
+    original_wait_for = agent_runner_module.wait_for
+
+    async def recording_wait_for(awaitable, timeout):  # noqa: ANN001
+        observed_timeouts.append(timeout)
+        return await original_wait_for(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(agent_runner_module, "wait_for", recording_wait_for)
+    events: list[dict[str, Any]] = []
+    resumed = await runner.resume_claimed_call(
+        context=_context(),
+        previous_messages=proposed.messages,
+        claimed_call=approved,
+        progress_callback=events.append,
+        continuation_progress={
+            "elapsed_ms": 9_500,
+            "model_cycles": 1,
+            "model_tokens": 90,
+            "prompt_tokens": 70,
+            "completion_tokens": 20,
+            "requested_tool_count": 1,
+            "executed_tool_count": 0,
+        },
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert writer.executed_arguments == [{}]
+    assert observed_timeouts
+    assert 0 < observed_timeouts[0] < 2
+    assert model.request_limits[-1][1] == 10
+    assert events[-1]["model_cycles"] == 2
+
+
+async def test_approval_resume_inherits_spent_tool_budget() -> None:
+    writer = _Capability("create_objective_candidate", ToolRisk.WRITE)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_objective_candidate", {}),)),
+        ModelTurn(content="The approved objective could not run within this turn's budget."),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((writer,)),
+        limits=AgentRunLimits(max_tool_calls=2),
+    )
+    proposed = await runner.run_turn(
+        context=_context(), previous_messages=(), user_message="Save the reviewed objective.",
+    )
+    assert proposed.pending_approval is not None
+    contexts_before_resume = len(model.contexts)
+    approved = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-10-09T00:00:00Z",
+    ).start("2026-10-09T00:00:01Z")
+
+    resumed = await runner.resume_claimed_call(
+        context=_context(),
+        previous_messages=proposed.messages,
+        claimed_call=approved,
+        continuation_progress={
+            "requested_tool_count": 2,
+            "executed_tool_count": 2,
+        },
+    )
+
+    assert resumed.status is AgentRunStatus.COMPLETED
+    assert resumed.completion_reason is AgentCompletionReason.RESOURCE_BUDGET
+    resumed_write_result = next(
+        item for item in resumed.tool_results
+        if item.tool_call_id == approved.tool_call_id
+    )
+    assert resumed_write_result.status is ToolResultStatus.FAILED
+    assert resumed_write_result.error_code == "resource_budget"
+    assert writer.executed_arguments == []
+    assert len(model.contexts) == contexts_before_resume + 1
 
 
 async def test_resource_budget_final_answer_has_time_to_summarize_large_trajectory(
@@ -2885,7 +3833,7 @@ async def test_finding_recheck_emits_actual_tool_progress_without_invented_plan(
     assert result.status is AgentRunStatus.COMPLETED
     assert any(event["phase"] == "tools" for event in progress_events)
     assert any(event["executed_tool_count"] > 0 for event in progress_events)
-    assert all("research_plan" not in event for event in progress_events)
+    assert all(event["execution_plan"] is None for event in progress_events)
     assert any(call.name == "read_source" and call.status is ToolCallStatus.SUCCEEDED
                for call in result.tool_calls)
 
@@ -2914,10 +3862,17 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
         ModelTurn(tool_calls=(ModelToolCall("inspect_published_finding", {}),)),
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
         ModelTurn(tool_calls=(ModelToolCall("create_evidence_draft", {**source, "source_digest": "a" * 64}),)),
+        (ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+                    "steps": [{"step_id": "publish", "action": "Save the evidence correction", "status": "in_progress"}],
+                    "status": "in_progress",
+                    "explanation": "The correction is ready for approval.",
+                }),))
+         if request_publication else
+         ModelTurn(content="原始依据把先升后降简化成下降。已形成依据修订草案，保存后还需重新综合结论。")),
         (ModelTurn(tool_calls=(ModelToolCall("create_evidence_version", {**source, "source_digest": "a" * 64}),))
          if request_publication else
          ModelTurn(content="原始依据把先升后降简化成下降。已形成依据修订草案，保存后还需重新综合结论。")),
-        discover=("inspect_published_finding", "read_source", "create_finding_draft", "create_evidence_draft"),
+        discover=("inspect_published_finding", "read_source", "create_finding_draft", "create_evidence_draft", "update_execution_plan"),
         source_inspection_required=True,
     )
     events: list[dict[str, object]] = []
@@ -2938,12 +3893,16 @@ async def test_finding_review_can_draft_evidence_correction_before_rebuilding_fi
         "inspect_published_finding", "read_source", "create_evidence_draft",
     ]
     if request_publication:
+        expected_calls.insert(3, "update_execution_plan")
         expected_calls.append("create_evidence_version")
         assert result.pending_approval.name == "create_evidence_version"
     assert [call.name for call in result.tool_calls if call.name != "discover_research_tools"] == expected_calls
     assert not evidence_write.executed_arguments
     assert not finding_draft.executed_arguments
-    assert all("research_plan" not in event for event in events)
+    if request_publication:
+        assert any(event["execution_plan"] is not None for event in events)
+    else:
+        assert all(event["execution_plan"] is None for event in events)
     assert any(event["executed_tool_count"] > 0 for event in events)
 
 
@@ -2974,6 +3933,11 @@ async def test_experiment_save_requires_real_approval_after_source_read_and_draf
         ),
         ModelTurn(tool_calls=(ModelToolCall("read_source", source),)),
         ModelTurn(tool_calls=(ModelToolCall("propose_paper_experiment_draft", draft_arguments),)),
+        ModelTurn(tool_calls=(ModelToolCall("update_execution_plan", {
+            "steps": [{"step_id": "save", "action": "Save the corrected paper experiment", "status": "in_progress"}],
+            "status": "in_progress",
+            "explanation": "The corrected experiment is ready for approval.",
+        }),)),
         ModelTurn(tool_calls=(ModelToolCall(
             "create_paper_experiment_revision", revision_arguments,
         ),)),
@@ -3372,74 +4336,6 @@ async def test_source_read_proof_does_not_cross_user_request_boundary() -> None:
     assert second_read.executed_arguments == []
 
 
-def test_research_plan_intent_exposes_inspection_and_revision_capabilities() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "查看已保存的研究方案并修订后保存",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "inspect_research_plans" in names
-    assert "revise_research_plan" in names
-    assert "create_research_plan" in names
-
-
-def test_explanation_does_not_enable_research_plan_capabilities() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Please provide an explanation of this system.",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert not {
-        "query_published_findings",
-        "assess_objective_quality",
-        "inspect_research_plans",
-        "propose_research_plan",
-    }.intersection(names)
-
-
-def test_generic_method_question_does_not_enable_source_reading() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Please explain this method.",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert not {
-        "browse_collection_papers",
-        "search_sources",
-        "read_source",
-        "inspect_document_sources",
-        "inspect_table",
-    }.intersection(names)
-
-
-def test_paper_method_question_still_enables_source_reading() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Read the paper's methods and results.",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "read_source" in names
-
-
-def test_document_identifier_enables_direct_source_inspection() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "Inspect the P002 group definitions",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert {
-        "search_sources",
-        "read_source",
-        "inspect_document_sources",
-        "inspect_table",
-    }.intersection(names)
-
-
 async def test_document_identifier_request_can_execute_source_read() -> None:
     read = _Capability(
         "read_source",
@@ -3478,49 +4374,8 @@ async def test_document_identifier_request_can_execute_source_read() -> None:
     assert read.executed_arguments == [{"question": "P002 group definitions"}]
 
 
-def test_generic_plan_question_does_not_enable_research_plan_tools() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "What is your plan?",
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert not {
-        "query_published_findings",
-        "assess_objective_quality",
-        "inspect_research_plans",
-        "propose_research_plan",
-        "create_research_plan",
-    }.intersection(names)
-
-
-@pytest.mark.parametrize(
-    "request_text",
-    ["Draft and save a plan", "Revise the saved plan"],
-)
-def test_actionable_english_plan_request_enables_plan_capabilities(
-    request_text: str,
-) -> None:
-    names = intent_policy.capability_names_for_intent(
-        request_text,
-        has_source_context=False,
-        prior_tool_names=set(),
-    )
-
-    assert "propose_research_plan" in names
-    assert "inspect_research_plans" in names
-
-
-@pytest.mark.parametrize(
-    ("request_text", "capability_name"),
-    [
-        ("Draft and save a plan", "create_research_plan"),
-    ],
-)
-async def test_actionable_english_plan_request_reaches_write_approval(
-    request_text: str,
-    capability_name: str,
-) -> None:
+async def test_registered_write_reaches_approval_after_model_discovery() -> None:
+    capability_name = "create_research_plan"
     write = _Capability(capability_name, ToolRisk.WRITE)
     model = _Model(
         ModelTurn(
@@ -3533,7 +4388,7 @@ async def test_actionable_english_plan_request_reaches_write_approval(
     ).run_turn(
         context=_context(),
         previous_messages=(),
-        user_message=request_text,
+        user_message="保存已经审核的研究方案。",
     )
 
     assert result.status is AgentRunStatus.APPROVAL_REQUIRED
@@ -3541,36 +4396,38 @@ async def test_actionable_english_plan_request_reaches_write_approval(
     assert write.executed_arguments == []
 
 
-def test_non_mutating_version_request_keeps_explicit_new_version_write() -> None:
-    names = intent_policy.capability_names_for_intent(
-        "不要修改旧 Finding，请创建一个新版本。",
-        has_source_context=False,
-        prior_tool_names=set(),
+@pytest.mark.anyio
+async def test_research_request_discovers_source_and_experiment_tools_from_catalog() -> None:
+    names = (
+        "get_collection_context",
+        "browse_collection_papers",
+        "inspect_document_sources",
+        "read_source",
+        "inspect_table",
+        "propose_paper_experiment_draft",
+    )
+    model = _Model(
+        ModelTurn(content="已加载完成研究这项请求所需的工具。"),
+        discover=names,
+        source_inspection_required=True,
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry(
+            tuple(_Capability(name, ToolRisk.DRAFT if name.endswith("draft") else ToolRisk.READ) for name in names)
+        ),
     )
 
-    assert "create_finding_version" in names
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="分析这些论文并重建其中实际报告的实验，给出下一步建议。",
+    )
 
-
-@pytest.mark.parametrize(("request_text", "writes"), [
-    ("请把这个 Finding 标为错误，保存错误反馈；不保存修订结论，也不发布新分析。", {"record_finding_feedback"}),
-    ("保存 Finding 人工修订，保留原始结果和现有 Evidence；不创建独立新 Finding，不发布新的分析版本。", {"curate_finding"}),
-    ("Save feedback for this Finding, but do not save the curation or publish a new analysis.", {"record_finding_feedback"}),
-    ("Check the complete table and save the corrected paper experiment as a new revision.", {"create_paper_experiment_revision"}),
-    ("Save the human revision of this Finding; do not publish a new Finding.", {"curate_finding"}),
-    ("请保存这个 Finding 的修订。", {"create_finding_version"}),
-    ("Save the revision of this Finding.", {"create_finding_version"}),
-    ("请保存实验记录修订，保留旧记录。", {"create_paper_experiment_revision"}),
-    ("保存这个 Finding 的反馈，先不要保存任何内容。", set()),
-    ("只读查看 Finding 已保存的错误反馈和人工修订，不要写入。", set()),
-    ("Read-only: inspect the saved Finding revision.", set()),
-    ("请核对这个已发布 Finding 并给修订草案，先不要保存或发布。", set()),
-    ("Review this published Finding; do not save or publish.", set()),
-    ("请复核这个 Finding，先不要发布。", set()),
-    ("请保存反馈但不保存修订，Finding 原始发布结果保留。", {"record_finding_feedback"}),
-])
-def test_research_writes_respect_each_requested_action(request_text, writes) -> None:
-    names = intent_policy.capability_names_for_intent(request_text, has_source_context=False, prior_tool_names=set())
-    assert names.intersection(intent_policy.WRITE_CAPABILITIES) == writes
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.tool_calls[0].name == "discover_research_tools"
+    assert model.discovery_decisions == [names]
+    assert model.tool_spec_names == [names]
 
 
 def test_failed_curation_retains_failure_observation() -> None:
@@ -3666,18 +4523,62 @@ async def test_approved_finding_review_reports_persisted_status_without_model_re
     ).require_approval()
     claimed = pending.approve(user_id="user-1", arguments_digest=pending.arguments_digest,
                               decided_at="2026-09-10T00:01:00Z").start("2026-09-10T00:01:01Z")
-    model = _Model(ModelTurn(content="已保存，等待您的批准。"))
-    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,)))
+    reader = _Capability("inspect_published_finding", ToolRisk.READ)
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall(name="inspect_published_finding", arguments={}),)),
+        ModelTurn(content="反馈已保存，我继续核对了另一篇论文。"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write, reader)))
     result = await runner.resume_claimed_call(context=_context(), previous_messages=(ChatMessage.user(
         message_id="msg-1", session_id="chat-1", content="请保存 Finding 修订，等待批准。",
         created_at="2026-09-10T00:00:00Z",
     ),), claimed_call=claimed)
     assert result.status is AgentRunStatus.COMPLETED
     assert result.pending_approval is None
-    assert "已保存" in result.messages[-1].content
-    assert "等待" not in result.messages[-1].content
-    assert model.contexts == []
+    assert result.messages[-1].content == "反馈已保存，我继续核对了另一篇论文。"
+    assert len(model.contexts) == 2
+    assert reader.executed_arguments == [{}]
     assert write.executed_arguments == [{}]
+
+
+async def test_approved_write_does_not_request_the_same_write_again() -> None:
+    write = _Capability(
+        "create_paper_experiment_revision",
+        ToolRisk.WRITE,
+        _NoArguments,
+        result_data={"saved": True, "revisions": [{"experiment_version": 2}]},
+    )
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("create_paper_experiment_revision", {}),)),
+        # Some providers repeat the exact call after receiving its success
+        # result instead of returning the requested confirmation.
+        ModelTurn(tool_calls=(ModelToolCall("create_paper_experiment_revision", {}),)),
+        ModelTurn(content="实验记录已保存，未生成研究结论。"),
+    )
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,)))
+
+    proposed = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="保存这份实验记录，不生成研究结论。",
+    )
+    assert proposed.status is AgentRunStatus.APPROVAL_REQUIRED
+    claimed = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-09-10T00:01:00Z",
+    ).start("2026-09-10T00:01:01Z")
+
+    completed = await runner.resume_claimed_call(
+        context=_context(),
+        previous_messages=proposed.messages,
+        claimed_call=claimed,
+    )
+
+    assert completed.status is AgentRunStatus.COMPLETED
+    assert completed.pending_approval is None
+    assert write.executed_arguments == [{}]
+    assert completed.messages[-1].content == "实验记录已保存，未生成研究结论。"
 
 
 def test_attached_source_context_does_not_force_collection_browse() -> None:
@@ -3760,11 +4661,28 @@ async def test_research_plan_revision_reads_existing_plan_before_write(user_requ
         ),
         ModelTurn(
             tool_calls=(
+                ModelToolCall(
+                    name="update_execution_plan",
+                    arguments={
+                        "steps": [{
+                            "step_id": "save",
+                            "action": "Save the revised research plan",
+                            "status": "in_progress",
+                        }],
+                        "status": "in_progress",
+                        "explanation": "The revision is ready for approval.",
+                    },
+                ),
+            )
+        ),
+        ModelTurn(
+            tool_calls=(
                 ModelToolCall(name="revise_research_plan", arguments={
                     "objective_id": "objective-1", "parent_plan_id": "plan-1",
                 }),
             )
         ),
+        discover=("inspect_research_plans", "revise_research_plan", "update_execution_plan"),
     )
     runner = ResearchAgentRunner(
         model=model,
@@ -3783,8 +4701,8 @@ async def test_research_plan_revision_reads_existing_plan_before_write(user_requ
 
     assert result.status is AgentRunStatus.APPROVAL_REQUIRED
     assert model.tool_spec_names[:2] == [
-        ("inspect_research_plans", "revise_research_plan"),
-        ("inspect_research_plans", "revise_research_plan"),
+        ("inspect_research_plans", "revise_research_plan", "update_execution_plan"),
+        ("inspect_research_plans", "revise_research_plan", "update_execution_plan"),
     ]
 
 

@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { t } from '../../../_shared/i18n';
-	import { LoaderCircle, Clock3, CircleAlert, Trash2 } from '@lucide/svelte';
+	import { LoaderCircle, Clock3, CircleAlert, Trash2, Pin, PinOff, ChevronDown } from '@lucide/svelte';
 	import type { ChatSessionActivity } from './conversationPresentation';
 
 	type SessionSummary = {
 		session_id: string;
 		title: string;
 		updated_at: string;
+		is_pinned: boolean;
 	};
 
 	export let collectionId = '';
@@ -16,11 +17,23 @@
 	export let sessionActivities: Record<string, ChatSessionActivity> = {};
 	export let activeSessionId = '';
 	export let disabled = false;
+	export let pinningSessionId = '';
+	export let historyHasMore = false;
+	export let historyPageLoading = false;
+	export let historyPageError = false;
 	export let onNewSession: () => void = () => {};
 	export let onSwitchSession: (sessionId: string) => void = () => {};
 	export let onDeleteSession: (sessionId: string) => void = () => {};
+	export let onTogglePin: (sessionId: string) => void = () => {};
+	export let onLoadMoreHistory: () => void = () => {};
 	export let formatHistoryTime: (value: string) => string = () => '';
 	let mobileHistoryOpen = false;
+
+	function loadMoreOnScroll(event: Event) {
+		const list = event.currentTarget as HTMLElement;
+		if (!historyPageError && list.scrollHeight - list.scrollTop - list.clientHeight < 80)
+			onLoadMoreHistory();
+	}
 </script>
 
 <aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
@@ -61,12 +74,13 @@
 		aria-label={$t('researchAgent.historyTitle')}
 	>
 		<h2>{$t('researchAgent.historyTitle')}</h2>
-		<div class="history-list">
+		<div class="history-list" on:scroll={loadMoreOnScroll}>
 			{#each history as item (item.session_id)}
 				{@const activity = sessionActivities[item.session_id]}
 				<div class="history-item" class:active={item.session_id === activeSessionId}>
 					<button
 						class="history-select"
+						title={item.title}
 						type="button"
 						{disabled}
 						on:click={() => {
@@ -89,6 +103,21 @@
 						{/if}
 					</button>
 					<button
+						class="pin-session"
+						class:pinned={item.is_pinned}
+						type="button"
+						{disabled}
+						aria-label={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
+						title={$t(item.is_pinned ? 'researchAgent.unpinSession' : 'researchAgent.pinSession')}
+						aria-pressed={item.is_pinned}
+						aria-busy={pinningSessionId === item.session_id}
+						on:click|stopPropagation={() => onTogglePin(item.session_id)}
+					>
+						{#if pinningSessionId === item.session_id}<LoaderCircle size={14} />
+						{:else if item.is_pinned}<PinOff size={14} aria-hidden="true" />
+						{:else}<Pin size={14} aria-hidden="true" />{/if}
+					</button>
+					<button
 						class="delete-session"
 						type="button"
 						{disabled}
@@ -101,6 +130,13 @@
 			{:else}
 				<p class="empty-history">{$t('researchAgent.emptyHistory')}</p>
 			{/each}
+			{#if historyHasMore}
+				<button class="load-more" type="button" disabled={disabled || historyPageLoading}
+					aria-label={$t('researchAgent.loadMoreSessions')} on:click={onLoadMoreHistory}>
+					{#if historyPageLoading}<LoaderCircle size={14} />{:else}<ChevronDown size={14} />{/if}
+					{$t('researchAgent.loadMoreSessions')}
+				</button>
+			{/if}
 		</div>
 	</section>
 
@@ -283,16 +319,18 @@
 
 	.history-list {
 		display: grid;
+		align-content: start;
+		grid-auto-rows: max-content;
 		gap: 4px;
 		overflow-y: auto;
 	}
 
 	.history-item {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) 28px 28px;
 		align-items: center;
 		gap: 8px;
-		min-height: 38px;
+		min-height: 50px;
 		padding: 7px 9px;
 		border: 1px solid transparent;
 		border-radius: 9px;
@@ -309,9 +347,10 @@
 		display: grid;
 		width: 100%;
 		min-width: 0;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-rows: 18px 16px;
 		align-items: center;
-		gap: 8px;
+		gap: 2px;
 		padding: 0;
 		border: 0;
 		background: transparent;
@@ -320,7 +359,8 @@
 		cursor: pointer;
 	}
 
-	.delete-session {
+	.delete-session,
+	.pin-session {
 		display: grid;
 		place-items: center;
 		width: 28px;
@@ -330,6 +370,26 @@
 		border-radius: 7px;
 		background: transparent;
 		color: var(--text-tertiary);
+		cursor: pointer;
+	}
+
+	.pin-session.pinned,
+	.pin-session:hover:not(:disabled),
+	.pin-session:focus-visible {
+		background: var(--surface-card);
+		color: var(--brand-primary);
+	}
+
+	.load-more {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+		min-height: 32px;
+		border: 0;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 12px;
 		cursor: pointer;
 	}
 
@@ -350,12 +410,14 @@
 		white-space: nowrap;
 		text-overflow: ellipsis;
 		font-size: 13px;
+		line-height: 18px;
 	}
 
 	.history-item time,
 	.empty-history {
 		color: var(--text-tertiary);
 		font-size: 11px;
+		line-height: 16px;
 	}
 
 	.collection-context {

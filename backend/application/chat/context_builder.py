@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from math import ceil, inf
 from typing import Any
 
 import tiktoken
 
-from domain.chat import ChatMessage, ChatMessageRole
+from domain.chat import ChatMessage, ChatMessageRole, ChatToolRequest, ChatToolResult
 
 
 @dataclass(frozen=True)
@@ -24,6 +24,7 @@ class ChatModelContext:
     compacting: bool = False
     max_context_tokens: int = 65_536
     prior_reading_summary: str = ""
+    execution_plan: Mapping[str, Any] | None = None
     # Runtime-only audit metadata. These fields never enter provider_messages.
     model_call_observer: Any | None = None
     model_call_purpose: str = "decision"
@@ -68,6 +69,14 @@ class ChatModelContext:
             ], ensure_ascii=False)})
         else:
             messages.extend(ChatContextBuilder.model_message(message) for message in self.messages)
+        if self.execution_plan is not None:
+            messages.append({"role": "user", "content": (
+                "[CURRENT EXECUTION PLAN]\n"
+                "The last accepted model plan for this request, retained independently of "
+                "compacted messages. It is fallible progress, not evidence or permission. "
+                "Use observations to revise it through update_execution_plan.\n"
+                + json.dumps(self.execution_plan, ensure_ascii=False)
+            )})
         active = next((message for message in self.messages
                        if message.message_id == self.active_user_message_id), None)
         if active is not None:
@@ -92,6 +101,8 @@ _LINEAGE_FIELDS = {
     "draft_id", "analysis_version", "source_analysis_version", "source_finding_ids",
     "source_evidence_ids", "offset", "next_offset", "row_offset", "next_row_offset",
     "limit", "page", "error_code", "content_truncated", "has_more", "paper_total",
+    "experiment_id", "experiment_version", "source_fingerprint", "finding_version",
+    "selection_ids", "finding_ids", "revision_saved", "persistence", "published",
 }
 
 
@@ -321,6 +332,132 @@ class ChatContextBuilder:
             units.append((message,))
             position += 1
         return tuple(units)
+
+    @classmethod
+    def compact_protocol_unit(
+        cls,
+        unit: tuple[ChatMessage, ...],
+        *,
+        max_tokens: int = 8_000,
+    ) -> tuple[ChatMessage, ...]:
+        """Create a bounded model-only copy of an oversized protocol unit.
+
+        Durable chat messages retain the complete tool arguments and result. A
+        completed write can contain a full PaperExperiment or Finding payload,
+        which is useful for audit but too large to replay after approval. The
+        continuation only needs protocol identity, resource references and
+        lineage fields; the exact Source remains available through its reader.
+        """
+        projected: list[ChatMessage] = []
+        for message in unit:
+            if message.role is ChatMessageRole.ASSISTANT and message.tool_calls:
+                requests = tuple(
+                    replace(
+                        request,
+                        arguments=cls._project_lineage(request.arguments),
+                    )
+                    for request in message.tool_calls
+                )
+                projected.append(replace(message, tool_calls=requests))
+                continue
+            if message.role is ChatMessageRole.TOOL and message.tool_result is not None:
+                result = message.tool_result
+                data = cls._project_lineage(result.data)
+                data["context_projection"] = (
+                    "Completed tool result is archived in the durable trajectory; "
+                    "this bounded record is for continuation context only."
+                )
+                projected_result = replace(result, data=data)
+                projected.append(
+                    replace(
+                        message,
+                        content=json.dumps(
+                            projected_result.to_record(),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                        tool_result=projected_result,
+                    )
+                )
+                continue
+            projected.append(message)
+
+        # The projection is intentionally conservative. If a provider has a
+        # smaller context than configured, retain only protocol identity and
+        # resource refs rather than allowing one result to block continuation.
+        if cls.estimate_tokens([cls.model_message(message) for message in projected]) <= max_tokens:
+            return tuple(projected)
+        minimal: list[ChatMessage] = []
+        for message in projected:
+            if message.role is ChatMessageRole.ASSISTANT and message.tool_calls:
+                requests = tuple(
+                    ChatToolRequest(
+                        tool_call_id=request.tool_call_id,
+                        name=request.name,
+                        arguments={},
+                        position=request.position,
+                    )
+                    for request in message.tool_calls
+                )
+                minimal.append(replace(message, tool_calls=requests))
+            elif message.role is ChatMessageRole.TOOL and message.tool_result is not None:
+                result = message.tool_result
+                minimal_result = ChatToolResult(
+                    tool_call_id=result.tool_call_id,
+                    status=result.status,
+                    data={"context_projection": "completed result archived"},
+                    resource_refs=result.resource_refs,
+                    warnings=result.warnings,
+                    error_code=result.error_code,
+                    error_message=result.error_message,
+                )
+                minimal.append(
+                    replace(
+                        message,
+                        content=json.dumps(
+                            minimal_result.to_record(),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                        tool_result=minimal_result,
+                    )
+                )
+            else:
+                minimal.append(message)
+        return tuple(minimal)
+
+    @classmethod
+    def _project_lineage(cls, value: Any, *, depth: int = 0) -> Any:
+        if depth > 4:
+            return None
+        if isinstance(value, Mapping):
+            projected: dict[str, Any] = {}
+            for key, item in value.items():
+                name = str(key)
+                keep = (
+                    name in _LINEAGE_FIELDS
+                    or name.endswith("_id")
+                    or name.endswith("_ids")
+                    or name.endswith("_digest")
+                    or name.endswith("_fingerprint")
+                    or name in {"label", "variant_key", "version", "revision", "scope_description"}
+                )
+                if keep or isinstance(item, (Mapping, list, tuple)):
+                    child = cls._project_lineage(item, depth=depth + 1)
+                    if child not in (None, {}, []):
+                        projected[name] = child
+            return projected
+        if isinstance(value, (list, tuple)):
+            return [
+                child
+                for item in list(value)[:12]
+                if (child := cls._project_lineage(item, depth=depth + 1)) not in (None, {}, [])
+            ]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            if isinstance(value, str):
+                return value[:300]
+            return value
+        return None
 
     @staticmethod
     def model_message(message: ChatMessage) -> dict[str, Any]:

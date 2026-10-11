@@ -45,6 +45,11 @@ class CreateFindingDraftCapability:
             "optional ComparisonGroups for researcher review. selection_ids must be "
             "canonical ObjectiveExperimentSelection IDs returned by the experiment "
             "graph; never use Evidence projection IDs, evidence-* IDs, or document IDs."
+            " Inspect the current published analysis and exact eligible selections "
+            "first; when deriving from a saved Finding, inspect and name that parent. "
+            "If no inspected selection supports the requested conclusion, explain "
+            "the unsupported claim rather than inventing a supporting selection. "
+            "Draft success does not publish a Finding; saving is a separate write."
         ),
         risk=ToolRisk.DRAFT,
         input_model=CreateFindingDraftToolRequest,

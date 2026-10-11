@@ -39,6 +39,7 @@ class ChatSession:
     fork_message_id: str | None = None
     fork_position: int | None = None
     fork_content: str | None = None
+    is_pinned: bool = False
 
     def __post_init__(self) -> None:
         lineage = (self.root_session_id, self.parent_session_id, self.fork_message_id,
@@ -99,6 +100,7 @@ class ChatSession:
             fork_position=payload.get("fork_position"),
             fork_content=payload.get("fork_content"),
             status=payload.get("status", "idle"),
+            is_pinned=payload.get("is_pinned", False),
         )
 
     def update(

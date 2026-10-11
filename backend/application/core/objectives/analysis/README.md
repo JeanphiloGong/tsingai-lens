@@ -14,7 +14,7 @@ does not own the database graph or the final scientific status.
 confirmed Objective + prepared Documents
   -> screen Sources for recall
   -> route bounded Source inspection work
-  -> extract PaperExperiment Draft content
+  -> reuse sufficient current fixed revisions, or extract PaperExperiment Draft content
   -> reconcile boundaries and local references in the service
   -> resolve Source labels and binding states
   -> write an immutable PaperExperiment revision
@@ -35,6 +35,7 @@ Only a ready, source-grounded selection can enter Finding synthesis.
 |---|---|---|---|---|
 | Screen | `source_screening.screen_sources` | Objective and paper Sources -> transient frames | Bounded | None |
 | Route | `evidence_routing.route_sources` | Frames and Source tree -> deterministic inspection routes | None | None |
+| Reuse | `paper_experiment_reuse.reusable_paper_experiments` | All latest paper experiments and current routed Sources -> fixed revisions, or fresh extraction | None | None |
 | Extract | `PaperExperimentExtractor.extract` in [`paper_experiment_extraction.py`](paper_experiment_extraction.py) | Routed Source bundle -> `PaperExperimentModelOutput`/Draft | Bounded extraction and targeted retries | None |
 | Prepare | `prepare_model_output` in [`paper_experiment_contract.py`](paper_experiment_contract.py) | Raw response -> validated local keys, source-label use, candidate direction and audit issues | None | None |
 | Reconcile | `reconcile_model_output` | Candidate scopes -> service-owned accepted scopes | None | None |

@@ -208,6 +208,12 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     assert wrong_digest.status_code == 409
     assert approved.status_code == 200
     assert approved.json()["status"] == "completed"
+    proposed_plan = proposed_write.json()["execution_plan"]
+    approved_plan = approved.json()["execution_plan"]
+    assert (proposed_plan is None) == (approved_plan is None)
+    if proposed_plan is not None:
+        assert approved_plan["plan_id"] == proposed_plan["plan_id"]
+        assert approved_plan["plan_version"] > proposed_plan["plan_version"]
     assert candidate_capability.executed == [
         {"question": "How does energy input affect grain morphology?"}
     ]
@@ -217,9 +223,12 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         "create_objective_candidate" in names
         for names in model.all_tool_spec_names
     )
-    assert model.all_tool_spec_names[-1] == ("discover_research_tools",)
-    # The write schema is discovered before approval, then hidden after the
-    # successful same-continuation write to prevent duplicate execution.
+    assert model.all_tool_spec_names[-1] == (
+        "create_objective_candidate",
+        "discover_research_tools",
+    )
+    # A successful write does not hide the capability by name. The same
+    # capability may be needed for a different resource in this continuation.
     assert [item["role"] for item in trajectory.json()["items"]] == [
         "user",
         "assistant",
@@ -230,6 +239,8 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         "tool",
         "assistant",
         "user",
+        "assistant",
+        "tool",
         "assistant",
         "tool",
         "assistant",

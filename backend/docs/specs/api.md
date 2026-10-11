@@ -183,6 +183,7 @@ list.
 - `POST /api/v1/chat-sessions`
 - `GET /api/v1/chat-sessions?collection_id={collection_id}`
 - `GET /api/v1/chat-sessions/{session_id}`
+- `PUT /api/v1/chat-sessions/{session_id}/pin`
 - `DELETE /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
@@ -199,9 +200,29 @@ references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
 
 The collection-scoped list returns the authenticated user's saved sessions,
-ordered by most recently updated, with `limit` and `offset` pagination. It is
+ordered by `is_pinned` descending, then `updated_at` descending and `session_id`
+descending, before applying `limit` and `offset` pagination. It is
 the source for restoring Chat history on another device; browser local storage
-may remember the active session but is not the authoritative history index.
+may remember the active session but is not the authoritative history index. Each
+list item also includes `title`, the trimmed first line of the first user question
+(up to 160 characters), or `null` for an empty conversation. A client can render
+history without loading every trajectory or relying on a local title cache.
+
+Session responses include `is_pinned` (false by default). `PUT .../{session_id}/pin`
+accepts exactly `{"is_pinned": true}` or `{"is_pinned": false}` and returns the
+saved session. Setting the same state is idempotent. The authenticated user must
+own both the session and its Collection; missing or unowned sessions return 404
+`chat_session_not_found`. Pinning is independent of execution and does not
+change `updated_at`, messages, approvals, or Source attachments. Generation
+checkpoints preserve the saved preference, and new branches start unpinned.
+
+Deleting an owned idle session returns 204 and removes its trajectory. Execution
+conflicts return 409 `chat_session_busy`. A session still referenced by another
+session's `parent_session_id` or `root_session_id` returns 409
+`chat_session_has_branches`; delete the dependent versions first. This preserves
+their saved questions, Source attachments, and tree checkpoints. Missing or
+unowned sessions return 404 `chat_session_not_found`. Deletion and branch copying
+serialize on the source session row so a concurrent branch cannot lose its source.
 
 Message editing and answer regeneration preserve the original trajectory.
 `POST /chat-sessions/{session_id}/branches` accepts a saved user `message_id`,
@@ -567,8 +588,35 @@ validation, and it does not turn a model proposal into approval.
 `ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
 the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
 `{"content": string}` data and are transient presentation updates. `progress`
-events carry phase, cycle, elapsed time, and budget fields while a turn runs;
-they are presentation updates and are not scientific trajectory records.
+events carry phase, cycle, elapsed time, budget fields, and the current
+`execution_plan` while a turn runs; they are presentation updates and are not
+scientific trajectory records. The plan has a stable `plan_id`, increasing
+`plan_version`, ordered steps, and one of `in_progress`, `completed`,
+`awaiting_approval`, `waiting_for_clarification`, `scientific_refusal`,
+`technical_failure`, or `resource_limited`. Complex requests have a model-authored
+plan loaded through the registered `update_execution_plan` capability; the
+runtime only adds approval, resource, and technical dispositions. `plan_version`
+is the recoverable sequence of capability request/result events, including
+pending and failed events, so an approval continuation or failed save cannot
+recreate an older version. The latest plan is recovered from the saved tool
+trajectory, so compaction, a disconnected stream, or approval continuation does
+not require a second persistence model.
+Streamed progress, the final turn, and the persisted response snapshot use the
+same runtime status calculation. A model answer preserves an explicit
+`waiting_for_clarification` or `scientific_refusal`; it closes an `in_progress`
+plan without changing the model's step assessments. Revoking write permission
+before an automatic claim produces `technical_failure`, with the denial reason,
+instead of retaining `awaiting_approval`. A runtime status change may keep the
+same plan version because it adds no capability request/result event.
+Simple answers may have no plan. It never represents Evidence, permission, or a
+scientific conclusion.
+Progress also includes `retry_count`, `remaining_retry_budget`, `retry_attempt`,
+`retry_delay_ms` and `termination_reason`. `model_retry` and `context_compaction`
+describe technical work. The existing snapshot progress stores an internal
+`context_checkpoint` containing provisional working notes and compacted message
+IDs for recovery; clients must not render it as evidence. Context failures use
+`context_window_exceeded` or `context_compaction_unavailable`, separately from
+provider availability failures.
 `snapshot` events identify the current response and assistant message before its
 text deltas; `trajectory` events replace the saved messages after checkpoints.
 The stream
@@ -634,19 +682,39 @@ stored 64-character `arguments_digest`; approval is bound to the tool call,
 exact stored arguments, authenticated user, and decision timestamp. Changed
 arguments, another user, or an incompatible call state return `409` or `404`
 and never execute the call. Rejection records a tool result and does not execute
-the capability. While a write remains `approval_required`, posting another
+the capability; the Agent then resumes the same research loop so remaining reads or
+non-write work can finish. While a write remains `approval_required`, posting another
 message to that session returns `409 chat_tool_approval_pending`; the user must
 approve or reject the exact pending action before starting another turn.
 
-The production Research Agent registers the capabilities below, but the Runner
-selects a bounded subset for each model decision based on the current user
-intent. Ordinary conversation receives no capability schemas; collection
-screening, Source inspection, Finding review, Objective work, and research-plan
-work each receive only their relevant read or draft actions. Write capabilities
-are exposed only for an explicit matching action and still stop for exact user
-approval. The production Research Agent currently exposes these capabilities:
+The production Research Agent registers the capabilities below. For each model
+decision, the Runner first exposes the current registered catalog; the model can
+load a bounded set of exact schemas through `discover_research_tools` based on
+the requested deliverable, trajectory observations, filenames, identifiers, and
+the registered descriptions. It does not use a fixed user-keyword router.
+Ordinary conversation may finish without discovery, while collection screening,
+Source inspection, Finding review, Objective work, and research-plan work load
+the capabilities needed for that task. Backend permission mode, capability risk,
+typed arguments, Source prerequisites, and exact write approval remain the
+authoritative boundaries. The production Research Agent currently exposes these
+capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
+- `browse_collection_papers` returns a bounded, screening-only paper survey. A
+  paper's `source_status` is `available` when canonical parsed Source content
+  can be read, `preparing` while preparation is still running,
+  `not_prepared` when an uploaded/stored paper has not been prepared,
+  `preparation_failed` when preparation failed, `unavailable` when the expected
+  Source is missing, and `read_failed` when that paper's Source read failed.
+  Missing Document Profile, missing or insufficient Paper Map, and an absent
+  labelled abstract remain optional screening limitations; they do not create a
+  warning when Source content is available and do not establish irrelevance.
+  A page warning is reserved for papers whose Source is actually unavailable or
+  failed to read, and names only the count; the structured paper records carry
+  the per-paper state. `next_offset` and an empty literal filename/title query
+  are normal navigation results, not warnings or scientific absence. Source
+  read failures are isolated to the affected paper so other page results remain
+  usable;
 - `inspect_document_sources` reads one prepared Document's parsed paragraphs,
   bounded table Markdown, and figure captions through exact or focused,
   paginated Source filters. Each Source includes a digest of its complete
@@ -767,8 +835,9 @@ approval. The production Research Agent currently exposes these capabilities:
   returns the persisted queued, running, succeeded, or failed state and never
   introduces a Chat-owned analysis path;
 - `propose_paper_experiment_draft` is a `draft` capability for Agent-authored
-  reconstruction of one paper's reusable experiment record. The Agent must
-  first read complete canonical Sources and may submit only response-local
+  reconstruction of one paper's reusable experiment record. It does not require
+  a confirmed Objective or a published Objective analysis. The Agent must first
+  read complete canonical Sources and may submit only response-local
   scientific keys plus supplied Source labels. Lens reloads the prepared
   document, resolves the authoritative Source catalog and fingerprint, and
   rejects Lens-owned IDs, versions, ownership fields, and validation status in
@@ -797,11 +866,12 @@ approval. The production Research Agent currently exposes these capabilities:
   fields, SourceReference objects, and analysis ownership remain service-owned;
 - `create_paper_experiment_revision` is a separate `write` capability for an
   approved, unchanged PaperExperiment draft. Lens revalidates the draft digest,
-  confirmed Objective, active analysis, current Source fingerprint, and user
-  ownership, then calls the canonical single-experiment writer. The immutable
-  PaperExperiment revision and its Objective Selection are committed through
-  the same atomic graph repository as automatic analysis. It does not create a
-  Finding; a Finding remains a separate Evidence/Selection-backed write;
+  current Source fingerprint, and user ownership, then calls the canonical
+  paper-revision writer. The immutable PaperExperiment revisions are committed
+  atomically without starting or publishing Objective analysis and without
+  creating an Objective Selection. A later Objective analysis may select one or
+  more fixed revisions for comparison. It does not create a Finding; a Finding
+  remains a separate Evidence/Selection-backed write;
 - `inspect_objective_analysis` is a `read` capability. It returns the current
   canonical Objective analysis version, paper progress, terminal error, and
   published-version identity without starting or retrying work;
@@ -864,6 +934,8 @@ call ID; any request-local identifier returned by a model provider is not a
 Chat identity and is not persisted.
 
 Turn status is one of `completed`, `approval_required`, `failed`, or `rejected`.
+The JSON turn response also includes `execution_plan` with the same runtime
+plan record shown in progress snapshots.
 Only `completed` has a non-null `completion_reason`: `model_answer`,
 `resource_budget`, `no_progress`, or `emergency_ceiling`. Every turn exposes
 `warnings` as an array. A completed answer may be partial: resource exhaustion,
@@ -871,13 +943,12 @@ repeated identical observations, and the emergency ceiling allow one final
 model request with no tools, using inspected evidence and explicit unread or
 failed scope. It returns `completed` with warnings when an answer is available;
 response or finalization failure returns `failed` with a sanitized error code.
-The exception is an approved durable write in the current continuation whose
-tool call and matching result both already have status `succeeded`. A later
-response-generation failure does not reverse that completed action: the turn
-returns `completed` with `completion_reason: "model_answer"`, no error code, a
-deterministic saved-action message, and a non-blocking warning that the detailed
-response was unavailable. Successful reads, drafts, queued writes, failed
-writes, and writes from earlier turns do not use this fallback.
+A successful durable write is retained when later response generation fails, but
+the turn remains `failed` with the technical error code and a warning that the
+saved result is authoritative. The failure is never converted into a completed
+research turn merely because an earlier write succeeded. Successful reads,
+drafts, queued writes, failed writes, and writes from earlier turns do not
+change this rule.
 
 Tool call and result failures are
 technical trajectory outcomes; they are not scientific absence, uncertainty,
@@ -1062,15 +1133,18 @@ newer version. The analysis command and analysis-status route share this
 response contract.
 
 PaperContribution is analysis-level coverage metadata, not a PaperExperiment
-field or scientific evidence for a Finding. Finding and experiment authoring
+field or scientific evidence for a Finding. Finding authoring
 copy the source analysis coverage into the new version, including excluded and
 failed papers with no experiment revision. This preserves the original input
 processing record; it does not assert that every paper supports the new Finding.
 The metadata is saved in the same publication transaction as the experiment
 graph. Finding synthesis consumes only fixed experiment revisions and their
 Selections and ComparisonGroups; it never consumes PaperContribution.
-Authored experiment graph snapshots retain the source analysis version and
-user identity; Agent publication also retains the committing tool-call ID.
+Authored Finding graph snapshots retain the source analysis version and user
+identity. PaperExperiment authoring saves paper facts independently and creates
+no analysis snapshot or copied coverage. A later automatic analysis may reuse
+current fixed revisions after validating the routed Source coverage and the
+Objective's required facts; otherwise it extracts new revisions.
 
 Each analysis-level contribution exposes `evidence_disposition`,
 `routed_source_count`, `extracted_source_count`,
@@ -1243,9 +1317,11 @@ Evidence remains available through read-only projections for historical analyses
 and source traceback. New researcher and Agent writes use the reviewed
 PaperExperiment draft and the approved `create_paper_experiment_revision`
 capability; that write validates the complete Source digest, creates an
-immutable revision and Objective Selection, and does not create a Finding.
-Historical Evidence records remain readable, but no new Evidence version or
-independent Evidence identity can be created through the browser or Agent.
+immutable paper-local revision, and does not start or publish Objective
+analysis, create an Objective Selection, or create a Finding. A later Objective
+analysis may select the fixed revision for comparison. Historical Evidence
+records remain readable, but no new Evidence version or independent Evidence
+identity can be created through the browser or Agent.
 
 The Evidence Map endpoint has no version query because it always projects the
 Objective's current `published_analysis_version`. It deterministically returns

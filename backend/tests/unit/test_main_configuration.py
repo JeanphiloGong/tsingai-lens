@@ -31,6 +31,7 @@ ENV_NAMES = (
     "LENS_AGENT_MAX_TURN_SECONDS", "LENS_AGENT_MAX_TOOL_CALLS",
     "LENS_AGENT_MAX_MODEL_TOKENS", "LENS_AGENT_NO_PROGRESS_LIMIT",
     "LENS_AGENT_EMERGENCY_MAX_CYCLES", "LENS_AGENT_MAX_PARALLEL_READS",
+    "LENS_AGENT_MAX_MODEL_RETRIES",
     "LENS_AGENT_MAX_MODEL_OUTPUT_TOKENS", "LENS_AGENT_MAX_FINALIZATION_SECONDS",
     "LENS_AGENT_MAX_FINALIZATION_OUTPUT_TOKENS",
     "LENS_AGENT_MAX_REQUEST_SECONDS",
@@ -38,7 +39,7 @@ ENV_NAMES = (
 )
 
 
-@pytest.mark.parametrize("value", ["not-a-number", "0", "-1", "nan", "inf"])
+@pytest.mark.parametrize("value", ["not-a-number", "-1", "nan", "inf"])
 def test_agent_limits_fall_back_for_invalid_values(
     monkeypatch: pytest.MonkeyPatch,
     value: str,
@@ -46,3 +47,12 @@ def test_agent_limits_fall_back_for_invalid_values(
     for name in ENV_NAMES:
         monkeypatch.setenv(name, value)
     assert _parse_agent_run_limits() == AgentRunLimits()
+
+
+def test_zero_explicitly_disables_optional_turn_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ENV_NAMES:
+        monkeypatch.setenv(name, "0")
+    assert _parse_agent_run_limits() == AgentRunLimits(
+        max_elapsed_seconds=None, max_tool_calls=None,
+        max_model_tokens=None, emergency_max_model_cycles=None,
+    )

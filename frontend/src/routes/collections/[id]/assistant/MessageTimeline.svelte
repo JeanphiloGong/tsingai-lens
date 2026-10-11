@@ -13,6 +13,7 @@
 		ChatMessage,
 		ChatToolCall,
 		ChatProgress,
+		ChatExecutionPlan,
 		ChatResponseSnapshot
 	} from '../../../_shared/chatSessions';
 	import type {
@@ -22,6 +23,7 @@
 	} from '../../../_shared/chatSessions';
 	import UserMessage from './UserMessage.svelte';
 	import AssistantMessage from './AssistantMessage.svelte';
+	import ResearchProgress from './ResearchProgress.svelte';
 	import ResearchActivity from './ResearchActivity.svelte';
 	import ResearchArtifact from './ResearchArtifact.svelte';
 	import ApprovalPanel from './ApprovalPanel.svelte';
@@ -77,6 +79,7 @@
 	export let collectionId = '';
 	export let progress: ChatProgress | null = null;
 	export let progressHistory: ChatProgress[] = [];
+	export let executionPlan: ChatExecutionPlan | null = null;
 	export let loading = false;
 	export let sending = false;
 	export let deciding = false;
@@ -327,6 +330,9 @@
 					{/if}{/each}
 			{/if}
 
+			{#if executionPlan && !loading && !sending && !recovering}
+				<ResearchProgress progress={{ phase: 'terminal', execution_plan: executionPlan }} active={false} />
+			{/if}
 			{#if pendingApproval}
 				<ApprovalPanel call={pendingApproval} {collectionId} {deciding} onDecide={decide} />
 			{/if}

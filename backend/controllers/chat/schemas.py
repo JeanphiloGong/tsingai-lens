@@ -17,6 +17,12 @@ class ChatSessionCreateRequest(BaseModel):
     collection_id: str = Field(min_length=1, max_length=64)
 
 
+class ChatSessionPinRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    is_pinned: bool = Field(strict=True)
+
+
 class ChatPermissionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["read_only", "confirm", "auto"]
@@ -44,6 +50,8 @@ class ChatSessionResponse(BaseModel):
     collection_id: str
     created_at: str
     updated_at: str
+    title: str | None = None
+    is_pinned: bool = False
     status: Literal["idle", "running", "approval"] = "idle"
     root_session_id: str | None = None
     parent_session_id: str | None = None
@@ -214,6 +222,7 @@ class ChatTurnResponse(BaseModel):
         | None
     ) = None
     warnings: list[str] = Field(default_factory=list)
+    execution_plan: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_completion(self) -> "ChatTurnResponse":

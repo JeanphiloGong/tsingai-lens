@@ -55,6 +55,8 @@ export type ChatSession = {
 	collection_id: string;
 	created_at: string;
 	updated_at: string;
+	title?: string | null;
+	is_pinned: boolean;
 	status: 'idle' | 'running' | 'approval';
 	root_session_id?: string | null;
 	parent_session_id?: string | null;
@@ -118,6 +120,7 @@ export type ChatToolCall = {
 };
 
 export type ChatTurn = {
+	execution_plan?: ChatExecutionPlan | null;
 	status: 'completed' | 'approval_required' | 'failed' | 'rejected';
 	completion_reason:
 		| 'model_answer'
@@ -190,6 +193,39 @@ export type ChatProgress = {
 	elapsed_ms?: number;
 	remaining_tool_budget?: number;
 	remaining_token_budget?: number;
+	retry_count?: number;
+	retry_attempt?: number | null;
+	retry_delay_ms?: number | null;
+	remaining_retry_budget?: number;
+	termination_reason?: string | null;
+	execution_plan?: ChatExecutionPlan | null;
+};
+
+export type ChatExecutionPlanStep = {
+	step_id: string;
+	action: string;
+	status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+};
+
+export type ChatExecutionPlan = {
+	plan_id: string;
+	plan_version: number;
+	request?: string;
+	status:
+		| 'in_progress'
+		| 'completed'
+		| 'awaiting_approval'
+		| 'waiting_for_clarification'
+		| 'scientific_refusal'
+		| 'permission_denied'
+		| 'stalled'
+		| 'technical_failure'
+		| 'resource_limited'
+		| string;
+	model_status?: string;
+	explanation?: string;
+	blocking_reason?: string | null;
+	steps: ChatExecutionPlanStep[];
 };
 
 export function formatChatElapsed(elapsedMs?: number) {
@@ -218,7 +254,13 @@ export function appendChatProgress(history: ChatProgress[], next: ChatProgress) 
 		previous.requested_tool_count === next.requested_tool_count &&
 		previous.executed_tool_count === next.executed_tool_count &&
 		previous.remaining_tool_budget === next.remaining_tool_budget &&
-		previous.remaining_token_budget === next.remaining_token_budget
+		previous.remaining_token_budget === next.remaining_token_budget &&
+		previous.retry_count === next.retry_count &&
+		previous.retry_attempt === next.retry_attempt &&
+		previous.termination_reason === next.termination_reason &&
+		previous.execution_plan?.plan_id === next.execution_plan?.plan_id &&
+		previous.execution_plan?.plan_version === next.execution_plan?.plan_version &&
+		previous.execution_plan?.status === next.execution_plan?.status
 	) {
 		return history;
 	}
@@ -259,6 +301,14 @@ export async function fetchChatSession(sessionId: string, signal?: AbortSignal) 
 
 export async function deleteChatSession(sessionId: string, signal?: AbortSignal) {
 	await requestJson(chatSessionPath(sessionId), { signal, method: 'DELETE' });
+}
+
+export async function setChatSessionPin(sessionId: string, isPinned: boolean, signal?: AbortSignal) {
+	return (await requestJson(`${chatSessionPath(sessionId)}/pin`, {
+		signal,
+		method: 'PUT',
+		body: JSON.stringify({ is_pinned: isPinned })
+	})) as ChatSession;
 }
 
 export type AgentPermission = {
@@ -414,6 +464,7 @@ async function readChatEvents(
 
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
+	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	let buffer = '';
 	let turn: ChatTurn | null = null;
 	const consume = (block: string) => {
@@ -468,7 +519,15 @@ async function readChatEvents(
 	try {
 		signal?.throwIfAborted();
 		while (true) {
-			const { done, value } = await reader.read();
+			// The server emits heartbeats during model work. A silent connection
+			// must yield to snapshot recovery, without cancelling the research job.
+			const { done, value } = await Promise.race([
+				reader.read(),
+				new Promise<never>((_, reject) => {
+					idleTimer = setTimeout(() => reject(new Error('error.researchConnectionInactive')), 30_000);
+				})
+			]);
+			clearTimeout(idleTimer);
 			signal?.throwIfAborted();
 			buffer += decoder.decode(value, { stream: !done });
 			let boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
@@ -482,6 +541,7 @@ async function readChatEvents(
 		if (buffer.trim()) consume(buffer);
 		return turn;
 	} finally {
+		clearTimeout(idleTimer);
 		signal?.removeEventListener('abort', cancelReader);
 		await reader.cancel().catch(() => {});
 		reader.releaseLock();

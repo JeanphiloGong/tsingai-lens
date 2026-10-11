@@ -4,6 +4,11 @@ from application.chat.capabilities.contracts import (
     CapabilityHandler,
     ToolSpec,
 )
+from application.chat.capabilities.execution_plan import (
+    ExecutionPlanStep,
+    UpdateExecutionPlanToolRequest,
+    UpdateExecutionPlanCapability,
+)
 from application.chat.capabilities.collection_context import (
     BrowseCollectionPapersToolRequest,
     BrowseCollectionPapersCapability,
@@ -100,6 +105,9 @@ __all__ = [
     "CapabilityExecutionContext",
     "CapabilityHandler",
     "CapabilityRegistry",
+    "ExecutionPlanStep",
+    "UpdateExecutionPlanToolRequest",
+    "UpdateExecutionPlanCapability",
     "BrowseCollectionPapersToolRequest",
     "BrowseCollectionPapersCapability",
     "AssessObjectiveQualityToolRequest",

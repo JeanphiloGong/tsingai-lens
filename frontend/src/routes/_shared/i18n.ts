@@ -482,6 +482,9 @@ const translations: Record<Language, Translations> = {
 			latestMessage: 'Latest message',
 			emptyHistory: 'No conversations yet',
 			deleteSession: 'Delete conversation',
+			pinSession: 'Pin conversation',
+			unpinSession: 'Unpin conversation',
+			loadMoreSessions: 'Load more conversations',
 			deleteSessionConfirm: 'Delete conversation "{title}"? This cannot be undone.',
 			untitledSession: 'New conversation',
 			currentCollection: 'Current collection',
@@ -590,6 +593,8 @@ const translations: Record<Language, Translations> = {
 				tools: 'Inspecting sources...',
 				finalize: 'Preparing the answer...',
 				waiting: 'Waiting for the research model...',
+				model_retry: 'Model service interrupted. Retry {attempt} in {seconds}s...',
+				context_compaction: 'Preserving research progress...',
 				responding: 'Writing the response...',
 				recovering: 'Research in progress...',
 				reconnecting: 'Reconnecting to research...',
@@ -614,7 +619,20 @@ const translations: Record<Language, Translations> = {
 				},
 				sourcePage: 'Page {page}',
 				currentPaper: 'Current paper',
-				searchQuery: 'Search: {query}'
+				searchQuery: 'Search: {query}',
+				planLabel: 'Current research plan',
+				planTitle: 'Current work',
+				planStatus: {
+					in_progress: 'In progress',
+					completed: 'Completed',
+					awaiting_approval: 'Waiting for approval',
+					waiting_for_clarification: 'Needs clarification',
+					scientific_refusal: 'Insufficient support',
+					permission_denied: 'Permission denied',
+					stalled: 'No further progress',
+					technical_failure: 'Technical failure',
+					resource_limited: 'Limited by runtime'
+				}
 			},
 			upload: {
 				add: 'Add papers',
@@ -681,6 +699,20 @@ const translations: Record<Language, Translations> = {
 				discoverResearchTools: 'Select research actions',
 				collection: 'Collection context',
 				browseCollectionPapers: 'Browse collection papers',
+				paperBrowseCount: '{count} papers listed on this page',
+				paperBrowseMore: '{count} papers listed on this page; {remaining} remain on later pages',
+				paperQueryNoMatch:
+					'No filename or title matches. Browse without this filter to find other papers.',
+				paperSourceUnavailable:
+					'This paper has no readable parsed content. Check its preparation status.',
+				paperSourcesPending: 'Original content is not ready for {count} papers',
+				paperSourcesFailed: 'Original content could not be read for {count} papers',
+				paperSourcePreparing: 'Preparation in progress',
+				paperSourceNotPrepared: 'Original content not prepared',
+				paperSourcePreparationFailed: 'Paper preparation failed',
+				paperSourceMissing: 'Parsed content unavailable',
+				paperSourceReadFailed: 'Original content read failed',
+				viewPaper: 'View paper',
 				searchSources: 'Search paper Sources',
 				readSource: 'Read exact Source',
 				inspectTable: 'Inspect complete table',
@@ -808,6 +840,7 @@ const translations: Record<Language, Translations> = {
 				evidence: 'Open evidence',
 				source: 'Open exact Source',
 				sourceCount: '{count} exact Sources',
+				recordCount: '{count} referenced records',
 				page: 'p. {page}',
 				document: 'Open paper',
 				analysis: 'Open analysis',
@@ -863,6 +896,7 @@ const translations: Record<Language, Translations> = {
 			researchPlanRejected: 'The proposed research plan was not saved.',
 			agentObjectiveAnalysisRejected: 'The proposed Agent analysis was not published.',
 			turnFailed: 'The Agent could not complete this turn. Try again later.',
+			contextRecoveryFailed: 'Research context could not be prepared. Completed work is preserved; continue with a narrower question.',
 			modelServiceUnavailable:
 				'The model service is temporarily unavailable. Contact an administrator or try again later. Any retrieved research results were kept.',
 			modelServiceTimeout:
@@ -871,8 +905,18 @@ const translations: Record<Language, Translations> = {
 				'The model service returned an invalid response. Contact an administrator or try again later. Any retrieved research results were kept.',
 			responseInterrupted: 'Generation was interrupted. The text shown is incomplete.',
 			responseDisconnected: 'Connection lost. Reconnecting to the response...',
-			turnLimited:
-				'The Agent reached its reading limit; the answer above is based on the completed inspection.'
+			technicalFailure: 'Technical failure',
+			technicalFailureDescription:
+				'This research turn stopped because of a technical problem. Completed work is preserved; you can continue the research.',
+			permissionDenied: 'Action not permitted',
+			permissionDeniedDescription:
+				'This action is not permitted in the current session. Completed work is preserved; adjust permissions or continue with a permitted step.',
+			resourceLimited: 'Run resource limit reached',
+			resourceLimitedDescription: 'This turn reached its time, tool or model budget. Completed work is saved; you can continue the unfinished research.',
+			noProgress: 'Research paused',
+			noProgressDescription: 'This turn stopped making progress. Completed work is saved; you can refine the question or continue.',
+			continueResearch: 'Continue research',
+			continueRequest: 'Continue the unfinished research from the saved results, keeping my earlier constraints and deferred actions.'
 		},
 		research: {
 			emptyValue: '--',
@@ -3336,12 +3380,16 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: 'Unexpected error.',
 			requestFailed: 'The request could not be completed. Please try again.',
+			researchConnectionInactive: 'The connection stopped responding. Checking saved research progress.',
 			authSessionChanged: 'Your sign-in session changed. Please sign in again.',
 			collectionNotFound: 'This collection does not exist.',
 			graphNotReady:
 				'Graph projection is not ready yet. Finish processing until the collection graph becomes available.',
 			communityNotFound: 'The requested community filter could not be found for this collection.',
-			chatSessionBusy: 'This conversation is still running. Try deleting it again when it finishes.',
+			chatSessionBusy:
+				'This conversation is still running. Try deleting it again when it finishes.',
+			chatSessionHasBranches:
+				'This conversation is the source of other conversation versions. Delete those versions first.',
 			uploadTooLarge: 'This file is larger than the 256 MiB upload limit.'
 		}
 	},
@@ -3806,6 +3854,9 @@ const translations: Record<Language, Translations> = {
 			latestMessage: '最新消息',
 			emptyHistory: '暂无历史会话',
 			deleteSession: '删除对话',
+			pinSession: '置顶会话',
+			unpinSession: '取消置顶',
+			loadMoreSessions: '加载更多会话',
 			deleteSessionConfirm: '确定删除“{title}”吗？删除后无法恢复。',
 			untitledSession: '新建会话',
 			currentCollection: '当前集合',
@@ -3912,6 +3963,8 @@ const translations: Record<Language, Translations> = {
 				tools: '正在检查来源...',
 				finalize: '正在整理答案...',
 				waiting: '正在等待研究模型响应...',
+				model_retry: '模型服务暂时中断，{seconds} 秒后第 {attempt} 次重试...',
+				context_compaction: '正在整理并保留研究进展...',
 				responding: '正在回复...',
 				recovering: '研究正在进行...',
 				reconnecting: '正在重新连接研究状态...',
@@ -3927,7 +3980,20 @@ const translations: Record<Language, Translations> = {
 				sourceKind: { passage: '原文片段', table: '表格', search: '原文检索', outline: '文档章节' },
 				sourcePage: '第 {page} 页',
 				currentPaper: '当前论文',
-				searchQuery: '检索：{query}'
+				searchQuery: '检索：{query}',
+				planLabel: '当前研究计划',
+				planTitle: '当前工作',
+				planStatus: {
+					in_progress: '进行中',
+					completed: '已完成',
+					awaiting_approval: '等待确认',
+					waiting_for_clarification: '需要澄清',
+					scientific_refusal: '依据不足',
+					permission_denied: '权限受限',
+					stalled: '暂时没有进展',
+					technical_failure: '技术失败',
+					resource_limited: '受运行限制'
+				}
 			},
 			upload: {
 				add: '添加论文',
@@ -3993,6 +4059,18 @@ const translations: Record<Language, Translations> = {
 				discoverResearchTools: '选择研究动作',
 				collection: '集合上下文',
 				browseCollectionPapers: '浏览集合论文',
+				paperBrowseCount: '本页列出 {count} 篇论文',
+				paperBrowseMore: '本页列出 {count} 篇论文，后续还有 {remaining} 篇',
+				paperQueryNoMatch: '没有匹配的文件名或标题，可取消筛选继续浏览其他论文。',
+				paperSourceUnavailable: '此论文还没有可读取的解析原文，请查看文献准备状态。',
+				paperSourcesPending: '{count} 篇论文原文尚未就绪',
+				paperSourcesFailed: '{count} 篇论文暂时无法读取原文',
+				paperSourcePreparing: '文献准备中',
+				paperSourceNotPrepared: '尚未准备原文',
+				paperSourcePreparationFailed: '文献准备失败',
+				paperSourceMissing: '解析结果不可用',
+				paperSourceReadFailed: '原文读取失败',
+				viewPaper: '查看文献',
 				searchSources: '搜索论文原文',
 				readSource: '读取精确 Source',
 				inspectTable: '查看完整表格',
@@ -4115,6 +4193,7 @@ const translations: Record<Language, Translations> = {
 				evidence: '打开证据',
 				source: '打开精确 Source',
 				sourceCount: '{count} 个精确来源',
+				recordCount: '{count} 条引用记录',
 				page: '第 {page} 页',
 				document: '打开论文',
 				analysis: '打开分析',
@@ -4167,11 +4246,21 @@ const translations: Record<Language, Translations> = {
 			modelServiceUnavailable:
 				'模型服务暂时不可用，请联系管理员或稍后重试。已取得的研究结果已保留。',
 			modelServiceTimeout: '模型服务响应超时，请稍后重试。已取得的研究结果已保留。',
+			contextRecoveryFailed: '暂时无法整理本轮研究上下文。已完成的工作已保留，可以缩小问题范围后继续。',
 			modelServiceInvalidResponse:
 				'模型服务返回了无效响应，请联系管理员或稍后重试。已取得的研究结果已保留。',
 			responseInterrupted: '回复生成已中断，当前显示的文字尚未完成。',
 			responseDisconnected: '连接已断开，正在重新连接回复...',
-			turnLimited: 'Agent 已达到本轮阅读上限；上面的回答仅基于已经完成的检查。'
+			technicalFailure: '技术失败',
+			technicalFailureDescription: '本轮研究因技术问题停止。已完成的工作已保留，可以继续研究。',
+			permissionDenied: '当前权限不允许执行此操作',
+			permissionDeniedDescription: '当前会话不允许执行此操作。已完成的工作已保留，请调整权限或继续执行允许的步骤。',
+			resourceLimited: '运行资源耗尽',
+			resourceLimitedDescription: '本轮已达到时间、工具调用或模型用量上限。已完成的工作已保存，可以继续未完成的研究。',
+			noProgress: '研究已暂停',
+			noProgressDescription: '本轮暂时无法取得新进展。已完成的工作已保存，可以调整问题或继续研究。',
+			continueResearch: '继续研究',
+			continueRequest: '请从已保存的结果继续未完成的研究，保持我之前的约束和暂缓执行的事项。'
 		},
 		research: {
 			emptyValue: '--',
@@ -6529,11 +6618,13 @@ const translations: Record<Language, Translations> = {
 		error: {
 			unexpected: '发生未知错误。',
 			requestFailed: '请求未能完成，请稍后重试。',
+			researchConnectionInactive: '连接暂时没有响应，正在检查已保存的研究进度。',
 			authSessionChanged: '登录状态已发生变化，请重新登录。',
 			collectionNotFound: '该集合不存在。',
 			graphNotReady: '图谱投影尚未就绪，请先完成处理，等集合图谱可用后再查看。',
 			communityNotFound: '当前集合中找不到指定的社区过滤条件。',
 			chatSessionBusy: '该对话仍在运行，请等待完成后再删除。',
+			chatSessionHasBranches: '该对话是其他对话版本的来源，请先删除这些版本。',
 			uploadTooLarge: '文件超过 256 MiB 上传限制。'
 		}
 	}

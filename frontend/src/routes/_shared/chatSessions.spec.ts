@@ -6,12 +6,15 @@ import {
 	streamChatMessage,
 	setChatMessageFeedback,
 	deleteChatSession,
+	setChatSessionPin,
 	type ChatProgress
 } from './chatSessions';
 
 describe('chat session deletion', () => {
 	it('uses the same-origin DELETE endpoint with encoded session identity', async () => {
-		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
+		const fetch = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(new Response(null, { status: 204 }));
 		try {
 			await deleteChatSession('session/one');
 			expect(fetch).toHaveBeenCalledWith(
@@ -22,6 +25,36 @@ describe('chat session deletion', () => {
 			fetch.mockRestore();
 		}
 	});
+});
+
+describe('chat history pinning', () => {
+	it.each([true, false])(
+		'saves an explicit pin state %s with an encoded session identity',
+		async (isPinned) => {
+			const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+				new Response(JSON.stringify({ session_id: 'session/one', is_pinned: isPinned }), {
+					headers: { 'Content-Type': 'application/json' }
+				})
+			);
+			const controller = new AbortController();
+			try {
+				await expect(
+					setChatSessionPin('session/one', isPinned, controller.signal)
+				).resolves.toMatchObject({ is_pinned: isPinned });
+				expect(fetch).toHaveBeenCalledWith(
+					'/api/v1/chat-sessions/session%2Fone/pin',
+					expect.objectContaining({
+						method: 'PUT',
+						credentials: 'same-origin',
+						signal: controller.signal,
+						body: JSON.stringify({ is_pinned: isPinned })
+					})
+				);
+			} finally {
+				fetch.mockRestore();
+			}
+		}
+	);
 });
 
 describe('answer feedback requests', () => {
@@ -52,6 +85,31 @@ describe('answer feedback requests', () => {
 });
 
 describe('chat stream lifecycle', () => {
+	it('leaves a silent stream for recovery but keeps a heartbeating long turn connected', async () => {
+		vi.useFakeTimers();
+		const cancel = vi.fn();
+		let stream!: ReadableStreamDefaultController<Uint8Array>;
+		const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+			new ReadableStream({ start(controller) { stream = controller; }, cancel })
+		));
+		try {
+			const response = streamChatMessage('chat_1', 'Compare the papers', () => {});
+			const rejected = expect(response).rejects.toThrow('error.researchConnectionInactive');
+			// Simulate over six minutes of live heartbeats, beyond the old harness limit.
+			for (let second = 0; second < 400; second += 20) {
+				await vi.advanceTimersByTimeAsync(20_000);
+				stream.enqueue(new TextEncoder().encode(': heartbeat\n\n'));
+			}
+			expect(cancel).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(30_000);
+			await rejected;
+			expect(cancel).toHaveBeenCalledOnce();
+		} finally {
+			fetch.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
 	it('releases an unfinished response when its conversation is left', async () => {
 		const cancel = vi.fn();
 		const textDelta = vi.fn();
@@ -158,5 +216,31 @@ describe('chat progress presentation helpers', () => {
 		const once = appendChatProgress([starting], tools);
 		expect(appendChatProgress(once, { ...tools, elapsed_ms: 13_000 })).toEqual(once);
 		expect(appendChatProgress(once, { ...tools, executed_tool_count: 3 })).toHaveLength(3);
+	});
+
+	it('keeps a changed execution plan visible in progress history', () => {
+		const initial: ChatProgress = {
+			phase: 'tools',
+			execution_plan: {
+				plan_id: 'plan-1',
+				plan_version: 1,
+				status: 'in_progress',
+				model_status: 'in_progress',
+				steps: [{ step_id: 'read', action: 'Read the Source', status: 'in_progress' }]
+			}
+		};
+		const updated: ChatProgress = {
+			...initial,
+			execution_plan: {
+				...initial.execution_plan!,
+				plan_version: 2,
+				status: 'completed',
+				steps: [{ step_id: 'read', action: 'Read the Source', status: 'completed' }]
+			}
+		};
+
+		expect(appendChatProgress([initial], updated)).toHaveLength(2);
+		const terminal = { ...updated, execution_plan: { ...updated.execution_plan!, plan_version: 1 } };
+		expect(appendChatProgress([initial], terminal)).toHaveLength(2);
 	});
 });

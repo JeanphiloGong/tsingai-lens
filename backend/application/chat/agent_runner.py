@@ -96,6 +96,18 @@ _TrajectoryCheckpoint = Callable[
 ]
 
 _MAX_TOOL_CALLS_PER_RESPONSE = 32
+# Token estimates use a local tokenizer while the provider counts its own
+# serialized request. Keep a small provider-side margin so compaction cannot
+# fill the entire advertised window before output tokens and framing are added.
+_CONTEXT_SAFETY_MARGIN_TOKENS = 4_096
+# A long trajectory can contain one protocol unit per Source page plus large
+# structured write results. Sending each omitted unit to the model for a
+# runtime summary makes recovery compete with the actual research request.
+# Keep model-authored notes for short histories and use the bounded archive
+# record for longer histories; exact Sources remain available through the
+# deterministic prior-reading projection.
+_MAX_MODEL_COMPACTION_UNITS = 8
+_MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION = 120.0
 _SAFE_DIAGNOSTIC_EXCEPTION_TYPES = (
     AttributeError,
     IndexError,
@@ -418,7 +430,10 @@ class AgentRunLimits:
     # Production defaults keep a research request resumable even when the
     # deployment does not provide environment overrides. Tests and operators
     # can still opt out explicitly with None through the application config.
-    max_elapsed_seconds: float | None = 900.0
+    # Keep one foreground request below the common browser/proxy patience
+    # window. A continuation starts from the durable snapshot when more work
+    # is needed, so a long study does not require one unbounded request.
+    max_elapsed_seconds: float | None = 300.0
     max_tool_calls: int | None = 96
     max_model_tokens: int | None = 1_000_000
     max_consecutive_no_progress: int = 2
@@ -510,16 +525,25 @@ class _RunProgress:
             return
         def number(name: str, default: float = 0.0) -> float:
             value = payload.get(name, default)
-            return value if isinstance(value, (int, float)) and not isinstance(value, bool) else default
+            return value if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and isfinite(float(value))
+            ) else default
 
         elapsed_ms = max(0.0, number("elapsed_ms"))
         self.started_at = monotonic()
         self.restored_elapsed_seconds = elapsed_ms / 1000.0
         for name in (
             "model_cycles", "model_tokens", "prompt_tokens", "completion_tokens",
-            "unreported_model_calls", "retry_count", "compaction_attempts",
+            "unreported_model_calls", "retry_count",
         ):
             setattr(self, name, max(0, int(number(name))))
+        # A continuation is a new runtime slice.  A failed compaction must not
+        # poison approval recovery or the explicit Continue action; the
+        # current slice still has the durable trajectory and can compact it
+        # again (or use the deterministic record fallback below).
+        self.compaction_attempts = 0
         # Progress snapshots use the public trace field names, while the
         # runner keeps separate internal counter names. Restore the latter
         # explicitly so an approval continuation cannot regain spent budget.
@@ -1437,7 +1461,7 @@ class ResearchAgentRunner:
         )
         model_context = replace(
             model_context,
-            max_context_tokens=self.limits.max_context_tokens,
+            max_context_tokens=self._effective_context_tokens(),
             model_call_observer=progress.model_call_observer,
             model_call_purpose=purpose,
             model_call_response_message_id=(
@@ -1504,7 +1528,8 @@ class ResearchAgentRunner:
             "messages": ChatModelContext((), execution_plan=execution_plan).provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
             "tools": [spec.model_schema() for spec in tool_specs],
         })
-        input_budget = self.limits.max_context_tokens - self.limits.max_model_output_tokens - overhead - 2048
+        context_limit = self._effective_context_tokens()
+        input_budget = context_limit - self.limits.max_model_output_tokens - overhead - 2048
         if tool_specs:
             input_budget -= min(16_000, max(0, input_budget // 3))
         prior_reading = self._prior_source_reading(
@@ -1531,6 +1556,24 @@ class ResearchAgentRunner:
             if progress.compaction_attempts >= 3:
                 raise ModelResponseError("Research context could not be compacted without repeated retries.",
                                          reason="context_compaction_unavailable", retryable=False)
+            if (
+                len(units) > _MAX_MODEL_COMPACTION_UNITS
+                or bool(progress.compacted_message_ids)
+                or progress.remaining_seconds() <= _MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION
+            ):
+                # Long recoveries must leave time for the requested read,
+                # comparison, or write. The archive is intentionally raw
+                # runtime state, not a scientific summary or authorization.
+                archived = [message for unit in units for message in unit]
+                progress.working_summary = self._fallback_working_notes(
+                    active, archived, max_tokens=min(6000, input_budget // 3),
+                ).model_dump_json()
+                progress.compacted_message_ids.update(
+                    message.message_id for message in archived
+                )
+                progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
+                units = []
+                continue
             batch: list[ChatMessage] = []
             for unit in units:
                 candidate = ChatModelContext((active, *batch, *unit), compacting=True,
@@ -1538,7 +1581,30 @@ class ResearchAgentRunner:
                                              execution_plan=execution_plan,
                                              active_user_message_id=active_user_message_id)
                 tokens = self.context_builder.estimate_tokens(candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT))
-                if tokens + 8192 + 2048 > self.limits.max_context_tokens:
+                if tokens + 8192 + 2048 > context_limit:
+                    # A completed write may contain the full PaperExperiment
+                    # or Finding payload. Keep its durable message untouched,
+                    # but give compaction a bounded protocol copy when the
+                    # original unit alone cannot fit. This preserves tool-call
+                    # identity and resource refs without replaying scientific
+                    # payloads into the provider request.
+                    if not batch:
+                        projected = self.context_builder.compact_protocol_unit(
+                            unit,
+                            max_tokens=min(8_000, max(1_024, context_limit - 12_288)),
+                        )
+                        projected_candidate = ChatModelContext(
+                            (active, *projected), compacting=True,
+                            working_summary=progress.working_summary,
+                            execution_plan=execution_plan,
+                            active_user_message_id=active_user_message_id,
+                        )
+                        projected_tokens = self.context_builder.estimate_tokens(
+                            projected_candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT)
+                        )
+                        if projected_tokens + 8192 + 2048 <= context_limit:
+                            batch.extend(projected)
+                            continue
                     break
                 batch.extend(unit)
             if not batch:
@@ -1547,38 +1613,35 @@ class ResearchAgentRunner:
             progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
             compaction_messages = (active, *batch)
             progress.compaction_attempts += 1
-            for attempt in range(2):
-                try:
-                    compacted = await self._respond(
-                        ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
-                                         execution_plan=execution_plan,
-                                         active_user_message_id=active_user_message_id),
-                        (), progress, None,
-                    )
-                    if compacted.tool_calls:
-                        raise ValueError("compaction cannot request tools")
-                    notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
-                    allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
-                    if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
-                        raise ValueError("working note cites an unobserved message")
-                    summary = self._bounded_working_notes(
-                        notes, max_tokens=min(6000, input_budget // 3),
-                    ).model_dump_json()
-                    break
-                except ValueError:
-                    if attempt:
-                        raise ModelResponseError("Research working notes could not be preserved.",
-                                                 reason="context_compaction_unavailable", retryable=False) from None
-                    compaction_messages = (*compaction_messages, ChatMessage.user(
-                        message_id=self._message_id(), session_id=active.session_id, created_at=_now_iso(),
-                        content="Return concise JSON matching OUTPUT_SCHEMA exactly: scope is a string; "
-                        "next_actions is an array of strings, not objects. All basis_message_ids must "
-                        "come from the supplied records or prior notes. Preserve scientific uncertainty; "
-                        "format repair does not verify a claim. Use at most 3000 tokens.",
-                    ))
-            else:
-                raise ModelResponseError("Research working notes could not be preserved.",
-                                         reason="context_compaction_unavailable", retryable=False)
+            summary = None
+            try:
+                compacted = await self._respond(
+                    ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
+                                     execution_plan=execution_plan,
+                                     active_user_message_id=active_user_message_id),
+                    (), progress, None,
+                )
+                if compacted.tool_calls:
+                    raise ValueError("compaction cannot request tools")
+                notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
+                allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
+                if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
+                    raise ValueError("working note cites an unobserved message")
+                summary = self._bounded_working_notes(
+                    notes, max_tokens=min(6000, input_budget // 3),
+                ).model_dump_json()
+            except (ModelResponseError, ValueError) as exc:
+                # Working notes are runtime memory, not scientific evidence.
+                # If the provider cannot produce the optional JSON, retain a
+                # bounded, message-ID-backed record instead of turning a
+                # formatting/provider issue into a terminal research failure.
+                logger.warning(
+                    "Research context compaction fell back to archived records reason=%s",
+                    getattr(exc, "reason", type(exc).__name__),
+                )
+                summary = self._fallback_working_notes(
+                    active, batch, max_tokens=min(6000, input_budget // 3),
+                ).model_dump_json()
             # A successful compaction closes this failure streak. The counter
             # guards consecutive failed attempts, not the lifetime of a long
             # investigation; otherwise later evidence would be forced into a
@@ -1599,8 +1662,11 @@ class ResearchAgentRunner:
         if any(unit[0].message_id not in retained for unit in self.context_builder._protocol_units(remaining)):
             return await self._prepare_model_context(messages, tool_specs, progress,
                                                      active_user_message_id=active_user_message_id)
-        return replace(view, max_context_tokens=self.limits.max_context_tokens,
+        return replace(view, max_context_tokens=context_limit,
                        prior_reading_summary=prior_reading, execution_plan=execution_plan)
+
+    def _effective_context_tokens(self) -> int:
+        return max(1_024, self.limits.max_context_tokens - _CONTEXT_SAFETY_MARGIN_TOKENS)
 
     def _prior_source_reading(
         self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,
@@ -1707,6 +1773,59 @@ class ResearchAgentRunner:
             )
         return candidate
 
+    def _fallback_working_notes(
+        self,
+        active: ChatMessage,
+        batch: list[ChatMessage],
+        *,
+        max_tokens: int,
+    ) -> ResearchWorkingNotesModelOutput:
+        """Preserve raw runtime records when optional note synthesis fails.
+
+        This deliberately does not summarize or interpret paper content. The
+        next model turn receives bounded records with their original message
+        IDs and is still required to reread Sources before making a claim or
+        authoring a scientific record.
+        """
+        checks: list[ResearchWorkingCheckModelOutput] = []
+        for message in batch:
+            if message.tool_result is not None:
+                record = json.dumps(
+                    message.tool_result.data,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                )[:480]
+                statement = f"Archived tool result {message.tool_result.tool_call_id}: {record}"
+            elif message.tool_calls:
+                names = ", ".join(call.name for call in message.tool_calls)
+                statement = f"Archived requested capabilities: {names}"
+            else:
+                continue
+            checks.append(ResearchWorkingCheckModelOutput(
+                statement=statement[:600],
+                conditions="Raw runtime record; this is not a scientific conclusion or authorization.",
+                basis_message_ids=[message.message_id],
+                unresolved="Verify the relevant canonical Source and conditions before relying on this record.",
+            ))
+            if len(checks) == 8:
+                break
+        if not checks:
+            checks.append(ResearchWorkingCheckModelOutput(
+                statement="Archived research request records are retained for continuation.",
+                conditions="Runtime memory only; no scientific claim was synthesized.",
+                basis_message_ids=[active.message_id],
+                unresolved="Reconstruct the needed Source evidence before answering.",
+            ))
+        return self._bounded_working_notes(
+            ResearchWorkingNotesModelOutput(
+                scope=active.content[:1000] or "Continue the current research request.",
+                checks=checks,
+                next_actions=["Continue from the archived records and verify exact Sources before a conclusion or write."],
+            ),
+            max_tokens=max_tokens,
+        )
+
     async def _finalize_with_current_evidence(
         self,
         reason: AgentCompletionReason,
@@ -1763,7 +1882,15 @@ class ResearchAgentRunner:
             messages.append(
                 self._assistant(
                     context,
-                    self._failure_answer(messages, calls, results),
+                    self._failure_answer(
+                        messages,
+                        calls,
+                        results,
+                        resource_limited=reason in {
+                            AgentCompletionReason.RESOURCE_BUDGET,
+                            AgentCompletionReason.EMERGENCY_CEILING,
+                        },
+                    ),
                     progress,
                     messages=messages,
                     calls=calls,
@@ -2210,14 +2337,24 @@ class ResearchAgentRunner:
         messages: list[ChatMessage],
         calls: list[ChatToolCall],
         results: list[ChatToolResult],
+        *,
+        resource_limited: bool = False,
     ) -> str:
         chinese = any("\u4e00" <= char <= "\u9fff" for char in ResearchAgentRunner._active_user_request(messages))
-        lead = (
-            "本轮回答未能完成，已取得的结果已保留。这是技术中断，不能据此判断论文没有证据。可以继续核对未完成的部分。"
-            if chinese else
-            "This turn could not be completed. Obtained results were preserved; the technical "
-            "interruption does not establish an absence of scientific evidence. You can continue the unfinished review."
-        )
+        if resource_limited:
+            lead = (
+                "本轮达到运行资源上限，已取得的结果已保留。不能据此判断论文没有证据，可以继续核对未完成的部分。"
+                if chinese else
+                "This turn reached its runtime resource limit. Obtained results were preserved; "
+                "this does not establish an absence of scientific evidence. You can continue the unfinished review."
+            )
+        else:
+            lead = (
+                "本轮回答未能完成，已取得的结果已保留。这是技术中断，不能据此判断论文没有证据。可以继续核对未完成的部分。"
+                if chinese else
+                "This turn could not be completed. Obtained results were preserved; the technical "
+                "interruption does not establish an absence of scientific evidence. You can continue the unfinished review."
+            )
         if not any(call.name in {"browse_collection_papers", "read_source", "inspect_table", "inspect_document_sources", "search_sources"} for call in calls):
             return lead
         ledger = ResearchAgentRunner._reading_ledger(calls, results, chinese=chinese)

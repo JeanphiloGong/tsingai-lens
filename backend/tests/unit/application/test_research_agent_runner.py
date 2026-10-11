@@ -2826,6 +2826,36 @@ async def test_resource_budget_final_answer_keeps_the_active_research_request() 
     assert user_request in model.contexts[-1][-1].content
 
 
+def test_resource_limited_failure_answer_is_distinct_from_technical_failure() -> None:
+    messages = [
+        ChatMessage.user(
+            message_id="user-1",
+            session_id="session-1",
+            content="请继续研究这组论文。",
+            created_at="2026-09-10T00:00:00Z",
+        )
+    ]
+
+    resource_answer = ResearchAgentRunner._failure_answer(
+        messages, [], [], resource_limited=True,
+    )
+    technical_answer = ResearchAgentRunner._failure_answer(messages, [], [])
+
+    assert "运行资源上限" in resource_answer
+    assert "技术中断" not in resource_answer
+    assert "技术中断" in technical_answer
+
+
+def test_context_budget_reserves_provider_token_safety_margin() -> None:
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="完成。")),
+        capabilities=CapabilityRegistry(()),
+        limits=AgentRunLimits(max_context_tokens=65_536),
+    )
+
+    assert runner._effective_context_tokens() == 61_440
+
+
 @pytest.mark.parametrize("kind", ["repeated", "invalid", "reworded", "changing"])
 async def test_plan_only_loop_reaches_no_progress(kind: str) -> None:
     class PlanningModel(_Model):

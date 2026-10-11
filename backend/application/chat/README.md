@@ -365,11 +365,16 @@ separately. Explicit evidence, evaluation against real research scenarios and
 researcher review remain necessary to assess scientific correctness.
 
 Whole-turn time, tool-call count, cumulative model tokens and total model cycles
-default to 900 seconds, 96 calls, 1,000,000 reported tokens and 64 cycles.
+default to 300 seconds, 96 calls, 1,000,000 reported tokens and 64 cycles.
 Their environment settings accept a positive limit; zero explicitly disables
 that ceiling. Approval waiting time is excluded; active usage survives approval.
 Individual model/read requests retain a 180-second timeout, cancellation and
-the repeated-observation guard.
+the repeated-observation guard. Context compaction is runtime memory rather
+than evidence: when the provider cannot produce its optional working-notes
+JSON, the runner keeps bounded raw records with their message IDs and
+continues from the durable trajectory. A failed compaction counter is reset
+for each approval or Continue slice so a recoverable context failure cannot
+block later work.
 Provider failures use structured HTTP status, known stream error codes and
 chained transport exceptions. HTTP 408/429/5xx and known transient stream or
 connection failures receive up to five retries with exponential jittered
@@ -558,7 +563,9 @@ Evidence, permission, or a Finding.
   and answer/reading reserves. Explicit character/message caps remain available
   to local callers; the production default uses token capacity. The same model
   message representation is counted and transmitted. Omitted operations have
-  validated provisional working notes while stored history remains complete.
+  validated provisional working notes while stored history remains complete;
+  the runner may retain bounded raw records when optional note synthesis is
+  unavailable.
 - `model.py`: defines the asynchronous provider-neutral model contract,
   request timeout/output limits, reported usage (including invalid responses),
   and the Research Agent instructions. Implementations must propagate

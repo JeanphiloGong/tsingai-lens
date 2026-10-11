@@ -43,6 +43,35 @@ def test_context_token_budget_preserves_complete_call_result_batches():
         assert (call in view.messages) == (result in view.messages)
 
 
+def test_compact_protocol_unit_keeps_write_lineage_without_payload() -> None:
+    call, result = _tool_pair(
+        call_id="paper-experiment-write",
+        payload={
+            "revision_saved": True,
+            "selection_ids": ["selection-1"],
+            "finding_ids": [],
+            "revisions": [{
+                "experiment_id": "pexp-1",
+                "experiment_version": 2,
+                "source_fingerprint": "a" * 64,
+                "scope_description": "A reviewed experiment",
+                "source_refs": [{"source_ref": "results-1", "quote": "x" * 100_000}],
+            }],
+        },
+    )
+
+    projected = ChatContextBuilder.compact_protocol_unit((call, result), max_tokens=2_000)
+
+    assert projected[0].tool_calls[0].tool_call_id == "paper-experiment-write"
+    assert projected[1].tool_result is not None
+    assert projected[1].tool_result.data["revision_saved"] is True
+    assert projected[1].tool_result.data["revisions"][0]["experiment_id"] == "pexp-1"
+    assert "x" * 1_000 not in projected[1].content
+    assert ChatContextBuilder.estimate_tokens(
+        [ChatContextBuilder.model_message(message) for message in projected]
+    ) <= 2_000
+
+
 def test_recent_user_scope_survives_larger_tool_results():
     original = _user("scope", "Keep HP-LPBF and L-PBF in the heat-treatment reading list.")
     active = _user("active", "Also include ELI; defer only the review paper.")
@@ -171,6 +200,37 @@ async def test_compaction_preserves_research_notes_and_full_archived_history():
 
 
 @pytest.mark.anyio
+async def test_long_trajectory_uses_bounded_archive_without_model_compaction():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    active = _user("active", "Continue the saved experiment review.")
+    history = []
+    for index in range(10):
+        history.extend(_tool_pair(call_id=f"source-{index}", payload={
+            "document_id": "paper-A",
+            "source_ref": f"results-{index}",
+            "content": "reported result " + str(index),
+        }))
+    model = _CompactionModel()
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry(()),
+        context_builder=ChatContextBuilder(max_messages=3),
+    )
+    progress = _RunProgress(runner.limits)
+
+    view = await runner._prepare_model_context(
+        (active, *history), (), progress, active_user_message_id=active.message_id,
+    )
+
+    assert not model.contexts
+    assert set(message.message_id for message in history[:-2]).issubset(progress.compacted_message_ids)
+    assert "Raw runtime record" in progress.working_summary
+    assert view.messages == (active, *history[-2:])
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("partial_section", [False, True])
 async def test_comparison_scope_is_regenerated_from_calls_after_context_compaction(partial_section):
     from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, capability_policy
@@ -248,8 +308,8 @@ async def test_comparison_scope_is_regenerated_from_calls_after_context_compacti
 
 
 @pytest.mark.anyio
-async def test_failed_compaction_does_not_discard_archived_observations():
-    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner, ModelResponseError
+async def test_failed_compaction_keeps_archived_observations_recoverable():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
     from application.chat.agent_runner import _RunProgress
 
     active = _user("active", "Check the same measurement.")
@@ -261,10 +321,53 @@ async def test_failed_compaction_does_not_discard_archived_observations():
     runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
                                  context_builder=ChatContextBuilder(max_messages=3))
     progress = _RunProgress(runner.limits)
-    with pytest.raises(ModelResponseError, match="working notes"):
-        await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
-    assert not progress.compacted_message_ids
-    assert progress.working_summary == ""
+    view = await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert progress.compacted_message_ids == {message.message_id for message in messages[1:3]}
+    assert "Raw runtime record" in progress.working_summary
+    assert "old" in progress.working_summary
+    assert view.messages[0] == active
+
+
+@pytest.mark.anyio
+async def test_oversized_completed_write_unit_is_compacted_as_lineage_only():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    active = _user("active", "Generate the Finding from the saved experiment selection.")
+    call, result = _tool_pair(
+        call_id="saved-write",
+        payload={
+            "revision_saved": True,
+            "selection_ids": ["selection-1"],
+            "revisions": [{
+                "experiment_id": "pexp-1",
+                "experiment_version": 1,
+                "source_fingerprint": "b" * 64,
+                "source_refs": [{"source_ref": "results-1", "quote": "payload " * 80_000}],
+            }],
+        },
+    )
+    model = _CompactionModel(ModelTurn(content=json.dumps({
+        "scope": active.content, "checks": [],
+        "next_actions": ["Read the saved experiment selection before authoring the Finding."],
+    })))
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry(()),
+        context_builder=ChatContextBuilder(max_messages=3),
+    )
+    progress = _RunProgress(runner.limits)
+
+    view = await runner._prepare_model_context(
+        (active, call, result), (), progress, active_user_message_id=active.message_id,
+    )
+
+    assert view.messages == (active,)
+    assert progress.compacted_message_ids == {call.message_id, result.message_id}
+    assert model.contexts and model.contexts[0].compacting
+    provider_context = json.dumps(model.contexts[0].provider_messages("compact"))
+    assert "saved-write" in provider_context
+    assert "payload payload" not in provider_context
 
 
 @pytest.mark.anyio
@@ -283,6 +386,17 @@ async def test_repeated_compaction_has_a_visible_failure_exit():
     with pytest.raises(ModelResponseError, match="compacted"):
         await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
     assert messages[2].tool_result is not None
+
+
+def test_continuation_resets_failed_compaction_attempts():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
+    progress = _RunProgress(runner.limits)
+    progress.restore_persisted_progress({"compaction_attempts": 3, "elapsed_ms": 10})
+
+    assert progress.compaction_attempts == 0
 
 
 def _user(message_id: str, content: str) -> ChatMessage:

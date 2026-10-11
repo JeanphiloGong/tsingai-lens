@@ -56,7 +56,7 @@ export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export DOCUMENT_PREPARATION_MAX_CONCURRENCY=3
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
-export LENS_AGENT_MAX_TURN_SECONDS=900
+export LENS_AGENT_MAX_TURN_SECONDS=300
 export LENS_AGENT_MAX_TOOL_CALLS=96
 export LENS_AGENT_MAX_MODEL_TOKENS=1000000
 export LENS_AGENT_NO_PROGRESS_LIMIT=2
@@ -104,7 +104,7 @@ streamed response, the runner retries up to five times when no user-visible
 text was received. A sixth invalid response returns `model_response_invalid`;
 this is distinct from provider connectivity or availability failure.
 The `LENS_AGENT_*` variables above are optional. Whole-turn seconds, tool calls,
-cumulative model tokens and total model cycles default to 900 seconds, 96 calls,
+cumulative model tokens and total model cycles default to 300 seconds, 96 calls,
 1,000,000 reported tokens and 64 cycles. Zero explicitly disables these four
 limits. Other settings require finite positive values (integers for counts).
 Retries share `LENS_AGENT_MAX_MODEL_RETRIES` across the turn and approvals,
@@ -186,8 +186,9 @@ Vite proxying and browser fetch impose no configured whole-turn deadline here.
 External proxies must permit streaming and allow the 15-second heartbeat.
 Acceptance harnesses must wait longer than the configured finite turn budget
 (allow at least 60 seconds for persistence and UI settling), record that budget,
-and distinguish a harness deadline from an HTTP failure. A 360-second harness
-wait cannot validate a 900-second turn's terminal state.
+and distinguish a harness deadline from an HTTP failure. The shipped 360-second
+harness wait validates the 300-second default; raise the harness wait whenever an
+operator deliberately configures a longer turn budget.
 
 ## Initialize Or Upgrade The Schema
 

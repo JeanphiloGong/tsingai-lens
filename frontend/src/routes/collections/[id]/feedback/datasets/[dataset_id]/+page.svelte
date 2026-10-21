@@ -229,7 +229,7 @@
 		try {
 			exportPreview = await previewFeedbackDatasetExport(datasetId, exportSelection);
 			if (exportPreview.issues.length === 0) {
-				exportNotice = '预检完成，所有已确认样本都可以导出。';
+				exportNotice = $t('taskDatasets.labels.preflightCompleteAllConfirmedSamplesCanBe');
 			}
 		} catch (err) {
 			exportError = errorMessage(err);
@@ -256,7 +256,7 @@
 				crypto.randomUUID()
 			);
 			exportItems = [published, ...exportItems.filter((item) => item.export_id !== published.export_id)];
-			exportNotice = `已发布 ${published.row_count} 条训练样本。可以按需下载主文件或追溯包。`;
+			exportNotice = $t('taskDatasets.labels.publishedCountTrainingSamplesDownloadTheMain', { count: published.row_count });
 			exportPreview = null;
 			allowPartialExport = false;
 		} catch (err) {
@@ -320,11 +320,11 @@
 				expected_generation: sampleDetail.sample.generation,
 				content: event.detail.content
 			});
-			await reloadSelected(generation, '修改已保存，请重新确认这个版本。');
+			await reloadSelected(generation, $t('taskDatasets.labels.changesSavedConfirmThisVersionAgain'));
 		} catch (err) {
 			if (generation === loadGeneration) {
 				editorError = isHttpStatusError(err, 409)
-					? '这个样本已经产生了新版本，请先重新加载再保存。'
+					? $t('taskDatasets.labels.aNewerSampleVersionExistsReloadBefore')
 					: errorMessage(err);
 			}
 		} finally {
@@ -361,12 +361,12 @@
 					(item) => item.sample_id !== sampleId && item.status === 'needs_confirmation'
 				);
 				if (next) await selectSample(next, generation);
-				else notice = '当前队列中的候选都已处理。';
+				else notice = $t('taskDatasets.labels.allCandidatesInThisQueueHaveBeen');
 			}
 		} catch (err) {
 			if (generation === loadGeneration) {
 				editorError = isHttpStatusError(err, 409)
-					? '这个样本已经产生了新版本，请重新打开后确认。'
+					? $t('taskDatasets.labels.aNewerSampleVersionExistsReopenIt')
 					: errorMessage(err);
 			}
 		} finally {
@@ -393,11 +393,11 @@
 				...(reason ? { reason } : {})
 			}, key);
 			pendingAction = null;
-			await reloadSelected(generation, action === 'discard' ? '样本已丢弃，可在队列中恢复。' : action === 'restore' ? '样本已恢复，请重新核对后确认。' : '构建任务已提交。');
+			await reloadSelected(generation, action === 'discard' ? $t('taskDatasets.labels.sampleDiscardedYouCanRestoreItFrom') : action === 'restore' ? $t('taskDatasets.labels.sampleRestoredReviewItAgainBeforeConfirming') : $t('taskDatasets.labels.buildRequestSubmitted'));
 		} catch (err) {
 			if (generation === loadGeneration) {
 				editorError = isHttpStatusError(err, 409)
-					? '样本状态已变化，请刷新后再操作。'
+					? $t('taskDatasets.labels.theSampleStatusChangedRefreshBeforeContinuing')
 					: errorMessage(err);
 			}
 		} finally {
@@ -419,16 +419,16 @@
 		notice = message;
 	}
 
-	function statusLabel(status: string) {
+	function statusLabel(status: string, translate = $t) {
 		return (
 			{
-				pending: '等待构建',
-				building: '构建中',
-				needs_confirmation: '待确认',
-				needs_input: '待补充',
-				confirmed: '已确认',
-				discarded: '已丢弃',
-				build_failed: '构建失败'
+				pending: translate('taskDatasets.labels.awaitingBuild'),
+				building: translate('taskDatasets.labels.building'),
+				needs_confirmation: translate('taskDatasets.labels.awaitingConfirmation'),
+				needs_input: translate('taskDatasets.labels.needsInput'),
+				confirmed: translate('taskDatasets.labels.confirmed'),
+				discarded: translate('taskDatasets.labels.discarded'),
+				build_failed: translate('taskDatasets.labels.buildFailed')
 			}[status] ?? status
 		);
 	}
@@ -438,11 +438,11 @@
 		return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 	}
 
-	function taskLabel(taskType: FeedbackDataset['task_type'] | undefined) {
+	function taskLabel(taskType: FeedbackDataset['task_type'] | undefined, translate = $t) {
 		return {
-			sft: '文献问答 · SFT',
-			preference: '回答偏好',
-			evaluation: '评测'
+			sft: translate('taskDatasets.type.sft'),
+			preference: translate('taskDatasets.type.preference'),
+			evaluation: translate('taskDatasets.type.evaluation')
 		}[taskType ?? 'sft'];
 	}
 
@@ -464,40 +464,40 @@
 		}
 	}
 
-	function previewRowSummary(row: DatasetExportPreview['sample_rows'][number]) {
+	function previewRowSummary(row: DatasetExportPreview['sample_rows'][number], translate = $t) {
 		if (dataset?.task_type === 'preference') {
-			return `A：${row.response_a_preview || '无'} · B：${row.response_b_preview || '无'} · 选择：${row.human_preference ?? '未选择'} · 证据 ${row.evidence_count} 段`;
+			return translate('taskDatasets.labels.aABBChoiceChoiceCount', { a: row.response_a_preview || translate('taskDatasets.noPreview'), b: row.response_b_preview || translate('taskDatasets.noPreview'), choice: row.human_preference ? translate(`taskDatasets.preferenceChoices.${row.human_preference}`) : translate('taskDatasets.noChoice'), count: row.evidence_count });
 		}
 		if (dataset?.task_type === 'evaluation') {
-			return `参考：${row.reference_preview || '无'} · 证据 ${row.evidence_count} 段`;
+			return translate('taskDatasets.labels.referenceTextCountExcerpts', { text: row.reference_preview || translate('taskDatasets.noPreview'), count: row.evidence_count });
 		}
-		return `回答：${row.target_preview || '无'} · 证据 ${row.evidence_count} 段`;
+		return translate('taskDatasets.labels.answerTextCountExcerpts', { text: row.target_preview || translate('taskDatasets.noPreview'), count: row.evidence_count });
 	}
 
-	function exportFormatLabel(schema: string) {
+	function exportFormatLabel(schema: string, translate = $t) {
 		if (schema === 'literature-sft.v2') return 'Messages SFT';
 		if (schema === 'literature-preference.v2') return 'TRL conversational DPO';
-		if (schema === 'literature-evaluation.v2') return $t('taskDatasets.evaluationFormat');
-		return $t('taskDatasets.legacyFormat');
+		if (schema === 'literature-evaluation.v2') return translate('taskDatasets.evaluationFormat');
+		return translate('taskDatasets.legacyFormat');
 	}
 </script>
 
 <svelte:head>
-	<title>{taskLabel(dataset?.task_type) || '反馈任务工作台'} | Lens</title>
+	<title>{taskLabel(dataset?.task_type, $t) || $t('taskDatasets.title')} | Lens</title>
 </svelte:head>
 
 <main class="page-shell">
 	<header class="page-header">
 		<div>
-			<h1>{taskLabel(dataset?.task_type) || '加载工作台…'}</h1>
-			<p class="page-subtitle">逐条核对候选回答，确认后再交付训练文件</p>
+			<h1>{taskLabel(dataset?.task_type, $t) || $t('taskDatasets.loadingWorkbenches')}</h1>
+			<p class="page-subtitle">{$t('taskDatasets.chooseTaskDetail')}</p>
 		</div>
 		<div class="header-actions">
-			<button class="toolbar-button toolbar-button--icon" type="button" on:click={refresh} disabled={loading} title="刷新样本队列" aria-label="刷新样本队列">
+			<button class="toolbar-button toolbar-button--icon" type="button" on:click={refresh} disabled={loading} title={$t('taskDatasets.refresh')} aria-label={$t('taskDatasets.refresh')}>
 				<span class:spin={loading}><RefreshCw size={17} aria-hidden="true" /></span>
 			</button>
-			<button class="toolbar-button" type="button" on:click={openFullExport} disabled={confirmedCount === 0} title="导出全部已确认样本">
-				<Download size={16} aria-hidden="true" /><span class="export-label">导出全部已确认</span><span class="toolbar-count">{confirmedCount}</span>
+			<button class="toolbar-button" type="button" on:click={openFullExport} disabled={confirmedCount === 0} title={$t('taskDatasets.exportTitle')}>
+				<Download size={16} aria-hidden="true" /><span class="export-label">{$t('taskDatasets.exportTitle')}</span><span class="toolbar-count">{confirmedCount}</span>
 			</button>
 		</div>
 	</header>
@@ -508,7 +508,7 @@
 	{#if loading}
 		<div class="loading" role="status"><span></span><span></span><span></span></div>
 	{:else}
-			<nav class="task-tabs" aria-label="反馈任务类型">
+			<nav class="task-tabs" aria-label={$t('taskDatasets.labels.feedbackTaskTypes')}>
 				{#each taskTabs as tab (tab.taskType)}
 					<button class:active={tab.taskType === currentTaskType} class="task-tab" type="button" on:click={() => openTask(tab.taskType)} disabled={!tab.dataset || tab.taskType === currentTaskType} aria-current={tab.taskType === currentTaskType ? 'page' : undefined}>
 						{#if tab.taskType === 'sft'}<MessageCircle size={16} aria-hidden="true" />{:else if tab.taskType === 'preference'}<LayoutGrid size={16} aria-hidden="true" />{:else}<CheckCircle2 size={16} aria-hidden="true" />{/if}
@@ -517,17 +517,17 @@
 				{/each}
 			</nav>
 
-			<section class="workbench-toolbar" aria-label="样本筛选">
-				<div class="status-tabs" role="tablist" aria-label="样本状态">
-					<button class:active={statusFilter === 'all'} type="button" role="tab" aria-selected={statusFilter === 'all'} on:click={() => statusFilter = 'all'}>全部 <span>{samples.length}</span></button>
-					<button class:active={statusFilter === 'needs_confirmation'} type="button" role="tab" aria-selected={statusFilter === 'needs_confirmation'} on:click={() => statusFilter = 'needs_confirmation'}>待确认 <span>{pendingCount}</span></button>
-					<button class:active={statusFilter === 'needs_input'} type="button" role="tab" aria-selected={statusFilter === 'needs_input'} on:click={() => statusFilter = 'needs_input'}>待补充 <span>{inputCount}</span></button>
-					<button class:active={statusFilter === 'build_failed'} type="button" role="tab" aria-selected={statusFilter === 'build_failed'} on:click={() => statusFilter = 'build_failed'}>构建失败 <span>{failedCount}</span></button>
-					<button class:active={statusFilter === 'confirmed'} type="button" role="tab" aria-selected={statusFilter === 'confirmed'} on:click={() => statusFilter = 'confirmed'}>已确认 <span>{confirmedCount}</span></button>
+			<section class="workbench-toolbar" aria-label={$t('taskDatasets.labels.sampleFilters')}>
+				<div class="status-tabs" role="tablist" aria-label={$t('taskDatasets.labels.sampleStatus')}>
+					<button class:active={statusFilter === 'all'} type="button" role="tab" aria-selected={statusFilter === 'all'} on:click={() => statusFilter = 'all'}>{$t('taskDatasets.labels.all')} <span>{samples.length}</span></button>
+					<button class:active={statusFilter === 'needs_confirmation'} type="button" role="tab" aria-selected={statusFilter === 'needs_confirmation'} on:click={() => statusFilter = 'needs_confirmation'}>{$t('taskDatasets.labels.awaitingConfirmation')} <span>{pendingCount}</span></button>
+					<button class:active={statusFilter === 'needs_input'} type="button" role="tab" aria-selected={statusFilter === 'needs_input'} on:click={() => statusFilter = 'needs_input'}>{$t('taskDatasets.labels.needsInput')} <span>{inputCount}</span></button>
+					<button class:active={statusFilter === 'build_failed'} type="button" role="tab" aria-selected={statusFilter === 'build_failed'} on:click={() => statusFilter = 'build_failed'}>{$t('taskDatasets.labels.buildFailed')} <span>{failedCount}</span></button>
+					<button class:active={statusFilter === 'confirmed'} type="button" role="tab" aria-selected={statusFilter === 'confirmed'} on:click={() => statusFilter = 'confirmed'}>{$t('taskDatasets.labels.confirmed')} <span>{confirmedCount}</span></button>
 				</div>
-				<label class="search-field" aria-label="搜索问题">
+				<label class="search-field" aria-label={$t('taskDatasets.labels.searchQuestions')}>
 					<Search size={16} aria-hidden="true" />
-					<input type="search" bind:value={searchQuery} placeholder="搜索问题" />
+					<input type="search" bind:value={searchQuery} placeholder={$t('taskDatasets.labels.searchQuestions')} />
 				</label>
 			</section>
 
@@ -535,17 +535,17 @@
 				<summary>{$t('taskDatasets.exportTitle')} · {confirmedCount}</summary>
 				<div class="export-heading">
 					<div>
-						<div class="eyebrow">交付训练文件</div>
-							<h2 id="export-title">导出已确认样本</h2>
-							<p>{exportFormatLabel(`literature-${currentTaskType}.v2`)}</p>
+						<div class="eyebrow">{$t('taskDatasets.labels.deliverTrainingFiles')}</div>
+							<h2 id="export-title">{$t('taskDatasets.labels.exportConfirmedSamples')}</h2>
+							<p>{exportFormatLabel(`literature-${currentTaskType}.v2`, $t)}</p>
 						<p>{$t('taskDatasets.selected', { count: exportSelection.length })}</p>
 					</div>
 					<div class="export-heading-meta">
-						<span class="export-count"><ShieldCheck size={15} aria-hidden="true" />{confirmedCount} 条已确认</span>
+						<span class="export-count"><ShieldCheck size={15} aria-hidden="true" />{$t('taskDatasets.labels.countConfirmed', { count: confirmedCount })}</span>
 						<span>{$t('taskDatasets.selected', { count: exportSelection.length })}</span>
 						<button class="secondary-button" type="button" on:click={openFullExport} disabled={confirmedCount === 0}>{$t('taskDatasets.selectAll')}</button>
 						<button class="secondary-button" type="button" on:click={runExportPreview} disabled={exportLoading || exportPublishing || exportSelection.length === 0}>
-							<FileJson size={16} aria-hidden="true" />{exportLoading ? '正在检查…' : '检查导出'}
+							<FileJson size={16} aria-hidden="true" />{exportLoading ? $t('taskDatasets.labels.checking') : $t('taskDatasets.labels.checkExport')}
 						</button>
 					</div>
 				</div>
@@ -559,63 +559,63 @@
 
 				{#if exportPreview}
 					<div class="export-preview">
-						<div class="export-metrics" aria-label="导出预检摘要">
-							<div><strong>{exportPreview.requested_count}</strong><span>确认集合</span></div>
-							<div class="metric--ready"><strong>{exportPreview.exportable_count}</strong><span>可导出</span></div>
-							<div class:metric--warning={exportPreview.issues.length > 0}><strong>{exportPreview.issues.length}</strong><span>需要处理的问题</span></div>
+						<div class="export-metrics" aria-label={$t('taskDatasets.labels.exportPreflightSummary')}>
+							<div><strong>{exportPreview.requested_count}</strong><span>{$t('taskDatasets.labels.confirmedSelection')}</span></div>
+							<div class="metric--ready"><strong>{exportPreview.exportable_count}</strong><span>{$t('taskDatasets.labels.exportable')}</span></div>
+							<div class:metric--warning={exportPreview.issues.length > 0}><strong>{exportPreview.issues.length}</strong><span>{$t('taskDatasets.labels.issuesToResolve')}</span></div>
 						</div>
 
 						{#if exportPreview.issues.length > 0}
 							<div class="export-issues">
-								<div class="export-subheading"><strong>有样本还不能进入文件</strong><span>先打开样本修正；也可以明确同意只发布其余可用样本。</span></div>
+								<div class="export-subheading"><strong>{$t('taskDatasets.labels.someSamplesCannotBeExportedYet')}</strong><span>{$t('taskDatasets.labels.openTheAffectedSamplesToCorrectThem')}</span></div>
 								{#each exportPreview.issues as issue (issue.sample_id + issue.code)}
 									<div class="export-issue">
-										<div><strong>{issue.question || '未能读取问题摘要'}</strong><span>{issue.message}</span></div>
-										<button class="link-button" type="button" on:click={() => openExportSample(issue.sample_id)}>打开样本</button>
+										<div><strong>{issue.question || $t('taskDatasets.labels.questionSummaryUnavailable')}</strong><span>{issue.message}</span></div>
+										<button class="link-button" type="button" on:click={() => openExportSample(issue.sample_id)}>{$t('taskDatasets.labels.openSample')}</button>
 									</div>
 								{/each}
 								<label class="partial-choice">
 									<input type="checkbox" bind:checked={allowPartialExport} />
-									<span><strong>我确认只发布可用样本</strong><small>问题样本会留在队列中，修正后可以发布新的版本。</small></span>
+									<span><strong>{$t('taskDatasets.labels.iApprovePublishingOnlyEligibleSamples')}</strong><small>{$t('taskDatasets.labels.affectedSamplesRemainInTheQueuePublish')}</small></span>
 								</label>
 							</div>
 						{:else}
-							<div class="export-ready"><CheckCircle2 size={18} aria-hidden="true" /><div><strong>全部样本通过预检</strong><span>问题、可读文献片段和追溯关系都已准备好。</span></div></div>
+							<div class="export-ready"><CheckCircle2 size={18} aria-hidden="true" /><div><strong>{$t('taskDatasets.labels.allSamplesPassedPreflight')}</strong><span>{$t('taskDatasets.labels.questionsReadablePaperExcerptsAndProvenanceAre')}</span></div></div>
 						{/if}
 
 						<div class="preview-rows">
-							<div class="export-subheading"><strong>文件内容预览</strong><span>展示前几条模型输入，完整内容会写入发布文件。</span></div>
+							<div class="export-subheading"><strong>{$t('taskDatasets.labels.filePreview')}</strong><span>{$t('taskDatasets.labels.showingTheFirstModelInputsThePublished')}</span></div>
 							{#each exportPreview.sample_rows.slice(0, 5) as row (row.sample_id)}
 								<div class="preview-row">
-									<div><strong>{row.question || '未命名问题'}</strong><span>{previewRowSummary(row)}</span></div>
-									<button class="link-button" type="button" on:click={() => openExportSample(row.sample_id)}>查看</button>
+									<div><strong>{row.question || $t('taskDatasets.labels.untitledQuestion')}</strong><span>{previewRowSummary(row, $t)}</span></div>
+									<button class="link-button" type="button" on:click={() => openExportSample(row.sample_id)}>{$t('taskDatasets.labels.view')}</button>
 								</div>
 							{/each}
 						</div>
 						<div class="export-footer">
-							<small>预检有效期至 {new Date(exportPreview.expires_at).toLocaleTimeString()}</small>
+							<small>{$t('taskDatasets.labels.preflightValidUntilTime', { time: new Date(exportPreview.expires_at).toLocaleTimeString() })}</small>
 							<button class="primary-button primary-button--compact" type="button" on:click={publishExport} disabled={exportPublishing || exportPreview.exportable_count === 0 || (exportPreview.issues.length > 0 && !allowPartialExport)}>
-								<Download size={16} aria-hidden="true" />{exportPublishing ? '正在发布…' : `发布 ${exportPreview.exportable_count} 条`}
+								<Download size={16} aria-hidden="true" />{exportPublishing ? $t('taskDatasets.labels.publishing') : $t('taskDatasets.labels.publishCountSamples', { count: exportPreview.exportable_count })}
 							</button>
 						</div>
 					</div>
 				{:else if confirmedCount === 0}
-					<div class="export-empty"><FileJson size={20} aria-hidden="true" /><div><strong>还没有可发布的样本</strong><span>先在上方队列中确认至少一个 Worker 候选。</span></div></div>
+					<div class="export-empty"><FileJson size={20} aria-hidden="true" /><div><strong>{$t('taskDatasets.labels.noSamplesReadyToPublish')}</strong><span>{$t('taskDatasets.labels.confirmAtLeastOnePreparedCandidateIn')}</span></div></div>
 				{:else}
-					<div class="export-empty export-empty--neutral"><FileJson size={20} aria-hidden="true" /><div><strong>导出前先做一次预检</strong><span>服务器会重新读取确认版本，避免页面中的旧内容被发布。</span></div></div>
+					<div class="export-empty export-empty--neutral"><FileJson size={20} aria-hidden="true" /><div><strong>{$t('taskDatasets.labels.runPreflightBeforeExporting')}</strong><span>{$t('taskDatasets.labels.theServerReloadsConfirmedVersionsToAvoid')}</span></div></div>
 				{/if}
 
 				{#if exportItems.length}
 					<div class="export-history">
-						<div class="export-subheading"><strong>已发布版本</strong><span>已发布文件不会随当前样本修改而变化。</span></div>
+						<div class="export-subheading"><strong>{$t('taskDatasets.labels.publishedVersions')}</strong><span>{$t('taskDatasets.labels.publishedFilesDoNotChangeWhenSamples')}</span></div>
 						{#each exportItems as item (item.export_id)}
 							<div class="export-history-row">
-								<div><strong>版本 {item.export_no}</strong><span>{item.row_count} 条 · {formatDate(item.created_at)} · {exportFormatLabel(item.schema_version)}</span></div>
+								<div><strong>{$t('taskDatasets.labels.versionNumber', { number: item.export_no })}</strong><span>{$t('taskDatasets.labels.countSamples', { count: item.row_count })} · {formatDate(item.created_at)} · {exportFormatLabel(item.schema_version, $t)}</span></div>
 								<div class="download-actions">
 									<button class="download-button" type="button" on:click={() => downloadExport(item, 'jsonl')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />JSONL</button>
 									<button class="download-button" type="button" on:click={() => downloadExport(item, 'json')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />JSON</button>
-									<button class="download-button download-button--quiet" type="button" on:click={() => downloadExport(item, 'provenance')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />追溯包</button>
-									<button class="download-button download-button--quiet" type="button" on:click={() => downloadExport(item, 'manifest')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />清单</button>
+									<button class="download-button download-button--quiet" type="button" on:click={() => downloadExport(item, 'provenance')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />{$t('taskDatasets.labels.provenancePackage')}</button>
+									<button class="download-button download-button--quiet" type="button" on:click={() => downloadExport(item, 'manifest')} disabled={downloadingExport !== ''}><Download size={14} aria-hidden="true" />{$t('taskDatasets.labels.manifest')}</button>
 								</div>
 							</div>
 						{/each}
@@ -626,21 +626,21 @@
 			<div class="workbench">
 			<aside class="queue" aria-labelledby="queue-title">
 				<div class="queue-header">
-					<div><div class="eyebrow">样本队列</div><h2 id="queue-title">逐条确认</h2></div>
+					<div><div class="eyebrow">{$t('taskDatasets.labels.sampleQueue')}</div><h2 id="queue-title">{$t('taskDatasets.labels.reviewEachSample')}</h2></div>
 					<span>{samples.length}</span>
 				</div>
 				{#if !samples.length}
-					<div class="queue-empty"><FileText size={22} aria-hidden="true" /><p>还没有候选样本。</p><small>后台 Worker 会持续整理当前 Collection 的反馈案例。</small></div>
+					<div class="queue-empty"><FileText size={22} aria-hidden="true" /><p>{$t('taskDatasets.labels.noCandidateSamplesYet')}</p><small>{$t('taskDatasets.labels.backgroundWorkersContinuouslyPrepareFeedbackCasesFor')}</small></div>
 				{:else if !filteredSamples.length}
-					<div class="queue-empty"><Search size={22} aria-hidden="true" /><p>没有匹配的样本。</p><small>调整状态筛选或搜索关键词后再试。</small></div>
+					<div class="queue-empty"><Search size={22} aria-hidden="true" /><p>{$t('taskDatasets.labels.noMatchingSamples')}</p><small>{$t('taskDatasets.labels.adjustTheStatusFilterOrSearchTerms')}</small></div>
 				{:else}
 					<div class="queue-list">
 						{#each filteredSamples as item (item.sample_id)}
 							<div class="queue-row">
 								{#if item.status === 'confirmed'}<input type="checkbox" aria-label={$t('taskDatasets.selectExport')} value={item.sample_id} bind:group={chosenExports} on:change={() => exportPreview = null} />{/if}
 							<button class:active={selectedSample?.sample_id === item.sample_id} class="queue-item" type="button" on:click={() => selectSample(item)}>
-								<span class="queue-copy"><strong title={caseQuestions[item.source_case_id]}>{caseQuestions[item.source_case_id] || statusLabel(item.status)}</strong><small>更新于 {formatDate(item.updated_at)}</small></span>
-								<span class="queue-status queue-status--{item.status}">{statusLabel(item.status)}</span>
+								<span class="queue-copy"><strong title={caseQuestions[item.source_case_id]}>{caseQuestions[item.source_case_id] || statusLabel(item.status, $t)}</strong><small>{$t('taskDatasets.labels.updatedTime', { time: formatDate(item.updated_at) })}</small></span>
+								<span class="queue-status queue-status--{item.status}">{statusLabel(item.status, $t)}</span>
 							</button>
 							</div>
 						{/each}
@@ -648,11 +648,11 @@
 				{/if}
 			</aside>
 
-			<section class="editor-area" aria-label="样本编辑器">
+			<section class="editor-area" aria-label={$t('taskDatasets.labels.sampleEditor')}>
 				{#if detailLoading}
-					<div class="detail-loading" role="status"><span></span><span></span><span></span><p>正在读取样本内容…</p></div>
+					<div class="detail-loading" role="status"><span></span><span></span><span></span><p>{$t('taskDatasets.labels.loadingSampleContent')}</p></div>
 				{:else if editorError && !sampleDetail}
-					<div class="detail-error" role="alert"><TriangleAlert size={22} aria-hidden="true" /><p>{editorError}</p><button type="button" on:click={() => selectedSample && selectSample(selectedSample)}>重新加载</button></div>
+					<div class="detail-error" role="alert"><TriangleAlert size={22} aria-hidden="true" /><p>{editorError}</p><button type="button" on:click={() => selectedSample && selectSample(selectedSample)}>{$t('taskDatasets.labels.reload')}</button></div>
 				{:else}
 					{#if dataset?.task_type === 'preference'}
 						<PreferenceAnnotation sample={sampleDetail} {saving} {confirming} {acting} error={editorError} {notice} on:save={saveSample} on:confirm={confirmSample} on:action={performAction} />

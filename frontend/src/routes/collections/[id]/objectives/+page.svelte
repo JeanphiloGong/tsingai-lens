@@ -232,25 +232,25 @@
 		return analysisStates[objective.objective_id]?.status ?? null;
 	}
 
-	function statusLabel(objective: ObjectiveSummary) {
+	function statusLabel(objective: ObjectiveSummary, translate = $t) {
 		const active = analysisStates[objective.objective_id];
-		if (active?.status === 'queued') return '等待分析';
-		if (active?.status === 'running') return '分析中';
-		if (active?.status === 'failed') return '分析失败';
+		if (active?.status === 'queued') return translate('objectiveWorkspace.pending');
+		if (active?.status === 'running') return translate('objectiveWorkspace.active');
+		if (active?.status === 'failed') return translate('objectiveWorkspace.failed');
 		if (objective.published_analysis_version !== null) {
-			return `结果 v${objective.published_analysis_version}`;
+			return translate('research.objectives.labels.resultVVersion', { version: objective.published_analysis_version });
 		}
-		if (objective.active_analysis_version !== null) return '分析已启动';
-		return objective.confirmation_status === 'confirmed' ? '已确认' : '待确认';
+		if (objective.active_analysis_version !== null) return translate('objectiveWorkspace.active');
+		return objective.confirmation_status === 'confirmed' ? translate('research.objectives.confirmed') : translate('research.objectives.candidate');
 	}
 
 	function canStartAnalysis(objective: ObjectiveSummary) {
 		return objective.active_analysis_version === null || analysisStatus(objective) === 'failed';
 	}
 
-	function actionLabel(objective: ObjectiveSummary) {
-		if (analysisStatus(objective) === 'failed') return '重试分析';
-		return objective.confirmation_status === 'candidate' ? '确认并分析' : '开始分析';
+	function actionLabel(objective: ObjectiveSummary, translate = $t) {
+		if (analysisStatus(objective) === 'failed') return translate('objectiveWorkspace.retryAnalysis');
+		return objective.confirmation_status === 'candidate' ? translate('research.objectives.confirmAndAnalyze') : translate('research.objectives.startAnalysis');
 	}
 
 	function isAnalysisProcessing(analysis: ObjectiveAnalysisState | null) {
@@ -266,19 +266,19 @@
 		return Math.round((processed / analysis.total_document_count) * 100);
 	}
 
-	function analysisPhaseLabel(analysis: ObjectiveAnalysisState) {
-		if (analysis.status === 'queued') return '等待系统开始分析';
+	function analysisPhaseLabel(analysis: ObjectiveAnalysisState, translate = $t) {
+		if (analysis.status === 'queued') return translate('research.objectives.labels.waitingForAnalysisToStart');
 		const phase = analysis.phase.toLocaleLowerCase();
 		if (phase.includes('framing') || phase.includes('routing')) {
-			return '正在定位与研究问题相关的论文内容';
+			return translate('research.objectives.labels.locatingPaperContentRelevantToTheResearch');
 		}
 		if (phase.includes('evidence') || phase.includes('extraction')) {
-			return '正在逐篇提取相关证据';
+			return translate('research.objectives.labels.extractingEvidenceFromEachPaper');
 		}
 		if (phase.includes('finding') || phase.includes('synthesis')) {
-			return '正在比较跨论文证据并形成 Findings';
+			return translate('research.objectives.labels.comparingEvidenceAcrossPapersAndFormingFindings');
 		}
-		return '正在分析已确认的论文范围';
+		return translate('research.objectives.labels.analyzingTheConfirmedPaperScope');
 	}
 
 	function objectiveWorkflowStatus(
@@ -425,7 +425,7 @@
 				scopeObjectiveId = objective.objective_id;
 				scopeQuery = '';
 				scopePage = 0;
-				scopeError = '系统推荐范围中没有可分析的已准备论文，请调整范围。';
+				scopeError = $t('research.objectives.labels.noReadyPapersAreAvailableInThe');
 				return;
 			}
 
@@ -499,97 +499,97 @@
 		return activeScope?.decisions.find((item) => item.document_id === documentId) ?? null;
 	}
 
-	function scopeDecisionLabel(documentId: string) {
+	function scopeDecisionLabel(documentId: string, translate = $t) {
 		const decision = scopeDecision(documentId);
-		if (!decision) return '尚未完成范围判断';
-		if (decision.classification === 'likely_relevant') return '系统推荐';
-		if (decision.classification === 'needs_inspection') return '待人工确认';
-		return '当前不建议';
+		if (!decision) return translate('research.objectives.labels.scopeAssessmentPending');
+		if (decision.classification === 'likely_relevant') return translate('research.objectives.labels.recommended');
+		if (decision.classification === 'needs_inspection') return translate('research.objectives.labels.needsInspection');
+		return translate('research.objectives.labels.notCurrentlyRecommended');
 	}
 
-	function confirmActionLabel(objective: ObjectiveSummary, count: number) {
-		if (!count) return '选择论文后开始分析';
+	function confirmActionLabel(objective: ObjectiveSummary, count: number, translate = $t) {
+		if (!count) return translate('research.objectives.labels.selectPapersToStartAnalysis');
 		return analysisStatus(objective) === 'failed'
-			? `使用 ${count} 篇论文重新分析`
-			: `使用 ${count} 篇论文开始分析`;
+			? translate('research.objectives.labels.reanalyzeCountPapers', { count })
+			: translate('research.objectives.labels.analyzeCountPapers', { count });
 	}
 </script>
 
-<svelte:head><title>研究目标</title></svelte:head>
+<svelte:head><title>{$t('objectiveWorkspace.list')}</title></svelte:head>
 
 <section class="objectives-page">
 	<header class="page-heading">
 		<div>
-			<h2>研究目标</h2>
-			<p>选择一个具体问题，审阅分析范围，再让系统逐篇提取并比较证据。</p>
+			<h2>{$t('objectiveWorkspace.list')}</h2>
+			<p>{$t('research.objectives.description')}</p>
 		</div>
-		<button class="btn btn--ghost" type="button" on:click={loadObjectives}>刷新</button>
+		<button class="btn btn--ghost" type="button" on:click={loadObjectives}>{$t('research.objectives.refresh')}</button>
 	</header>
 
 	{#if loading}
-		<p class="state" aria-busy="true">正在加载...</p>
+		<p class="state" aria-busy="true">{$t('research.objectives.loading')}</p>
 	{:else if error}
 		<p class="state state--error" role="alert">{error}</p>
 	{:else if !objectives.length}
 		<section class="empty-state">
-			<h3>没有可供确认的研究目标</h3>
+			<h3>{$t('research.objectives.labels.noResearchObjectivesToConfirm')}</h3>
 			<p>
-				当前没有候选同时满足材料范围、研究变量、结果指标和来源支持规则。这不表示目标级证据分析已经完成。
+				{$t('research.objectives.labels.noCandidatesCurrentlySatisfyTheMaterialScope')}
 			</p>
 			<div class="actions">
 				<a
 					class="btn btn--ghost btn--small"
 					href={resolve('/collections/[id]', { id: collectionId })}
 				>
-					返回集合概览
+					{$t('research.objectives.labels.backToCollectionOverview')}
 				</a>
 				<a
 					class="btn btn--primary btn--small"
 					href={resolve('/collections/[id]/documents', { id: collectionId })}
 				>
-					检查文献
+					{$t('research.objectives.labels.inspectPapers')}
 				</a>
 			</div>
 		</section>
 	{:else}
-		<div class="summary" aria-label="研究目标概览">
-			<div><strong>{objectives.length}</strong><span>研究目标</span></div>
-			<div><strong>{confirmedCount}</strong><span>已确认</span></div>
-			<div><strong>{publishedCount}</strong><span>已有结果</span></div>
+		<div class="summary" aria-label={$t('research.objectives.labels.researchObjectiveOverview')}>
+			<div><strong>{objectives.length}</strong><span>{$t('research.objectives.labels.researchObjectives')}</span></div>
+			<div><strong>{confirmedCount}</strong><span>{$t('research.objectives.labels.confirmed')}</span></div>
+			<div><strong>{publishedCount}</strong><span>{$t('research.objectives.labels.resultsAvailable')}</span></div>
 		</div>
 
-		<div class="objective-filters" role="search" aria-label="筛选研究目标">
+		<div class="objective-filters" role="search" aria-label={$t('research.objectives.labels.filterResearchObjectives')}>
 			<label>
-				<span>搜索研究目标</span>
-				<input type="search" bind:value={objectiveQuery} placeholder="问题、材料、变量或结果" />
+				<span>{$t('research.objectives.search')}</span>
+				<input type="search" bind:value={objectiveQuery} placeholder={$t('research.objectives.labels.questionMaterialVariableOrOutcome')} />
 			</label>
 			<label>
-				<span>分析状态</span>
+				<span>{$t('research.objectives.status')}</span>
 				<select bind:value={objectiveFilterStatus}>
-					<option value="all">全部状态</option>
-					<option value="pending">待分析</option>
-					<option value="active">分析中</option>
-					<option value="published">已有结果</option>
-					<option value="failed">分析失败</option>
+					<option value="all">{$t('research.objectives.allStatus')}</option>
+					<option value="pending">{$t('research.objectives.pendingStatus')}</option>
+					<option value="active">{$t('research.objectives.activeStatus')}</option>
+					<option value="published">{$t('research.objectives.publishedStatus')}</option>
+					<option value="failed">{$t('research.objectives.failedStatus')}</option>
 				</select>
 			</label>
 			{#if objectiveFiltersActive}
 				<button class="btn btn--ghost btn--small" type="button" on:click={clearObjectiveFilters}>
-					清除筛选
+					{$t('research.objectives.clear')}
 				</button>
 			{/if}
 		</div>
 
 		{#if objectiveFiltersActive}
-			<p class="filter-count" aria-live="polite">找到 {filteredObjectives.length} 个研究目标</p>
+			<p class="filter-count" aria-live="polite">{$t('research.objectives.labels.foundCountResearchObjectives', { count: filteredObjectives.length })}</p>
 		{/if}
 
 		{#if !filteredObjectives.length}
 			<section class="filter-empty">
-				<h3>没有匹配的研究目标</h3>
-				<p>请调整关键词或分析状态后重试。</p>
+				<h3>{$t('research.objectives.noMatch')}</h3>
+				<p>{$t('research.objectives.adjust')}</p>
 				<button class="btn btn--ghost btn--small" type="button" on:click={clearObjectiveFilters}>
-					清除筛选
+					{$t('research.objectives.labels.clearFilters')}
 				</button>
 			</section>
 		{:else}
@@ -604,41 +604,41 @@
 						<div class="heading">
 							<div>
 								<h3><a href={objectiveHref}>{objective.question}</a></h3>
-								<p>{objective.requested_comparator || '尚未设置比较意图'}</p>
+								<p>{objective.requested_comparator || $t('research.objectives.labels.noComparisonIntentSpecified')}</p>
 							</div>
 							<span
 								class:published={objective.published_analysis_version !== null}
 								class:failed={analysisStatus(objective) === 'failed'}
 							>
-								{statusLabel(objective)}
+								{statusLabel(objective, $t)}
 							</span>
 						</div>
 						<dl>
 							<div>
-								<dt>材料</dt>
+								<dt>{$t('research.objectives.labels.material')}</dt>
 								<dd>{joined(objective.material_scope)}</dd>
 							</div>
 							<div>
-								<dt>变量</dt>
+								<dt>{$t('research.objectives.labels.variables')}</dt>
 								<dd>{joined(objective.variables)}</dd>
 							</div>
 							<div>
-								<dt>结果</dt>
+								<dt>{$t('research.objectives.labels.outcomes')}</dt>
 								<dd>{joined(objective.outcomes)}</dd>
 							</div>
 							<div>
-								<dt>问题来源</dt>
-								<dd>{objective.seed_document_ids.length} 篇</dd>
+								<dt>{$t('research.objectives.labels.questionSources')}</dt>
+								<dd>{$t('research.objectives.labels.countPapers', { count: objective.seed_document_ids.length })}</dd>
 							</div>
 						</dl>
 						{#if activeAnalysis && isAnalysisProcessing(activeAnalysis)}
 							{@const progressPercent = analysisProgressPercent(activeAnalysis)}
 							<div class="analysis-progress" role="status" aria-live="polite">
 								<div class="analysis-progress__header">
-									<strong>{analysisPhaseLabel(activeAnalysis)}</strong>
+									<strong>{analysisPhaseLabel(activeAnalysis, $t)}</strong>
 									{#if activeAnalysis.total_document_count > 0}
 										<span
-											>论文进度 {activeAnalysis.processed_document_count} / {activeAnalysis.total_document_count}</span
+											>{$t('research.objectives.labels.paperProgressDoneTotal', { done: activeAnalysis.processed_document_count, total: activeAnalysis.total_document_count })}</span
 										>
 									{/if}
 								</div>
@@ -646,11 +646,11 @@
 									<div
 										class="analysis-progress__track"
 										role="progressbar"
-										aria-label="研究目标分析进度"
+										aria-label={$t('research.objectives.labels.researchObjectiveAnalysisProgress')}
 										aria-valuemin="0"
 										aria-valuemax="100"
 										aria-valuenow={progressPercent}
-										aria-valuetext={`论文进度 ${activeAnalysis.processed_document_count} / ${activeAnalysis.total_document_count}`}
+										aria-valuetext={$t('research.objectives.labels.paperProgressDoneTotal', { done: activeAnalysis.processed_document_count, total: activeAnalysis.total_document_count })}
 									>
 										<span style={`width: ${progressPercent}%`}></span>
 									</div>
@@ -671,23 +671,23 @@
 									on:click={() => void startRecommendedAnalysis(objective)}
 								>
 									{actionObjectiveId === objective.objective_id
-										? '正在准备...'
-										: actionLabel(objective)}
+										? $t('research.objectives.labels.preparing')
+										: actionLabel(objective, $t)}
 								</button>
 								<button
 									class="btn btn--ghost btn--small"
 									type="button"
 									disabled={Boolean(actionObjectiveId)}
-									title="默认使用系统推荐的文献范围"
+									title={$t('research.objectives.labels.useTheRecommendedPaperScopeByDefault')}
 									on:click={() => void openScopeReview(objective)}
 								>
-									调整范围
+									{$t('research.objectives.labels.adjustScope')}
 								</button>
 							{/if}
 							{#if objective.published_analysis_version !== null}
-								<a class="btn btn--ghost btn--small" href={objectiveHref}>查看 Findings</a>
+								<a class="btn btn--ghost btn--small" href={objectiveHref}>{$t('research.objectives.labels.viewFindings')}</a>
 							{:else if activeAnalysis?.status === 'failed'}
-								<a class="btn btn--ghost btn--small" href={objectiveHref}>查看失败详情</a>
+								<a class="btn btn--ghost btn--small" href={objectiveHref}>{$t('research.objectives.labels.viewFailureDetails')}</a>
 							{/if}
 						</div>
 					</article>
@@ -723,43 +723,43 @@
 		<div class="scope-dialog" role="dialog" aria-modal="true" aria-labelledby="scope-dialog-title">
 			<header>
 				<div>
-					<span>分析前确认</span>
-					<h2 id="scope-dialog-title">确认分析论文范围</h2>
+					<span>{$t('research.objectives.labels.confirmBeforeAnalysis')}</span>
+					<h2 id="scope-dialog-title">{$t('research.objectives.labels.confirmPapersForAnalysis')}</h2>
 				</div>
 				<button
 					class="close-button"
 					type="button"
-					aria-label="关闭论文范围"
+					aria-label={$t('research.objectives.labels.closePaperScope')}
 					on:click={closeScopeReview}>×</button
 				>
 			</header>
 
 			<div class="scope-question">
 				<strong>{scopeObjective.question}</strong>
-				<p>系统只会分析你在这里确认的论文；启动后，本次范围会被冻结以便结果追溯。</p>
+				<p>{$t('research.objectives.labels.onlyThePapersConfirmedHereWillBe')}</p>
 			</div>
 			{#if activeScope}
-				<div class="scope-summary" aria-label="论文范围判断概览">
-					<span><strong>{activeScope.counts.likely_relevant}</strong> 篇系统推荐</span>
-					<span><strong>{activeScope.counts.needs_inspection}</strong> 篇待人工确认</span>
-					<span><strong>{scopeObjective.seed_document_ids.length}</strong> 篇问题来源</span>
+				<div class="scope-summary" aria-label={$t('research.objectives.labels.paperScopeAssessmentOverview')}>
+					<span>{$t('research.objectives.labels.countRecommendedPapers', { count: activeScope.counts.likely_relevant })}</span>
+					<span>{$t('research.objectives.labels.countPapersNeedingInspection', { count: activeScope.counts.needs_inspection })}</span>
+					<span>{$t('research.objectives.labels.countQuestionSourcePapers', { count: scopeObjective.seed_document_ids.length })}</span>
 				</div>
 			{/if}
 
 			<div class="scope-toolbar">
 				<label class="scope-search">
-					<span>搜索可用论文</span>
+					<span>{$t('research.objectives.labels.searchAvailablePapers')}</span>
 					<input
 						type="search"
 						value={scopeQuery}
 						on:input={(event) => updateScopeQuery((event.currentTarget as HTMLInputElement).value)}
 					/>
 				</label>
-				<strong>已选择 {selectedScopeIds.length} 篇论文</strong>
+				<strong>{$t('research.objectives.labels.selectedCountPapers', { count: selectedScopeIds.length })}</strong>
 			</div>
 
 			{#if scopeLoading}
-				<p class="scope-state" aria-busy="true">正在加载可用论文...</p>
+				<p class="scope-state" aria-busy="true">{$t('research.objectives.labels.loadingAvailablePapers')}</p>
 			{:else if scopeError}
 				<p class="scope-state scope-state--error" role="alert">{scopeError}</p>
 			{:else if visibleScopeDocuments.length}
@@ -774,40 +774,40 @@
 							<span class="scope-option-copy">
 								<span>{document.original_filename}</span>
 								<small>
-									{scopeDecisionLabel(document.document_id)}{scopeDecision(document.document_id)
+									{scopeDecisionLabel(document.document_id, $t)}{scopeDecision(document.document_id)
 										?.is_seed
-										? ' · 问题来源'
+										? $t('research.objectives.labels.questionSource')
 										: ''}
 								</small>
 							</span>
 						</label>
 					{/each}
 				</div>
-				<nav class="scope-pagination" aria-label="论文范围分页">
+				<nav class="scope-pagination" aria-label={$t('research.objectives.labels.paperScopePages')}>
 					<button type="button" disabled={scopePage === 0} on:click={() => (scopePage -= 1)}
-						>上一页</button
+						>{$t('research.objectives.labels.previous')}</button
 					>
-					<span>第 {scopePage + 1}/{scopePageCount} 页</span>
+					<span>{$t('research.objectives.labels.pagePageTotal', { page: scopePage + 1, total: scopePageCount })}</span>
 					<button
 						type="button"
 						disabled={scopePage + 1 >= scopePageCount}
 						on:click={() => (scopePage += 1)}
 					>
-						下一页
+						{$t('research.objectives.labels.next')}
 					</button>
 				</nav>
 			{:else if readyDocuments.length}
-				<p class="scope-state">没有匹配的已准备论文。</p>
+				<p class="scope-state">{$t('research.objectives.labels.noMatchingReadyPapers')}</p>
 			{:else}
-				<p class="scope-state">还没有可用于分析的已准备论文。</p>
+				<p class="scope-state">{$t('research.objectives.labels.noReadyPapersAvailableForAnalysis')}</p>
 			{/if}
 
 			<footer>
 				{#if !selectedScopeIds.length && !scopeLoading}
-					<p>请选择至少一篇论文。</p>
+					<p>{$t('research.objectives.labels.selectAtLeastOnePaper')}</p>
 				{/if}
 				<div>
-					<button class="btn btn--ghost" type="button" on:click={closeScopeReview}>取消</button>
+					<button class="btn btn--ghost" type="button" on:click={closeScopeReview}>{$t('research.objectives.labels.cancel')}</button>
 					<button
 						class="btn btn--primary"
 						type="button"
@@ -815,8 +815,8 @@
 						on:click={() => void startAnalysis(scopeObjective)}
 					>
 						{actionObjectiveId
-							? '正在启动...'
-							: confirmActionLabel(scopeObjective, selectedScopeIds.length)}
+							? $t('research.objectives.labels.starting')
+							: confirmActionLabel(scopeObjective, selectedScopeIds.length, $t)}
 					</button>
 				</div>
 			</footer>
@@ -1208,9 +1208,6 @@
 		font-size: 13px;
 	}
 
-	.scope-summary strong {
-		color: var(--text-primary);
-	}
 
 	.scope-options {
 		display: grid;

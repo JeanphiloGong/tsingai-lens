@@ -76,28 +76,28 @@
 	}
 
 	function formatSource(source: Record<string, unknown>) {
-		return String(source.document_title ?? source.title ?? '未命名文献');
+		return String(source.document_title ?? source.title ?? $t('taskDatasets.labels.untitledPaper'));
 	}
 </script>
 
 {#if !sample}
 	<section class="empty" aria-live="polite">
 		<FileText size={28} aria-hidden="true" />
-		<h2>选择一个样本</h2>
-		<p>左侧队列中的候选会在这里显示问题、回答和可核对的证据。</p>
+		<h2>{$t('taskDatasets.labels.selectASample')}</h2>
+		<p>{$t('taskDatasets.labels.sftEmptyDescription')}</p>
 	</section>
 {:else}
 	<div class="annotation-grid">
 		<section class="question-column" aria-labelledby="question-title">
-			<div class="section-kicker">输入</div>
-			<h2 id="question-title">研究问题</h2>
-			{#if !currentRevision && canEdit}<label for="sft-question">{$t('taskDatasets.questionContent')}</label><textarea id="sft-question" bind:value={question} rows="3" disabled={saving || confirming || acting}></textarea>{:else}<p class="question">{question || '暂无可读问题'}</p>{/if}
+			<div class="section-kicker">{$t('taskDatasets.labels.input')}</div>
+			<h2 id="question-title">{$t('taskDatasets.labels.researchQuestion')}</h2>
+			{#if !currentRevision && canEdit}<label for="sft-question">{$t('taskDatasets.questionContent')}</label><textarea id="sft-question" bind:value={question} rows="3" disabled={saving || confirming || acting}></textarea>{:else}<p class="question">{question || $t('taskDatasets.labels.noReadableQuestionAvailable')}</p>{/if}
 			<details class="original-answer">
-				<summary><ChevronDown size={15} aria-hidden="true" />原始回答</summary>
-				<p>{sample.source_case.answer || '暂无原始回答'}</p>
+				<summary><ChevronDown size={15} aria-hidden="true" />{$t('taskDatasets.labels.originalAnswer')}</summary>
+				<p>{sample.source_case.answer || $t('taskDatasets.labels.noOriginalAnswerAvailable')}</p>
 			</details>
 			<div class="source-meta">
-				<span>案例来源</span>
+				<span>{$t('taskDatasets.labels.caseSource')}</span>
 				<small>{sample.source_case.status}</small>
 			</div>
 		</section>
@@ -105,45 +105,45 @@
 		<section class="editor-column" aria-labelledby="answer-title">
 			<div class="section-heading">
 				<div>
-					<div class="section-kicker">人工确认</div>
-					<h2 id="answer-title">正确回答</h2>
+					<div class="section-kicker">{$t('taskDatasets.labels.humanConfirmation')}</div>
+					<h2 id="answer-title">{$t('taskDatasets.labels.correctAnswer')}</h2>
 				</div>
 				{#if sample.sample.status === 'confirmed'}
-					<span class="status status--confirmed"><ShieldCheck size={14} aria-hidden="true" />已确认</span>
+					<span class="status status--confirmed"><ShieldCheck size={14} aria-hidden="true" />{$t('taskDatasets.labels.confirmed')}</span>
 				{:else}
-					<span class="status">{sample.sample.status === 'needs_confirmation' ? '待确认' : sample.sample.status === 'needs_input' ? '待补充' : sample.sample.status === 'build_failed' ? '构建失败' : sample.sample.status === 'discarded' ? '已丢弃' : '构建中'}</span>
+					<span class="status">{sample.sample.status === 'needs_confirmation' ? $t('taskDatasets.labels.awaitingConfirmation') : sample.sample.status === 'needs_input' ? $t('taskDatasets.labels.needsInput') : sample.sample.status === 'build_failed' ? $t('taskDatasets.labels.buildFailed') : sample.sample.status === 'discarded' ? $t('taskDatasets.labels.discarded') : $t('taskDatasets.labels.building')}</span>
 				{/if}
 			</div>
 			{#if currentRevision || canEdit}
-				<label for="sft-target">回答内容</label>
+				<label for="sft-target">{$t('taskDatasets.labels.answerContent')}</label>
 				<textarea id="sft-target" bind:value={target} rows="12" disabled={!canEdit || saving || confirming || acting}></textarea>
 			{:else}
-				<p class="missing">当前还没有完整候选。请核对右侧缺失信息，再重新构建。</p>
+				<p class="missing">{$t('taskDatasets.labels.noCompleteCandidateYetReviewTheMissing')}</p>
 			{/if}
 
-			{#if canEdit}<div class="actions" aria-label="样本操作">
+			{#if canEdit}<div class="actions" aria-label={$t('taskDatasets.labels.sampleActions')}>
 				<button class:primary={draftChanged} type="button" on:click={save} disabled={saving || confirming || acting || !draftChanged || !complete}>
-					<Save size={16} aria-hidden="true" />{saving ? '保存中…' : '保存修改'}
+					<Save size={16} aria-hidden="true" />{saving ? $t('taskDatasets.labels.saving') : $t('taskDatasets.labels.saveChanges')}
 				</button>
 				<button class:primary={!draftChanged} type="button" on:click={() => confirm(false)} disabled={!canConfirm}>
-					<Check size={16} aria-hidden="true" />{confirming ? '确认中…' : '确认样本'}
+					<Check size={16} aria-hidden="true" />{confirming ? $t('taskDatasets.labels.confirming') : $t('taskDatasets.labels.confirmSample')}
 				</button>
 				<button type="button" on:click={() => confirm(true)} disabled={!canConfirm}>
-					确认并下一条
+					{$t('taskDatasets.labels.confirmAndNext')}
 				</button>
 			</div>{/if}
-			{#if draftChanged}<p class="draft-note" role="status">有未保存的修改，保存后才能确认。</p>{/if}
+			{#if draftChanged}<p class="draft-note" role="status">{$t('taskDatasets.labels.saveYourChangesBeforeConfirming')}</p>{/if}
 			<details class="sample-options"><summary>{$t('taskDatasets.moreActions')}</summary>
 			{#if sample.sample.status === 'needs_confirmation' || sample.sample.status === 'confirmed' || sample.sample.status === 'needs_input'}
 				<div class="rebuild-area">
-					<label for="rebuild-reason">退回意见</label>
-					<textarea id="rebuild-reason" bind:value={rebuildReason} rows="3" maxlength="2000" placeholder="说明应核对的条件或缺失来源" disabled={acting}></textarea>
-					<button type="button" on:click={() => act('rebuild')} disabled={acting || saving || confirming || !rebuildReason.trim()}><RotateCcw size={16} aria-hidden="true" />退回重建</button>
+					<label for="rebuild-reason">{$t('taskDatasets.labels.rebuildFeedback')}</label>
+					<textarea id="rebuild-reason" bind:value={rebuildReason} rows="3" maxlength="2000" placeholder={$t('taskDatasets.labels.describeConditionsToCheckOrMissingSources')} disabled={acting}></textarea>
+					<button type="button" on:click={() => act('rebuild')} disabled={acting || saving || confirming || !rebuildReason.trim()}><RotateCcw size={16} aria-hidden="true" />{$t('taskDatasets.labels.sendBackForRebuild')}</button>
 				</div>
 			{/if}
 			<div class="recovery-actions">
-				{#if sample.sample.status === 'build_failed'}<button type="button" on:click={() => act('retry')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />重试构建</button>{/if}
-				{#if sample.sample.status === 'discarded'}<button type="button" on:click={() => act('restore')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />恢复样本</button>{:else}<button type="button" on:click={() => act('discard')} disabled={acting || saving || confirming}><Trash2 size={16} aria-hidden="true" />丢弃样本</button>{/if}
+				{#if sample.sample.status === 'build_failed'}<button type="button" on:click={() => act('retry')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />{$t('taskDatasets.labels.retryBuild')}</button>{/if}
+				{#if sample.sample.status === 'discarded'}<button type="button" on:click={() => act('restore')} disabled={acting}><RotateCcw size={16} aria-hidden="true" />{$t('taskDatasets.labels.restoreSample')}</button>{:else}<button type="button" on:click={() => act('discard')} disabled={acting || saving || confirming}><Trash2 size={16} aria-hidden="true" />{$t('taskDatasets.labels.discardSample')}</button>{/if}
 			</div>
 			</details>
 			{#if notice}<p class="notice" role="status">{notice}</p>{/if}
@@ -151,15 +151,15 @@
 		</section>
 
 		<aside class="evidence-column" aria-labelledby="evidence-title">
-			<div class="section-kicker">核对</div>
-			<h2 id="evidence-title">证据原文</h2>
+			<div class="section-kicker">{$t('taskDatasets.labels.review')}</div>
+			<h2 id="evidence-title">{$t('taskDatasets.labels.originalEvidence')}</h2>
 			<p class="aside-note">{$t('taskDatasets.optionalEvidence')}</p>
 			<div class="evidence-list">
 				{#each evidence as item, index}
 					<article class="evidence-card">
-						<label for={`evidence-title-${index}`}>文献标题</label>
+						<label for={`evidence-title-${index}`}>{$t('taskDatasets.labels.paperTitle')}</label>
 						<input id={`evidence-title-${index}`} bind:value={item.document_title} disabled={!canEdit || saving || confirming || acting} />
-						<label for={`evidence-text-${index}`}>片段</label>
+						<label for={`evidence-text-${index}`}>{$t('taskDatasets.labels.excerpt')}</label>
 						<textarea id={`evidence-text-${index}`} bind:value={item.text} rows="6" disabled={!canEdit || saving || confirming || acting}></textarea>
 						{#if canEdit}<button class="evidence-remove" type="button" aria-label={`${$t('taskDatasets.removeEvidence')} ${index + 1}`} title={$t('taskDatasets.removeEvidence')} on:click={() => evidence = evidence.filter((_, i) => i !== index)} disabled={saving || confirming || acting}><Trash2 size={15} aria-hidden="true" /></button>{/if}
 					</article>
@@ -170,15 +170,15 @@
 			{#if canEdit}<button class="evidence-add" type="button" on:click={() => evidence = [...evidence, { document_title: '', text: '' }]} disabled={saving || confirming || acting}><Plus size={15} aria-hidden="true" />{$t('taskDatasets.addEvidence')}</button>{/if}
 			{#if missingReasons.length}
 				<div class="missing-box">
-					<strong>还需要补充</strong>
+					<strong>{$t('taskDatasets.labels.additionalInputNeeded')}</strong>
 					<ul>{#each missingReasons as reason}<li>{reason}</li>{/each}</ul>
 				</div>
 			{/if}
 			{#if sample.source_case.omitted_candidates.length}
 				<details class="omitted">
-					<summary>未读取的候选来源（{sample.source_case.omitted_candidates.length}）</summary>
+					<summary>{$t('taskDatasets.labels.unreadCandidateSourcesCount', { count: sample.source_case.omitted_candidates.length })}</summary>
 					{#each sample.source_case.omitted_candidates as source}
-						<p>{formatSource(source)}：{String(source.reason ?? '未读取')}</p>
+						<p>{formatSource(source)}：{String(source.reason ?? $t('taskDatasets.labels.notRead'))}</p>
 					{/each}
 				</details>
 			{/if}

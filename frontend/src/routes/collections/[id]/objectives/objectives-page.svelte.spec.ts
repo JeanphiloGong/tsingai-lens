@@ -1,6 +1,7 @@
 import { page as browserPage } from 'vitest/browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from 'vitest-browser-svelte';
+import { language } from '../../../_shared/i18n';
 
 type ObjectivesPageState = {
 	params: { id: string };
@@ -163,12 +164,25 @@ function scopePreview({
 
 describe('collections/[id]/objectives/+page.svelte', () => {
 	beforeEach(() => {
+		language.set('zh');
 		setPage({
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123/objectives')
 		});
 		goto.mockReset();
 		fetchMock.mockReset();
+	});
+
+
+	it('switches all objective labels while preserving researcher text', async () => {
+		fetchMock.mockResolvedValue(jsonResponse({collection_id:'col_123', objectives:[objective({question:'研究者问题',confirmation_status:'confirmed'})]}));
+		render(Page);
+		await expect.element(browserPage.getByText('研究者问题',{exact:true})).toBeInTheDocument();
+		language.set('en');
+		await expect.element(browserPage.getByLabelText('Search research objectives')).toBeInTheDocument();
+		await expect.poll(()=>document.querySelector('.objectives-page')!.textContent!.replaceAll('研究者问题','')).not.toMatch(/[\u3400-\u9fff]/);
+		language.set('zh');
+		await expect.element(browserPage.getByLabelText('搜索研究目标')).toBeInTheDocument();
 	});
 
 	it('shows an explicit empty state before Objective candidates exist', async () => {
@@ -597,12 +611,12 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 
 		await expect.element(browserPage.getByText('Published research question?')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Candidate question 5?')).not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Objectives 1–5 of 9')).toBeInTheDocument();
-		await browserPage.getByRole('button', { name: 'Next' }).click();
+		await expect.element(browserPage.getByText('第 1–5 个，共 9 个')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: '下一页' }).click();
 		await expect.element(browserPage.getByText('Candidate question 5?')).toBeInTheDocument();
-		await expect.element(browserPage.getByText(/Objectives 6/)).toBeInTheDocument();
+		await expect.element(browserPage.getByText(/第 6/)).toBeInTheDocument();
 		await browserPage.getByLabelText('搜索研究目标').fill('Candidate question');
-		await expect.element(browserPage.getByText('Objectives 1–5 of 8')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('第 1–5 个，共 8 个')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Candidate question 1?')).toBeInTheDocument();
 	});
 

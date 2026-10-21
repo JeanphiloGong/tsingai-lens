@@ -379,3 +379,7 @@ reader.
 
 Route components use helpers from `../_shared/`; they do not implement a second
 API client or normalize retired payloads.
+
+
+Objective list and feedback workbench static labels follow the selected language;
+researcher input and source content are not translated.

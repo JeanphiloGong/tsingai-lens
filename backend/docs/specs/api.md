@@ -184,6 +184,7 @@ list.
 - `GET /api/v1/chat-sessions?collection_id={collection_id}`
 - `GET /api/v1/chat-sessions/{session_id}`
 - `PUT /api/v1/chat-sessions/{session_id}/pin`
+- `PUT /api/v1/chat-sessions/{session_id}/title`
 - `DELETE /api/v1/chat-sessions/{session_id}`
 - `GET /api/v1/chat-sessions/{session_id}/messages`
 - `POST /api/v1/chat-sessions/{session_id}/messages`
@@ -204,9 +205,17 @@ ordered by `is_pinned` descending, then `updated_at` descending and `session_id`
 descending, before applying `limit` and `offset` pagination. It is
 the source for restoring Chat history on another device; browser local storage
 may remember the active session but is not the authoritative history index. Each
-list item also includes `title`, the trimmed first line of the first user question
+list item also includes `title`: the saved custom title, otherwise the trimmed first line of the first user question
 (up to 160 characters), or `null` for an empty conversation. A client can render
 history without loading every trajectory or relying on a local title cache.
+
+`PUT .../{session_id}/title` accepts `{"title": "IN718 comparison"}` and
+returns the saved session. Titles are trimmed and must contain 1–160 characters
+on one line, without NUL; invalid requests return 422. Both session and collection
+ownership are required; missing or unowned sessions return 404. Renaming changes
+only the custom title, preserving messages, progress, pin state and activity time.
+Individual session reads expose the custom title or null. Later generation
+checkpoints do not overwrite it; branches start without a custom title.
 
 Session responses include `is_pinned` (false by default). `PUT .../{session_id}/pin`
 accepts exactly `{"is_pinned": true}` or `{"is_pinned": false}` and returns the

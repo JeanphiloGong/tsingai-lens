@@ -49,6 +49,7 @@ class ChatSessionRow(Base):
     is_pinned: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false",
     )
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     root_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     parent_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     fork_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

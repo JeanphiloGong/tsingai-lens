@@ -40,6 +40,7 @@ class ChatSession:
     fork_position: int | None = None
     fork_content: str | None = None
     is_pinned: bool = False
+    title: str | None = None
 
     def __post_init__(self) -> None:
         lineage = (self.root_session_id, self.parent_session_id, self.fork_message_id,
@@ -59,6 +60,11 @@ class ChatSession:
             object.__setattr__(
                 self, field_name, _required_text(getattr(self, field_name), field_name)
             )
+        if self.title is not None:
+            title = self.title.strip()
+            if not title or len(title) > 160 or any(c in title for c in "\x00\r\n"):
+                raise ValueError("title must be between 1 and 160 characters")
+            object.__setattr__(self, "title", title)
         created_at = _timestamp(self.created_at, "created_at")
         updated_at = _timestamp(self.updated_at, "updated_at")
         if datetime.fromisoformat(updated_at.replace("Z", "+00:00")) < datetime.fromisoformat(

@@ -36,6 +36,7 @@ from controllers.chat.schemas import (
     ChatSessionCreateRequest,
     ChatSessionListResponse,
     ChatSessionPinRequest,
+    ChatSessionTitleRequest,
     ChatSessionResponse,
     ChatToolCallResponse,
     ChatToolDecisionRequest,
@@ -182,6 +183,25 @@ async def set_chat_session_pin(
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    return ChatSessionResponse.model_validate(session, from_attributes=True)
+
+
+@router.put(
+    "/{session_id}/title",
+    response_model=ChatSessionResponse,
+    summary="Rename one owned Chat session",
+)
+async def set_chat_session_title(
+    session_id: str, payload: ChatSessionTitleRequest, request: Request,
+) -> ChatSessionResponse:
+    try:
+        session = await request.app.state.chat_session_service.set_session_title_for_user(
+            session_id, await current_user_id(request), title=payload.title,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 

@@ -1256,3 +1256,21 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
         message.role == "tool" and message.tool_call_id == pending.tool_call_id
         for message in messages
     )
+
+
+async def test_rename_survives_continuation_and_rejects_non_owner() -> None:
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="Evidence retained.")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    saved = await service.set_session_title_for_user(session.session_id, "user-1", title="  IN718 comparison  ")
+    assert saved.title == "IN718 comparison"
+    assert saved.updated_at == session.updated_at
+    with pytest.raises(ChatSessionNotFoundError):
+        await service.set_session_title_for_user(session.session_id, "user-2", title="Other title")
+    for invalid in (" ", "x" * 161, "line\nbreak", "nul\x00title"):
+        with pytest.raises(ValueError):
+            await service.set_session_title_for_user(session.session_id, "user-1", title=invalid)
+    await service.post_message_for_user(session.session_id, "user-1", message="Compare the evidence")
+    assert (await service.get_session_for_user(session.session_id, "user-1")).title == "IN718 comparison"
+    assert (await service.list_sessions_for_user(collection_id="col-1", user_id="user-1"))[0].title == "IN718 comparison"
+    assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2

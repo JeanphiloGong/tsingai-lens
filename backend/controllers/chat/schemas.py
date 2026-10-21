@@ -23,6 +23,12 @@ class ChatSessionPinRequest(BaseModel):
     is_pinned: bool = Field(strict=True)
 
 
+class ChatSessionTitleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=160)
+
+
 class ChatPermissionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["read_only", "confirm", "auto"]

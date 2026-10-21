@@ -11,6 +11,7 @@
 		createChatSession,
 		deleteChatSession,
 		setChatSessionPin,
+		setChatSessionTitle,
 		listChatSessions,
 		branchChatMessage,
 		clearPendingChatSourceContexts,
@@ -129,12 +130,18 @@
 	let historyPageError = false;
 	let historyNeedsRefresh = false;
 	let pinningSessionId = '';
+	let renamingSessionId = '';
+	let renameDraft = '';
+	let renameSaving = false;
+	let renameError = '';
+	let renameDialog: HTMLDialogElement;
+	$: renameInvalid = !renameDraft.trim() || Array.from(renameDraft.trim()).length > 160 || /[\r\n\x00]/.test(renameDraft);
 	let loading = false;
 	let sending = false;
 	let submitting = false;
 	let deletingSessionId = '';
 	$: sessionNavigationDisabled =
-		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId);
+		loading || submitting || deciding || revising || Boolean(deletingSessionId || pinningSessionId) || renameSaving;
 	let progress: ChatProgress | null = null;
 	let settledExecutionPlan: ChatExecutionPlan | null = null;
 	let progressHistory: ChatProgress[] = [];
@@ -192,10 +199,8 @@
 		? ($collections.find((item) => item.id === collectionId)?.name?.trim() ?? '')
 		: '';
 	$: conversationTitle =
-		messages
-			.find((message) => message.role === 'user')
-			?.content.trim()
-			.split('\n')[0] ?? '';
+		session?.title?.trim() ??
+			messages.find((message) => message.role === 'user')?.content.trim().split('\n')[0] ?? '';
 
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
 	$: queryReviewFindingId = $page.url.searchParams.get('review_finding_id') ?? '';
@@ -323,7 +328,7 @@
 	function titleFromText(text: string) {
 		const firstLine = text.trim().split('\n')[0]?.trim() ?? '';
 		if (!firstLine) return $t('researchAgent.untitledSession');
-		return firstLine.length > 38 ? `${firstLine.slice(0, 38)}...` : firstLine;
+		return firstLine.length > 160 ? `${firstLine.slice(0, 160)}...` : firstLine;
 	}
 
 	function titleFromMessages(nextMessages: ChatMessage[]) {
@@ -340,7 +345,7 @@
 			{
 				session_id: nextSession.session_id,
 				title:
-					title ||
+					nextSession.title || title ||
 					(messages.some((message) => message.role === 'user')
 						? titleFromMessages(messages)
 						: previous?.title || $t('researchAgent.untitledSession')),
@@ -396,12 +401,8 @@
 			const previous = stored.find((entry) => entry.session_id === item.session_id);
 			const status: ChatSessionActivity =
 				item.status === 'running' || item.status === 'approval' ? item.status : 'idle';
-			const title =
-				item.session_id === session?.session_id && messages.length
-					? titleFromMessages(messages)
-					: item.title?.trim()
-						? titleFromText(item.title)
-						: previous?.title || $t('researchAgent.untitledSession');
+			const title = item.title?.trim() || (item.session_id === session?.session_id && messages.length
+				? titleFromMessages(messages) : previous?.title || $t('researchAgent.untitledSession'));
 			return {
 				session_id: item.session_id,
 				title,
@@ -902,6 +903,47 @@
 			if (isCurrentSession(generation, ownerCollectionId)) error = errorMessage(err);
 		} finally {
 			if (isCurrentSession(generation, ownerCollectionId)) pinningSessionId = '';
+		}
+	}
+
+	function beginRename(item: StoredChatSession) {
+		if (sessionNavigationDisabled) return;
+		renamingSessionId = item.session_id;
+		renameDraft = item.title;
+		renameError = '';
+		renameDialog.showModal();
+	}
+
+	function cancelRename() {
+		if (renameSaving) return;
+		renameDialog?.close();
+		renamingSessionId = '';
+		renameDraft = '';
+	}
+
+	async function saveRename() {
+		if (renameInvalid || renameSaving || !renamingSessionId) return;
+		const title = renameDraft.trim();
+		const targetId = renamingSessionId;
+		const generation = sessionGeneration;
+		const ownerCollectionId = collectionId;
+		renameSaving = true;
+		renameError = '';
+		historyGeneration += 1;
+		historyPageLoading = false;
+		try {
+			const saved = await setChatSessionTitle(targetId, title, sessionController?.signal);
+			if (!isCurrentSession(generation, ownerCollectionId)) return;
+			historyGeneration += 1;
+			writeHistory(history.map((entry) => entry.session_id === targetId
+				? { ...entry, title: saved.title || title } : entry));
+			if (session?.session_id === targetId) session = { ...session, title: saved.title };
+			renameSaving = false;
+			cancelRename();
+		} catch (err) {
+			if (isCurrentSession(generation, ownerCollectionId)) renameError = errorMessage(err);
+		} finally {
+			renameSaving = false;
 		}
 	}
 
@@ -1464,6 +1506,7 @@
 			onSwitchSession={switchSession}
 			onDeleteSession={removeSession}
 			onTogglePin={toggleSessionPin}
+			onRenameSession={(id) => { const item = history.find((entry) => entry.session_id === id); if (item) beginRename(item); }}
 			{pinningSessionId}
 			{historyHasMore}
 			{historyPageLoading}
@@ -1507,6 +1550,7 @@
 					{#each history as item (item.session_id)}
 						{@const activity = sessionActivities[item.session_id]}
 						<div class="embedded-history-item">
+
 							<button
 								class="embedded-history-select"
 								type="button"
@@ -1528,6 +1572,7 @@
 									</span>
 								{/if}
 							</button>
+							<button class="embedded-rename" type="button" disabled={sessionNavigationDisabled} aria-label={$t('researchAgent.renameSession')} title={$t('researchAgent.renameSession')} on:click={() => beginRename(item)}>{$t('researchAgent.renameSession')}</button>
 							<button
 								class="embedded-pin"
 								class:pinned={item.is_pinned}
@@ -1736,7 +1781,25 @@
 	/>
 {/if}
 
+<dialog bind:this={renameDialog} aria-labelledby="rename-title" on:cancel={(event) => { event.preventDefault(); cancelRename(); }}>
+	<form on:submit|preventDefault={saveRename}>
+		<h2 id="rename-title">{$t('researchAgent.renameSession')}</h2>
+		<label for="rename-input">{$t('researchAgent.renameInput')}</label>
+		<input id="rename-input" bind:value={renameDraft} disabled={renameSaving} aria-describedby="rename-help" aria-invalid={renameInvalid} />
+		<p id="rename-help">{$t('researchAgent.renameHelp')}</p>
+		{#if renameError}<p role="alert">{renameError}</p>{/if}
+		<button type="button" disabled={renameSaving} on:click={cancelRename}>{$t('researchAgent.cancelRename')}</button>
+		<button type="submit" disabled={renameInvalid || renameSaving}>{$t(renameSaving ? 'researchAgent.savingRename' : 'researchAgent.saveRename')}</button>
+	</form>
+</dialog>
+
 <style>
+	dialog { width: min(420px, calc(100vw - 32px)); box-sizing: border-box; border: 1px solid var(--border-default); border-radius: 12px; padding: 24px; color: var(--text-primary); background: var(--surface-card); }
+	dialog::backdrop { background: rgb(0 0 0 / 35%); }
+	dialog input { display: block; width: 100%; box-sizing: border-box; padding: 10px; margin-top: 8px; }
+	dialog p { font-size: 13px; }
+	dialog button { padding: 8px 16px; margin-right: 8px; }
+
 	.checkpoint-bar {
 		display: flex;
 		align-items: center;

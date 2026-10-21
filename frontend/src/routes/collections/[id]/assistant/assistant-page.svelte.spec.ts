@@ -726,6 +726,61 @@ describe('collections/[id]/assistant Research Agent', () => {
 		}
 	);
 
+	it.each([false, true])('renames, reloads and continues a conversation without losing its title (embedded=%s)', async (embedded) => {
+		const saved = { ...session, title: null as string | null, is_pinned: false };
+		const question = { message_id: 'msg_title', session_id: session.session_id, role: 'user' as const, content: 'Original research question', created_at: createdAt, tool_call_id: null, tool_calls: [], tool_result: null, source_contexts: [] };
+		installApi({ trajectory: {items: [question], feedback: [], pending_approval: null}, messageTurn: {status: 'completed', completion_reason:'model_answer', warnings:[], messages:[question], pending_approval:null, error_code:null} });
+		const original = fetchMock.getMockImplementation()!;
+		let fail = true;
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if(path.endsWith('/chat_1/title')) {
+				expect(method).toBe('PUT');
+				if(fail) return Promise.resolve(jsonResponse({detail:'Save unavailable'},500));
+				saved.title = JSON.parse(String(init?.body)).title;
+				return Promise.resolve(jsonResponse(saved));
+			}
+			if(path === '/api/v1/chat-sessions' && method==='GET') return Promise.resolve(jsonResponse({items:[{...saved, title:saved.title || question.content}],limit:10,offset:0}));
+			if(path === '/api/v1/chat-sessions/chat_1' && method==='GET') return Promise.resolve(jsonResponse(saved));
+			return original(input,init);
+		});
+		let view = render(Conversation, {embedded});
+		const openHistory = async () => {
+			await expect.element(browserPage.getByLabelText('Message',{exact:true})).toBeEnabled();
+			if(embedded) await browserPage.getByRole('button',{name:'Conversation history',exact:true}).click();
+			else if(window.innerWidth <= 820) await browserPage.getByRole('button',{name:'Show history',exact:true}).click();
+		};
+		await openHistory();
+		await browserPage.getByRole('button',{name:'Rename conversation',exact:true}).click();
+		const input = browserPage.getByLabelText('Conversation title',{exact:true});
+		await input.fill(' ');
+		await expect.element(browserPage.getByRole('button',{name:'Save',exact:true})).toBeDisabled();
+		await input.fill('x'.repeat(161));
+		await expect.element(browserPage.getByRole('button',{name:'Save',exact:true})).toBeDisabled();
+		await input.fill('Cancelled title');
+		await browserPage.getByRole('button',{name:'Cancel',exact:true}).click();
+		expect(saved.title).toBeNull();
+		await browserPage.getByRole('button',{name:'Rename conversation',exact:true}).click();
+		await input.fill('IN718 ductility comparison');
+		await browserPage.getByRole('button',{name:'Save',exact:true}).click();
+		await expect.element(browserPage.getByRole('alert').filter({hasText:'The request could not be completed'})).toBeInTheDocument();
+		await expect.element(input).toHaveValue('IN718 ductility comparison');
+		fail = false;
+		await browserPage.getByRole('button',{name:'Save',exact:true}).click();
+		await vi.waitFor(() => expect(document.querySelector('dialog')?.hasAttribute('open')).toBe(false));
+		expect(saved.title).toBe('IN718 ductility comparison');
+		await view.unmount();
+		localStorage.removeItem('lens.chatSessionHistory.researcher_1:col_123');
+		view = render(Conversation, {embedded});
+		await openHistory();
+		await expect.element(browserPage.getByRole('button',{name:/IN718 ductility comparison/}).first()).toBeInTheDocument();
+		await browserPage.getByLabelText('Message',{exact:true}).fill('Continue comparison');
+		await browserPage.getByRole('button',{name:'Send',exact:true}).click();
+		await expect.element(browserPage.getByLabelText('Message',{exact:true})).toBeEnabled();
+		await vi.waitFor(()=>expect(JSON.parse(localStorage.getItem('lens.chatSessionHistory.researcher_1:col_123')!)[0].title).toBe('IN718 ductility comparison'));
+	});
+
 	it.each([false, true])('pins and unpins history without switching the conversation (embedded=%s)', async (embedded) => {
 		const old = { ...session, session_id: 'chat_old', title: 'Compare LPBF conditions',
 			updated_at: '2026-08-19T07:00:00+00:00', is_pinned: false };

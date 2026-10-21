@@ -222,6 +222,7 @@ class PostgresChatRepository:
                     created_at=_datetime(record.created_at),
                     updated_at=_datetime(record.updated_at),
                     is_pinned=record.is_pinned,
+                    title=record.title,
                 )
             )
 
@@ -260,6 +261,16 @@ class PostgresChatRepository:
             row.is_pinned = is_pinned
             return _session_record(row)
 
+    async def set_session_title(
+        self, *, session_id: str, user_id: str, title: str,
+    ) -> ChatSession:
+        async with self.session_factory.begin() as database:
+            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+            if row is None or row.user_id != user_id:
+                raise FileNotFoundError("chat session not found")
+            row.title = title
+            return _session_record(row)
+
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSessionSummary, ...]:
@@ -275,7 +286,7 @@ class PostgresChatRepository:
                 .scalar_subquery()
             )
             rows = await session.execute(
-                select(ChatSessionRow, first_user_message.label("title"))
+                select(ChatSessionRow, first_user_message.label("first_message_title"))
                 .where(
                     ChatSessionRow.user_id == user_id,
                     ChatSessionRow.collection_id == collection_id,
@@ -289,7 +300,7 @@ class PostgresChatRepository:
                 .offset(offset)
             )
             return tuple(
-                ChatSessionSummary(session=_session_record(row), title=title)
+                ChatSessionSummary(session=_session_record(row), title=row.title or title)
                 for row, title in rows.all()
             )
 
@@ -755,6 +766,7 @@ def _session_record(row: ChatSessionRow) -> ChatSession:
         fork_message_id=row.fork_message_id,
         fork_position=row.fork_position,
         fork_content=row.fork_content,
+        title=row.title,
     )
 
 

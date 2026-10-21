@@ -345,6 +345,19 @@ class ChatSessionService:
         except FileNotFoundError as exc:
             raise ChatSessionNotFoundError(session_id) from exc
 
+    async def set_session_title_for_user(
+        self, session_id: str, user_id: str, *, title: str,
+    ) -> ChatSession:
+        session = await self.get_session_for_user(session_id, user_id)
+        if not title.strip() or len(title.strip()) > 160 or any(c in title for c in "\x00\r\n"):
+            raise ValueError("title must contain 1–160 characters on a single line")
+        try:
+            return await self.repository.set_session_title(
+                session_id=session.session_id, user_id=user_id, title=title.strip(),
+            )
+        except FileNotFoundError as exc:
+            raise ChatSessionNotFoundError(session_id) from exc
+
     async def list_messages_for_user(
         self,
         session_id: str,

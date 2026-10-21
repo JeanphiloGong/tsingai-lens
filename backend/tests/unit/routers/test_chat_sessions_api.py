@@ -493,3 +493,30 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
     assert "event: text_delta\ndata: {\"content\":\"你好\"}" in response.text
     assert "event: turn\n" in response.text
     assert '"status":"completed"' in response.text
+
+
+def test_title_route_validates_input_and_hides_unowned_sessions(collection_service) -> None:
+    from tests.unit.application.test_chat_session_service import _Model, _Repository, _service
+    from application.chat import ModelTurn
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="Answer")), repository)
+    session = asyncio.run(service.create_session(collection_id="col-1", user_id="user-1"))
+    app = create_app(
+        auth_session_service=_AuthService(), collection_service=collection_service,
+        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+        source_artifact_repository=object(), document_profile_repository=object(),
+        paper_map_repository=object(), objective_repository=MemoryObjectiveRepository(),
+        finding_review_repository=object(), experiment_plan_repository=object(),
+        chat_session_service=service,
+    )
+    path = f"/api/v1/chat-sessions/{session.session_id}/title"
+    with TestClient(app) as client:
+        assert client.put(path, json={"title": "New title"}).status_code == 401
+        client.cookies.set("lens_session", "browser-session")
+        for title in ("", "   ", "x" * 161, "line\nbreak", "nul\x00title"):
+            assert client.put(path, json={"title": title}).status_code == 422
+        renamed = client.put(path, json={"title": "  IN718 comparison  "})
+        assert renamed.status_code == 200
+        assert renamed.json()["title"] == "IN718 comparison"
+        assert client.get(path.removesuffix("/title")).json()["title"] == "IN718 comparison"
+        assert client.put("/api/v1/chat-sessions/missing/title", json={"title": "Other"}).status_code == 404

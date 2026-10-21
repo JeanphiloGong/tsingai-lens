@@ -105,7 +105,7 @@ class MemoryChatRepository:
         return tuple(
             ChatSessionSummary(
                 session=session,
-                title=next(
+                title=session.title or next(
                     (
                         message.content
                         for message in self.messages.get(session.session_id, ())
@@ -116,6 +116,16 @@ class MemoryChatRepository:
             )
             for session in sessions[offset : offset + limit]
         )
+
+    async def set_session_title(
+        self, *, session_id: str, user_id: str, title: str,
+    ) -> ChatSession:
+        session = self.sessions.get(session_id)
+        if session is None or session.user_id != user_id:
+            raise FileNotFoundError("chat session not found")
+        renamed = replace(session, title=title)
+        self.sessions[session_id] = renamed
+        return renamed
 
     async def set_session_pin(
         self, *, session_id: str, user_id: str, is_pinned: bool,

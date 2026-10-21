@@ -133,6 +133,10 @@ class ChatRepository(Protocol):
         self, *, session_id: str, user_id: str, is_pinned: bool,
     ) -> ChatSession: ...
 
+    async def set_session_title(
+        self, *, session_id: str, user_id: str, title: str,
+    ) -> ChatSession: ...
+
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSessionSummary, ...]: ...

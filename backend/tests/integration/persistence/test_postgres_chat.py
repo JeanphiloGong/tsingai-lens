@@ -167,6 +167,18 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         final_message,
     )
     assert await repository.read_tool_call(read_call.tool_call_id) == read_call
+    # A stale generation checkpoint must not undo a researcher's custom name.
+    await repository.set_session_title(session_id=chat.session_id, user_id=chat.user_id, title="IN718 comparison")
+    with pytest.raises(FileNotFoundError):
+        await repository.set_session_title(session_id=chat.session_id, user_id="other-user", title="Forbidden")
+    await repository.save_trajectory(
+        session=chat.update(user_id=chat.user_id, collection_id=chat.collection_id, updated_at="2026-08-19T00:00:06+00:00"),
+        messages=(user_message, assistant_call, tool_message, final_message),
+        tool_calls=(read_call,), tool_results=(read_result,),
+    )
+    assert (await repository.read_session(chat.session_id)).title == "IN718 comparison"
+    assert (await repository.list_sessions(user_id=chat.user_id, collection_id=chat.collection_id))[0].title == "IN718 comparison"
+
 
     write_message = ChatMessage.assistant_tool_calls(
         message_id="msg-5",

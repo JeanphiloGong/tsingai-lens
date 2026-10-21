@@ -311,6 +311,14 @@ export async function setChatSessionPin(sessionId: string, isPinned: boolean, si
 	})) as ChatSession;
 }
 
+export async function setChatSessionTitle(sessionId: string, title: string, signal?: AbortSignal) {
+	return (await requestJson(`${chatSessionPath(sessionId)}/title`, {
+		signal,
+		method: 'PUT',
+		body: JSON.stringify({ title })
+	})) as ChatSession;
+}
+
 export type AgentPermission = {
 	mode: 'read_only' | 'confirm' | 'auto';
 	actions: string[];

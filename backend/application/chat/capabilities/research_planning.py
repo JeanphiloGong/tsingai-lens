@@ -19,6 +19,7 @@ from application.goal.research_plan_contract import (
     ResearchPlanVariable,
 )
 from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
+from application.goal.experiment_plan_projection import experiment_plan_record
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
@@ -152,7 +153,7 @@ class InspectResearchPlansCapability:
                 context.collection_id,
                 arguments.objective_id,
             )
-            records = [item.to_record() for item in plans]
+            records = [experiment_plan_record(item) for item in plans]
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status="succeeded",
@@ -184,7 +185,7 @@ class InspectResearchPlansCapability:
                 error_code="research_plan_not_found",
                 error_message="The requested research-plan revision was not found.",
             )
-        record = plan.to_record()
+        record = experiment_plan_record(plan)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
@@ -682,7 +683,7 @@ def _saved_plan_result(
     current: ChatToolResult,
     plan: Any,
 ) -> ChatToolResult:
-    record = plan.to_record()
+    record = experiment_plan_record(plan)
     refs = [_plan_ref(context.collection_id, objective_id, record)]
     refs.extend(
         ref for ref in current.resource_refs if ref.resource_type != "research_plan_draft"

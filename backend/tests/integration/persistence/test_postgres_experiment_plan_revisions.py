@@ -11,6 +11,7 @@ from domain.goal import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
 )
+from application.goal.experiment_plan_projection import experiment_plan_from_record
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.experiment_plan_repository import (
     PostgresExperimentPlanRepository,
@@ -82,7 +83,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         },
     }
     payload.update(overrides)
-    return ExperimentPlanRecord.from_mapping(payload)
+    return experiment_plan_from_record(payload)
 
 
 async def test_postgres_round_trips_structured_plan_and_revision_lineage(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 
 ChatSessionStatus = Literal["idle", "running", "approval"]
@@ -84,23 +84,6 @@ class ChatSession:
             created_at=created_at,
             updated_at=created_at,
             status="idle",
-        )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ChatSession":
-        return cls(
-            session_id=str(payload.get("session_id") or ""),
-            user_id=str(payload.get("user_id") or ""),
-            collection_id=str(payload.get("collection_id") or ""),
-            created_at=str(payload.get("created_at") or ""),
-            updated_at=str(payload.get("updated_at") or ""),
-            root_session_id=payload.get("root_session_id"),
-            parent_session_id=payload.get("parent_session_id"),
-            fork_message_id=payload.get("fork_message_id"),
-            fork_position=payload.get("fork_position"),
-            fork_content=payload.get("fork_content"),
-            status=payload.get("status", "idle"),
-            is_pinned=payload.get("is_pinned", False),
         )
 
     def update(

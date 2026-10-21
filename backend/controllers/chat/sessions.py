@@ -45,7 +45,7 @@ from controllers.chat.schemas import (
     ChatTurnResponse,
 )
 from controllers.dependencies.auth import current_user_id
-from domain.chat import ChatSourceContext, ToolPermissionMode
+from domain.chat import ChatResourceRef, ChatSourceContext, ToolPermissionMode
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
 
@@ -473,7 +473,23 @@ async def post_chat_message(
 def _source_contexts(payload: ChatTurnRequest) -> tuple[ChatSourceContext, ...]:
     try:
         return tuple(
-            ChatSourceContext.from_mapping(item.model_dump())
+            ChatSourceContext(
+                resource_ref=ChatResourceRef(
+                    resource_type=item.resource_ref.resource_type,
+                    resource_id=item.resource_ref.resource_id,
+                    href=item.resource_ref.href,
+                ),
+                collection_id=item.collection_id,
+                document_id=item.document_id,
+                document_title=item.document_title,
+                source_kind=item.source_kind,
+                source_ref=item.source_ref,
+                page=item.page,
+                quote=item.quote,
+                heading_path=item.heading_path,
+                quote_truncated=item.quote_truncated,
+                source_digest=item.source_digest,
+            )
             for item in payload.source_contexts
         )
     except ValueError as exc:

@@ -209,9 +209,20 @@ contradicting claims, immutable revision digests and valid business transitions
 retain their domain checks.
 
 Controllers use response schemas to read attributes or compose stored metadata.
-Existing `to_record()`/`from_mapping()` methods that define canonical artifact,
-snapshot or digest inputs retain their exact formats; replacing those with
-unqualified `asdict()` would change omitted fields, defaults or digests.
+Chat controllers construct typed domain objects directly from validated request
+fields. The PostgreSQL Chat repository reconstructs those objects from rows and
+nested JSON fields; Chat domain objects do not expose `from_mapping()`.
+Application and persistence boundaries explicitly project selected source
+contexts into their wire or storage records. The application-owned
+`chat/tool_result_projection.py` preserves the stable tool-result record used
+by model messages and failure digests; Chat domain objects no longer own that
+serialization. Evaluation record mappings and experiment-plan mappings likewise
+live in `application/evaluation/record_projection.py` and
+`application/goal/experiment_plan_projection.py`. These moves preserve existing
+wire fields, persisted records and digest inputs; replacing the explicit
+projections with unqualified `asdict()` can change omitted fields or defaults.
+Core, Source and Feedback domain mapping cleanup is a separate migration and
+is not implied by these changes.
 They are not a reason to add encoders to new domain objects. Frozen dataclasses
 preserve revision identities, but nested dictionaries are still mutable; copied
 input and output payloads isolate the snapshots from caller-owned dictionaries.

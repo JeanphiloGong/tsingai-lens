@@ -24,6 +24,7 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.evaluation import FindingCuration, FindingFeedback
+from application.evaluation.record_projection import finding_curation_from_record, finding_feedback_from_record
 from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 
@@ -827,7 +828,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
         "finding_id": "finding-1",
     }
     await service.review_repository.upsert_curation(
-        FindingCuration.from_mapping(
+        finding_curation_from_record(
             {
                 "curation_id": "curation-1",
                 **identity,
@@ -838,7 +839,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
         )
     )
     await service.review_repository.upsert_feedback(
-        FindingFeedback.from_mapping(
+        finding_feedback_from_record(
             {
                 "feedback_id": "feedback-1",
                 **identity,
@@ -858,7 +859,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
     assert rejected["training_messages"] == []
 
     await service.review_repository.upsert_curation(
-        FindingCuration.from_mapping(
+        finding_curation_from_record(
             {
                 "curation_id": "curation-1",
                 **identity,

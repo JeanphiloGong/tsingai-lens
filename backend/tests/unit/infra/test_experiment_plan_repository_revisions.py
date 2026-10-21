@@ -6,6 +6,7 @@ from domain.goal import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
 )
+from application.goal.experiment_plan_projection import experiment_plan_from_record
 from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
@@ -37,7 +38,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         "structured_plan": {"hypothesis": "Initial hypothesis"},
     }
     payload.update(overrides)
-    return ExperimentPlanRecord.from_mapping(payload)
+    return experiment_plan_from_record(payload)
 
 
 async def test_append_preserves_history_and_lists_only_the_leaf_revision() -> None:

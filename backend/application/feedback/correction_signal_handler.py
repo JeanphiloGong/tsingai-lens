@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from application.feedback.analysis_handler import (
     AnalysisInputError,
+    feedback_message_record,
     conversation_before_answer,
     read_chat_coverage_audit,
 )
@@ -195,10 +196,10 @@ class CorrectionSignalAnalysisHandler:
         }
         input_payload = {
             "signal": signal.to_record(),
-            "anchor": anchor.to_record(),
+            "anchor": feedback_message_record(anchor),
             "coverage": asdict(coverage),
             "related_message_ids": [item.message_id for item in related_messages],
-            "corrected_answer": corrected.to_record() if corrected else None,
+            "corrected_answer": feedback_message_record(corrected) if corrected else None,
             "corrected_coverage": (
                 asdict(corrected_coverage) if corrected_coverage else None
             ),

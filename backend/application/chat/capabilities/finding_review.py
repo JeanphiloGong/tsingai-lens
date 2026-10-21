@@ -11,6 +11,7 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from application.evaluation.record_projection import finding_curation_record, finding_feedback_record
 from domain.core import Finding
 from domain.core.scientific_fact import SCIENTIFIC_RESULT_DIRECTIONS
 
@@ -160,7 +161,7 @@ class RecordFindingFeedbackCapability:
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
-            data=feedback.to_record(),
+            data=finding_feedback_record(feedback),
             resource_refs=(
                 _finding_ref(
                     context.collection_id,
@@ -218,7 +219,7 @@ class CurateFindingCapability:
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
-            data=curation.to_record(),
+            data=finding_curation_record(curation),
             resource_refs=(
                 _finding_ref(
                     context.collection_id,

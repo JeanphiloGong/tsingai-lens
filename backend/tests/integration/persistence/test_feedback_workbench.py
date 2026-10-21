@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from application.chat.session_service import ChatSessionService
+from application.chat.tool_result_projection import tool_result_record
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
 from application.feedback.dataset_snapshot_service import (
@@ -459,7 +460,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
         tool_results=(failed_result,),
     )
 
-    result_digest = tool_result_digest(failed_result.to_record())
+    result_digest = tool_result_digest(tool_result_record(failed_result))
     enqueue_kwargs = {
         "session_id": SESSION_ID,
         "tool_call_id": call.tool_call_id,

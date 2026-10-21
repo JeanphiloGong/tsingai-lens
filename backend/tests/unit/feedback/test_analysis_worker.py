@@ -234,3 +234,28 @@ async def test_worker_rejects_unknown_payload_and_keeps_no_result() -> None:
     assert result.status == "failed"
     assert jobs.finished == ("failed", "unsupported_feedback_analysis_job")
     assert not cases.results
+
+
+def test_feedback_message_snapshot_keeps_digest_shape_without_approval_metadata():
+    from application.feedback.analysis_handler import feedback_message_record
+    from domain.chat import ChatToolRequest
+
+    message = ChatMessage(
+        message_id="answer-1", session_id="session-1", role="assistant",
+        content="Inspect the reported tensile conditions.", created_at="2026-10-20T00:00:00+00:00",
+        tool_calls=(ChatToolRequest(
+            tool_call_id="call-1", name="read_source", arguments={"pages": [3]},
+            position=0, decision_user_id="reviewer-1", authorization_revision=2,
+        ),),
+    )
+    snapshot = feedback_message_record(message)
+    assert snapshot == {
+        "message_id": "answer-1", "session_id": "session-1", "role": "assistant",
+        "content": "Inspect the reported tensile conditions.",
+        "created_at": "2026-10-20T00:00:00+00:00", "tool_call_id": None,
+        "tool_calls": [{"tool_call_id": "call-1", "name": "read_source",
+                        "arguments": {"pages": [3]}, "position": 0}],
+        "tool_result": None, "source_contexts": [],
+    }
+    snapshot["tool_calls"][0]["arguments"]["pages"].append(4)
+    assert message.tool_calls[0].arguments == {"pages": [3]}

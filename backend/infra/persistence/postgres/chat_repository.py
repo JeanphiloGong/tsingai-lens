@@ -6,6 +6,7 @@ import json
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
+from typing import Any, Mapping
 from uuid import uuid4
 
 from sqlalchemy import delete, func, or_, select, update
@@ -22,7 +23,9 @@ from application.repositories.chat_repository import (
 )
 from domain.chat import (
     ChatMessage,
+    ChatResourceRef,
     ChatSession,
+    ChatSourceContext,
     ChatToolCall,
     ChatToolRequest,
     ChatToolResult,
@@ -555,7 +558,7 @@ class PostgresChatRepository:
                         content=message.content,
                         tool_call_id=message.tool_call_id,
                         source_contexts=[
-                            item.to_record() for item in message.source_contexts
+                            _source_context_payload(item) for item in message.source_contexts
                         ],
                         created_at=_datetime(message.created_at),
                     )
@@ -756,26 +759,24 @@ def _session_record(row: ChatSessionRow) -> ChatSession:
 
 
 def _call_record(row: ChatToolCallRow) -> ChatToolCall:
-    return ChatToolCall.from_mapping(
-        {
-            "tool_call_id": row.tool_call_id,
-            "session_id": row.session_id,
-            "assistant_message_id": row.assistant_message_id,
-            "position": row.position,
-            "name": row.name,
-            "arguments": dict(row.arguments),
-            "arguments_digest": row.arguments_digest,
-            "risk": row.risk,
-            "status": row.status,
-            "started_at": _optional_iso(row.started_at),
-            "finished_at": _optional_iso(row.finished_at),
-            "error_code": row.error_code,
-            "decision_user_id": row.decision_user_id,
-            "decision_arguments_digest": row.decision_arguments_digest,
-            "decided_at": _optional_iso(row.decided_at),
-            "decision_basis": row.decision_basis,
-            "authorization_revision": row.authorization_revision,
-        }
+    return ChatToolCall(
+        tool_call_id=row.tool_call_id,
+        session_id=row.session_id,
+        assistant_message_id=row.assistant_message_id,
+        position=row.position,
+        name=row.name,
+        arguments=dict(row.arguments),
+        arguments_digest=row.arguments_digest,
+        risk=row.risk,
+        status=row.status,
+        started_at=_optional_iso(row.started_at),
+        finished_at=_optional_iso(row.finished_at),
+        error_code=row.error_code,
+        decision_user_id=row.decision_user_id,
+        decision_arguments_digest=row.decision_arguments_digest,
+        decided_at=_optional_iso(row.decided_at),
+        decision_basis=row.decision_basis,
+        authorization_revision=row.authorization_revision,
     )
 
 
@@ -784,18 +785,19 @@ def _message_record(
     result: ChatToolCallRow | None,
     requests: tuple[ChatToolRequest, ...],
 ) -> ChatMessage:
-    return ChatMessage.from_mapping(
-        {
-            "message_id": row.message_id,
-            "session_id": row.session_id,
-            "role": row.role,
-            "content": row.content,
-            "created_at": _iso(row.created_at),
-            "tool_call_id": row.tool_call_id,
-            "tool_calls": [request.to_record(include_audit=True) for request in requests],
-            "tool_result": _result_record(result) if result is not None else None,
-            "source_contexts": list(row.source_contexts),
-        }
+    return ChatMessage(
+        message_id=row.message_id,
+        session_id=row.session_id,
+        role=row.role,
+        content=row.content,
+        created_at=_iso(row.created_at),
+        tool_call_id=row.tool_call_id,
+        tool_calls=requests,
+        tool_result=_tool_result_record(result) if result is not None else None,
+        source_contexts=tuple(
+            _source_context_record(item)
+            for item in (row.source_contexts or ())
+        ),
     )
 
 
@@ -835,16 +837,75 @@ def _model_call_record(row: ChatModelCallRow) -> ChatModelCall:
     )
 
 
-def _result_record(row: ChatToolCallRow) -> dict:
+def _resource_ref_record(record: Mapping[str, Any]) -> ChatResourceRef:
+    return ChatResourceRef(
+        resource_type=str(record.get("resource_type") or ""),
+        resource_id=str(record.get("resource_id") or ""),
+        href=(str(record["href"]) if record.get("href") is not None else None),
+    )
+
+
+def _source_context_record(record: Mapping[str, Any]) -> ChatSourceContext:
+    resource = record.get("resource_ref")
+    if not isinstance(resource, Mapping):
+        raise ValueError("source context requires resource_ref")
+    return ChatSourceContext(
+        resource_ref=_resource_ref_record(resource),
+        collection_id=str(record.get("collection_id") or ""),
+        document_id=str(record.get("document_id") or ""),
+        document_title=str(record.get("document_title") or ""),
+        source_kind=str(record.get("source_kind") or ""),
+        source_ref=str(record.get("source_ref") or ""),
+        page=(int(record["page"]) if record.get("page") is not None else None),
+        quote=str(record.get("quote") or ""),
+        heading_path=(
+            str(record["heading_path"])
+            if record.get("heading_path") is not None
+            else None
+        ),
+        quote_truncated=bool(record.get("quote_truncated", False)),
+        source_digest=(
+            str(record["source_digest"])
+            if record.get("source_digest") is not None
+            else None
+        ),
+    )
+
+
+def _source_context_payload(source: ChatSourceContext) -> dict[str, Any]:
     return {
-        "tool_call_id": row.tool_call_id,
-        "status": row.result_status,
-        "data": dict(row.result_data or {}),
-        "resource_refs": list(row.result_resource_refs or []),
-        "warnings": list(row.result_warnings or []),
-        "error_code": row.result_error_code,
-        "error_message": row.result_error_message,
+        "resource_ref": {
+            "resource_type": source.resource_ref.resource_type,
+            "resource_id": source.resource_ref.resource_id,
+            "href": source.resource_ref.href,
+        },
+        "collection_id": source.collection_id,
+        "document_id": source.document_id,
+        "document_title": source.document_title,
+        "source_kind": source.source_kind,
+        "source_ref": source.source_ref,
+        "page": source.page,
+        "quote": source.quote,
+        "heading_path": source.heading_path,
+        "quote_truncated": source.quote_truncated,
+        "source_digest": source.source_digest,
     }
+
+
+def _tool_result_record(row: ChatToolCallRow) -> ChatToolResult:
+    return ChatToolResult(
+        tool_call_id=row.tool_call_id,
+        status=row.result_status,
+        data=dict(row.result_data or {}),
+        resource_refs=tuple(
+            _resource_ref_record(item)
+            for item in (row.result_resource_refs or ())
+            if isinstance(item, Mapping)
+        ),
+        warnings=tuple(str(item) for item in (row.result_warnings or ())),
+        error_code=row.result_error_code,
+        error_message=row.result_error_message,
+    )
 
 
 def _datetime(value: str | datetime) -> datetime:

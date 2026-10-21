@@ -4,6 +4,10 @@ from typing import Any, Mapping
 
 from application.source.collection_service import CollectionService
 from domain.evaluation import EvaluationGoldItem, EvaluationGoldSet
+from application.evaluation.record_projection import (
+    evaluation_gold_item_from_record,
+    evaluation_gold_set_from_record,
+)
 from application.repositories.evaluation_repository import EvaluationRepository
 
 
@@ -34,7 +38,7 @@ class EvaluationGoldService:
         collection_document_ids = await self._collection_document_ids(
             collection_id
         )
-        gold_set = EvaluationGoldSet.from_mapping(
+        gold_set = evaluation_gold_set_from_record(
             {
                 "gold_id": gold_id,
                 "collection_id": collection_id,
@@ -63,7 +67,7 @@ class EvaluationGoldService:
     ) -> EvaluationGoldItem:
         payload = dict(item)
         payload["gold_id"] = gold_id
-        return EvaluationGoldItem.from_mapping(payload)
+        return evaluation_gold_item_from_record(payload)
 
     async def _collection_document_ids(self, collection_id: str) -> set[str]:
         keys: set[str] = set()

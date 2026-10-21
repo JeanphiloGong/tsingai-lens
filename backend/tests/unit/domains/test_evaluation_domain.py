@@ -9,10 +9,26 @@ from domain.evaluation import (
     EvaluationRun,
     EvaluationScore,
 )
+from application.evaluation.record_projection import (
+    evaluation_failure_from_record,
+    evaluation_failure_record,
+    evaluation_gold_item_from_record,
+    evaluation_gold_item_record,
+    evaluation_gold_set_from_record,
+    evaluation_gold_set_record,
+    evaluation_prediction_item_from_record,
+    evaluation_prediction_item_record,
+    evaluation_prediction_snapshot_from_record,
+    evaluation_prediction_snapshot_record,
+    evaluation_run_from_record,
+    evaluation_run_record,
+    evaluation_score_from_record,
+    evaluation_score_record,
+)
 
 
 def test_evaluation_gold_records_round_trip_collection_bound_contracts():
-    gold_set = EvaluationGoldSet.from_mapping(
+    gold_set = evaluation_gold_set_from_record(
         {
             "gold_id": "lpbf_316l_gold_v1",
             "collection_id": "col_gold",
@@ -23,7 +39,7 @@ def test_evaluation_gold_records_round_trip_collection_bound_contracts():
             "metadata": {"domain": "materials"},
         }
     )
-    gold_item = EvaluationGoldItem.from_mapping(
+    gold_item = evaluation_gold_item_from_record(
         {
             "gold_item_id": "gold-measurement-1",
             "gold_id": gold_set.gold_id,
@@ -40,14 +56,14 @@ def test_evaluation_gold_records_round_trip_collection_bound_contracts():
         }
     )
 
-    assert EvaluationGoldSet.from_mapping(gold_set.to_record()) == gold_set
-    assert EvaluationGoldItem.from_mapping(gold_item.to_record()) == gold_item
+    assert evaluation_gold_set_from_record(evaluation_gold_set_record(gold_set)) == gold_set
+    assert evaluation_gold_item_from_record(evaluation_gold_item_record(gold_item)) == gold_item
     assert gold_set.collection_id == "col_gold"
     assert gold_item.family == "measurement_results"
 
 
 def test_prediction_snapshot_and_evaluation_run_round_trip_failures():
-    prediction_item = EvaluationPredictionItem.from_mapping(
+    prediction_item = evaluation_prediction_item_from_record(
         {
             "item_id": "pred-measurement-1",
             "document_id": "doc-1",
@@ -62,7 +78,7 @@ def test_prediction_snapshot_and_evaluation_run_round_trip_failures():
             "confidence": "0.8",
         }
     )
-    snapshot = EvaluationPredictionSnapshot.from_mapping(
+    snapshot = evaluation_prediction_snapshot_from_record(
         {
             "snapshot_id": "pred-1",
             "collection_id": "col_gold",
@@ -70,10 +86,10 @@ def test_prediction_snapshot_and_evaluation_run_round_trip_failures():
             "fact_source": "objective_first",
             "system_context": {"model": "qwen"},
             "artifact_counts": {"measurement_results": "1"},
-            "items": [prediction_item.to_record()],
+            "items": [evaluation_prediction_item_record(prediction_item)],
         }
     )
-    failure = EvaluationFailure.from_mapping(
+    failure = evaluation_failure_from_record(
         {
             "failure_id": "fail-1",
             "evaluation_run_id": "eval-1",
@@ -90,7 +106,7 @@ def test_prediction_snapshot_and_evaluation_run_round_trip_failures():
             "source_refs": [{"anchor_id": "anc-1"}],
         }
     )
-    run = EvaluationRun.from_mapping(
+    run = evaluation_run_from_record(
         {
             "evaluation_run_id": "eval-1",
             "collection_id": "col_gold",
@@ -112,12 +128,12 @@ def test_prediction_snapshot_and_evaluation_run_round_trip_failures():
                     "denominator": 1,
                 }
             ],
-            "failures": [failure.to_record()],
+            "failures": [evaluation_failure_record(failure)],
         }
     )
 
-    assert EvaluationPredictionSnapshot.from_mapping(snapshot.to_record()) == snapshot
-    assert EvaluationRun.from_mapping(run.to_record()) == run
+    assert evaluation_prediction_snapshot_from_record(evaluation_prediction_snapshot_record(snapshot)) == snapshot
+    assert evaluation_run_from_record(evaluation_run_record(run)) == run
     assert snapshot.items[0].confidence == 0.8
     assert run.failures[0].likely_layer == "core_extraction"
-    assert run.scores[0] == EvaluationScore.from_mapping(run.scores[0].to_record())
+    assert run.scores[0] == evaluation_score_from_record(evaluation_score_record(run.scores[0]))

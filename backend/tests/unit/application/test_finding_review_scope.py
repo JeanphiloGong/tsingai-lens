@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from domain.evaluation import FindingFeedback
 
 import pytest
 
@@ -7,6 +8,7 @@ from application.chat.capabilities.published_findings import InspectPublishedFin
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from dataclasses import replace
 from application.chat.context_builder import ChatContextBuilder
+from application.chat.tool_result_projection import tool_result_record
 import json
 
 
@@ -32,7 +34,7 @@ async def test_child_empty_feedback_does_not_erase_parent_review():
         }}
 
     async def feedback(**key):
-        return [SimpleNamespace(to_record=lambda: {"note": "Original overclaim"})] if key["finding_id"] == "parent" else []
+        return [FindingFeedback(feedback_id="feedback-1", collection_id="col-1", objective_id="objective-1", analysis_version=1, finding_id="parent", review_status="incorrect", issue_type="overclaim", note="Original overclaim", reviewer="user-1", created_at="2026-09-06T00:00:00+00:00")] if key["finding_id"] == "parent" else []
 
     capability = InspectPublishedFindingCapability(
         collection_service=SimpleNamespace(get_collection_for_user=AsyncMock()),
@@ -52,7 +54,8 @@ async def test_child_empty_feedback_does_not_erase_parent_review():
         "collection_id": "col-1", "objective_id": "objective-1", "analysis_version": 3,
         "finding_id": "child", "includes_ancestor_reviews": False,
     }
-    assert parent.data["feedback_records"] == [{"note": "Original overclaim"}]
+    assert len(parent.data["feedback_records"]) == 1
+    assert parent.data["feedback_records"][0]["note"] == "Original overclaim"
     assert parent.data["review_scope"]["analysis_version"] == 1
 
 
@@ -80,7 +83,7 @@ async def test_large_finding_evidence_is_paged_without_losing_complete_records()
         assert result.data["finding"] == finding
         assert ChatContextBuilder.estimate_tokens({
             "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
+            "content": json.dumps(tool_result_record(result), ensure_ascii=True, separators=(",", ":")),
         }) <= _context().max_result_tokens
         collected.extend(result.data["evidence"])
         next_offset = result.data["next_evidence_offset"]

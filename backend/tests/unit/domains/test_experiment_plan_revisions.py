@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from domain.goal import ExperimentPlanRecord
+from application.goal.experiment_plan_projection import experiment_plan_from_record, experiment_plan_record
 
 
 def _plan_payload(**overrides):
@@ -25,7 +26,7 @@ def _plan_payload(**overrides):
 
 
 def test_legacy_plan_defaults_to_an_unstructured_first_revision() -> None:
-    plan = ExperimentPlanRecord.from_mapping(_plan_payload())
+    plan = experiment_plan_from_record(_plan_payload())
 
     assert plan.plan_version == 1
     assert plan.parent_plan_id is None
@@ -49,7 +50,7 @@ def test_structured_plan_round_trip_preserves_the_approved_payload() -> None:
         "controls": ["powder batch", "layer thickness"],
         "replicates": 3,
     }
-    plan = ExperimentPlanRecord.from_mapping(
+    plan = experiment_plan_from_record(
         _plan_payload(
             structured_plan=structured_plan,
             updated_by="researcher-1",
@@ -57,16 +58,16 @@ def test_structured_plan_round_trip_preserves_the_approved_payload() -> None:
     )
 
     assert plan.structured_plan == structured_plan
-    assert plan.to_record()["structured_plan"] == structured_plan
-    assert plan.to_record()["updated_by"] == "researcher-1"
+    assert experiment_plan_record(plan)["structured_plan"] == structured_plan
+    assert experiment_plan_record(plan)["updated_by"] == "researcher-1"
 
 
 def test_later_revision_requires_an_immediate_parent_and_actor() -> None:
     with pytest.raises(ValueError, match="parent_plan_id"):
-        ExperimentPlanRecord.from_mapping(_plan_payload(plan_version=2))
+        experiment_plan_from_record(_plan_payload(plan_version=2))
 
     with pytest.raises(ValueError, match="updated_by"):
-        ExperimentPlanRecord.from_mapping(
+        experiment_plan_from_record(
             _plan_payload(
                 plan_id="plan-v2",
                 plan_version=2,
@@ -77,24 +78,23 @@ def test_later_revision_requires_an_immediate_parent_and_actor() -> None:
 
 def test_first_revision_cannot_point_to_a_parent() -> None:
     with pytest.raises(ValueError, match="first revision"):
-        ExperimentPlanRecord.from_mapping(
+        experiment_plan_from_record(
             _plan_payload(parent_plan_id="another-plan")
         )
 
 
 def test_plan_version_rejects_non_integral_values() -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        ExperimentPlanRecord.from_mapping(_plan_payload(plan_version=1.5))
+        experiment_plan_from_record(_plan_payload(plan_version=1.5))
 
 
 def test_next_revision_is_direct_validated_and_copies_structured_content(monkeypatch) -> None:
-    plan = ExperimentPlanRecord.from_mapping(_plan_payload())
+    plan = experiment_plan_from_record(_plan_payload())
     structured = {"variables": [{"name": "laser power", "levels": [100, 200]}]}
 
     def reject_serialization(_self):
         pytest.fail("revision must not serialize the existing Plan")
 
-    monkeypatch.setattr(ExperimentPlanRecord, "to_record", reject_serialization)
     revision = plan.next_revision(
         plan_id="plan-v2", title=" Reviewed matrix ", content=" Approved levels. ",
         status="ready_for_review", structured_plan=structured,

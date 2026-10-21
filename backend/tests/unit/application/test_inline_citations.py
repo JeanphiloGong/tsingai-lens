@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from domain.chat import ChatMessage, ChatResourceRef, ChatToolCall, ChatToolResult, ToolRisk
+from domain.chat import ChatMessage, ChatResourceRef, ChatToolCall, ChatToolRequest, ChatToolResult, ToolRisk
 
 from application.chat.inline_citations import format_inline_citations, format_message_citations
 
@@ -204,16 +204,13 @@ def test_unknown_internal_source_id_is_not_exposed() -> None:
 
 def test_historical_assistant_message_is_projected_with_its_source_context() -> None:
     source = _read_result()
-    request = ChatMessage.from_mapping({
-        "message_id": "request-1",
-        "session_id": "session-1",
-        "role": "assistant",
-        "content": "",
-        "created_at": "2026-09-28T00:00:00Z",
-        "tool_calls": [{
-            "tool_call_id": "call-1", "name": "inspect_table", "arguments": {}, "position": 0,
-        }],
-    })
+    request = ChatMessage.assistant_tool_calls(
+        message_id="request-1",
+        session_id="session-1",
+        content="",
+        created_at="2026-09-28T00:00:00Z",
+        tool_calls=(ChatToolRequest("call-1", "inspect_table", {}, 0),),
+    )
     assistant = ChatMessage.assistant(
         message_id="answer-1",
         session_id="session-1",

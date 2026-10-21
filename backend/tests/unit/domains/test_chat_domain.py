@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 import pytest
 
@@ -17,14 +17,14 @@ from domain.chat import (
 )
 
 
-def test_ordered_requests_round_trip_and_reject_gaps_and_duplicates() -> None:
+def test_ordered_requests_preserve_order_and_reject_gaps_and_duplicates() -> None:
     first = ChatToolRequest("call-1", "read_source", {"document_id": "paper-1"}, 0)
     second = ChatToolRequest("call-2", "read_source", {"document_id": "paper-2"}, 1)
     message = ChatMessage.assistant_tool_calls(
         message_id="msg-1", session_id="chat-1", content="",
         created_at="2026-09-08T00:00:00+00:00", tool_calls=(first, second),
     )
-    assert ChatMessage.from_mapping(message.to_record()) == message
+    assert message.tool_calls == (first, second)
     for bad in (replace(second, position=2), replace(second, tool_call_id="call-1")):
         with pytest.raises(ValueError):
             replace(message, tool_calls=(first, bad))
@@ -32,7 +32,7 @@ def test_ordered_requests_round_trip_and_reject_gaps_and_duplicates() -> None:
         replace(message, tool_call_id="call-1")
 
 
-def test_chat_session_round_trips_immutable_owner_and_collection() -> None:
+def test_chat_session_preserves_immutable_owner_and_collection() -> None:
     session = ChatSession.create(
         session_id="chat-1",
         user_id="user-1",
@@ -40,7 +40,8 @@ def test_chat_session_round_trips_immutable_owner_and_collection() -> None:
         created_at="2026-08-19T00:00:00+00:00",
     )
 
-    assert ChatSession.from_mapping(asdict(session)) == session
+    assert session.user_id == "user-1"
+    assert session.collection_id == "col-1"
     with pytest.raises(ValueError, match="session identity cannot be reassigned"):
         session.update(
             user_id="user-2",
@@ -161,7 +162,7 @@ def test_queued_tool_result_requires_a_traceable_resource() -> None:
         ),
     )
 
-    assert ChatToolResult.from_mapping(queued.to_record()) == queued
+    assert queued.resource_refs[0].resource_id == "objective-1:1"
 
 
 def test_tool_result_and_message_copy_mutable_input() -> None:
@@ -197,7 +198,7 @@ def test_resource_reference_requires_stable_identity() -> None:
         ChatResourceRef(resource_type="document", resource_id=" ")
 
 
-def test_user_message_round_trips_traceable_source_context() -> None:
+def test_user_message_preserves_traceable_source_context() -> None:
     source_context = ChatSourceContext(
         resource_ref=ChatResourceRef(
             resource_type="source",
@@ -225,8 +226,8 @@ def test_user_message_round_trips_traceable_source_context() -> None:
         source_contexts=(source_context,),
     )
 
-    assert ChatMessage.from_mapping(message.to_record()) == message
     assert message.source_contexts == (source_context,)
+    assert message.source_contexts[0].quote == "Conductivity improved to 12 mS/cm under EIS."
 
 
 def test_source_context_rejects_an_invalid_source_digest() -> None:

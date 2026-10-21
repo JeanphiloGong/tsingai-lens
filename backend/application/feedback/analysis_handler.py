@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, Protocol
 from uuid import uuid4
 
+from application.chat.source_context_projection import source_context_record
+from application.chat.tool_result_projection import tool_result_record
 from application.feedback.source_coverage import (
     ChatCoverageAudit,
     build_evidence_coverage,
@@ -154,7 +157,7 @@ class FeedbackAnalysisHandler:
                 "response_digest": feedback.response_digest,
             },
             "session_id": feedback.session_id,
-            "answer": answer.to_record(),
+            "answer": feedback_message_record(answer),
             "coverage": asdict(coverage),
         }
         input_digest = sha256(
@@ -293,3 +296,22 @@ __all__ = [
     "RuleBasedFeedbackAnalysisEngine",
     "read_chat_coverage_audit",
 ]
+
+
+def feedback_message_record(message: ChatMessage) -> dict[str, Any]:
+    """Snapshot the message for the stable feedback input digest, excluding approvals."""
+    return {
+        "message_id": message.message_id,
+        "session_id": message.session_id,
+        "role": message.role.value,
+        "content": message.content,
+        "created_at": message.created_at,
+        "tool_call_id": message.tool_call_id,
+        "tool_calls": [
+            {"tool_call_id": call.tool_call_id, "name": call.name,
+             "arguments": deepcopy(dict(call.arguments)), "position": call.position}
+            for call in message.tool_calls
+        ],
+        "tool_result": tool_result_record(message.tool_result) if message.tool_result is not None else None,
+        "source_contexts": [source_context_record(source) for source in message.source_contexts],
+    }

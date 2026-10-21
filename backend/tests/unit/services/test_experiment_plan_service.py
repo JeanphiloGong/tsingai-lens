@@ -7,6 +7,7 @@ from application.goal.experiment_plan_service import (
     ExperimentPlanService,
 )
 from domain.goal import ExperimentPlanRecord
+from application.goal.experiment_plan_projection import experiment_plan_from_record
 from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
@@ -73,7 +74,7 @@ def _structured_plan(hypothesis: str) -> dict:
 
 
 def _historical_plan() -> ExperimentPlanRecord:
-    return ExperimentPlanRecord.from_mapping(
+    return experiment_plan_from_record(
         {
             "plan_id": "exp_historical",
             "collection_id": "col_1",

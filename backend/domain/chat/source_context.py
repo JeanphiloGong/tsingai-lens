@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
-from typing import Any, Mapping
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from domain.chat.resource_ref import ChatResourceRef, _required_text
@@ -64,49 +63,5 @@ class ChatSourceContext:
             )
             if parsed.scheme or parsed.netloc or parsed.path != expected_path:
                 raise ValueError("source context href does not match its document")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ChatSourceContext":
-        resource_payload = payload.get("resource_ref")
-        if not isinstance(resource_payload, Mapping):
-            raise ValueError("source context requires resource_ref")
-        page = payload.get("page")
-        return cls(
-            resource_ref=ChatResourceRef.from_mapping(resource_payload),
-            collection_id=str(payload.get("collection_id") or ""),
-            document_id=str(payload.get("document_id") or ""),
-            document_title=str(payload.get("document_title") or ""),
-            source_kind=str(payload.get("source_kind") or ""),
-            source_ref=str(payload.get("source_ref") or ""),
-            page=int(page) if page is not None else None,
-            quote=str(payload.get("quote") or ""),
-            heading_path=(
-                str(payload["heading_path"])
-                if payload.get("heading_path") is not None
-                else None
-            ),
-            quote_truncated=bool(payload.get("quote_truncated", False)),
-            source_digest=(
-                str(payload["source_digest"])
-                if payload.get("source_digest") is not None
-                else None
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "resource_ref": asdict(self.resource_ref),
-            "collection_id": self.collection_id,
-            "document_id": self.document_id,
-            "document_title": self.document_title,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "page": self.page,
-            "quote": self.quote,
-            "heading_path": self.heading_path,
-            "quote_truncated": self.quote_truncated,
-            "source_digest": self.source_digest,
-        }
-
 
 __all__ = ["ChatSourceContext"]

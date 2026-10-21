@@ -6,6 +6,7 @@ import pytest
 
 from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
 from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
+from application.chat.tool_result_projection import tool_result_record
 from application.repositories.analysis_job_repository import (
     TOOL_FAILURE_JOB_TYPE,
     AnalysisJob,
@@ -127,7 +128,7 @@ def _fixture():
         content="I could not inspect the source.", created_at="2026-09-25T00:00:03+00:00",
     )
     messages = (assistant, result_message, answer)
-    digest = tool_result_digest(result.to_record())
+    digest = tool_result_digest(tool_result_record(result))
     job = AnalysisJob(
         job_id="job-tool-1", job_type=TOOL_FAILURE_JOB_TYPE, payload_version=1,
         payload={
@@ -170,7 +171,7 @@ async def test_worker_cancels_when_result_is_no_longer_a_failure():
         message_id=messages[1].message_id, session_id=session.session_id,
         result=successful, created_at=messages[1].created_at,
     ), messages[2])
-    changed_digest = tool_result_digest(successful.to_record())
+    changed_digest = tool_result_digest(tool_result_record(successful))
     changed_job = replace(
         job,
         payload={**job.payload, "result_digest": changed_digest},

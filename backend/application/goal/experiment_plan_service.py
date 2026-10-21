@@ -11,6 +11,10 @@ from application.goal.protocol_contract import (
 )
 from application.goal.research_plan_contract import ResearchPlanStructure
 from domain.goal import ExperimentPlanRecord
+from application.goal.experiment_plan_projection import (
+    experiment_plan_from_record,
+    experiment_plan_record,
+)
 from application.repositories.experiment_plan_repository import ExperimentPlanRepository
 
 
@@ -47,7 +51,7 @@ class ExperimentPlanService:
         created_by: str | None = None,
     ) -> ExperimentPlanRecord:
         now = _now_iso()
-        plan = ExperimentPlanRecord.from_mapping(
+        plan = experiment_plan_from_record(
             {
                 "plan_id": _plan_id(
                     collection_id,
@@ -118,7 +122,7 @@ class ExperimentPlanService:
             )
 
         now = _now_iso()
-        plan = ExperimentPlanRecord.from_mapping(
+        plan = experiment_plan_from_record(
             {
                 "plan_id": _plan_id(
                     collection_id,
@@ -313,13 +317,13 @@ class ExperimentPlanService:
                 objective_id=plan.objective_id,
                 source_findings=source_findings,
             )
-        payload = plan.to_record()
+        payload = experiment_plan_record(plan)
         payload["metadata"] = {
             **dict(plan.metadata),
             "source_validity": validity,
             "source_validity_reasons": reasons,
         }
-        return ExperimentPlanRecord.from_mapping(payload)
+        return experiment_plan_from_record(payload)
 
 
 def _now_iso() -> str:

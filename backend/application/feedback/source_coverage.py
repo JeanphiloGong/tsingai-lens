@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from application.chat.capability_policy import complete_source_reads
+from application.chat.source_context_projection import source_context_record
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.feedback import EvidenceCoverage
 
@@ -116,7 +117,7 @@ def build_evidence_coverage(
 
     if active_user is not None:
         for source in active_user.source_contexts:
-            add_requested(source.to_record(), origin="user_selected_context")
+            add_requested(source_context_record(source), origin="user_selected_context")
 
     observations: list[_SourceObservation] = []
     successful_results: dict[str, list[Mapping[str, Any]]] = {}

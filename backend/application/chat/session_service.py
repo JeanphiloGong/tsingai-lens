@@ -26,6 +26,7 @@ from application.chat.inline_citations import (
     format_inline_citations,
     format_message_citations,
 )
+from application.chat.tool_result_projection import tool_result_record
 from application.repositories.analysis_job_repository import (
     AnalysisJobRepository,
     correction_signal_idempotency_key,
@@ -923,7 +924,7 @@ class ChatSessionService:
                 or result_message.session_id != session.session_id
             ):
                 continue
-            digest = tool_result_digest(tool_result.to_record())
+            digest = tool_result_digest(tool_result_record(tool_result))
             key = tool_failure_idempotency_key(
                 session_id=session.session_id,
                 tool_call_id=call.tool_call_id,

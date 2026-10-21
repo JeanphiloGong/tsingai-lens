@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from application.feedback.analysis_handler import AnalysisInputError
+from application.chat.tool_result_projection import tool_result_record
 from application.repositories.analysis_job_repository import (
     TOOL_FAILURE_JOB_TYPE,
     TOOL_FAILURE_PAYLOAD_VERSION,
@@ -148,7 +149,7 @@ class ToolFailureAnalysisHandler:
         if result_message.tool_call_id != call.tool_call_id or result_message.tool_result is None:
             raise AnalysisInputError("tool_failure_identity_mismatch")
         result = result_message.tool_result
-        actual_digest = tool_result_digest(result.to_record())
+        actual_digest = tool_result_digest(tool_result_record(result))
         if actual_digest != values["result_digest"]:
             raise AnalysisInputError("tool_failure_superseded")
         if result.status is not ToolResultStatus.FAILED or call.status is not ToolCallStatus.FAILED:
@@ -187,7 +188,7 @@ class ToolFailureAnalysisHandler:
                 "status": call.status.value,
                 "error_code": call.error_code,
             },
-            "result": result.to_record(),
+            "result": tool_result_record(result),
             "coverage": asdict(coverage),
             "related_message_ids": list(related),
             "answer_message_id": answer_message_id,

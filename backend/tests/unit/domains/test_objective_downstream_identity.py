@@ -5,10 +5,12 @@ from domain.evaluation import (
     FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
+from application.goal.experiment_plan_projection import experiment_plan_from_record, experiment_plan_record
+from application.evaluation.record_projection import finding_curation_from_record, finding_feedback_from_record, finding_curation_record, finding_feedback_record
 
 
 def test_experiment_plan_record_has_only_objective_identity() -> None:
-    plan = ExperimentPlanRecord.from_mapping(
+    plan = experiment_plan_from_record(
         {
             "plan_id": "plan-1",
             "collection_id": "collection-1",
@@ -22,12 +24,12 @@ def test_experiment_plan_record_has_only_objective_identity() -> None:
     )
 
     assert plan.objective_id == "objective-1"
-    assert plan.to_record()["objective_id"] == "objective-1"
-    assert "goal_id" not in plan.to_record()
+    assert experiment_plan_record(plan)["objective_id"] == "objective-1"
+    assert "goal_id" not in experiment_plan_record(plan)
 
 
 def test_review_records_have_only_objective_identity() -> None:
-    feedback = FindingFeedback.from_mapping(
+    feedback = finding_feedback_from_record(
         {
             "feedback_id": "feedback-1",
             "collection_id": "collection-1",
@@ -39,7 +41,7 @@ def test_review_records_have_only_objective_identity() -> None:
             "created_at": "2026-07-20T00:00:00+00:00",
         }
     )
-    curation = FindingCuration.from_mapping(
+    curation = finding_curation_from_record(
         {
             "curation_id": "curation-1",
             "collection_id": "collection-1",
@@ -84,7 +86,7 @@ def test_review_records_have_only_objective_identity() -> None:
         }
     )
 
-    for record in (feedback.to_record(), curation.to_record()):
+    for record in (finding_feedback_record(feedback), finding_curation_record(curation)):
         assert record["objective_id"] == "objective-1"
         assert "scope_type" not in record
         assert "scope_id" not in record

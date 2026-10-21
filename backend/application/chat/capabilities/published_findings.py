@@ -12,6 +12,8 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.chat.tool_result_projection import tool_result_record
+from application.evaluation.record_projection import finding_feedback_record, finding_curation_record
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from application.chat.context_builder import ChatContextBuilder
 
@@ -379,8 +381,8 @@ class InspectPublishedFindingCapability:
                 "objective_id": arguments.objective_id,
                 "analysis_version": version,
                 "finding": dict(detail["finding"]),
-                "feedback_records": [item.to_record() for item in feedback],
-                "curation_records": [item.to_record() for item in curations],
+                "feedback_records": [finding_feedback_record(item) for item in feedback],
+                "curation_records": [finding_curation_record(item) for item in curations],
                 "review_scope": {**review_key, "includes_ancestor_reviews": False},
                 "evidence_review": review,
                 "replacement_evidence": replacement_evidence,
@@ -409,7 +411,7 @@ class InspectPublishedFindingCapability:
         budget = max(0, min(context.max_result_tokens, 12_000) - 256)
         while ChatContextBuilder.estimate_tokens({
             "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
+            "content": json.dumps(tool_result_record(result), ensure_ascii=True, separators=(",", ":")),
         }) > budget:
             if not evidence_items:
                 return ChatToolResult(

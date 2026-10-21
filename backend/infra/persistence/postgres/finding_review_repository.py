@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.evaluation import FindingCuration, FindingFeedback
+from application.evaluation.record_projection import finding_curation_from_record, finding_feedback_from_record
 from infra.persistence.postgres.models.evaluation import (
     FindingCurationRecord,
     FindingFeedbackRecord,
@@ -160,7 +161,7 @@ def _curation_key(value) -> tuple[str, str, int, str]:
 
 
 def _feedback(row: FindingFeedbackRecord) -> FindingFeedback:
-    return FindingFeedback.from_mapping(
+    return finding_feedback_from_record(
         {
             "feedback_id": row.feedback_id,
             "collection_id": row.collection_id,
@@ -177,7 +178,7 @@ def _feedback(row: FindingFeedbackRecord) -> FindingFeedback:
 
 
 def _curation(row: FindingCurationRecord) -> FindingCuration:
-    return FindingCuration.from_mapping(
+    return finding_curation_from_record(
         {
             "curation_id": row.curation_id,
             "collection_id": row.collection_id,

@@ -117,6 +117,12 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         tool_call_id=read_call.tool_call_id,
         status="succeeded",
         data={"document_count": 10},
+        resource_refs=(ChatResourceRef(
+            resource_type="document",
+            resource_id="doc-source",
+            href="/collections/col-chat/documents/doc-source",
+        ),),
+        warnings=("Some papers still require researcher review.",),
     )
     tool_message = ChatMessage.from_tool_result(
         message_id="msg-3",
@@ -249,7 +255,24 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         assistant_message_id="msg-batch", name="read_source", position=position,
         arguments={"document_id": f"paper-{position}"}, risk=ToolRisk.READ,
     ).start("2026-08-19T00:02:00+00:00").succeed("2026-08-19T00:02:01+00:00") for position in range(2))
-    observations = tuple(ChatToolResult(tool_call_id=call.tool_call_id, status="succeeded", data={"document_id": call.arguments["document_id"]}) for call in batch)
+    batch = (batch[0], ChatToolCall.requested(
+        tool_call_id=batch[1].tool_call_id, session_id=chat.session_id,
+        assistant_message_id="msg-batch", name="read_source", position=1,
+        arguments=batch[1].arguments, risk=ToolRisk.READ,
+    ).start("2026-08-19T00:02:00+00:00").fail(
+        "source_unavailable", "2026-08-19T00:02:01+00:00",
+    ))
+    observations = (
+        ChatToolResult(
+            tool_call_id=batch[0].tool_call_id, status="succeeded",
+            data={"document_id": batch[0].arguments["document_id"]},
+        ),
+        ChatToolResult(
+            tool_call_id=batch[1].tool_call_id, status="failed",
+            error_code="source_unavailable",
+            error_message="The selected source could not be read.",
+        ),
+    )
     trajectory = (
         *(await repository.read_messages(chat.session_id)),
         ChatMessage.from_tool_result(message_id="msg-write-result", session_id=chat.session_id, result=write_result, created_at="2026-08-19T00:01:04+00:00"),
@@ -259,4 +282,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     await repository.save_trajectory(session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
     reloaded = await PostgresChatRepository(postgres_session_factory).read_messages(chat.session_id)
     assert reloaded == trajectory
+    assert await repository.read_message(user_message.message_id) == user_message
+    assert await repository.read_message(tool_message.message_id) == tool_message
+    assert await repository.read_tool_call(batch[1].tool_call_id) == batch[1]
     assert [request.position for request in reloaded[-3].tool_calls] == [0, 1]

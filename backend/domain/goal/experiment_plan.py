@@ -52,45 +52,6 @@ class ExperimentPlanRecord:
         ):
             raise ValueError("structured_plan must be an object")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentPlanRecord":
-        source_links = payload.get("source_links")
-        plan_id = _required_text(payload.get("plan_id"), "plan_id")
-        plan_version = _positive_int(payload.get("plan_version", 1), "plan_version")
-        parent_plan_id = _optional_text(payload.get("parent_plan_id"))
-        updated_by = _optional_text(payload.get("updated_by"))
-        structured_plan = payload.get("structured_plan")
-        return cls(
-            plan_id=plan_id,
-            collection_id=_required_text(payload.get("collection_id"), "collection_id"),
-            objective_id=_required_text(payload.get("objective_id"), "objective_id"),
-            title=_required_text(payload.get("title"), "title"),
-            content=_required_text(payload.get("content"), "content"),
-            status=normalize_experiment_plan_status(payload.get("status")),
-            source_message_id=_optional_text(payload.get("source_message_id")),
-            source_links=tuple(
-                _string_mapping(item)
-                for item in source_links
-                if isinstance(item, Mapping)
-            )
-            if isinstance(source_links, list | tuple)
-            else (),
-            metadata=dict(payload.get("metadata"))
-            if isinstance(payload.get("metadata"), Mapping)
-            else {},
-            created_by=_optional_text(payload.get("created_by")),
-            created_at=str(payload.get("created_at") or ""),
-            updated_at=str(payload.get("updated_at") or ""),
-            plan_version=plan_version,
-            parent_plan_id=parent_plan_id,
-            structured_plan=(
-                deepcopy(dict(structured_plan))
-                if isinstance(structured_plan, Mapping)
-                else structured_plan
-            ),
-            updated_by=updated_by,
-        )
-
     def with_updates(
         self,
         *,
@@ -141,31 +102,6 @@ class ExperimentPlanRecord:
             ),
             metadata=dict(self.metadata if metadata is None else metadata),
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "plan_id": self.plan_id,
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "title": self.title,
-            "content": self.content,
-            "status": self.status,
-            "source_message_id": self.source_message_id,
-            "source_links": [dict(link) for link in self.source_links],
-            "metadata": dict(self.metadata),
-            "created_by": self.created_by,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "plan_version": self.plan_version,
-            "parent_plan_id": self.parent_plan_id,
-            "structured_plan": (
-                deepcopy(dict(self.structured_plan))
-                if self.structured_plan is not None
-                else None
-            ),
-            "updated_by": self.updated_by,
-        }
-
 
 def normalize_experiment_plan_status(value: Any) -> ExperimentPlanStatus:
     status = str(value or "draft").strip().lower()

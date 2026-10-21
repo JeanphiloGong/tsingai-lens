@@ -18,6 +18,7 @@ from openai import AsyncOpenAI
 
 from application.chat import CapabilityRegistry, ResearchAgentRunner
 from application.chat.agent_runner import AgentRunLimits
+from application.chat.tool_result_projection import tool_result_record
 from application.chat.capabilities import (
     AgentContext,
     BrowseCollectionPapersCapability,
@@ -197,7 +198,7 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
             )
         )
         for outcome in result.tool_results
-    ), [outcome.to_record() for outcome in result.tool_results]
+    ), [tool_result_record(outcome) for outcome in result.tool_results]
     answer = " ".join(message.content for message in result.messages if message.content)
     assert "72" in answer and "82" in answer
     assert not any(

@@ -17,6 +17,21 @@ from domain.evaluation import (
     EvaluationRun,
     EvaluationScore,
 )
+from application.evaluation.record_projection import (
+    evaluation_failure_from_record,
+    evaluation_failure_record,
+    evaluation_gold_item_from_record,
+    evaluation_gold_item_record,
+    evaluation_gold_set_from_record,
+    evaluation_gold_set_record,
+    evaluation_prediction_item_from_record,
+    evaluation_prediction_item_record,
+    evaluation_prediction_snapshot_from_record,
+    evaluation_run_from_record,
+    evaluation_score_from_record,
+    evaluation_score_record,
+    evaluation_run_record,
+)
 from infra.persistence.postgres.models.evaluation import (
     EvaluationGoldSetRecord,
     EvaluationPredictionSnapshotRecord,
@@ -78,7 +93,7 @@ class PostgresEvaluationRepository:
             if row is None:
                 return ()
             return tuple(
-                EvaluationGoldItem.from_mapping(item)
+                evaluation_gold_item_from_record(item)
                 for item in _sorted_records(row.items)
             )
 
@@ -121,7 +136,7 @@ class PostgresEvaluationRepository:
             row = await session.get(EvaluationPredictionSnapshotRecord, snapshot_id)
             if row is None:
                 return None
-            return EvaluationPredictionSnapshot.from_mapping(
+            return evaluation_prediction_snapshot_from_record(
                 {
                     "snapshot_id": row.snapshot_id,
                     "collection_id": row.collection_id,
@@ -130,7 +145,7 @@ class PostgresEvaluationRepository:
                     "system_context": row.system_context,
                     "artifact_counts": row.artifact_counts,
                     "items": [
-                        _prediction_item_from_record(item).to_record()
+                        evaluation_prediction_item_record(_prediction_item_from_record(item))
                         for item in _sorted_records(row.items)
                     ],
                 }
@@ -215,7 +230,7 @@ class PostgresEvaluationRepository:
 
 
 def _gold_set(row: EvaluationGoldSetRecord) -> EvaluationGoldSet:
-    return EvaluationGoldSet.from_mapping(
+    return evaluation_gold_set_from_record(
         {
             "gold_id": row.gold_id,
             "collection_id": row.collection_id,
@@ -229,21 +244,21 @@ def _gold_set(row: EvaluationGoldSetRecord) -> EvaluationGoldSet:
 
 
 def _gold_item_record(item: EvaluationGoldItem) -> dict[str, Any]:
-    return item.to_record()
+    return evaluation_gold_item_record(item)
 
 
 def _prediction_item_record(item: EvaluationPredictionItem) -> dict[str, Any]:
-    return item.to_record()
+    return evaluation_prediction_item_record(item)
 
 
 def _prediction_item_from_record(value: Any) -> EvaluationPredictionItem:
-    return EvaluationPredictionItem.from_mapping(
+    return evaluation_prediction_item_from_record(
         value if isinstance(value, dict) else {}
     )
 
 
 def _evaluation_run(row: EvaluationRunRecord) -> EvaluationRun:
-    return EvaluationRun.from_mapping(
+    return evaluation_run_from_record(
         {
             "evaluation_run_id": row.evaluation_run_id,
             "collection_id": row.collection_id,
@@ -255,11 +270,11 @@ def _evaluation_run(row: EvaluationRunRecord) -> EvaluationRun:
             "status": row.status,
             "summary": row.summary,
             "scores": [
-                _score_from_record(score, row.evaluation_run_id).to_record()
+                evaluation_score_record(_score_from_record(score, row.evaluation_run_id))
                 for score in _sorted_records(row.scores)
             ],
             "failures": [
-                _failure_from_record(failure, row.evaluation_run_id).to_record()
+                evaluation_failure_record(_failure_from_record(failure, row.evaluation_run_id))
                 for failure in _sorted_records(row.failures)
             ],
         }
@@ -267,23 +282,23 @@ def _evaluation_run(row: EvaluationRunRecord) -> EvaluationRun:
 
 
 def _score_record(score: EvaluationScore) -> dict[str, Any]:
-    return score.to_record()
+    return evaluation_score_record(score)
 
 
 def _score_from_record(value: Any, evaluation_run_id: str) -> EvaluationScore:
     record = dict(value) if isinstance(value, dict) else {}
     record.setdefault("evaluation_run_id", evaluation_run_id)
-    return EvaluationScore.from_mapping(record)
+    return evaluation_score_from_record(record)
 
 
 def _failure_record(failure: EvaluationFailure) -> dict[str, Any]:
-    return failure.to_record()
+    return evaluation_failure_record(failure)
 
 
 def _failure_from_record(value: Any, evaluation_run_id: str) -> EvaluationFailure:
     record = dict(value) if isinstance(value, dict) else {}
     record.setdefault("evaluation_run_id", evaluation_run_id)
-    return EvaluationFailure.from_mapping(record)
+    return evaluation_failure_from_record(record)
 
 
 def _sorted_records(value: Any) -> list[dict[str, Any]]:

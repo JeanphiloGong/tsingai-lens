@@ -10,6 +10,7 @@ from application.chat.capabilities.collection_context import (
     BrowseCollectionPapersCapability,
     BrowseCollectionPapersToolRequest,
 )
+from application.chat.tool_result_projection import tool_result_record
 from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
@@ -175,7 +176,7 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     assert result.data["paper_total"] == 7
     assert len(result.warnings) == 1
     assert "3" in result.warnings[0]
-    assert "private-storage-detail" not in str(result.to_record())
+    assert "private-storage-detail" not in str(tool_result_record(result))
     assert "paper-6" in caplog.text
 
     miss = asyncio.run(capability.execute(context, BrowseCollectionPapersToolRequest(query="not-a-filename")))

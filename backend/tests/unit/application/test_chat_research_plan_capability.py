@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tests.unit.application.test_research_agent_runner import _Model as _DiscoveryModel
-from types import SimpleNamespace
+from domain.goal import ExperimentPlanRecord
 
 import pytest
 from pydantic import ValidationError
@@ -109,59 +109,41 @@ class _ExperimentPlanService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.plans = {
-            "exp-agent-1": SimpleNamespace(
-                plan_id="exp-agent-1",
-                status="draft",
-                metadata={
-                    "source": "research_agent",
-                    "source_findings": _source_snapshots(),
-                },
-                to_record=lambda: {
-                    "plan_id": "exp-agent-1",
-                    "collection_id": "col-1",
-                    "objective_id": "objective-1",
-                    "title": "Initial plan",
-                    "content": "Initial content",
-                    "status": "draft",
-                    "source_message_id": None,
-                    "source_links": [],
-                    "metadata": {
-                        "source": "research_agent",
-                        "source_findings": _source_snapshots(),
-                    },
-                    "created_by": "user-1",
-                    "created_at": "2026-09-06T00:00:00+00:00",
-                    "updated_at": "2026-09-06T00:00:00+00:00",
-                    "plan_version": 1,
-                    "parent_plan_id": None,
-                    "structured_plan": None,
-                    "updated_by": "user-1",
-                },
+            "exp-agent-1": ExperimentPlanRecord(
+                plan_id='exp-agent-1',
+                collection_id='col-1',
+                objective_id='objective-1',
+                title='Initial plan',
+                content='Initial content',
+                status='draft',
+                source_message_id=None,
+                source_links=(),
+                metadata={'source': 'research_agent', 'source_findings': _source_snapshots()},
+                created_by='user-1',
+                created_at='2026-09-06T00:00:00+00:00',
+                updated_at='2026-09-06T00:00:00+00:00',
+                plan_version=1,
+                parent_plan_id=None,
+                structured_plan=None,
+                updated_by='user-1',
             )
         }
 
     async def create_agent_plan(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(
-            plan_id="exp-agent-1",
-            status="draft",
-            to_record=lambda: {
-                "plan_id": "exp-agent-1",
-                "collection_id": kwargs["collection_id"],
-                "objective_id": kwargs["objective_id"],
-                "title": kwargs["title"],
-                "content": kwargs["content"],
-                "status": "draft",
-                "source_message_id": None,
-                "source_links": kwargs["source_links"],
-                "metadata": {
-                    "source": "research_agent",
-                    "source_findings": kwargs["source_findings"],
-                },
-                "created_by": kwargs["created_by"],
-                "created_at": "2026-09-06T00:00:00+00:00",
-                "updated_at": "2026-09-06T00:00:00+00:00",
-            },
+        return ExperimentPlanRecord(
+            plan_id='exp-agent-1',
+            collection_id=kwargs['collection_id'],
+            objective_id=kwargs['objective_id'],
+            title=kwargs['title'],
+            content=kwargs['content'],
+            status='draft',
+            source_message_id=None,
+            source_links=tuple(kwargs['source_links']),
+            metadata={'source': 'research_agent', 'source_findings': kwargs['source_findings']},
+            created_by=kwargs['created_by'],
+            created_at='2026-09-06T00:00:00+00:00',
+            updated_at='2026-09-06T00:00:00+00:00',
         )
 
     async def list_plans(self, collection_id, objective_id):
@@ -174,30 +156,23 @@ class _ExperimentPlanService:
 
     async def update_plan(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(
-            plan_id="exp-agent-2",
-            status="draft",
-            to_record=lambda: {
-                "plan_id": "exp-agent-2",
-                "collection_id": kwargs["collection_id"],
-                "objective_id": kwargs["objective_id"],
-                "title": kwargs["title"],
-                "content": kwargs["content"],
-                "status": "draft",
-                "source_message_id": None,
-                "source_links": kwargs["source_links"],
-                "metadata": {
-                    "source": "research_agent",
-                    "source_findings": kwargs["source_findings"],
-                },
-                "created_by": "user-1",
-                "created_at": "2026-09-06T00:00:00+00:00",
-                "updated_at": "2026-09-07T00:00:00+00:00",
-                "plan_version": 2,
-                "parent_plan_id": kwargs["plan_id"],
-                "structured_plan": kwargs["structured_plan"],
-                "updated_by": kwargs["updated_by"],
-            },
+        return ExperimentPlanRecord(
+            plan_id='exp-agent-2',
+            collection_id=kwargs['collection_id'],
+            objective_id=kwargs['objective_id'],
+            title=kwargs['title'],
+            content=kwargs['content'],
+            status='draft',
+            source_message_id=None,
+            source_links=tuple(kwargs['source_links']),
+            metadata={'source': 'research_agent', 'source_findings': kwargs['source_findings']},
+            created_by='user-1',
+            created_at='2026-09-06T00:00:00+00:00',
+            updated_at='2026-09-07T00:00:00+00:00',
+            plan_version=2,
+            parent_plan_id=kwargs['plan_id'],
+            structured_plan=kwargs['structured_plan'],
+            updated_by=kwargs['updated_by'],
         )
 
 

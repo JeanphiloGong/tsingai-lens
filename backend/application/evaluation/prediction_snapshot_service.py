@@ -262,7 +262,7 @@ def _field(record: Any, name: str) -> Any:
 def _record(record: Any) -> dict[str, Any]:
     if isinstance(record, Mapping):
         return dict(record)
-    return record.to_record()
+    return dict(record.to_record())
 
 def _timestamp_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")

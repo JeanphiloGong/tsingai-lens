@@ -13,6 +13,11 @@ from application.core.objectives.analysis.analysis_record_source import (
 )
 from domain.core import Finding, ObjectiveEvidence, PaperContribution
 from domain.evaluation import FindingCuration, FindingFeedback
+from application.evaluation.record_projection import (
+    finding_curation_from_record,
+    finding_feedback_from_record,
+    finding_curation_record,
+)
 from application.repositories.finding_review_repository import FindingReviewRepository
 from application.repositories.objective_repository import ObjectiveRepository
 
@@ -57,7 +62,7 @@ class FindingFeedbackService:
             finding_id,
         )
         created_at = _now_iso()
-        feedback = FindingFeedback.from_mapping(
+        feedback = finding_feedback_from_record(
             {
                 "feedback_id": _stable_id(
                     "feedback",
@@ -125,7 +130,7 @@ class FindingFeedbackService:
             curated_finding=curated_finding,
         )
         updated_at = _now_iso()
-        curation = FindingCuration.from_mapping(
+        curation = finding_curation_from_record(
             {
                 "curation_id": _stable_id(
                     "curation",

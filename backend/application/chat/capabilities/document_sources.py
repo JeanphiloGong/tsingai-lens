@@ -14,6 +14,7 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.chat.tool_result_projection import tool_result_record
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from domain.source import render_markdown_table
 from application.chat.context_builder import ChatContextBuilder
@@ -871,7 +872,7 @@ class InspectDocumentSourcesCapability:
     def _result_tokens(result: ChatToolResult) -> int:
         return ChatContextBuilder.estimate_tokens({
             "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(result.to_record(), ensure_ascii=True, separators=(",", ":")),
+            "content": json.dumps(tool_result_record(result), ensure_ascii=True, separators=(",", ":")),
         })
 
     @staticmethod

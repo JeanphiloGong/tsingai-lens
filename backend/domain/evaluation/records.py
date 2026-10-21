@@ -60,35 +60,6 @@ class EvaluationGoldSet:
     description: str | None = None
     metadata: dict[str, Any] | None = None
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationGoldSet":
-        return cls(
-            gold_id=_normalize_text(payload.get("gold_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            version=_normalize_text(payload.get("version")) or "v1",
-            target_layer=_normalize_choice(
-                payload.get("target_layer"),
-                allowed=EVALUATION_TARGET_LAYERS,
-                default="core",
-            ),
-            metric_profile=_normalize_text(payload.get("metric_profile"))
-            or "materials_core_v1",
-            description=_normalize_text(payload.get("description")),
-            metadata=_normalize_mapping(payload.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "gold_id": self.gold_id,
-            "collection_id": self.collection_id,
-            "version": self.version,
-            "target_layer": self.target_layer,
-            "metric_profile": self.metric_profile,
-            "description": self.description,
-            "metadata": dict(self.metadata or {}),
-        }
-
-
 @dataclass(frozen=True)
 class EvaluationGoldItem:
     gold_item_id: str
@@ -100,32 +71,6 @@ class EvaluationGoldItem:
     evidence_refs: tuple[dict[str, Any], ...] = ()
     metadata: dict[str, Any] | None = None
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationGoldItem":
-        return cls(
-            gold_item_id=_normalize_text(payload.get("gold_item_id")) or "",
-            gold_id=_normalize_text(payload.get("gold_id")) or "",
-            document_id=_normalize_text(payload.get("document_id")) or "",
-            family=_normalize_text(payload.get("family")) or "",
-            item_key=_normalize_text(payload.get("item_key")) or "",
-            payload=_normalize_mapping(payload.get("payload")),
-            evidence_refs=_normalize_mapping_tuple(payload.get("evidence_refs")),
-            metadata=_normalize_mapping(payload.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "gold_item_id": self.gold_item_id,
-            "gold_id": self.gold_id,
-            "document_id": self.document_id,
-            "family": self.family,
-            "item_key": self.item_key,
-            "payload": dict(self.payload),
-            "evidence_refs": [dict(item) for item in self.evidence_refs],
-            "metadata": dict(self.metadata or {}),
-        }
-
-
 @dataclass(frozen=True)
 class EvaluationPredictionItem:
     item_id: str
@@ -135,30 +80,6 @@ class EvaluationPredictionItem:
     payload: dict[str, Any]
     source_refs: tuple[dict[str, Any], ...] = ()
     confidence: float | None = None
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationPredictionItem":
-        return cls(
-            item_id=_normalize_text(payload.get("item_id")) or "",
-            document_id=_normalize_text(payload.get("document_id")) or "",
-            family=_normalize_text(payload.get("family")) or "",
-            item_key=_normalize_text(payload.get("item_key")) or "",
-            payload=_normalize_mapping(payload.get("payload")),
-            source_refs=_normalize_mapping_tuple(payload.get("source_refs")),
-            confidence=_normalize_optional_float(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "item_id": self.item_id,
-            "document_id": self.document_id,
-            "family": self.family,
-            "item_key": self.item_key,
-            "payload": dict(self.payload),
-            "source_refs": [dict(item) for item in self.source_refs],
-            "confidence": self.confidence,
-        }
-
 
 @dataclass(frozen=True)
 class EvaluationPredictionSnapshot:
@@ -170,37 +91,6 @@ class EvaluationPredictionSnapshot:
     artifact_counts: dict[str, int]
     items: tuple[EvaluationPredictionItem, ...]
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationPredictionSnapshot":
-        return cls(
-            snapshot_id=_normalize_text(payload.get("snapshot_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            target_layer=_normalize_choice(
-                payload.get("target_layer"),
-                allowed=EVALUATION_TARGET_LAYERS,
-                default="core",
-            ),
-            fact_source=_normalize_text(payload.get("fact_source")) or "paper_facts",
-            system_context=_normalize_mapping(payload.get("system_context")),
-            artifact_counts=_normalize_int_mapping(payload.get("artifact_counts")),
-            items=tuple(
-                EvaluationPredictionItem.from_mapping(item)
-                for item in _normalize_mapping_sequence(payload.get("items"))
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "snapshot_id": self.snapshot_id,
-            "collection_id": self.collection_id,
-            "target_layer": self.target_layer,
-            "fact_source": self.fact_source,
-            "system_context": dict(self.system_context),
-            "artifact_counts": dict(self.artifact_counts),
-            "items": [item.to_record() for item in self.items],
-        }
-
-
 @dataclass(frozen=True)
 class EvaluationScore:
     score_id: str
@@ -211,32 +101,6 @@ class EvaluationScore:
     numerator: float | None = None
     denominator: float | None = None
     document_id: str | None = None
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationScore":
-        return cls(
-            score_id=_normalize_text(payload.get("score_id")) or "",
-            evaluation_run_id=_normalize_text(payload.get("evaluation_run_id")) or "",
-            family=_normalize_text(payload.get("family")) or "overall",
-            metric=_normalize_text(payload.get("metric")) or "",
-            value=_normalize_optional_float(payload.get("value")) or 0.0,
-            numerator=_normalize_optional_float(payload.get("numerator")),
-            denominator=_normalize_optional_float(payload.get("denominator")),
-            document_id=_normalize_text(payload.get("document_id")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "score_id": self.score_id,
-            "evaluation_run_id": self.evaluation_run_id,
-            "family": self.family,
-            "metric": self.metric,
-            "value": self.value,
-            "numerator": self.numerator,
-            "denominator": self.denominator,
-            "document_id": self.document_id,
-        }
-
 
 @dataclass(frozen=True)
 class EvaluationFailure:
@@ -254,52 +118,6 @@ class EvaluationFailure:
     reason: str | None = None
     source_refs: tuple[dict[str, Any], ...] = ()
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationFailure":
-        return cls(
-            failure_id=_normalize_text(payload.get("failure_id")) or "",
-            evaluation_run_id=_normalize_text(payload.get("evaluation_run_id")) or "",
-            document_id=_normalize_text(payload.get("document_id")) or "",
-            family=_normalize_text(payload.get("family")) or "",
-            failure_type=_normalize_choice(
-                payload.get("failure_type"),
-                allowed=EVALUATION_FAILURE_TYPES,
-                default="missing_gold_item",
-            ),
-            likely_layer=_normalize_choice(
-                payload.get("likely_layer"),
-                allowed=EVALUATION_LAYERS,
-                default="unknown",
-            ),
-            severity=_normalize_text(payload.get("severity")) or "medium",
-            gold_item_id=_normalize_text(payload.get("gold_item_id")),
-            prediction_item_id=_normalize_text(payload.get("prediction_item_id")),
-            gold=_normalize_optional_mapping(payload.get("gold")),
-            prediction=_normalize_optional_mapping(payload.get("prediction")),
-            reason=_normalize_text(payload.get("reason")),
-            source_refs=_normalize_mapping_tuple(payload.get("source_refs")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "failure_id": self.failure_id,
-            "evaluation_run_id": self.evaluation_run_id,
-            "document_id": self.document_id,
-            "family": self.family,
-            "failure_type": self.failure_type,
-            "likely_layer": self.likely_layer,
-            "severity": self.severity,
-            "gold_item_id": self.gold_item_id,
-            "prediction_item_id": self.prediction_item_id,
-            "gold": dict(self.gold) if self.gold is not None else None,
-            "prediction": (
-                dict(self.prediction) if self.prediction is not None else None
-            ),
-            "reason": self.reason,
-            "source_refs": [dict(item) for item in self.source_refs],
-        }
-
-
 @dataclass(frozen=True)
 class EvaluationRun:
     evaluation_run_id: str
@@ -313,52 +131,6 @@ class EvaluationRun:
     summary: dict[str, Any]
     scores: tuple[EvaluationScore, ...] = ()
     failures: tuple[EvaluationFailure, ...] = ()
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvaluationRun":
-        return cls(
-            evaluation_run_id=_normalize_text(payload.get("evaluation_run_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            gold_id=_normalize_text(payload.get("gold_id")) or "",
-            prediction_snapshot_id=_normalize_text(
-                payload.get("prediction_snapshot_id")
-            )
-            or "",
-            target_layer=_normalize_choice(
-                payload.get("target_layer"),
-                allowed=EVALUATION_TARGET_LAYERS,
-                default="core",
-            ),
-            fact_source=_normalize_text(payload.get("fact_source")) or "paper_facts",
-            metric_profile=_normalize_text(payload.get("metric_profile"))
-            or "materials_core_v1",
-            status=_normalize_text(payload.get("status")) or "ready",
-            summary=_normalize_mapping(payload.get("summary")),
-            scores=tuple(
-                EvaluationScore.from_mapping(score)
-                for score in _normalize_mapping_sequence(payload.get("scores"))
-            ),
-            failures=tuple(
-                EvaluationFailure.from_mapping(failure)
-                for failure in _normalize_mapping_sequence(payload.get("failures"))
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "evaluation_run_id": self.evaluation_run_id,
-            "collection_id": self.collection_id,
-            "gold_id": self.gold_id,
-            "prediction_snapshot_id": self.prediction_snapshot_id,
-            "target_layer": self.target_layer,
-            "fact_source": self.fact_source,
-            "metric_profile": self.metric_profile,
-            "status": self.status,
-            "summary": dict(self.summary),
-            "scores": [score.to_record() for score in self.scores],
-            "failures": [failure.to_record() for failure in self.failures],
-        }
-
 
 @dataclass(frozen=True)
 class FindingFeedback:
@@ -389,36 +161,6 @@ class FindingFeedback:
                 f"{self.review_status} finding feedback requires an issue"
             )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingFeedback":
-        return cls(
-            feedback_id=_normalize_text(payload.get("feedback_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            objective_id=_normalize_text(payload.get("objective_id")) or "",
-            analysis_version=int(payload.get("analysis_version") or 0),
-            finding_id=_normalize_text(payload.get("finding_id")) or "",
-            review_status=(_normalize_text(payload.get("review_status")) or "").lower(),
-            issue_type=(_normalize_text(payload.get("issue_type")) or "").lower(),
-            note=_normalize_text(payload.get("note")),
-            reviewer=_normalize_text(payload.get("reviewer")),
-            created_at=_normalize_text(payload.get("created_at")) or "",
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "feedback_id": self.feedback_id,
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "finding_id": self.finding_id,
-            "review_status": self.review_status,
-            "issue_type": self.issue_type,
-            "note": self.note,
-            "reviewer": self.reviewer,
-            "created_at": self.created_at,
-        }
-
-
 @dataclass(frozen=True)
 class FindingCuration:
     curation_id: str
@@ -448,40 +190,6 @@ class FindingCuration:
             self.finding_id,
         ):
             raise ValueError("curated Finding identity differs from curation identity")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingCuration":
-        return cls(
-            curation_id=_normalize_text(payload.get("curation_id")) or "",
-            collection_id=_normalize_text(payload.get("collection_id")) or "",
-            objective_id=_normalize_text(payload.get("objective_id")) or "",
-            analysis_version=int(payload.get("analysis_version") or 0),
-            finding_id=_normalize_text(payload.get("finding_id")) or "",
-            curated_status=(
-                _normalize_text(payload.get("curated_status")) or ""
-            ).lower(),
-            curated_finding=Finding.from_mapping(
-                _normalize_mapping(payload.get("curated_finding"))
-            ),
-            note=_normalize_text(payload.get("note")),
-            reviewer=_normalize_text(payload.get("reviewer")),
-            updated_at=_normalize_text(payload.get("updated_at")) or "",
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "curation_id": self.curation_id,
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "finding_id": self.finding_id,
-            "curated_status": self.curated_status,
-            "curated_finding": self.curated_finding.to_record(),
-            "note": self.note,
-            "reviewer": self.reviewer,
-            "updated_at": self.updated_at,
-        }
-
 
 def _normalize_text(value: Any) -> str | None:
     if value is None:

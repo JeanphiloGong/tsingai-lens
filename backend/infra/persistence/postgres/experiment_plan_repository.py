@@ -12,6 +12,7 @@ from domain.goal import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
 )
+from application.goal.experiment_plan_projection import experiment_plan_from_record
 from infra.persistence.postgres.models.chat import ChatMessageRow, ChatSessionRow
 from infra.persistence.postgres.models.objective_workspace import (
     ObjectiveExperimentPlan,
@@ -198,7 +199,7 @@ def _constraint_name(exc: IntegrityError) -> str | None:
 
 
 def _plan_record(row: ObjectiveExperimentPlan) -> ExperimentPlanRecord:
-    return ExperimentPlanRecord.from_mapping(
+    return experiment_plan_from_record(
         {
             "plan_id": row.plan_id,
             "collection_id": row.collection_id,

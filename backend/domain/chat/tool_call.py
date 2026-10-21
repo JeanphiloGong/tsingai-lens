@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
@@ -105,46 +105,6 @@ class ChatToolResult:
 
     def for_call(self, tool_call_id: str) -> "ChatToolResult":
         return replace(self, tool_call_id=tool_call_id)
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ChatToolResult":
-        return cls(
-            tool_call_id=str(payload.get("tool_call_id") or ""),
-            status=str(payload.get("status") or ""),
-            data=(
-                dict(payload["data"])
-                if isinstance(payload.get("data"), Mapping)
-                else {}
-            ),
-            resource_refs=tuple(
-                ChatResourceRef.from_mapping(item)
-                for item in payload.get("resource_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            warnings=tuple(str(item) for item in payload.get("warnings") or ()),
-            error_code=(
-                str(payload["error_code"])
-                if payload.get("error_code") is not None
-                else None
-            ),
-            error_message=(
-                str(payload["error_message"])
-                if payload.get("error_message") is not None
-                else None
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "tool_call_id": self.tool_call_id,
-            "status": self.status.value,
-            "data": deepcopy(dict(self.data)),
-            "resource_refs": [asdict(item) for item in self.resource_refs],
-            "warnings": list(self.warnings),
-            "error_code": self.error_code,
-            "error_message": self.error_message,
-        }
-
 
 @dataclass(frozen=True)
 class ChatToolCall:
@@ -349,54 +309,6 @@ class ChatToolCall:
             error_code=_required_text(error_code, "error_code"),
             finished_at=_required_text(finished_at, "finished_at"),
         )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ChatToolCall":
-        return cls(
-            tool_call_id=str(payload.get("tool_call_id") or ""),
-            session_id=str(payload.get("session_id") or ""),
-            assistant_message_id=str(payload.get("assistant_message_id") or ""),
-            position=payload["position"],
-            name=str(payload.get("name") or ""),
-            arguments=(
-                dict(payload["arguments"])
-                if isinstance(payload.get("arguments"), Mapping)
-                else {}
-            ),
-            arguments_digest=str(payload.get("arguments_digest") or ""),
-            risk=str(payload.get("risk") or ToolRisk.UNKNOWN.value),
-            status=str(payload.get("status") or ToolCallStatus.REQUESTED.value),
-            started_at=payload.get("started_at"),
-            finished_at=payload.get("finished_at"),
-            error_code=payload.get("error_code"),
-            decision_user_id=payload.get("decision_user_id"),
-            decision_arguments_digest=payload.get("decision_arguments_digest"),
-            decided_at=payload.get("decided_at"),
-            decision_basis=payload.get("decision_basis", "explicit"),
-            authorization_revision=payload.get("authorization_revision"),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "tool_call_id": self.tool_call_id,
-            "session_id": self.session_id,
-            "assistant_message_id": self.assistant_message_id,
-            "position": self.position,
-            "name": self.name,
-            "arguments": deepcopy(dict(self.arguments)),
-            "arguments_digest": self.arguments_digest,
-            "risk": self.risk.value,
-            "status": self.status.value,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "error_code": self.error_code,
-            "decision_user_id": self.decision_user_id,
-            "decision_arguments_digest": self.decision_arguments_digest,
-            "decided_at": self.decided_at,
-            "decision_basis": self.decision_basis,
-            "authorization_revision": self.authorization_revision,
-        }
-
 
 __all__ = [
     "ChatToolCall",

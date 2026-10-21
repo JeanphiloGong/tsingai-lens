@@ -9,6 +9,7 @@ from application.repositories.objective_repository import ObjectiveAnalysis
 from controllers.core.finding_review import router
 from domain.core import Finding, ObjectiveEvidence
 from domain.evaluation import FindingCuration, FindingFeedback
+from application.evaluation.record_projection import finding_curation_from_record, finding_feedback_from_record
 
 
 class _Service:
@@ -72,7 +73,7 @@ class _Service:
         )
 
     async def record_feedback(self, **kwargs):
-        return FindingFeedback.from_mapping(
+        return finding_feedback_from_record(
             {
                 "feedback_id": "feedback-1",
                 **kwargs,
@@ -92,7 +93,7 @@ class _Service:
         )
 
     async def record_curation(self, **kwargs):
-        return FindingCuration.from_mapping(
+        return finding_curation_from_record(
             {
                 "curation_id": "curation-1",
                 **kwargs,

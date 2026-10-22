@@ -161,7 +161,11 @@ class OpenAIChatModel:
                 await finish("cancelled", error_code="request_cancelled", usage=usage)
                 raise
             except Exception as exc:  # noqa: BLE001
-                await finish("provider_failed", error_code=_provider_error_code(exc), usage=usage)
+                reason = _provider_error_code(exc)
+                await finish("provider_failed", error_code=reason, usage=usage)
+                if reason == "context_window_exceeded":
+                    raise ModelResponseError("The provider rejected the context size.",
+                                             reason=reason, retryable=False, usage=usage) from exc
                 raise
 
         usage = None
@@ -294,7 +298,11 @@ class OpenAIChatModel:
             await finish("cancelled", error_code="request_cancelled", usage=usage)
             raise
         except Exception as exc:  # noqa: BLE001
-            await finish("provider_failed", error_code=_provider_error_code(exc), usage=usage)
+            reason = _provider_error_code(exc)
+            await finish("provider_failed", error_code=reason, usage=usage)
+            if reason == "context_window_exceeded":
+                raise ModelResponseError("The provider rejected the context size.",
+                                         reason=reason, retryable=False, usage=usage) from exc
             raise
 
     async def _stream_turn(
@@ -402,6 +410,14 @@ class OpenAIChatModel:
                 partial_content=bool(content_parts),
                 usage=usage,
             ) from exc
+
+        except Exception as exc:
+            if _provider_error_code(exc) == "context_window_exceeded":
+                raise ModelResponseError(
+                    "The provider rejected the context size.", reason="context_window_exceeded",
+                    retryable=False, partial_content=bool(content_parts), usage=usage,
+                ) from exc
+            raise
 
         record_llm_prompt_version(
             "research_agent", RESEARCH_AGENT_PROMPT_VERSION,
@@ -530,6 +546,13 @@ def _json_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def _provider_error_code(exc: BaseException) -> str:
     """Persist a stable transport class without provider bodies or credentials."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, Mapping):
+        detail = body.get("error", body)
+        if (isinstance(detail, Mapping)
+                and getattr(exc, "status_code", None) in {400, 413, 422}
+                and detail.get("code") in {"context_length_exceeded", "context_window_exceeded"}):
+            return "context_window_exceeded"
     name = type(exc).__name__.lower()
     if "timeout" in name:
         return "provider_timeout"

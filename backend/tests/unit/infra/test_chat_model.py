@@ -713,3 +713,47 @@ async def test_openai_chat_model_marks_stream_iterator_value_error_as_invalid_re
     assert exc_info.value.reason == "invalid_stream"
     assert exc_info.value.partial_content is False
     assert _completions.stream.closed
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("code", ["context_length_exceeded", "context_window_exceeded"])
+async def test_provider_context_rejection_is_normalized_and_audited(streaming, nested, code):
+    outcomes = []
+
+    class Observer:
+        async def start(self, record):
+            return "model-call-1"
+
+        async def finish(self, call_id, outcome):
+            outcomes.append(outcome)
+
+    detail = {"code": code, "message": "private prompt/provider details", "type": "invalid_request_error"}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
+        400, json={"error": detail} if nested else detail,
+    ))) as http_client:
+        async with AsyncOpenAI(api_key="test", base_url="https://provider.invalid/v1", http_client=http_client) as client:
+            model = OpenAIChatModel(client=client)
+            with pytest.raises(ModelResponseError) as caught:
+                await model.respond(
+                    context=ChatModelContext((_message(),), model_call_observer=Observer()),
+                    tool_specs=(), text_delta_callback=(lambda _: None) if streaming else None,
+                )
+    assert caught.value.reason == "context_window_exceeded"
+    assert not caught.value.retryable
+    assert not caught.value.partial_content
+    assert "private" not in str(caught.value)
+    assert outcomes[-1].error_code == "context_window_exceeded"
+
+
+@pytest.mark.parametrize("status,code", [(400, "invalid_request_error"), (401, "context_length_exceeded"),
+                                        (429, "rate_limit_exceeded"), (500, "server_error")])
+async def test_other_provider_errors_are_not_context_rejections(status, code):
+    from openai import APIStatusError
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
+        status, json={"error": {"code": code, "message": "context window exceeded"}},
+    ))) as http_client:
+        async with AsyncOpenAI(api_key="test", base_url="https://provider.invalid/v1", http_client=http_client) as client:
+            with pytest.raises(APIStatusError):
+                await OpenAIChatModel(client=client).respond(context=ChatModelContext((_message(),)), tool_specs=())

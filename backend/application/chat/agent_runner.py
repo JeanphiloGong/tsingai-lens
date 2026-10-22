@@ -1599,146 +1599,104 @@ class ResearchAgentRunner:
     ) -> ChatModelContext:
         """Compact old operations into provisional notes; the durable trajectory stays intact."""
         execution_plan = progress.execution_plan.to_record() if progress.execution_plan else None
-        overhead = self.context_builder.estimate_tokens({
-            "messages": ChatModelContext((), execution_plan=execution_plan).provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
-            "tools": [spec.model_schema() for spec in tool_specs],
-        })
         context_limit = self._effective_context_tokens()
-        input_budget = context_limit - self.limits.max_model_output_tokens - overhead - 2048
-        if tool_specs:
-            input_budget -= min(16_000, max(0, input_budget // 3))
+        input_budget = self.context_builder.input_budget(
+            context_limit=context_limit, output_limit=self.limits.max_model_output_tokens,
+            system_prompt=RESEARCH_AGENT_SYSTEM_PROMPT,
+            tool_schemas=[spec.model_schema() for spec in tool_specs], execution_plan=execution_plan,
+        )
         prior_reading = self._prior_source_reading(
             messages, active_user_message_id=active_user_message_id,
             max_tokens=min(4500, max(256, input_budget // 8)),
         )
         if prior_reading:
             input_budget -= self.context_builder.estimate_tokens(prior_reading) + 200
-        available = tuple(message for message in messages if message.message_id not in progress.compacted_message_ids)
-        try:
-            view = self.context_builder.for_model(
-                available, active_user_message_id=active_user_message_id,
-                max_input_tokens=input_budget, working_summary=progress.working_summary,
-            )
-        except ValueError as exc:
-            raise ModelResponseError("Pinned research context exceeds the context window.",
-                                     reason="context_window_exceeded", retryable=False) from exc
-        view = replace(view, prior_reading_summary=prior_reading, execution_plan=execution_plan)
-        kept = {message.message_id for message in view.messages}
-        omitted = tuple(message for message in available if message.message_id not in kept)
         active = next(message for message in messages if message.message_id == active_user_message_id)
-        units = list(self.context_builder._protocol_units(omitted))
-        while units:
+        while True:
+            available = tuple(message for message in messages
+                              if message.message_id not in progress.compacted_message_ids)
+            try:
+                view = self.context_builder.for_model(
+                    available, active_user_message_id=active_user_message_id,
+                    max_input_tokens=input_budget, working_summary=progress.working_summary,
+                )
+            except ValueError as exc:
+                raise ModelResponseError("Pinned research context exceeds the context window.",
+                                         reason="context_window_exceeded", retryable=False) from exc
+            retained = {message.message_id for message in view.messages}
+            units = [unit for unit in self.context_builder._protocol_units(available)
+                     if unit[0].message_id not in retained]
+            if not units:
+                return replace(view, max_context_tokens=context_limit,
+                               prior_reading_summary=prior_reading, execution_plan=execution_plan)
             if progress.compaction_attempts >= 3:
                 raise ModelResponseError("Research context could not be compacted without repeated retries.",
                                          reason="context_compaction_unavailable", retryable=False)
+            notes_budget = min(6000, input_budget // 3)
             if (
                 len(units) > _MAX_MODEL_COMPACTION_UNITS
                 or bool(progress.compacted_message_ids)
                 or progress.remaining_seconds() <= _MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION
             ):
-                # Long recoveries must leave time for the requested read,
-                # comparison, or write. The archive is intentionally raw
-                # runtime state, not a scientific summary or authorization.
-                archived = [message for unit in units for message in unit]
-                progress.working_summary = self._fallback_working_notes(
-                    active, archived, max_tokens=min(6000, input_budget // 3),
-                ).model_dump_json()
-                progress.compacted_message_ids.update(
-                    message.message_id for message in archived
-                )
-                progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
-                units = []
-                continue
-            batch: list[ChatMessage] = []
-            for unit in units:
-                candidate = ChatModelContext((active, *batch, *unit), compacting=True,
-                                             working_summary=progress.working_summary,
-                                             execution_plan=execution_plan,
-                                             active_user_message_id=active_user_message_id)
-                tokens = self.context_builder.estimate_tokens(candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT))
-                if tokens + 8192 + 2048 > context_limit:
-                    # A completed write may contain the full PaperExperiment
-                    # or Finding payload. Keep its durable message untouched,
-                    # but give compaction a bounded protocol copy when the
-                    # original unit alone cannot fit. This preserves tool-call
-                    # identity and resource refs without replaying scientific
-                    # payloads into the provider request.
-                    if not batch:
-                        projected = self.context_builder.compact_protocol_unit(
-                            unit,
-                            max_tokens=min(8_000, max(1_024, context_limit - 12_288)),
-                        )
-                        projected_candidate = ChatModelContext(
-                            (active, *projected), compacting=True,
-                            working_summary=progress.working_summary,
-                            execution_plan=execution_plan,
-                            active_user_message_id=active_user_message_id,
-                        )
-                        projected_tokens = self.context_builder.estimate_tokens(
-                            projected_candidate.provider_messages(RESEARCH_COMPACTION_SYSTEM_PROMPT)
-                        )
-                        if projected_tokens + 8192 + 2048 <= context_limit:
-                            batch.extend(projected)
-                            continue
-                    break
-                batch.extend(unit)
-            if not batch:
-                raise ModelResponseError("One research observation exceeds the context window.",
-                                         reason="context_window_exceeded", retryable=False)
-            progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
-            compaction_messages = (active, *batch)
-            progress.compaction_attempts += 1
-            summary = None
-            try:
-                compacted = await self._respond(
-                    ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
-                                     execution_plan=execution_plan,
-                                     active_user_message_id=active_user_message_id),
-                    (), progress, None,
-                )
-                if compacted.tool_calls:
-                    raise ValueError("compaction cannot request tools")
-                notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
-                allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
-                if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
-                    raise ValueError("working note cites an unobserved message")
-                summary = self._bounded_working_notes(
-                    notes, max_tokens=min(6000, input_budget // 3),
-                ).model_dump_json()
-            except (ModelResponseError, ValueError) as exc:
-                # Working notes are runtime memory, not scientific evidence.
-                # If the provider cannot produce the optional JSON, retain a
-                # bounded, message-ID-backed record instead of turning a
-                # formatting/provider issue into a terminal research failure.
-                logger.warning(
-                    "Research context compaction fell back to archived records reason=%s",
-                    getattr(exc, "reason", type(exc).__name__),
-                )
+                batch = [message for unit in units for message in unit]
                 summary = self._fallback_working_notes(
-                    active, batch, max_tokens=min(6000, input_budget // 3),
+                    active, batch, max_tokens=notes_budget,
                 ).model_dump_json()
-            # A successful compaction closes this failure streak. The counter
-            # guards consecutive failed attempts, not the lifetime of a long
-            # investigation; otherwise later evidence would be forced into a
-            # stale recent-only view after three successful compactions.
-            progress.compaction_attempts = 0
+            else:
+                try:
+                    batch = self.context_builder.compaction_batch(
+                        active, units, context_limit=context_limit,
+                        system_prompt=RESEARCH_COMPACTION_SYSTEM_PROMPT,
+                        working_summary=progress.working_summary, execution_plan=execution_plan,
+                    )
+                except ValueError as exc:
+                    raise ModelResponseError(str(exc), reason="context_window_exceeded", retryable=False) from exc
+                summary = await self._compact_working_notes(
+                    active, batch, progress, notes_budget=notes_budget, execution_plan=execution_plan,
+                )
+            # Publish notes and retired IDs together, only after building the replacement.
             progress.working_summary = summary
             progress.compacted_message_ids.update(message.message_id for message in batch)
+            progress.compaction_attempts = 0
             progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
-            units = [unit for unit in units if unit[0].message_id not in progress.compacted_message_ids]
-        view = self.context_builder.for_model(
-            tuple(message for message in messages if message.message_id not in progress.compacted_message_ids),
-            active_user_message_id=active_user_message_id, max_input_tokens=input_budget,
-            working_summary=progress.working_summary,
-        )
-        # Lineage is derived from the complete archived history, not model notes.
-        retained = {message.message_id for message in view.messages}
-        remaining = tuple(message for message in messages if message.message_id not in progress.compacted_message_ids)
-        if any(unit[0].message_id not in retained for unit in self.context_builder._protocol_units(remaining)):
-            return await self._prepare_model_context(messages, tool_specs, progress,
-                                                     active_user_message_id=active_user_message_id)
-        return replace(view, max_context_tokens=context_limit,
-                       prior_reading_summary=prior_reading, execution_plan=execution_plan)
+
+    async def _compact_working_notes(
+        self, active: ChatMessage, batch: list[ChatMessage], progress: _RunProgress,
+        *, notes_budget: int, execution_plan: Mapping[str, Any] | None,
+    ) -> str:
+        progress.trace(AgentContext(active.session_id, "", ""), phase="context_compaction")
+        compaction_messages = (active, *batch)
+        progress.compaction_attempts += 1
+        summary = None
+        try:
+            compacted = await self._respond(
+                ChatModelContext(compaction_messages, compacting=True, working_summary=progress.working_summary,
+                                 execution_plan=execution_plan,
+                                 active_user_message_id=active.message_id),
+                (), progress, None,
+            )
+            if compacted.tool_calls:
+                raise ValueError("compaction cannot request tools")
+            notes = ResearchWorkingNotesModelOutput.model_validate_json(extract_json_object(compacted.content))
+            allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
+            if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
+                raise ValueError("working note cites an unobserved message")
+            summary = self._bounded_working_notes(
+                notes, max_tokens=notes_budget,
+            ).model_dump_json()
+        except (ModelResponseError, ValueError) as exc:
+            # Working notes are runtime memory, not scientific evidence.
+            # If the provider cannot produce the optional JSON, retain a
+            # bounded, message-ID-backed record instead of turning a
+            # formatting/provider issue into a terminal research failure.
+            logger.warning(
+                "Research context compaction fell back to archived records reason=%s",
+                getattr(exc, "reason", type(exc).__name__),
+            )
+            summary = self._fallback_working_notes(
+                active, batch, max_tokens=notes_budget,
+            ).model_dump_json()
+        return summary
 
     def _effective_context_tokens(self) -> int:
         return max(1_024, self.limits.max_context_tokens - _CONTEXT_SAFETY_MARGIN_TOKENS)

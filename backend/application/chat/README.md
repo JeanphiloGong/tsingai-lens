@@ -404,6 +404,11 @@ usually determines the batch size. Oversized Sources remain explicitly unread
 and provide their exact reference for individual paginated reading. Independent
 reads share the allowance while retaining their individual provenance.
 
+Context preparation follows an explicit select -> compact -> rebuild loop.
+`context_builder.py` owns pure budget and complete-exchange selection;
+`agent_runner.py` owns model calls and publishes the replacement notes with
+the retired message IDs after construction succeeds.
+
 When older operations leave context, the runner creates provisional working
 notes containing scope, comparison conditions, conclusions, basis message IDs,
 uncertainties and next actions. It validates references before retiring those

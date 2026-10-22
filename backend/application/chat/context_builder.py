@@ -225,6 +225,64 @@ class ChatContextBuilder:
         return ChatModelContext(selected_messages, summary, active_user_message_id=active_user_message_id,
                                 working_summary=working_summary)
 
+    def input_budget(
+        self, *, context_limit: int, output_limit: int, system_prompt: str,
+        tool_schemas: list[dict[str, Any]], execution_plan: Mapping[str, Any] | None,
+    ) -> int:
+        """Reserve fixed instructions, output, framing and room for the next read."""
+        overhead = self.estimate_tokens({
+            "messages": ChatModelContext((), execution_plan=execution_plan).provider_messages(system_prompt),
+            "tools": tool_schemas,
+        })
+        budget = context_limit - output_limit - overhead - 2048
+        if tool_schemas:
+            budget -= min(16_000, max(0, budget // 3))
+        return budget
+
+    def compaction_batch(
+        self, active: ChatMessage, units: list[tuple[ChatMessage, ...]], *,
+        context_limit: int, system_prompt: str, working_summary: str,
+        execution_plan: Mapping[str, Any] | None,
+    ) -> list[ChatMessage]:
+        """Select whole exchanges; project an oversized exchange without changing history."""
+        active_user_message_id = active.message_id
+        batch: list[ChatMessage] = []
+        for unit in units:
+            candidate = ChatModelContext((active, *batch, *unit), compacting=True,
+                                         working_summary=working_summary,
+                                         execution_plan=execution_plan,
+                                         active_user_message_id=active_user_message_id)
+            tokens = self.estimate_tokens(candidate.provider_messages(system_prompt))
+            if tokens + 8192 + 2048 > context_limit:
+                # A completed write may contain the full PaperExperiment
+                # or Finding payload. Keep its durable message untouched,
+                # but give compaction a bounded protocol copy when the
+                # original unit alone cannot fit. This preserves tool-call
+                # identity and resource refs without replaying scientific
+                # payloads into the provider request.
+                if not batch:
+                    projected = self.compact_protocol_unit(
+                        unit,
+                        max_tokens=min(8_000, max(1_024, context_limit - 12_288)),
+                    )
+                    projected_candidate = ChatModelContext(
+                        (active, *projected), compacting=True,
+                        working_summary=working_summary,
+                        execution_plan=execution_plan,
+                        active_user_message_id=active_user_message_id,
+                    )
+                    projected_tokens = self.estimate_tokens(
+                        projected_candidate.provider_messages(system_prompt)
+                    )
+                    if projected_tokens + 8192 + 2048 <= context_limit:
+                        batch.extend(projected)
+                        continue
+                break
+            batch.extend(unit)
+        if not batch:
+            raise ValueError("One research observation exceeds the context window.")
+        return batch
+
     @staticmethod
     def estimate_tokens(value: Any) -> int:
         text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))

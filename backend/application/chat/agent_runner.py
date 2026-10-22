@@ -111,6 +111,10 @@ _CONTEXT_SAFETY_MARGIN_TOKENS = 4_096
 # deterministic prior-reading projection.
 _MAX_MODEL_COMPACTION_UNITS = 8
 _MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION = 120.0
+_WORKING_NOTES_LOSS_NOTICE = (
+    "Some archived details are omitted or truncated in these notes. "
+    "Full records remain in the trajectory; reopen exact Sources for missing details."
+)
 _SAFE_DIAGNOSTIC_EXCEPTION_TYPES = (
     AttributeError,
     IndexError,
@@ -1640,7 +1644,7 @@ class ResearchAgentRunner:
             ):
                 batch = [message for unit in units for message in unit]
                 summary = self._fallback_working_notes(
-                    active, batch, max_tokens=notes_budget,
+                    active, batch, max_tokens=notes_budget, working_summary=progress.working_summary,
                 ).model_dump_json()
             else:
                 try:
@@ -1681,10 +1685,25 @@ class ResearchAgentRunner:
             allowed_ids = progress.compacted_message_ids | {message.message_id for message in (active, *batch)}
             if any(set(check.basis_message_ids) - allowed_ids for check in notes.checks):
                 raise ValueError("working note cites an unobserved message")
+            if progress.working_summary:
+                previous = ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary)
+                covered = {identity for check in notes.checks for identity in check.basis_message_ids}
+                retained = [check for check in previous.checks if not set(check.basis_message_ids) <= covered]
+                if retained:
+                    combined = [*retained, *notes.checks]
+                    if len(combined) > 16:
+                        combined = [*retained[:8], *notes.checks[-8:]]
+                        notes.next_actions = [_WORKING_NOTES_LOSS_NOTICE, *notes.next_actions[:7]]
+                    notes.checks = combined
             summary = self._bounded_working_notes(
                 notes, max_tokens=notes_budget,
             ).model_dump_json()
         except (ModelResponseError, ValueError) as exc:
+            if isinstance(exc, ModelResponseError) and exc.reason not in {
+                "context_window_exceeded", "output_token_limit", "empty_response",
+                "invalid_response_shape", "reasoning_only_response", "invalid_stream",
+            }:
+                raise
             # Working notes are runtime memory, not scientific evidence.
             # If the provider cannot produce the optional JSON, retain a
             # bounded, message-ID-backed record instead of turning a
@@ -1694,7 +1713,7 @@ class ResearchAgentRunner:
                 getattr(exc, "reason", type(exc).__name__),
             )
             summary = self._fallback_working_notes(
-                active, batch, max_tokens=notes_budget,
+                active, batch, max_tokens=notes_budget, working_summary=progress.working_summary,
             ).model_dump_json()
         return summary
 
@@ -1780,81 +1799,61 @@ class ResearchAgentRunner:
         self, notes: ResearchWorkingNotesModelOutput, *, max_tokens: int,
     ) -> ResearchWorkingNotesModelOutput:
         """Keep validated navigation notes within their reserved context space."""
-        checks = [ResearchWorkingCheckModelOutput(
-            statement=check.statement[:600],
-            conditions=check.conditions[:400],
-            basis_message_ids=check.basis_message_ids[:8],
-            unresolved=check.unresolved[:400],
-        ) for check in notes.checks]
-        next_actions = [str(action)[:400] for action in notes.next_actions[:8]]
-        candidate = ResearchWorkingNotesModelOutput(
-            scope=notes.scope[:1000], checks=checks, next_actions=next_actions,
-        )
-        while checks and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
-            checks.pop()
-            candidate = ResearchWorkingNotesModelOutput(
-                scope=candidate.scope, checks=checks, next_actions=next_actions,
-            )
-        while next_actions and self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
-            next_actions.pop()
-            candidate = ResearchWorkingNotesModelOutput(
-                scope=candidate.scope, checks=checks, next_actions=next_actions,
-            )
-        if self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
-            candidate = ResearchWorkingNotesModelOutput(
-                scope=candidate.scope[:400], checks=[], next_actions=[],
-            )
+        candidate = notes.model_copy(deep=True)
+        if self.context_builder.estimate_tokens(candidate.model_dump_json()) <= max_tokens:
+            return candidate
+        candidate.next_actions = [
+            _WORKING_NOTES_LOSS_NOTICE,
+            *[action for action in candidate.next_actions if action != _WORKING_NOTES_LOSS_NOTICE][:7],
+        ]
+        # Retain early context and the latest observation while removing middle records.
+        while self.context_builder.estimate_tokens(candidate.model_dump_json()) > max_tokens:
+            if candidate.checks:
+                candidate.checks.pop(len(candidate.checks) // 2)
+            elif len(candidate.next_actions) > 1:
+                candidate.next_actions.pop()
+            elif len(candidate.scope) > 80:
+                candidate.scope = candidate.scope[:len(candidate.scope) // 2] + " [truncated]"
+            else:
+                raise ModelResponseError("Working notes cannot fit the context budget.",
+                                         reason="context_window_exceeded", retryable=False)
         return candidate
 
     def _fallback_working_notes(
-        self,
-        active: ChatMessage,
-        batch: list[ChatMessage],
-        *,
-        max_tokens: int,
+        self, active: ChatMessage, batch: list[ChatMessage], *, max_tokens: int,
+        working_summary: str = "",
     ) -> ResearchWorkingNotesModelOutput:
-        """Preserve raw runtime records when optional note synthesis fails.
-
-        This deliberately does not summarize or interpret paper content. The
-        next model turn receives bounded records with their original message
-        IDs and is still required to reread Sources before making a claim or
-        authoring a scientific record.
-        """
+        """Merge existing notes with explicitly lossy excerpts, without inferring evidence."""
+        previous = (ResearchWorkingNotesModelOutput.model_validate_json(working_summary)
+                    if working_summary else None)
         checks: list[ResearchWorkingCheckModelOutput] = []
-        for message in batch:
+        # Prefer recent results over call envelopes; their IDs retain the source of each excerpt.
+        for message in reversed(batch):
             if message.tool_result is not None:
-                record = json.dumps(
-                    message.tool_result.data,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    default=str,
-                )[:480]
-                statement = f"Archived tool result {message.tool_result.tool_call_id}: {record}"
-            elif message.tool_calls:
-                names = ", ".join(call.name for call in message.tool_calls)
-                statement = f"Archived requested capabilities: {names}"
+                record = json.dumps(message.tool_result.data, ensure_ascii=False,
+                                    separators=(",", ":"), default=str)
+                excerpt = record[:480] + (" [truncated]" if len(record) > 480 else "")
+                statement = f"Archived tool result {message.tool_result.tool_call_id}: {excerpt}"
+            elif message.role is ChatMessageRole.USER:
+                statement = "Earlier researcher request: " + message.content[:480]
             else:
                 continue
             checks.append(ResearchWorkingCheckModelOutput(
-                statement=statement[:600],
+                statement=statement[:1200],
                 conditions="Raw runtime record; this is not a scientific conclusion or authorization.",
                 basis_message_ids=[message.message_id],
-                unresolved="Verify the relevant canonical Source and conditions before relying on this record.",
+                unresolved="Verify missing details against the canonical Source before relying on this excerpt.",
             ))
             if len(checks) == 8:
                 break
-        if not checks:
-            checks.append(ResearchWorkingCheckModelOutput(
-                statement="Archived research request records are retained for continuation.",
-                conditions="Runtime memory only; no scientific claim was synthesized.",
-                basis_message_ids=[active.message_id],
-                unresolved="Reconstruct the needed Source evidence before answering.",
-            ))
+        checks.reverse()
+        prior_checks = sorted(previous.checks, key=lambda check: not bool(check.unresolved)) if previous else []
+        actions = [action for action in previous.next_actions if action != _WORKING_NOTES_LOSS_NOTICE] if previous else []
         return self._bounded_working_notes(
             ResearchWorkingNotesModelOutput(
-                scope=active.content[:1000] or "Continue the current research request.",
-                checks=checks,
-                next_actions=["Continue from the archived records and verify exact Sources before a conclusion or write."],
+                scope=previous.scope if previous else (active.content[:1000] or "Continue the current research request."),
+                checks=[*prior_checks[:8], *checks],
+                next_actions=[_WORKING_NOTES_LOSS_NOTICE, *actions[:7]],
             ),
             max_tokens=max_tokens,
         )

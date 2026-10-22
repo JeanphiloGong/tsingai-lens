@@ -414,7 +414,13 @@ notes containing scope, comparison conditions, conclusions, basis message IDs,
 uncertainties and next actions. It validates references before retiring those
 operations from model input. The full trajectory remains in storage. Working
 notes are not primary evidence, approval or published results. Source claims require
-their actual passages. A failed compaction preserves history and fails visibly.
+their actual passages. Repeated archival compaction merges previous notes with
+recent result excerpts instead of replacing the previous investigation. Notes
+have a bounded budget and explicitly mark omitted or truncated details; retiring
+a message means it is archived, not that every fact was retained. Failed note
+construction leaves previous notes and retired IDs unchanged. Invalid optional
+summary output can fall back to excerpts; transport and persistence failures
+remain failures.
 Working notes and retired message IDs are checkpointed in the existing response
 snapshot for approval and interruption recovery, without copying notes to logs.
 Pinned execution hints retain draft references and saved revision identities;

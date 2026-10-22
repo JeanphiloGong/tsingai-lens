@@ -28,6 +28,52 @@ class _CompactionModel:
         return turn
 
 
+@pytest.mark.anyio
+async def test_three_compactions_retain_earlier_conditions_and_new_observations():
+    from application.chat import CapabilityRegistry, ModelTurn, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    active = _user("active", "Compare Inconel 718 elongation using only the collection; density >= 99.9%.")
+    notes = {"scope": active.content, "checks": [{
+        "statement": "Paper A reports an as-built measurement; Source methods-A.",
+        "conditions": "Liquid-floating process; orientation unknown.",
+        "basis_message_ids": ["msg-result-first"],
+        "unresolved": "Do not transfer heat-treated measurements to the as-built ranking.",
+    }], "next_actions": ["Check tensile orientation."]}
+    model = _CompactionModel(ModelTurn(content=json.dumps(notes)))
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    messages = [active, *_tool_pair(call_id="first"), *_tool_pair(call_id="second")]
+    original = tuple(messages)
+    for name in ("third", "fourth", "fifth"):
+        view = await runner._prepare_model_context(tuple(messages), (), progress, active_user_message_id="active")
+        messages.extend(_tool_pair(call_id=name, payload={"source_ref": name, "content": "New observation"}))
+    saved = json.loads(view.working_summary)
+    assert any("orientation unknown" in check["conditions"] for check in saved["checks"])
+    assert any("msg-result-third" in check["basis_message_ids"] for check in saved["checks"])
+    assert "Check tensile orientation." in saved["next_actions"]
+    assert tuple(messages[:len(original)]) == original
+    assert len(model.contexts) == 1
+
+
+def test_fallback_marks_loss_and_preserves_old_and_recent_records():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+
+    runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
+    active = _user("active", "Preserve material and test conditions.")
+    old = runner._fallback_working_notes(active, list(_tool_pair(call_id="first")), max_tokens=6000)
+    batch = [message for i in range(12) for message in _tool_pair(
+        call_id=f"next-{i}", payload={"source_ref": f"results-{i}", "content": "measurement " * 100})]
+    notes = runner._fallback_working_notes(active, batch, max_tokens=1600,
+                                           working_summary=old.model_dump_json())
+    assert len(notes.checks) <= 16
+    assert runner.context_builder.estimate_tokens(notes.model_dump_json()) <= 1600
+    assert any("first" in check.statement for check in notes.checks)
+    assert any("next-11" in check.statement for check in notes.checks)
+    assert any("omitted" in action for action in notes.next_actions)
+
+
 def test_context_token_budget_preserves_complete_call_result_batches():
     active = _user("active", "Compare elongation under the same annealing conditions.")
     pairs = [_tool_pair(call_id=f"source-{i}", payload={
@@ -663,3 +709,32 @@ def test_default_context_keeps_eight_findings_for_a_constrained_research_plan() 
     view = ChatContextBuilder().for_model(messages)
     assert view.messages == messages
     assert not view.rollover_summary
+
+
+@pytest.mark.anyio
+async def test_failed_compaction_does_not_publish_new_notes_or_retired_ids():
+    from application.chat import CapabilityRegistry, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    runner = ResearchAgentRunner(model=_CompactionModel(TimeoutError("provider timeout")),
+                                 capabilities=CapabilityRegistry(()),
+                                 context_builder=ChatContextBuilder(max_messages=3))
+    progress = _RunProgress(runner.limits)
+    active = _user("active", "Compare only matching test conditions.")
+    messages = (active, *_tool_pair(call_id="old"), *_tool_pair(call_id="recent"))
+    with pytest.raises(TimeoutError):
+        await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
+    assert progress.working_summary == ""
+    assert not progress.compacted_message_ids
+    assert len(messages) == 5
+
+
+def test_working_notes_with_no_room_fail_without_returning_an_oversized_summary():
+    from application.chat import CapabilityRegistry, ModelResponseError, ResearchAgentRunner
+    from application.chat.model import ResearchWorkingNotesModelOutput
+
+    runner = ResearchAgentRunner(model=_CompactionModel(), capabilities=CapabilityRegistry(()))
+    notes = ResearchWorkingNotesModelOutput(scope="Only collection evidence.", checks=[], next_actions=[])
+    with pytest.raises(ModelResponseError, match="cannot fit"):
+        runner._bounded_working_notes(notes, max_tokens=1)
+    assert notes.scope == "Only collection evidence."

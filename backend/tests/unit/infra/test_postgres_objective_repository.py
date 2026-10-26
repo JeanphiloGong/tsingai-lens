@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core import PreparedDocumentInput, ResearchObjective
 from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
-from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
 
 def _objective() -> ResearchObjective:
@@ -35,7 +34,7 @@ def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> None:
     created_at = datetime(2026, 9, 2, 1, 2, 3, tzinfo=UTC)
     updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     objective = _objective()
-    row = PostgresObjectiveRepository._new_objective_row(
+    row = ObjectiveRepository._new_objective_row(
         objective,
         now=created_at,
     )
@@ -46,7 +45,7 @@ def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> None:
     assert row.created_at == created_at
     assert row.updated_at == updated_at
 
-    restored = PostgresObjectiveRepository._objective_record_from_row(row)
+    restored = ObjectiveRepository._objective_record_from_row(row)
     assert restored.objective == objective
     assert restored.created_at == created_at
     assert restored.updated_at == updated_at
@@ -64,7 +63,7 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
         origin="system_discovered",
         created_by_tool_call_id=None,
         payload={
-            **PostgresObjectiveRepository._objective_payload(_objective()),
+            **ObjectiveRepository._objective_payload(_objective()),
             "created_at": legacy_created_at.isoformat(),
             "updated_at": legacy_updated_at.isoformat(),
         },
@@ -72,7 +71,7 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
         updated_at=column_updated_at,
     )
 
-    restored = PostgresObjectiveRepository._objective_record_from_row(row)
+    restored = ObjectiveRepository._objective_record_from_row(row)
 
     assert restored.created_at == column_created_at
     assert restored.updated_at == column_updated_at
@@ -97,7 +96,7 @@ def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> 
         ),
     )
 
-    row = PostgresObjectiveRepository._new_analysis_row(
+    row = ObjectiveRepository._new_analysis_row(
         analysis,
         now=datetime(2026, 9, 5, tzinfo=UTC),
     )
@@ -110,7 +109,7 @@ def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> 
             "status": "verified",
         }
     ]
-    assert PostgresObjectiveRepository._analysis_from_row(row).diagnostics == (
+    assert ObjectiveRepository._analysis_from_row(row).diagnostics == (
         {
             "trace_type": "table_matrix_repair",
             "table_id": "table-1",

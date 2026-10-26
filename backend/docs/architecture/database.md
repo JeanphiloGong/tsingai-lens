@@ -69,7 +69,7 @@ The database preserves two different kinds of state:
 | Uploaded source files and extracted figure bytes | Object storage | Tables keep a storage key, SHA-256, media type, and size; bytes are not stored in PostgreSQL. |
 | Parser, model, and pipeline scratch | Local runtime paths | Disposable cache/output paths are not product read authorities. |
 | Schema changes | Alembic | Startup does not create, probe, or infer tables. |
-| Test-only alternatives | Memory repositories | They implement ports for isolated tests and are not production storage. |
+| Isolated service tests | Test doubles in `tests/support/repositories/` | They are not runtime storage; PostgreSQL integration tests exercise real persistence. |
 
 The runtime composes one `AsyncEngine` and one `async_sessionmaker` in
 `main.py`. Each repository operation uses a short task-local `AsyncSession`;
@@ -174,8 +174,8 @@ output paths.
 
 ### 4. Current Document Preparation Aggregate
 
-`PostgresSourceArtifactRepository`, `PostgresDocumentProfileRepository`, and
-`PostgresPaperMapRepository` persist one `document_preparations` row per current
+`SourceArtifactRepository`, `DocumentProfileRepository`, and
+`PaperMapRepository` persist one `document_preparations` row per current
 Document. The row keeps named Source, Profile, and Paper Map sections so each
 producer can replace its own result without creating parallel current tables.
 
@@ -473,23 +473,24 @@ identity used by the Evidence or Finding.
 
 | Repository | Tables owned |
 | --- | --- |
-| `PostgresAuthRepository` | `auth_users`, `auth_sessions` |
-| `PostgresCollectionRepository` | `collections`, `documents` (document count derived from current rows) |
-| `PostgresPipelineRunRepository` | `pipeline_runs` |
-| `PostgresSourceArtifactRepository` | `document_preparations.source_*`, `document_preparations.artifact_json` |
-| `PostgresDocumentProfileRepository` | `document_preparations.profile_json` |
-| `PostgresPaperMapRepository` | `document_preparations.paper_map_payload` |
-| `PostgresObjectiveRepository` | `collections.discovery_*`, `research_objectives`, and `objective_analyses` lifecycle metadata; authored snapshots remain in the analysis payload |
-| `PostgresPaperExperimentRepository` / `PostgresObjectiveExperimentSelectionRepository` | Immutable automatic experiment revisions and Objective-scoped selections |
-| `PostgresComparisonGroupRepository` / `PostgresExperimentFindingRepository` | Optional comparison groups and Findings that reference fixed selections |
-| `PostgresChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
-| `PostgresExperimentPlanRepository` | `objective_experiment_plans` |
-| `PostgresFindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
-| `PostgresEvaluationRepository` | All `evaluation_*` tables |
+| `AuthRepository` | `auth_users`, `auth_sessions` |
+| `CollectionRepository` | `collections`, `documents` (document count derived from current rows) |
+| `PipelineRunRepository` | `pipeline_runs` |
+| `SourceArtifactRepository` | `document_preparations.source_*`, `document_preparations.artifact_json` |
+| `DocumentProfileRepository` | `document_preparations.profile_json` |
+| `PaperMapRepository` | `document_preparations.paper_map_payload` |
+| `ObjectiveRepository` | `collections.discovery_*`, `research_objectives`, and `objective_analyses` lifecycle metadata; authored snapshots remain in the analysis payload |
+| `PaperExperimentRepository` / `ObjectiveExperimentSelectionRepository` | Immutable automatic experiment revisions and Objective-scoped selections |
+| `ComparisonGroupRepository` / `ExperimentFindingRepository` | Optional comparison groups and Findings that reference fixed selections |
+| `ChatRepository` | `chat_sessions`, `chat_messages`, `chat_tool_calls` (including embedded results), `chat_message_feedback` |
+| `ExperimentPlanRepository` | `objective_experiment_plans` |
+| `FindingReviewRepository` | `finding_feedback_records`, `finding_curation_records` |
+| `EvaluationRepository` | All `evaluation_*` tables |
 
 The composition root in `main.py` injects these repositories into application
-services. Memory repositories mirror selected ports only for isolated tests;
-they do not define production schema or behavior.
+services. Their SQL, mappings and query results live in `repositories/`,
+beside `application/`. Test doubles live only under `tests/support/`; database
+integration tests use an independent PostgreSQL database.
 
 ## Related Authorities
 

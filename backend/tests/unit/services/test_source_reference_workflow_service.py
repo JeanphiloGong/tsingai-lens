@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from application.source.reference_workflow_service import (
-    SourceReferenceWorkflowService,
-)
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
+from application.source.reference_workflow_service import (
+    SourceReferenceWorkflowService,
+)
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
-from infra.persistence.memory import MemorySourceArtifactRepository
+from tests.support.repositories import MemorySourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 

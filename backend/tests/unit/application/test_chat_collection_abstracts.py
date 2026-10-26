@@ -10,14 +10,14 @@ from application.chat.capabilities.collection_context import (
     BrowseCollectionPapersCapability,
     BrowseCollectionPapersToolRequest,
 )
-from application.chat.tool_result_projection import tool_result_record
+from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
 )
-from application.chat.capabilities.contracts import CapabilityExecutionContext
+from application.chat.tool_result_projection import tool_result_record
 from domain.source.artifacts import SourceBlock, SourceDocument
-from infra.persistence.memory import (
+from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,

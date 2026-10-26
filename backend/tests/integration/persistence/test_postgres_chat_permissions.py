@@ -3,14 +3,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import StoredCollection
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ToolRisk
 from domain.source import Collection
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.chat_repository import ChatRepository
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
 )
 
 pytestmark = pytest.mark.anyio
@@ -19,10 +18,10 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 async def permission_case(postgres_session_factory):
     now = datetime.now(timezone.utc).isoformat()
-    await PostgresAuthRepository(postgres_session_factory).add_user(AuthUserRecord(
+    await AuthRepository(postgres_session_factory).add_user(AuthUserRecord(
         user_id="u", email="permission@example.com", display_name=None,
         password_hash="test-only", created_at=now))
-    await PostgresCollectionRepository(postgres_session_factory).add_collection(
+    await CollectionRepository(postgres_session_factory).add_collection(
         StoredCollection(
             collection=Collection(
                 collection_id="c",
@@ -35,7 +34,7 @@ async def permission_case(postgres_session_factory):
             updated_at=now,
         )
     )
-    repo = PostgresChatRepository(postgres_session_factory)
+    repo = ChatRepository(postgres_session_factory)
     session = ChatSession.create(session_id="s", user_id="u", collection_id="c", created_at=now)
     await repo.add_session(session)
     grant = await repo.set_permission("s", "u", mode="auto", actions=["record_finding_feedback"],
@@ -55,7 +54,7 @@ async def test_automatic_claim_is_durable_and_not_replayed(permission_case, post
         for _ in range(2)])
     claimed = first or second
     assert (first is None) != (second is None)
-    fresh = PostgresChatRepository(postgres_session_factory)
+    fresh = ChatRepository(postgres_session_factory)
     stored = await fresh.read_tool_call("call")
     assert stored == claimed
     assert stored.decision_basis == "scope_grant"

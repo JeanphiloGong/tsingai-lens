@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from application.repositories.pipeline_run_repository import ModelUsage, TokenUsage
 from infra.llm.usage import (
     capture_llm_usage,
     record_llm_completion,
     record_llm_prompt_version,
 )
+from repositories.pipeline_run_repository import ModelUsage, TokenUsage
 
 
 def _completion(

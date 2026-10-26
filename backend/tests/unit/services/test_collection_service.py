@@ -9,7 +9,6 @@ from zipfile import ZipFile
 import pytest
 from pypdf import PdfWriter
 
-from application.repositories.collection_repository import StoredDocument
 from application.source.collection_service import CollectionService
 from application.source.source_archive_service import (
     CollectionSourceArchiveError,
@@ -19,8 +18,9 @@ from application.source.source_archive_service import (
 from application.source.source_import_service import SourceImportService
 from domain.chat.permissions import AUTO_ACTIONS
 from domain.source import Document
-from infra.persistence.memory import MemoryCollectionRepository
+from repositories.collection_repository import StoredDocument
 from tests.support.collection_service import build_test_collection_service
+from tests.support.repositories import MemoryCollectionRepository
 
 pytestmark = pytest.mark.anyio
 

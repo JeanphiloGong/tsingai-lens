@@ -10,14 +10,16 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 from application.core.objectives.analysis.experiment_query_service import (
     ExperimentQueryService,
 )
-from application.repositories.objective_repository import (
+from application.source.collection_service import CollectionService
+from domain.core.finding import Finding
+from infra.persistence.postgres.experiment_analysis_transaction import (
+    PostgresExperimentAnalysisTransactionFactory,
+)
+from repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_ABSTENTION_REASONS,
     ObjectiveAnalysis,
     ObjectiveRepository,
 )
-from application.repositories.transaction import RepositoryTransactionFactory
-from application.source.collection_service import CollectionService
-from domain.core.finding import Finding
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class FindingAuthoringService:
         objective_repository: ObjectiveRepository,
         experiment_query_service: ExperimentQueryService,
         experiment_analysis_writer: ExperimentAnalysisWriter,
-        experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None,
+        experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository

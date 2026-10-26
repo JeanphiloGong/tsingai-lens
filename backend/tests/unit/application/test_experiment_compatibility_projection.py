@@ -8,9 +8,6 @@ import pytest
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
-from application.repositories.paper_experiment_repository import (
-    StoredPaperExperimentRevision,
-)
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
     ObjectiveEvidenceResponse,
@@ -18,7 +15,9 @@ from controllers.schemas.core.research_objectives import (
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import PaperExperimentRevision
-
+from repositories.paper_experiment_repository import (
+    StoredPaperExperimentRevision,
+)
 
 pytestmark = pytest.mark.anyio
 

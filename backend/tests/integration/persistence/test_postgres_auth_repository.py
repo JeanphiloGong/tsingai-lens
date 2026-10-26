@@ -1,20 +1,21 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
-from application.repositories.auth_repository import AuthSessionRecord, AuthUserRecord
-
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-import os
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.models.auth import AuthSession
-
+from repositories.auth_repository import (
+    AuthRepository,
+    AuthSessionRecord,
+    AuthUserRecord,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -22,7 +23,7 @@ pytestmark = pytest.mark.anyio
 async def test_auth_repository_round_trips_users_and_sessions(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAuthRepository(postgres_session_factory)
+    repository = AuthRepository(postgres_session_factory)
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     token_hash = sha256(b"browser-session-token").hexdigest()
     user = AuthUserRecord(
@@ -52,7 +53,7 @@ async def test_auth_repository_round_trips_users_and_sessions(
 async def test_auth_repository_rejects_duplicate_email_and_token_hash(
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAuthRepository(postgres_session_factory)
+    repository = AuthRepository(postgres_session_factory)
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     first_user = AuthUserRecord(
         user_id="user_first", email="reader@example.com", display_name=None,
@@ -80,7 +81,7 @@ async def test_postgresql_enforces_auth_contract(
     monkeypatch,
     postgres_session_factory,
 ) -> None:
-    repository = PostgresAuthRepository(postgres_session_factory)
+    repository = AuthRepository(postgres_session_factory)
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     user = AuthUserRecord(
         user_id="user_constraints", email="constraints@example.com", display_name=None,

@@ -204,11 +204,11 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 
     database = __import__("infra.persistence.database", fromlist=["database"])
     objective_repository = __import__(
-        "infra.persistence.postgres.objective_repository",
+        "repositories.objective_repository",
         fromlist=["objective_repository"],
     )
     review_repository = __import__(
-        "infra.persistence.postgres.finding_review_repository",
+        "repositories.finding_review_repository",
         fromlist=["finding_review_repository"],
     )
     evaluation = __import__("application.evaluation", fromlist=["evaluation"])
@@ -217,12 +217,12 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
     monkeypatch.setattr(database, "build_session_factory", lambda _engine: None)
     monkeypatch.setattr(
         objective_repository,
-        "PostgresObjectiveRepository",
+        "ObjectiveRepository",
         lambda _sessions: ObjectiveRepository(),
     )
     monkeypatch.setattr(
         review_repository,
-        "PostgresFindingReviewRepository",
+        "FindingReviewRepository",
         lambda _sessions: ReviewRepository(),
     )
     monkeypatch.setattr(

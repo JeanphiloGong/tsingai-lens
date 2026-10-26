@@ -16,10 +16,10 @@ from application.feedback.source_coverage import (
     ChatCoverageAudit,
     build_evidence_coverage,
 )
-from application.repositories.chat_repository import ChatRepository
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.chat.feedback import ChatMessageFeedback
 from domain.feedback import AnalysisResult, EvidenceCoverage, FeedbackProblemType
+from repositories.chat_repository import ChatRepository
 
 
 class AnalysisInputError(ValueError):

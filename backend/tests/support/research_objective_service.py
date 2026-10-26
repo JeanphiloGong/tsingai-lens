@@ -12,16 +12,16 @@ from application.core.objectives.objective_input_service import ObjectiveInputSe
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
-from application.repositories.collection_repository import StoredDocument
-from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjective
 from domain.source import Document
-from infra.persistence.memory import (
+from repositories.collection_repository import StoredDocument
+from repositories.objective_repository import ObjectiveAnalysis
+from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
 )
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:

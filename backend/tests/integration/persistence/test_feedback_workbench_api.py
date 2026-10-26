@@ -3,16 +3,15 @@ from __future__ import annotations
 from hashlib import sha256
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-import pytest
 
-from application.auth.session_service import AuthSessionService, SESSION_COOKIE_NAME
-from application.repositories.auth_repository import AuthSessionRecord, AuthUserRecord
+from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
 from controllers import feedback_cases
 from main import configure_middleware
+from repositories.auth_repository import AuthSessionRecord, AuthUserRecord
 from tests.integration.persistence.test_feedback_workbench import feedback_chain
-
 
 pytestmark = pytest.mark.anyio
 

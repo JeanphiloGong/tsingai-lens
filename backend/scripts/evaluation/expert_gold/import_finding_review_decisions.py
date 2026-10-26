@@ -4,9 +4,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
@@ -44,18 +43,18 @@ async def import_review_decisions(
             build_database_engine,
             build_session_factory,
         )
-        from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
-            PostgresObjectiveRepository,
+        from repositories.finding_review_repository import (  # noqa: PLC0415
+            FindingReviewRepository,
         )
-        from infra.persistence.postgres.finding_review_repository import (  # noqa: PLC0415
-            PostgresFindingReviewRepository,
+        from repositories.objective_repository import (  # noqa: PLC0415
+            ObjectiveRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
         session_factory = build_session_factory(engine)
         feedback_service = FindingFeedbackService(
-            review_repository=PostgresFindingReviewRepository(session_factory),
-            objective_repository=PostgresObjectiveRepository(session_factory),
+            review_repository=FindingReviewRepository(session_factory),
+            objective_repository=ObjectiveRepository(session_factory),
         )
     try:
         return await FindingReviewImportService(feedback_service).import_jsonl_file(

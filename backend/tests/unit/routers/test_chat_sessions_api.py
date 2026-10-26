@@ -17,7 +17,6 @@ from application.chat.session_service import (
     ChatSourceContextError,
 )
 from application.pipeline import PipelineRunService
-from application.repositories.chat_repository import ChatSessionSummary
 from controllers.chat import sessions as sessions_controller
 from controllers.chat.schemas import (
     ChatSessionCreateRequest,
@@ -33,11 +32,12 @@ from domain.chat import (
     ToolPermissionMode,
     ToolRisk,
 )
-from infra.persistence.memory import (
+from main import create_app
+from repositories.chat_repository import ChatSessionSummary
+from tests.support.repositories import (
     MemoryObjectiveRepository,
     MemoryPipelineRunRepository,
 )
-from main import create_app
 
 
 class _Service:
@@ -496,8 +496,12 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
 
 
 def test_title_route_validates_input_and_hides_unowned_sessions(collection_service) -> None:
-    from tests.unit.application.test_chat_session_service import _Model, _Repository, _service
     from application.chat import ModelTurn
+    from tests.unit.application.test_chat_session_service import (
+        _Model,
+        _Repository,
+        _service,
+    )
     repository = _Repository()
     service = _service(_Model(ModelTurn(content="Answer")), repository)
     session = asyncio.run(service.create_session(collection_id="col-1", user_id="user-1"))

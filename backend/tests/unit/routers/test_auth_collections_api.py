@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from io import BytesIO
-import json
-import os
 from pathlib import Path
-import subprocess
-import sys
 from unittest.mock import AsyncMock, Mock
 from zipfile import ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
-import pytest
 
 import application.source.source_archive_service as source_archive_service_module
 
@@ -33,14 +33,16 @@ def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
     from tests.support.experiment_plan_repository import (
         InMemoryExperimentPlanRepository,
     )
-    from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
     from tests.support.objective_review_repository import (
         InMemoryObjectiveReviewRepository,
     )
-    from infra.persistence.memory import (
+    from tests.support.repositories import (
         MemoryDocumentProfileRepository,
         MemoryPaperMapRepository,
         MemorySourceArtifactRepository,
+    )
+    from tests.support.repositories.objective_repository import (
+        MemoryObjectiveRepository,
     )
 
     return {
@@ -62,7 +64,7 @@ def _build_client(
     collection_service,
 ) -> Iterator[TestClient]:
     from application.pipeline import PipelineRunService
-    from infra.persistence.memory import MemoryPipelineRunRepository
+    from tests.support.repositories import MemoryPipelineRunRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -130,7 +132,7 @@ def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) ->
     monkeypatch.setattr("main.DatabaseSettings", lambda: object())
     monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
     monkeypatch.setattr("main.build_session_factory", lambda _engine: object())
-    monkeypatch.setattr("main.PostgresAuthRepository", lambda _factory: object())
+    monkeypatch.setattr("main.AuthRepository", lambda _factory: object())
     monkeypatch.setattr("main.AuthSessionService", lambda _repository: service)
 
     with pytest.raises(RuntimeError, match="bootstrap failed"):
@@ -146,9 +148,11 @@ def test_app_lifespan_composes_one_shared_collection_service(
     auth_session_service,
     collection_service,
 ) -> None:
+    from application.core.objectives.analysis.experiment_analysis_writer import (
+        ExperimentAnalysisWriter,
+    )
     from application.pipeline import PipelineRunService
-    from application.core.objectives.analysis.experiment_analysis_writer import ExperimentAnalysisWriter
-    from infra.persistence.memory import MemoryPipelineRunRepository
+    from tests.support.repositories import MemoryPipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
@@ -218,12 +222,12 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
     collection_service,
 ) -> None:
     from application.core.objectives.analysis_service import ObjectiveAnalysisService
+    from application.pipeline import PipelineRunService
     from application.source.document_preparation_service import (
         DocumentPreparationService,
     )
-    from application.pipeline import PipelineRunService
-    from infra.persistence.memory import MemoryPipelineRunRepository
     from main import create_app
+    from tests.support.repositories import MemoryPipelineRunRepository
 
     preparation_recovery = AsyncMock(return_value=0)
     analysis_recovery = AsyncMock(return_value=0)

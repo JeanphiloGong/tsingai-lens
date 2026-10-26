@@ -21,20 +21,20 @@ from application.core.objectives.analysis.paper_experiment_contract import (
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
-from application.repositories.experiment_analysis_repository import (
-    ExperimentAnalysisWrite,
-    StoredExperimentAnalysis,
-)
-from application.repositories.objective_repository import ObjectiveAnalysis
-from application.repositories.paper_experiment_repository import (
-    StoredPaperExperimentRevision,
-)
 from domain.core.research_objective import (
     ObjectiveFactSet,
     PaperContribution,
     ResearchObjective,
 )
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from repositories.experiment_analysis_repository import (
+    ExperimentAnalysisWrite,
+    StoredExperimentAnalysis,
+)
+from repositories.objective_repository import ObjectiveAnalysis
+from repositories.paper_experiment_repository import (
+    StoredPaperExperimentRevision,
+)
+from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 

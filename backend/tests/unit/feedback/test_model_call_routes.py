@@ -3,13 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from fastapi import HTTPException
 
 from application.chat.session_service import ChatSessionNotFoundError
-from application.repositories.chat_repository import ChatModelCall
 from controllers.chat.sessions import get_chat_model_call, list_chat_model_calls
-
+from repositories.chat_repository import ChatModelCall
 
 pytestmark = pytest.mark.anyio
 

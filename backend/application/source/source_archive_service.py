@@ -9,9 +9,9 @@ from tempfile import SpooledTemporaryFile
 from typing import Any
 from zipfile import ZIP_STORED, ZipFile
 
-from application.repositories.collection_repository import CollectionRepository
-from application.repositories.object_store import ObjectStore
 from application.source.collection_service import collection_details
+from repositories.collection_repository import CollectionRepository
+from repositories.object_store import ObjectStore
 
 _SOURCE_ARCHIVE_MAX_MIB = 256
 _SOURCE_ARCHIVE_MAX_BYTES = _SOURCE_ARCHIVE_MAX_MIB * 1024 * 1024

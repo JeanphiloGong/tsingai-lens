@@ -54,9 +54,10 @@ reuse revisions from one or more papers.
   discovery, PaperExperiment extraction, selection, and Finding synthesis.
 - `application/chat/`: Research Agent trajectory and approved capability calls.
 - `domain/`: Business objects, invariants, and state transitions.
-- [`application/repositories/`](application/repositories/README.md): Repository
-  contracts and their dedicated query results.
-- `infra/`: PostgreSQL, object storage, Source parsing, and model clients.
+- [`repositories/`](repositories/README.md): Concrete PostgreSQL
+  queries, writes, mappings, and their dedicated query results.
+- `infra/`: database connections, ORM tables, transactions, object storage,
+  Source parsing, and model clients.
 - `docs/`: Backend architecture, API, and operations authorities.
 
 ## Public HTTP Contract

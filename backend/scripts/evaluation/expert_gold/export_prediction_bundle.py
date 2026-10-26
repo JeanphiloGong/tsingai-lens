@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import sys
 from datetime import datetime, timezone
 from hashlib import sha1
-import json
 from pathlib import Path
-import sys
 from typing import Any
-
 
 SCHEMA_VERSION = "prediction-bundle-v0.4"
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -21,16 +20,15 @@ from infra.persistence.database import (  # noqa: E402
     build_database_engine,
     build_session_factory,
 )
-from infra.persistence.postgres.document_profile_repository import (  # noqa: E402
-    PostgresDocumentProfileRepository,
+from repositories.document_profile_repository import (  # noqa: E402
+    DocumentProfileRepository,
 )
-from infra.persistence.postgres.objective_repository import (  # noqa: E402
-    PostgresObjectiveRepository,
+from repositories.objective_repository import (  # noqa: E402
+    ObjectiveRepository,
 )
-from infra.persistence.postgres.source_artifact_repository import (  # noqa: E402
-    PostgresSourceArtifactRepository,
+from repositories.source_artifact_repository import (  # noqa: E402
+    SourceArtifactRepository,
 )
-
 
 DEFAULT_OUTPUT_PATH = (
     DEFAULT_BACKEND_ROOT
@@ -165,13 +163,13 @@ async def _load_artifacts(
     engine = build_database_engine(DatabaseSettings())
     try:
         sessions = build_session_factory(engine)
-        documents = await PostgresSourceArtifactRepository(
+        documents = await SourceArtifactRepository(
             sessions
         ).read_collection_documents(collection_id)
-        profiles = await PostgresDocumentProfileRepository(sessions).list_collection(
+        profiles = await DocumentProfileRepository(sessions).list_collection(
             collection_id
         )
-        objective_repository = PostgresObjectiveRepository(sessions)
+        objective_repository = ObjectiveRepository(sessions)
         evidence: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
         for objective in await objective_repository.list_objectives(collection_id):

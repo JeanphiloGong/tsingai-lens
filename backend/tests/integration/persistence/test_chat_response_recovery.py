@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 import json
 import socket
+from contextlib import asynccontextmanager
 
+import pytest
+import uvicorn
 from alembic import command
 from alembic.config import Config
 from fastapi import FastAPI
 from httpx import AsyncClient
-import pytest
 from sqlalchemy import inspect, text
-import uvicorn
 
-from application.auth.session_service import AuthSessionService, SESSION_COOKIE_NAME
+from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
 from application.chat import CapabilityRegistry, ResearchAgentRunner
 from application.chat.session_service import ChatSessionService
 from controllers.chat.sessions import router
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
+from repositories.auth_repository import AuthRepository
+from repositories.chat_repository import ChatRepository
 from tests.integration.persistence.test_chat_branches import branch_app  # noqa: F401
 from tests.unit.application.test_chat_session_service import _PausedResponseModel
 
@@ -63,9 +63,9 @@ async def test_real_http_disconnect_resumes_on_another_worker_without_duplicate_
     reader = ChatSessionService(
         collection_service=writer.collection_service,
         source_artifact_repository=writer.source_artifact_repository,
-        repository=PostgresChatRepository(fixture.factory), runner=writer.runner,
+        repository=ChatRepository(fixture.factory), runner=writer.runner,
     )
-    auth = AuthSessionService(PostgresAuthRepository(fixture.factory))
+    auth = AuthSessionService(AuthRepository(fixture.factory))
     cookies = {SESSION_COOKIE_NAME: fixture.cookies[0]}
     try:
         async with _server(writer, auth) as first_url, _server(reader, auth) as second_url:

@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from datetime import datetime
 import json
-from pathlib import Path
 import sys
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
-
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
@@ -21,19 +20,18 @@ from infra.persistence.database import (  # noqa: E402
     build_database_engine,
     build_session_factory,
 )
-from infra.persistence.postgres.document_profile_repository import (  # noqa: E402
-    PostgresDocumentProfileRepository,
+from repositories.document_profile_repository import (  # noqa: E402
+    DocumentProfileRepository,
 )
-from infra.persistence.postgres.objective_repository import (  # noqa: E402
-    PostgresObjectiveRepository,
+from repositories.objective_repository import (  # noqa: E402
+    ObjectiveRepository,
 )
-from infra.persistence.postgres.paper_map_repository import (  # noqa: E402
-    PostgresPaperMapRepository,
+from repositories.paper_map_repository import (  # noqa: E402
+    PaperMapRepository,
 )
-from infra.persistence.postgres.source_artifact_repository import (  # noqa: E402
-    PostgresSourceArtifactRepository,
+from repositories.source_artifact_repository import (  # noqa: E402
+    SourceArtifactRepository,
 )
-
 
 ARTIFACT_NAMES = (
     "documents",
@@ -141,16 +139,16 @@ async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
     engine = build_database_engine(DatabaseSettings())
     try:
         sessions = build_session_factory(engine)
-        documents = await PostgresSourceArtifactRepository(
+        documents = await SourceArtifactRepository(
             sessions
         ).read_collection_documents(collection_id)
-        profiles = await PostgresDocumentProfileRepository(sessions).list_collection(
+        profiles = await DocumentProfileRepository(sessions).list_collection(
             collection_id
         )
-        paper_maps = await PostgresPaperMapRepository(sessions).list_collection(
+        paper_maps = await PaperMapRepository(sessions).list_collection(
             collection_id
         )
-        objective_repository = PostgresObjectiveRepository(sessions)
+        objective_repository = ObjectiveRepository(sessions)
         evidence: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
         for objective in await objective_repository.list_objectives(collection_id):

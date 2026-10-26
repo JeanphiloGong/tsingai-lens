@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from application.repositories.pipeline_run_repository import (
+from repositories.pipeline_run_repository import (
     ExecutionStats,
     ExecutionTimestamps,
     ModelUsage,

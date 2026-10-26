@@ -4,19 +4,11 @@ import json
 from dataclasses import replace
 
 import pytest
+from scripts.evaluation.feedback_dataset.prepare import load_prepared, prepare_export
 
 from application.feedback.dataset_export_service import (
     DatasetExportError,
     FeedbackDatasetExportService,
-)
-from application.repositories.feedback_dataset_export_repository import (
-    DatasetExportConflict,
-    DatasetExportDraft,
-    DatasetExportIdempotencyConflict,
-    DatasetExportSummary,
-)
-from application.repositories.feedback_dataset_sample_repository import (
-    ConfirmedDatasetMember,
 )
 from domain.feedback import Dataset, DatasetExport, DatasetSample, SampleRevision
 from domain.feedback.sample_revision import (
@@ -25,7 +17,15 @@ from domain.feedback.sample_revision import (
     SftRevisionContent,
     content_digest_for,
 )
-from scripts.evaluation.feedback_dataset.prepare import prepare_export, load_prepared
+from repositories.feedback_dataset_export_repository import (
+    DatasetExportConflict,
+    DatasetExportDraft,
+    DatasetExportIdempotencyConflict,
+    DatasetExportSummary,
+)
+from repositories.feedback_dataset_sample_repository import (
+    ConfirmedDatasetMember,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -150,7 +150,9 @@ async def test_selected_export_never_reads_unselected_stale_members() -> None:
     class SamplesWithStaleUnselectedMember(_Samples):
         async def read_confirmed_members(self, *, dataset_id, sample_ids=None):
             if sample_ids is None or "sample-2" in sample_ids:
-                from application.repositories.feedback_dataset_sample_repository import DatasetSampleRevisionConflict
+                from repositories.feedback_dataset_sample_repository import (
+                    DatasetSampleRevisionConflict,
+                )
                 raise DatasetSampleRevisionConflict("sample_source_stale")
             return await super().read_confirmed_members(dataset_id=dataset_id, sample_ids=sample_ids)
 

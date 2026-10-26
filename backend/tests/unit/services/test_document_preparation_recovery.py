@@ -11,15 +11,15 @@ from application.core.document_profiles.extraction import (
 )
 from application.core.document_profiles.service import DocumentProfileService
 from application.pipeline import PipelineRunService
-from application.repositories.collection_repository import StoredDocument
 from application.source.document_preparation_service import DocumentPreparationService
 from domain.source import Document, SourceDocument
-from infra.persistence.memory import (
+from repositories.collection_repository import StoredDocument
+from tests.support.collection_service import build_test_collection_service
+from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemoryPipelineRunRepository,
     MemorySourceArtifactRepository,
 )
-from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio
 

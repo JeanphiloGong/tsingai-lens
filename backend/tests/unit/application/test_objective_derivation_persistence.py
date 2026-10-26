@@ -14,7 +14,7 @@ from application.core.objectives.objective_authoring_service import (
     ObjectiveAuthoringService,
 )
 from domain.core import ResearchObjective
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 

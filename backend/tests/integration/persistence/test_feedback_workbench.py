@@ -22,13 +22,6 @@ from application.feedback.dataset_snapshot_service import (
 from application.feedback.feedback_case_service import FeedbackCaseService
 from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
 from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
-from application.repositories.analysis_job_repository import (
-    TOOL_FAILURE_JOB_TYPE,
-    correction_signal_idempotency_key,
-    tool_failure_idempotency_key,
-)
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import StoredCollection
 from application.source.collection_service import CollectionService
 from domain.chat import (
     ChatMessage,
@@ -47,19 +40,23 @@ from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.tool_failure import tool_failure_signal_id, tool_result_digest
 from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-from infra.persistence.postgres.analysis_job_repository import (
-    PostgresAnalysisJobRepository,
+from repositories.analysis_job_repository import (
+    TOOL_FAILURE_JOB_TYPE,
+    AnalysisJobRepository,
+    correction_signal_idempotency_key,
+    tool_failure_idempotency_key,
 )
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.chat_repository import ChatRepository
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
 )
-from infra.persistence.postgres.dataset_snapshot_repository import (
-    PostgresDatasetSnapshotRepository,
+from repositories.dataset_snapshot_repository import (
+    DatasetSnapshotRepository,
 )
-from infra.persistence.postgres.feedback_case_repository import (
-    PostgresFeedbackCaseRepository,
+from repositories.feedback_case_repository import (
+    FeedbackCaseRepository,
 )
 
 pytestmark = pytest.mark.anyio
@@ -76,7 +73,7 @@ def _current_iso() -> str:
 
 @pytest.fixture
 async def feedback_chain(postgres_session_factory, tmp_path):
-    auth = PostgresAuthRepository(postgres_session_factory)
+    auth = AuthRepository(postgres_session_factory)
     await auth.add_user(
         AuthUserRecord(
             user_id=USER_ID,
@@ -87,7 +84,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         )
     )
 
-    collections = PostgresCollectionRepository(postgres_session_factory)
+    collections = CollectionRepository(postgres_session_factory)
     await collections.add_collection(
         StoredCollection(
             collection=Collection(
@@ -105,7 +102,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         collections, FileCollectionWorkspace(tmp_path)
     )
 
-    chat = PostgresChatRepository(postgres_session_factory)
+    chat = ChatRepository(postgres_session_factory)
     session = ChatSession.create(
         session_id=SESSION_ID,
         user_id=USER_ID,
@@ -171,7 +168,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         tool_results=(),
     )
 
-    jobs = PostgresAnalysisJobRepository(postgres_session_factory)
+    jobs = AnalysisJobRepository(postgres_session_factory)
     chat_service = ChatSessionService(
         collection_service=collection_service,
         source_artifact_repository=None,
@@ -179,13 +176,13 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         runner=None,
         analysis_job_repository=jobs,
     )
-    cases = PostgresFeedbackCaseRepository(postgres_session_factory)
+    cases = FeedbackCaseRepository(postgres_session_factory)
     case_service = FeedbackCaseService(
         case_repository=cases,
         chat_repository=chat,
         collection_service=collection_service,
     )
-    snapshots = PostgresDatasetSnapshotRepository(postgres_session_factory)
+    snapshots = DatasetSnapshotRepository(postgres_session_factory)
     snapshot_service = DatasetSnapshotService(
         repository=snapshots,
         case_repository=cases,

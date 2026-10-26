@@ -5,9 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from asyncio import CancelledError, Semaphore
+from asyncio import CancelledError, Semaphore, create_task
 from asyncio import Task as AsyncTask
-from asyncio import create_task
 from dataclasses import replace
 from hashlib import sha256 as hash_sha256
 from pathlib import Path
@@ -21,21 +20,21 @@ from application.core.document_profiles.extraction import (
 from application.core.document_profiles.service import DocumentProfileService
 from application.pipeline import PipelineRunService
 from application.pipeline.pipeline_run_service import document_preparation_error_message
-from application.repositories.collection_repository import StoredDocument
-from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.source.collection_service import CollectionService
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
 from domain.core.document_profile import PROFILE_STATUS_COMPLETED
 from domain.source import Document, SourceDocument
+from infra.source.artifact_bundle import SourceArtifactBundle
 from infra.source.config.source_parser_config import (
     InputConfig,
     InputStorageConfig,
     SourceParserConfig,
     StorageConfig,
 )
-from infra.source.artifact_bundle import SourceArtifactBundle
+from repositories.collection_repository import StoredDocument
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 logger = logging.getLogger(__name__)
 

@@ -5,8 +5,7 @@ import pytest
 from application.source.collection_service import CollectionService
 from domain.chat.permissions import AUTO_ACTIONS
 from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.memory import MemoryCollectionRepository
-
+from tests.support.repositories import MemoryCollectionRepository
 
 pytestmark = pytest.mark.anyio
 

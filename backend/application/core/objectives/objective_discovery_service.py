@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 from asyncio import (
     CancelledError,
-    Task as AsyncTask,
     create_task,
     gather,
     get_running_loop,
@@ -10,29 +11,30 @@ from asyncio import (
     to_thread,
     wrap_future,
 )
+from asyncio import (
+    Task as AsyncTask,
+)
 from collections.abc import Coroutine
 from hashlib import sha256
-import json
-import logging
 from threading import Lock
 from typing import Any, Callable
 
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
+from application.core.objectives.llm.structured_response import (
+    StructuredResponseClient,
+)
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from application.core.objectives.objective_input_service import (
-    ObjectiveInputService,
     PAPER_RESEARCH_MAP_POLICY_VERSION,
-)
-from application.core.objectives.llm.structured_response import (
-    StructuredResponseClient,
+    ObjectiveInputService,
 )
 from application.pipeline import PipelineRunService
 from domain.core import ObjectiveFactSet, PreparedDocumentInput
-from application.repositories.objective_repository import ObjectiveRepository
+from repositories.objective_repository import ObjectiveRepository
 
 logger = logging.getLogger(__name__)
 

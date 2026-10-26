@@ -7,6 +7,9 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 
 from application.core.objectives.analysis.diagnostics import record_analysis_failure
 from application.core.objectives.analysis.evidence_routing import route_sources
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    _selection_slices,
+)
 from application.core.objectives.analysis.paper_experiment_contract import (
     ReconciledPaperExperimentOutput,
 )
@@ -15,8 +18,9 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
     PaperExperimentExtractor,
     build_bundle_from_routes,
 )
-from application.core.objectives.analysis.paper_experiment_reuse import reusable_paper_experiments
-from application.core.objectives.analysis.experiment_analysis_writer import _selection_slices
+from application.core.objectives.analysis.paper_experiment_reuse import (
+    reusable_paper_experiments,
+)
 from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
     PaperAnalysisFrame,
@@ -31,16 +35,6 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopePreview,
     screen_objective_scope,
 )
-from application.repositories.objective_repository import (
-    ObjectiveAnalysis,
-    ObjectiveRepository,
-)
-from application.repositories.paper_map_repository import PaperMapRepository
-from application.repositories.paper_experiment_repository import (
-    PaperExperimentRepository,
-    StoredPaperExperimentRevision,
-)
-from domain.core.paper_experiment import PaperExperimentRevision
 from application.source.collection_service import CollectionService
 from domain.core import (
     InspectedObjectiveSourceRef,
@@ -49,6 +43,16 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from domain.core.paper_experiment import PaperExperimentRevision
+from repositories.objective_repository import (
+    ObjectiveAnalysis,
+    ObjectiveRepository,
+)
+from repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
+    StoredPaperExperimentRevision,
+)
+from repositories.paper_map_repository import PaperMapRepository
 
 logger = logging.getLogger(__name__)
 

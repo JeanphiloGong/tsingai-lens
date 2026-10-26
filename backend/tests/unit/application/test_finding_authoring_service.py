@@ -9,7 +9,6 @@ import pytest
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
-from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.research_objective import (
     ObjectiveFactSet,
@@ -17,7 +16,8 @@ from domain.core.research_objective import (
     PreparedDocumentInput,
     ResearchObjective,
 )
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from repositories.objective_repository import ObjectiveAnalysis
+from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 

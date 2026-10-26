@@ -4,12 +4,12 @@ from dataclasses import replace
 
 import pytest
 
-from application.repositories.collection_repository import (
+from domain.source import Collection, Document
+from repositories.collection_repository import (
     StoredCollection,
     StoredDocument,
 )
-from domain.source import Collection, Document
-from infra.persistence.memory import MemoryCollectionRepository
+from tests.support.repositories import MemoryCollectionRepository
 
 pytestmark = pytest.mark.anyio
 

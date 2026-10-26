@@ -1,0 +1,402 @@
+"""PostgreSQL repository for collection."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from domain.chat.permissions import permission_record
+from domain.source import Collection as CollectionAggregate
+from domain.source import Document as DocumentAggregate
+from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.models.document import Document
+from infra.persistence.postgres.models.document_preparation import (
+    DocumentPreparationRow,
+)
+from repositories.feedback_dataset_repository import ensure_system_datasets
+
+
+@dataclass(frozen=True)
+class StoredDocument:
+    document: DocumentAggregate
+    stored_filename: str
+    storage_key: str
+    created_at: str
+    updated_at: str | None = None
+
+
+@dataclass(frozen=True)
+class StoredCollection:
+    collection: CollectionAggregate
+    created_at: str
+    updated_at: str
+    documents: tuple[StoredDocument, ...] = ()
+
+
+@dataclass(frozen=True)
+class CollectionDocumentSummary:
+    document_id: str
+    original_filename: str
+    media_type: str | None
+    status: str
+    size_bytes: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class CollectionSummary:
+    collection_id: str
+    name: str
+    description: str | None
+    status: str
+    created_at: str
+    updated_at: str
+    documents: tuple[CollectionDocumentSummary, ...]
+
+
+class CollectionRepository:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        self.session_factory = session_factory
+
+    async def add_collection(self, record: StoredCollection) -> None:
+        async with self.session_factory.begin() as session:
+            session.add(
+                Collection(
+                    collection_id=record.collection.collection_id,
+                    owner_user_id=record.collection.owner_user_id,
+                    name=record.collection.name,
+                    description=record.collection.description,
+                    status=record.collection.status,
+                    created_at=_datetime(record.created_at),
+                    updated_at=_datetime(record.updated_at),
+                )
+            )
+            await session.flush()
+            await ensure_system_datasets(
+                session, collection_id=record.collection.collection_id,
+                owner_user_id=record.collection.owner_user_id,
+                now=_datetime(record.created_at),
+            )
+
+    async def list_collections(
+        self,
+        owner_user_id: str | None = None,
+    ) -> tuple[CollectionSummary, ...]:
+        statement = select(
+            Collection.collection_id, Collection.name, Collection.description,
+            Collection.status, Collection.created_at, Collection.updated_at,
+        ).order_by(Collection.created_at)
+        if owner_user_id is not None:
+            statement = statement.where(Collection.owner_user_id == owner_user_id)
+        async with self.session_factory() as session:
+            rows = (await session.execute(statement)).all()
+            if not rows:
+                return ()
+            documents_by_collection: dict[str, list[CollectionDocumentSummary]] = {
+                row.collection_id: [] for row in rows
+            }
+            documents = await session.execute(
+                select(
+                    Document.collection_id, Document.document_id,
+                    Document.original_filename, Document.media_type, Document.status,
+                    Document.size_bytes, Document.created_at, Document.updated_at,
+                )
+                .where(Document.collection_id.in_(documents_by_collection))
+                .order_by(Document.document_order)
+            )
+            for document in documents:
+                documents_by_collection[document.collection_id].append(
+                    CollectionDocumentSummary(
+                        document_id=document.document_id,
+                        original_filename=document.original_filename,
+                        media_type=document.media_type,
+                        status=document.status,
+                        size_bytes=document.size_bytes,
+                        created_at=_iso(document.created_at),
+                        updated_at=_iso(document.updated_at),
+                    )
+                )
+            return tuple(
+                CollectionSummary(
+                    collection_id=row.collection_id,
+                    name=row.name,
+                    description=row.description,
+                    status=row.status,
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    documents=tuple(documents_by_collection[row.collection_id]),
+                )
+                for row in rows
+            )
+
+    async def read_collection(
+        self,
+        collection_id: str,
+    ) -> StoredCollection | None:
+        async with self.session_factory() as session:
+            row = await session.get(Collection, collection_id)
+            if row is None:
+                return None
+            return _to_collection(
+                row,
+                await _documents_for_collection(session, collection_id),
+            )
+
+    async def collection_belongs_to_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> bool:
+        statement = select(Collection.collection_id).where(
+            Collection.collection_id == collection_id,
+            Collection.owner_user_id == owner_user_id,
+        )
+        async with self.session_factory() as session:
+            return await session.scalar(statement) is not None
+
+    async def read_document(
+        self,
+        collection_id: str,
+        document_id: str,
+    ) -> StoredDocument | None:
+        async with self.session_factory() as session:
+            row = (await session.execute(
+                select(Document, DocumentPreparationRow)
+                .outerjoin(
+                    DocumentPreparationRow,
+                    DocumentPreparationRow.document_id == Document.document_id,
+                )
+                .where(
+                    Document.collection_id == collection_id,
+                    Document.document_id == document_id,
+                )
+            )).one_or_none()
+            return _to_document(*row) if row is not None else None
+
+    async def update_collection(self, record: StoredCollection) -> bool:
+        async with self.session_factory.begin() as session:
+            row = await session.get(Collection, record.collection.collection_id)
+            if row is None:
+                return False
+            row.owner_user_id = record.collection.owner_user_id
+            row.name = record.collection.name
+            row.description = record.collection.description
+            row.status = record.collection.status
+            row.updated_at = _datetime(record.updated_at)
+            return True
+
+    async def read_agent_default_permission(
+        self, collection_id: str
+    ) -> dict[str, Any] | None:
+        async with self.session_factory() as session:
+            row = await session.get(Collection, collection_id)
+            if row is None:
+                return None
+            return dict(row.agent_default_permission or {}) or None
+
+    async def set_agent_default_permission(
+        self,
+        collection_id: str,
+        permission: dict[str, Any],
+        *,
+        expected_revision: int,
+    ) -> bool:
+        async with self.session_factory.begin() as session:
+            row = await session.get(Collection, collection_id, with_for_update=True)
+            if row is None:
+                return False
+            current_revision = permission_record(row.agent_default_permission)["revision"]
+            if current_revision != expected_revision:
+                raise ValueError("permission_revision_conflict")
+            row.agent_default_permission = dict(permission)
+            return True
+
+    async def add_documents(
+        self,
+        collection_id: str,
+        documents: tuple[StoredDocument, ...],
+        *,
+        updated_at: str,
+    ) -> None:
+        if not documents:
+            raise ValueError("at least one document is required")
+        async with self.session_factory.begin() as session:
+            collection = await session.get(
+                Collection,
+                collection_id,
+                with_for_update=True,
+            )
+            if collection is None:
+                raise FileNotFoundError(f"collection not found: {collection_id}")
+            existing_ids = set(
+                await session.scalars(
+                    select(Document.document_id).where(
+                        Document.collection_id == collection_id
+                    )
+                )
+            )
+            existing_hashes = set(
+                await session.scalars(
+                    select(Document.sha256).where(
+                        Document.collection_id == collection_id
+                    )
+                )
+            )
+            if len({item.document.document_id for item in documents}) != len(
+                documents
+            ) or any(item.document.document_id in existing_ids for item in documents):
+                raise ValueError("document already exists")
+            if len({item.document.sha256 for item in documents}) != len(
+                documents
+            ) or any(item.document.sha256 in existing_hashes for item in documents):
+                raise ValueError("document content already exists in collection")
+            next_order = int(
+                await session.scalar(
+                    select(func.coalesce(func.max(Document.document_order), -1)).where(
+                        Document.collection_id == collection_id
+                    )
+                )
+            ) + 1
+            session.add_all(
+                _document_row(collection_id, item, next_order + position)
+                for position, item in enumerate(documents)
+            )
+            collection.status = "uploaded"
+            collection.updated_at = _datetime(updated_at)
+
+    async def update_document(self, record: StoredDocument) -> bool:
+        async with self.session_factory.begin() as session:
+            document = record.document
+            row = await session.get(Document, document.document_id)
+            if row is None:
+                return False
+            row.original_filename = document.original_filename
+            row.stored_filename = record.stored_filename
+            row.storage_key = record.storage_key
+            row.sha256 = document.sha256
+            row.media_type = document.media_type
+            row.status = document.status
+            row.size_bytes = document.size_bytes
+            row.updated_at = _datetime(record.updated_at or record.created_at)
+            return True
+
+    async def delete_collection(self, collection_id: str) -> bool:
+        async with self.session_factory.begin() as session:
+            row = await session.get(Collection, collection_id)
+            if row is None:
+                return False
+            await session.delete(row)
+            return True
+
+
+def _to_collection(
+    row: Collection,
+    documents: tuple[StoredDocument, ...],
+) -> StoredCollection:
+    return StoredCollection(
+        collection=CollectionAggregate(
+            collection_id=row.collection_id,
+            owner_user_id=row.owner_user_id,
+            name=row.name,
+            description=row.description,
+            status=row.status,
+        ),
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+        documents=documents,
+    )
+
+
+def _document_row(
+    collection_id: str,
+    record: StoredDocument,
+    document_order: int,
+) -> Document:
+    return Document(
+        document_id=record.document.document_id,
+        collection_id=collection_id,
+        original_filename=record.document.original_filename,
+        stored_filename=record.stored_filename,
+        storage_key=record.storage_key,
+        sha256=record.document.sha256,
+        media_type=record.document.media_type,
+        status=record.document.status,
+        size_bytes=record.document.size_bytes,
+        document_order=document_order,
+        created_at=_datetime(record.created_at),
+        updated_at=_datetime(record.updated_at or record.created_at),
+    )
+
+
+def _to_document(
+    row: Document,
+    preparation_row: DocumentPreparationRow | None = None,
+) -> StoredDocument:
+    profile_payload = dict(preparation_row.profile_json or {}) if preparation_row else {}
+    source_fingerprint = preparation_row.source_fingerprint if preparation_row else None
+    profile_fingerprint = profile_payload.get("profile_fingerprint")
+    return StoredDocument(
+        document=DocumentAggregate(
+            document_id=row.document_id,
+            original_filename=row.original_filename,
+            sha256=row.sha256,
+            media_type=row.media_type,
+            status=row.status,
+            size_bytes=row.size_bytes,
+            parser_version=preparation_row.parser_version if preparation_row else None,
+            document_analysis_version=profile_payload.get("profile_version"),
+            source_fingerprint=source_fingerprint,
+            profile_fingerprint=profile_fingerprint,
+            # A fully prepared document uses the profile fingerprint as its
+            # preparation identity.  Source-only fixtures and documents that are
+            # still between parsing and profile generation retain a usable
+            # source identity until the profile artifact is available.
+            preparation_fingerprint=profile_fingerprint or source_fingerprint,
+        ),
+        stored_filename=row.stored_filename,
+        storage_key=row.storage_key,
+        created_at=_iso(row.created_at),
+        updated_at=_iso(row.updated_at),
+    )
+
+
+async def _documents_for_collection(
+    session: AsyncSession,
+    collection_id: str,
+) -> tuple[StoredDocument, ...]:
+    rows = await session.execute(
+        select(Document, DocumentPreparationRow)
+        .outerjoin(
+            DocumentPreparationRow,
+            DocumentPreparationRow.document_id == Document.document_id,
+        )
+        .where(Document.collection_id == collection_id)
+        .order_by(Document.document_order)
+    )
+    return tuple(_to_document(*row) for row in rows)
+
+
+def _datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value)
+        parsed = datetime.fromisoformat(
+            f"{text[:-1]}+00:00" if text.endswith("Z") else text
+        )
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _iso(value: datetime) -> str:
+    return _datetime(value).isoformat()
+
+
+__all__ = ['CollectionRepository']

@@ -47,7 +47,7 @@ from application.chat.model import (
     ResearchWorkingNotesModelOutput,
 )
 from application.core.structured_extraction.json_support import extract_json_object
-from application.repositories.chat_repository import ModelCallObserver
+from repositories.chat_repository import ModelCallObserver
 from domain.chat import (
     ChatMessage,
     ChatMessageRole,

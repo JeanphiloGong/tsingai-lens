@@ -3,19 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from application.core.objectives.analysis.experiment_compatibility_projection import (
-    ExperimentCompatibilityProjection,
-)
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
+)
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
 )
 from application.source.collection_service import CollectionService
 from domain.evaluation import (
     EvaluationPredictionItem,
     EvaluationPredictionSnapshot,
 )
-from application.repositories.evaluation_repository import EvaluationRepository
-from application.repositories.objective_repository import ObjectiveRepository
+from repositories.evaluation_repository import EvaluationRepository
+from repositories.objective_repository import ObjectiveRepository
 
 
 class CoreArtifactsNotReadyForEvaluationError(RuntimeError):

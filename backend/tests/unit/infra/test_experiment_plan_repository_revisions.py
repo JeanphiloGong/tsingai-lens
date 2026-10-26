@@ -6,11 +6,10 @@ from domain.goal import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
 )
-from application.goal.experiment_plan_projection import experiment_plan_from_record
+from repositories.experiment_plan_repository import experiment_plan_from_record
 from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
-
 
 pytestmark = pytest.mark.anyio
 

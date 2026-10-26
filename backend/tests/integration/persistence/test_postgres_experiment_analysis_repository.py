@@ -2,37 +2,34 @@ from __future__ import annotations
 
 import pytest
 
-from application.repositories.experiment_analysis_repository import (
-    ExperimentAnalysisWrite,
-)
 from domain.core import Finding
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import PaperExperimentRevision
-from infra.persistence.postgres.comparison_group_repository import (
-    PostgresComparisonGroupRepository,
-)
-from infra.persistence.postgres.experiment_analysis_repository import (
-    PostgresExperimentAnalysisRepository,
-)
 from infra.persistence.postgres.experiment_analysis_transaction import (
     PostgresExperimentAnalysisTransactionFactory,
 )
-from infra.persistence.postgres.experiment_finding_repository import (
-    PostgresExperimentFindingRepository,
+from repositories.comparison_group_repository import (
+    ComparisonGroupRepository,
 )
-from infra.persistence.postgres.objective_experiment_selection_repository import (
-    PostgresObjectiveExperimentSelectionRepository,
+from repositories.experiment_analysis_repository import (
+    ExperimentAnalysisRepository,
+    ExperimentAnalysisWrite,
 )
-from infra.persistence.postgres.paper_experiment_repository import (
-    PostgresPaperExperimentRepository,
+from repositories.experiment_finding_repository import (
+    ExperimentFindingRepository,
+)
+from repositories.objective_experiment_selection_repository import (
+    ObjectiveExperimentSelectionRepository,
+)
+from repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
 )
 from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
     OBJECTIVE_ID,
     _queue_and_claim,
 )
-
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_objective_lifecycle",)
 pytestmark = pytest.mark.anyio
@@ -195,7 +192,7 @@ async def test_complete_analysis_graph_commits_once_and_is_idempotent(
         ),
         created_by="test-agent",
     )
-    repository = PostgresExperimentAnalysisRepository(
+    repository = ExperimentAnalysisRepository(
         objective_repository.session_factory
     )
 
@@ -242,7 +239,7 @@ async def test_failed_cross_paper_finding_rolls_back_the_entire_analysis_graph(
         with_group=False,
     )
     session_factory = objective_repository.session_factory
-    repository = PostgresExperimentAnalysisRepository(session_factory)
+    repository = ExperimentAnalysisRepository(session_factory)
 
     with pytest.raises(ValueError, match="requires a comparison group"):
         await repository.write_graph(
@@ -258,10 +255,10 @@ async def test_failed_cross_paper_finding_rolls_back_the_entire_analysis_graph(
             )
         )
 
-    experiments = PostgresPaperExperimentRepository(session_factory)
-    selections = PostgresObjectiveExperimentSelectionRepository(session_factory)
-    groups = PostgresComparisonGroupRepository(session_factory)
-    findings = PostgresExperimentFindingRepository(session_factory)
+    experiments = PaperExperimentRepository(session_factory)
+    selections = ObjectiveExperimentSelectionRepository(session_factory)
+    groups = ComparisonGroupRepository(session_factory)
+    findings = ExperimentFindingRepository(session_factory)
     assert await experiments.read_latest_revision("experiment-a") is None
     assert await experiments.read_latest_revision("experiment-b") is None
     assert await selections.list_selections(
@@ -322,7 +319,7 @@ async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
         created_by="test-agent",
     )
     session_factory = objective_repository.session_factory
-    repository = PostgresExperimentAnalysisRepository(session_factory)
+    repository = ExperimentAnalysisRepository(session_factory)
     transaction_factory = PostgresExperimentAnalysisTransactionFactory(
         session_factory
     )
@@ -332,10 +329,10 @@ async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
             await repository.write_graph(graph, transaction=transaction)
             raise RuntimeError("objective publication failed")
 
-    experiments = PostgresPaperExperimentRepository(session_factory)
-    selections = PostgresObjectiveExperimentSelectionRepository(session_factory)
-    groups = PostgresComparisonGroupRepository(session_factory)
-    findings = PostgresExperimentFindingRepository(session_factory)
+    experiments = PaperExperimentRepository(session_factory)
+    selections = ObjectiveExperimentSelectionRepository(session_factory)
+    groups = ComparisonGroupRepository(session_factory)
+    findings = ExperimentFindingRepository(session_factory)
     assert await experiments.read_latest_revision("experiment-a") is None
     assert await experiments.read_latest_revision("experiment-b") is None
     assert await selections.list_selections(

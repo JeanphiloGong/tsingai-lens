@@ -11,10 +11,12 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from application.evaluation.record_projection import finding_curation_record, finding_feedback_record
 from domain.core import Finding
 from domain.core.scientific_fact import SCIENTIFIC_RESULT_DIRECTIONS
-
+from repositories.finding_review_repository import (
+    finding_curation_record,
+    finding_feedback_record,
+)
 
 ReviewStatus = Literal["correct", "incorrect", "partial", "unclear"]
 IssueType = Literal[

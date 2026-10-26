@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from pypdf import PdfWriter
 
-from application.repositories.collection_repository import StoredDocument
+from repositories.collection_repository import StoredDocument
 
 try:
     from fastapi import HTTPException
@@ -25,15 +25,15 @@ from domain.source import (
     Document,
     source_documents_from_records,
 )
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemorySourceArtifactRepository,
-)
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
 from tests.support.collection_service import (
     build_test_collection_service,
     build_test_source_import_service,
 )
+from tests.support.repositories import (
+    MemoryDocumentProfileRepository,
+    MemorySourceArtifactRepository,
+)
+from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 

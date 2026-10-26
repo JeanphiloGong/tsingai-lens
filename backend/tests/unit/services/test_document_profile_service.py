@@ -1,26 +1,27 @@
 from __future__ import annotations
 
 import pandas as pd
-
 import pytest
 
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
+    DocumentProfileModelOutput,
 )
-from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
+from domain.core.document_profile import DocumentProfile
+from domain.source import SourceDocument, source_documents_from_records
+from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
 from tests.support.collection_service import (
     build_test_collection_service,
     build_test_source_import_service,
 )
-from domain.core.document_profile import DocumentProfile
-from domain.source import SourceDocument, source_documents_from_records
-from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
-from infra.persistence.memory import MemoryDocumentProfileRepository
-from infra.persistence.memory import MemorySourceArtifactRepository
+from tests.support.repositories import (
+    MemoryDocumentProfileRepository,
+    MemorySourceArtifactRepository,
+)
 
 pytestmark = pytest.mark.anyio
 

@@ -10,20 +10,37 @@ from sqlalchemy import delete, func, select
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
 from application.feedback.dataset_export_service import FeedbackDatasetExportService
-from application.feedback.dataset_service import FeedbackDatasetService
-from application.feedback.dataset_service import FeedbackDatasetConflict
+from application.feedback.dataset_service import (
+    FeedbackDatasetConflict,
+    FeedbackDatasetService,
+)
 from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from domain.feedback.sample_revision import SampleRevision, SftRevisionContent
-from infra.persistence.postgres import feedback_dataset_sample_repository as sample_module
-from infra.persistence.postgres.feedback_dataset_export_repository import PostgresFeedbackDatasetExportRepository
-from infra.persistence.postgres.feedback_dataset_repository import PostgresFeedbackDatasetRepository
-from infra.persistence.postgres.feedback_dataset_sample_repository import PostgresFeedbackDatasetSampleRepository
-from infra.persistence.postgres.models.feedback import AnalysisJobRow, FeedbackAnalysisResultRow, FeedbackCaseRow
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
 from infra.persistence.postgres.models.collection import Collection
-from tests.integration.persistence.test_feedback_workbench import COLLECTION_ID, SESSION_ID, USER_ID, feedback_chain
+from infra.persistence.postgres.models.feedback import (
+    AnalysisJobRow,
+    FeedbackAnalysisResultRow,
+    FeedbackCaseRow,
+)
+from infra.persistence.postgres.models.feedback_dataset import (
+    FeedbackDatasetRow,
+    FeedbackDatasetSampleRow,
+)
+from repositories import feedback_dataset_sample_repository as sample_module
+from repositories.feedback_dataset_export_repository import (
+    FeedbackDatasetExportRepository,
+)
+from repositories.feedback_dataset_repository import FeedbackDatasetRepository
+from repositories.feedback_dataset_sample_repository import (
+    FeedbackDatasetSampleRepository,
+)
+from tests.integration.persistence.test_feedback_workbench import (
+    COLLECTION_ID,
+    SESSION_ID,
+    USER_ID,
+    feedback_chain,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -34,8 +51,8 @@ def _now():
 
 def _service(chain, factory):
     return FeedbackDatasetService(
-        repository=PostgresFeedbackDatasetRepository(factory), collection_service=chain.collection_service,
-        sample_repository=PostgresFeedbackDatasetSampleRepository(factory), case_repository=chain.cases,
+        repository=FeedbackDatasetRepository(factory), collection_service=chain.collection_service,
+        sample_repository=FeedbackDatasetSampleRepository(factory), case_repository=chain.cases,
     )
 
 
@@ -133,7 +150,7 @@ async def test_selected_publication_ignores_unselected_bad_source(bad_source, fe
             row.status = "withdrawn"
     exports = FeedbackDatasetExportService(
         dataset_service=service, sample_repository=service.sample_repository,
-        repository=PostgresFeedbackDatasetExportRepository(postgres_session_factory),
+        repository=FeedbackDatasetExportRepository(postgres_session_factory),
     )
     preview = await exports.preview_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[chosen.sample_id])
     exported = await exports.publish_for_user(
@@ -182,7 +199,7 @@ async def test_background_backfill_skips_withdrawn_cases_and_is_idempotent(feedb
         row.status = "withdrawn"
         await session.execute(delete(FeedbackDatasetSampleRow))
         await session.execute(delete(AnalysisJobRow).where(AnalysisJobRow.job_type == "dataset_sample_build"))
-    repository = PostgresFeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
     assert await repository.backfill_existing_cases() == 1
     assert await repository.backfill_existing_cases() == 1
     async with postgres_session_factory() as session:
@@ -212,7 +229,7 @@ async def test_historical_backfill_crosses_a_full_batch(feedback_chain, postgres
             )
             for index, answer in enumerate(answers)
         ])
-    repository = PostgresFeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
     assert await repository.backfill_existing_cases() == 201
     async with postgres_session_factory() as session:
         assert await session.scalar(select(func.count()).select_from(FeedbackDatasetSampleRow)) == 603
@@ -228,7 +245,7 @@ async def test_empty_historical_collections_cross_a_full_batch(feedback_chain, p
             )
             for index in range(201)
         ])
-    repository = PostgresFeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
     assert await repository.backfill_existing_cases() == 0
     async with postgres_session_factory() as session:
         assert await session.scalar(select(func.count()).select_from(FeedbackDatasetRow)) == 606
@@ -354,7 +371,7 @@ async def test_timed_out_build_releases_sample_and_job_lease(feedback_chain, pos
 async def test_completion_rechecks_case_after_candidate_generation(feedback_chain, postgres_session_factory):
     chain = feedback_chain
     case = await _analyze(chain)
-    repository = PostgresFeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
     job = await chain.jobs.claim_next_dataset_sample_build_job(_now())
     dataset_id, sample_id = job.payload["dataset_id"], job.payload["sample_id"]
     sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)

@@ -18,19 +18,12 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
-from application.repositories.collection_repository import CollectionRepository
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
     build_session_factory,
 )
 from infra.persistence.file.object_store import FileObjectStore
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
-from infra.persistence.postgres.source_artifact_repository import (
-    PostgresSourceArtifactRepository,
-)
 from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -44,6 +37,10 @@ from infra.source.contracts.artifact_schemas import (
 from infra.source.parsers.docling_pdf import (
     build_pdf_bundle,
     build_pdf_converter,
+)
+from repositories.collection_repository import CollectionRepository
+from repositories.source_artifact_repository import (
+    SourceArtifactRepository,
 )
 
 
@@ -109,7 +106,7 @@ async def main_async() -> None:
             frames = await _reparse_collection_inputs(
                 backend_root=backend_root,
                 collection_dir=collection_dir,
-                collection_repository=PostgresCollectionRepository(
+                collection_repository=CollectionRepository(
                     build_session_factory(engine)
                 ),
                 document_id=args.document_id,
@@ -158,7 +155,7 @@ async def _load_existing_artifacts(
     collection_id = collection_dir.name
     engine = build_database_engine(DatabaseSettings())
     try:
-        documents = await PostgresSourceArtifactRepository(
+        documents = await SourceArtifactRepository(
             build_session_factory(engine)
         ).read_collection_documents(collection_id)
     finally:

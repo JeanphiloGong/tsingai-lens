@@ -9,19 +9,19 @@ from hashlib import sha256
 from typing import Any, Protocol
 from uuid import uuid4
 
-from application.feedback.analysis_handler import AnalysisInputError
 from application.chat.tool_result_projection import tool_result_record
-from application.repositories.analysis_job_repository import (
-    TOOL_FAILURE_JOB_TYPE,
-    TOOL_FAILURE_PAYLOAD_VERSION,
-    tool_failure_idempotency_key,
-)
+from application.feedback.analysis_handler import AnalysisInputError
 from domain.chat import ChatMessage, ChatMessageRole, ToolCallStatus, ToolResultStatus
 from domain.feedback import (
     EvidenceCoverage,
     ToolFailureAnalysisResult,
     ToolFailureSignal,
     tool_result_digest,
+)
+from repositories.analysis_job_repository import (
+    TOOL_FAILURE_JOB_TYPE,
+    TOOL_FAILURE_PAYLOAD_VERSION,
+    tool_failure_idempotency_key,
 )
 
 

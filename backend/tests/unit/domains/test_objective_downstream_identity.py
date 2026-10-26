@@ -5,8 +5,16 @@ from domain.evaluation import (
     FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
-from application.goal.experiment_plan_projection import experiment_plan_from_record, experiment_plan_record
-from application.evaluation.record_projection import finding_curation_from_record, finding_feedback_from_record, finding_curation_record, finding_feedback_record
+from repositories.experiment_plan_repository import (
+    experiment_plan_from_record,
+    experiment_plan_record,
+)
+from repositories.finding_review_repository import (
+    finding_curation_from_record,
+    finding_curation_record,
+    finding_feedback_from_record,
+    finding_feedback_record,
+)
 
 
 def test_experiment_plan_record_has_only_objective_identity() -> None:

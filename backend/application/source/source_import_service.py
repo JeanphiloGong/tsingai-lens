@@ -8,14 +8,14 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
-from application.repositories.collection_repository import (
-    CollectionRepository,
-    StoredDocument,
-)
-from application.repositories.object_store import ObjectStore
 from application.source.collection_service import document_details
 from domain.source import Document
 from infra.source.ingestion.upload_validation import validate_upload
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredDocument,
+)
+from repositories.object_store import ObjectStore
 
 
 def _now_iso() -> str:

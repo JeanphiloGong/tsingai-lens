@@ -24,8 +24,6 @@ from application.core.objectives.llm.structured_response import (
 from application.core.objectives.paper_research_map_service import (
     PaperResearchMapService,
 )
-from application.repositories.paper_map_repository import PaperMapRepository
-from application.repositories.source_artifact_repository import SourceArtifactRepository
 from application.source.collection_service import CollectionService
 from domain.core import PaperResearchMap, PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
@@ -39,6 +37,8 @@ from domain.source import (
     SourceTableCell,
     build_source_document_tree,
 )
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 class ObjectiveSourceInputs(TypedDict):

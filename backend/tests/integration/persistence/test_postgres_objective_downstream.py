@@ -4,10 +4,11 @@ import pytest
 
 from domain.core import Finding, ObjectiveEvidence
 from domain.evaluation import FindingCuration, FindingFeedback
-from application.evaluation.record_projection import finding_curation_from_record, finding_feedback_from_record
 from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
-from infra.persistence.postgres.finding_review_repository import (
-    PostgresFindingReviewRepository,
+from repositories.finding_review_repository import (
+    FindingReviewRepository,
+    finding_curation_from_record,
+    finding_feedback_from_record,
 )
 from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
@@ -15,7 +16,6 @@ from tests.integration.persistence.test_postgres_objective_lifecycle import (
     _contribution,
     _queue_and_claim,
 )
-
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_objective_lifecycle",)
 pytestmark = [
@@ -78,7 +78,7 @@ async def test_finding_review_round_trips_published_analysis_identity(
     objective_repository,
 ) -> None:
     analysis = await _publish_next_analysis(objective_repository)
-    reviews = PostgresFindingReviewRepository(objective_repository.session_factory)
+    reviews = FindingReviewRepository(objective_repository.session_factory)
     finding = _finding(analysis.analysis_version)
 
     feedback = await reviews.upsert_feedback(
@@ -165,7 +165,7 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
             )
         )
 
-    reviews = PostgresFindingReviewRepository(objective_repository.session_factory)
+    reviews = FindingReviewRepository(objective_repository.session_factory)
     feedback = await reviews.upsert_feedback(
         finding_feedback_from_record(
             {

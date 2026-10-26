@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 import json
-from typing import Any, Annotated, Mapping
+from dataclasses import replace
+from typing import Annotated, Any, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,11 +12,13 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
-from application.chat.tool_result_projection import tool_result_record
-from application.evaluation.record_projection import finding_feedback_record, finding_curation_record
-from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from application.chat.context_builder import ChatContextBuilder
-
+from application.chat.tool_result_projection import tool_result_record
+from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from repositories.finding_review_repository import (
+    finding_curation_record,
+    finding_feedback_record,
+)
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=160)]
 _OBJECTIVE_LIMIT = 12

@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
+from application.source.artifact_input_service import load_document_tree
 from application.source.collection_service import CollectionService
-from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import (
     SourceDocument,
     SourceDocumentNode,
@@ -15,11 +15,11 @@ from domain.source import (
     SourceTable,
     render_markdown_table,
 )
-from application.source.artifact_input_service import load_document_tree
 from infra.source.mapping.text_quality import (
     is_garbled_pdf_text,
     normalize_display_text,
 )
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 class DocumentMarkdownNotReadyError(RuntimeError):

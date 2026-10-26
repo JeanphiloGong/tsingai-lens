@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 
-from application.repositories.auth_repository import AuthSessionRecord
-
 import pytest
 
 from application.auth import (
@@ -12,6 +10,8 @@ from application.auth import (
     InvalidCredentialsError,
     SessionNotFoundError,
 )
+from repositories.auth_repository import AuthSessionRecord
+
 pytestmark = pytest.mark.anyio
 
 

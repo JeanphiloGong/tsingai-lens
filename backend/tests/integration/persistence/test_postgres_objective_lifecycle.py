@@ -2,15 +2,22 @@
 
 import pytest
 
-from application.repositories.objective_repository import ObjectiveAnalysis
-from application.repositories.pipeline_run_repository import (
+from domain.core import (
+    ObjectiveFactSet,
+    PaperContribution,
+    PreparedDocumentInput,
+    ResearchObjective,
+)
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
+from repositories.pipeline_run_repository import (
     ExecutionStats,
     ModelUsage,
     TokenUsage,
 )
-from domain.core import ObjectiveFactSet, PaperContribution, PreparedDocumentInput, ResearchObjective
-from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
-from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID, _source
+from tests.integration.persistence.test_postgres_source_artifacts import (
+    COLLECTION_ID,
+    _source,
+)
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
@@ -24,7 +31,7 @@ async def objective_repository(source_repository):
         await source_repository.replace_document(
             COLLECTION_ID, _source(document_id, title=document_id),
         )
-    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    repository = ObjectiveRepository(source_repository.session_factory)
     objective = ResearchObjective.from_mapping({
         "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
         "question": "How does laser power affect tensile strength?",
@@ -83,33 +90,33 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     from controllers.core.finding_review import router
     from domain.core import PaperContribution
     from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-    from infra.persistence.postgres.collection_repository import (
-        PostgresCollectionRepository,
-    )
-    from infra.persistence.postgres.comparison_group_repository import (
-        PostgresComparisonGroupRepository,
-    )
-    from infra.persistence.postgres.experiment_analysis_repository import (
-        PostgresExperimentAnalysisRepository,
-    )
     from infra.persistence.postgres.experiment_analysis_transaction import (
         PostgresExperimentAnalysisTransactionFactory,
     )
-    from infra.persistence.postgres.experiment_finding_repository import (
-        PostgresExperimentFindingRepository,
+    from repositories.collection_repository import (
+        CollectionRepository,
     )
-    from infra.persistence.postgres.objective_experiment_selection_repository import (
-        PostgresObjectiveExperimentSelectionRepository,
+    from repositories.comparison_group_repository import (
+        ComparisonGroupRepository,
     )
-    from infra.persistence.postgres.paper_experiment_repository import (
-        PostgresPaperExperimentRepository,
+    from repositories.experiment_analysis_repository import (
+        ExperimentAnalysisRepository,
+    )
+    from repositories.experiment_finding_repository import (
+        ExperimentFindingRepository,
+    )
+    from repositories.objective_experiment_selection_repository import (
+        ObjectiveExperimentSelectionRepository,
+    )
+    from repositories.paper_experiment_repository import (
+        PaperExperimentRepository,
     )
     from tests.unit.application.test_experiment_analysis_writer import (
         _comparison_experiment,
     )
 
     sessions = source_repository.session_factory
-    repository = PostgresObjectiveRepository(sessions)
+    repository = ObjectiveRepository(sessions)
     objective = ResearchObjective.from_mapping(
         {
             "collection_id": COLLECTION_ID,
@@ -135,10 +142,10 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         prompt_versions={},
     )
     analysis = await repository.claim_analysis(COLLECTION_ID, objective.objective_id, 1)
-    experiments = PostgresPaperExperimentRepository(sessions)
+    experiments = PaperExperimentRepository(sessions)
     writer = ExperimentAnalysisWriter(
         paper_experiment_repository=experiments,
-        experiment_analysis_repository=PostgresExperimentAnalysisRepository(sessions),
+        experiment_analysis_repository=ExperimentAnalysisRepository(sessions),
     )
     source = await writer.write_experiment_analysis(
         collection_id=COLLECTION_ID,
@@ -169,16 +176,16 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     )
     query = ExperimentQueryService(
         experiments,
-        PostgresObjectiveExperimentSelectionRepository(sessions),
-        PostgresComparisonGroupRepository(sessions),
-        PostgresExperimentFindingRepository(sessions),
+        ObjectiveExperimentSelectionRepository(sessions),
+        ComparisonGroupRepository(sessions),
+        ExperimentFindingRepository(sessions),
         objective_repository=repository,
     )
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     app.state.finding_authoring_service = FindingAuthoringService(
         collection_service=CollectionService(
-            PostgresCollectionRepository(sessions), FileCollectionWorkspace(tmp_path)
+            CollectionRepository(sessions), FileCollectionWorkspace(tmp_path)
         ),
         objective_repository=repository,
         experiment_query_service=query,
@@ -236,7 +243,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
 async def test_published_evidence_gap_survives_a_failed_followup(
     source_repository,
 ) -> None:
-    repository = PostgresObjectiveRepository(source_repository.session_factory)
+    repository = ObjectiveRepository(source_repository.session_factory)
     objective = ResearchObjective.from_mapping(
         {
             "collection_id": COLLECTION_ID,

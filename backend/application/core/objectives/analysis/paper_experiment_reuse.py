@@ -12,11 +12,11 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 from application.core.objectives.analysis.paper_experiment_extraction import (
     PaperExperimentSourceBundle,
 )
-from application.repositories.paper_experiment_repository import (
-    StoredPaperExperimentRevision,
-)
 from domain.core.paper_experiment import PaperExperimentRevision
 from domain.core.research_objective import ResearchObjective
+from repositories.paper_experiment_repository import (
+    StoredPaperExperimentRevision,
+)
 
 
 def reusable_paper_experiments(

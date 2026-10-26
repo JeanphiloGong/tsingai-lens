@@ -17,13 +17,13 @@ from application.feedback.correction_signal_handler import (
     CorrectionSignalAnalysisHandler,
 )
 from application.feedback.correction_signal_worker import CorrectionSignalAnalysisWorker
-from application.repositories.analysis_job_repository import (
+from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
+from domain.feedback import is_correction_challenge
+from repositories.analysis_job_repository import (
     CORRECTION_SIGNAL_JOB_TYPE,
     AnalysisJob,
     correction_signal_idempotency_key,
 )
-from domain.chat import ChatMessage, ChatResourceRef, ChatSession, ChatSourceContext
-from domain.feedback import is_correction_challenge
 
 pytestmark = pytest.mark.anyio
 

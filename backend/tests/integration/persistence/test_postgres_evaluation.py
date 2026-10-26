@@ -5,8 +5,6 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import StoredCollection
 from domain.evaluation import (
     EvaluationFailure,
     EvaluationGoldItem,
@@ -17,12 +15,13 @@ from domain.evaluation import (
     EvaluationScore,
 )
 from domain.source import Collection
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
 )
-from infra.persistence.postgres.evaluation_repository import (
-    PostgresEvaluationRepository,
+from repositories.evaluation_repository import (
+    EvaluationRepository,
 )
 
 pytestmark = pytest.mark.anyio
@@ -32,7 +31,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
     postgres_session_factory,
 ) -> None:
     sessions = postgres_session_factory
-    await PostgresAuthRepository(sessions).add_user(
+    await AuthRepository(sessions).add_user(
         AuthUserRecord(
             user_id="user-evaluation",
             email="evaluation@example.com",
@@ -41,7 +40,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
             created_at="2026-07-20T00:00:00+00:00",
         )
     )
-    collections = PostgresCollectionRepository(sessions)
+    collections = CollectionRepository(sessions)
     for collection_id in ("col-gold", "col-other"):
         await collections.add_collection(
             StoredCollection(
@@ -56,7 +55,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
                 updated_at="2026-07-20T00:00:00+00:00",
             )
         )
-    repository = PostgresEvaluationRepository(sessions)
+    repository = EvaluationRepository(sessions)
     gold_set = EvaluationGoldSet(
         gold_id="gold-v1",
         collection_id="col-gold",
@@ -203,7 +202,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
     postgres_session_factory,
 ) -> None:
     sessions = postgres_session_factory
-    repository = PostgresEvaluationRepository(sessions)
+    repository = EvaluationRepository(sessions)
     with pytest.raises(IntegrityError):
         await repository.upsert_gold_set(
             EvaluationGoldSet(
@@ -216,7 +215,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
             (),
         )
 
-    await PostgresAuthRepository(sessions).add_user(
+    await AuthRepository(sessions).add_user(
         AuthUserRecord(
             user_id="user-evaluation-cascade",
             email="evaluation-cascade@example.com",
@@ -225,7 +224,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
             created_at=datetime(2026, 7, 20, tzinfo=timezone.utc).isoformat(),
         )
     )
-    collections = PostgresCollectionRepository(sessions)
+    collections = CollectionRepository(sessions)
     await collections.add_collection(
         StoredCollection(
             collection=Collection(

@@ -13,26 +13,26 @@ from application.source.document_preparation_service import (
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
 from domain.core import DocumentProfile, PaperResearchMap
 from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.memory import (
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-)
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
-from infra.persistence.postgres.document_profile_repository import (
-    PostgresDocumentProfileRepository,
-)
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
 )
-from infra.persistence.postgres.paper_map_repository import PostgresPaperMapRepository
-from infra.persistence.postgres.pipeline_run_repository import (
-    PostgresPipelineRunRepository,
+from repositories.collection_repository import (
+    CollectionRepository,
+)
+from repositories.document_profile_repository import (
+    DocumentProfileRepository,
+)
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.pipeline_run_repository import (
+    PipelineRunRepository,
 )
 from tests.integration.persistence.test_postgres_source_artifacts import (
     COLLECTION_ID,
     _source,
+)
+from tests.support.repositories import (
+    MemoryPaperMapRepository,
+    MemorySourceArtifactRepository,
 )
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
@@ -69,8 +69,8 @@ def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
 
 
 async def test_profiles_and_paper_maps_are_current_per_document(source_repository) -> None:
-    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
-    paper_maps = PostgresPaperMapRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository(source_repository.session_factory)
+    paper_maps = PaperMapRepository(source_repository.session_factory)
     first_profile = _profile("doc_a", "Paper A")
     second_profile = _profile("doc_b", "Paper B")
     first_map = _paper_map("doc_a")
@@ -107,7 +107,7 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
 
 
 async def test_profile_replacement_does_not_relabel_current_source(source_repository) -> None:
-    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository(source_repository.session_factory)
     source = _source("doc_a", title="Current source")
     await source_repository.replace_document(COLLECTION_ID, source)
     async with source_repository.session_factory() as session:
@@ -115,7 +115,7 @@ async def test_profile_replacement_does_not_relabel_current_source(source_reposi
         current_fingerprint = row.source_fingerprint
     stale_profile = replace(_profile("doc_a", "Previous profile"), source_fingerprint="old-source")
     await profiles.replace(COLLECTION_ID, stale_profile)
-    collection_repository = PostgresCollectionRepository(source_repository.session_factory)
+    collection_repository = CollectionRepository(source_repository.session_factory)
     collection = await collection_repository.read_collection(COLLECTION_ID)
     document = collection.documents[0]
     await collection_repository.update_document(
@@ -132,7 +132,7 @@ async def test_profile_replacement_does_not_relabel_current_source(source_reposi
 
 
 async def test_profile_only_preparation_is_not_a_source(source_repository) -> None:
-    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository(source_repository.session_factory)
     await profiles.replace(COLLECTION_ID, _profile("doc_a", "Imported profile"))
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") is None
     assert await source_repository.read_collection_documents(COLLECTION_ID) == ()
@@ -140,7 +140,7 @@ async def test_profile_only_preparation_is_not_a_source(source_repository) -> No
 
 async def test_paper_map_requires_a_profile_in_the_shared_row(source_repository) -> None:
     await source_repository.replace_document(COLLECTION_ID, _source("doc_a", title="Source only"))
-    paper_maps = PostgresPaperMapRepository(source_repository.session_factory)
+    paper_maps = PaperMapRepository(source_repository.session_factory)
     with pytest.raises(FileNotFoundError, match="document profile not found"):
         await paper_maps.replace(COLLECTION_ID, _paper_map("doc_a"))
 
@@ -150,7 +150,7 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
     tmp_path,
 ) -> None:
     collection_service = CollectionService(
-        PostgresCollectionRepository(source_repository.session_factory),
+        CollectionRepository(source_repository.session_factory),
         FileCollectionWorkspace(tmp_path / "collections"),
     )
     await collection_service.update_document_preparation(
@@ -159,7 +159,7 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
         status="processing",
     )
     pipeline_run_service = PipelineRunService(
-        PostgresPipelineRunRepository(source_repository.session_factory)
+        PipelineRunRepository(source_repository.session_factory)
     )
     run, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=COLLECTION_ID,

@@ -6,24 +6,23 @@ from datetime import datetime, timezone
 
 import pytest
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import (
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriter,
+)
+from domain.core.paper_experiment import PaperExperimentRevision
+from domain.source import Collection, Document
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.collection_repository import (
+    CollectionRepository,
     StoredCollection,
     StoredDocument,
 )
-from application.repositories.paper_experiment_repository import (
+from repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
     PaperExperimentRevisionConflictError,
 )
-from application.core.objectives.analysis.experiment_analysis_writer import ExperimentAnalysisWriter
-from tests.unit.application.test_experiment_analysis_writer import _physical_split_experiment
-from domain.core.paper_experiment import PaperExperimentRevision
-from domain.source import Collection, Document
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
-from infra.persistence.postgres.paper_experiment_repository import (
-    PostgresPaperExperimentRepository,
+from tests.unit.application.test_experiment_analysis_writer import (
+    _physical_split_experiment,
 )
 
 pytestmark = pytest.mark.anyio
@@ -34,7 +33,7 @@ NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 @pytest.fixture
 async def paper_experiment_repository(postgres_session_factory):
-    auth = PostgresAuthRepository(postgres_session_factory)
+    auth = AuthRepository(postgres_session_factory)
     await auth.add_user(
         AuthUserRecord(
             user_id="experiment-owner",
@@ -44,7 +43,7 @@ async def paper_experiment_repository(postgres_session_factory):
             created_at=NOW,
         )
     )
-    collections = PostgresCollectionRepository(postgres_session_factory)
+    collections = CollectionRepository(postgres_session_factory)
     collection = StoredCollection(
         collection=Collection(
             collection_id="experiment-collection",
@@ -77,7 +76,7 @@ async def paper_experiment_repository(postgres_session_factory):
         ),
         updated_at=NOW.isoformat(),
     )
-    return PostgresPaperExperimentRepository(postgres_session_factory)
+    return PaperExperimentRepository(postgres_session_factory)
 
 
 async def test_source_only_batch_rolls_back_every_revision_on_write_failure(

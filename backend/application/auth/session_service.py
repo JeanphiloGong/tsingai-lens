@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from application.auth.passwords import hash_password, verify_password
-from application.repositories.auth_repository import (
+from repositories.auth_repository import (
     AuthRepository,
     AuthSessionRecord,
     AuthUserRecord,

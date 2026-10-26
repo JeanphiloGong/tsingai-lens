@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from application.repositories.comparison_group_repository import ComparisonGroupRepository
-from application.repositories.experiment_finding_repository import (
-    ExperimentFindingRepository,
-)
-from application.repositories.objective_experiment_selection_repository import (
-    ObjectiveExperimentSelectionRepository,
-)
-from application.repositories.transaction import RepositoryTransaction
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
+from repositories.comparison_group_repository import ComparisonGroupRepository
+from repositories.experiment_finding_repository import (
+    ExperimentFindingRepository,
+)
+from repositories.objective_experiment_selection_repository import (
+    ObjectiveExperimentSelectionRepository,
+)
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,7 @@ class ExperimentFindingPublisher:
         self,
         finding: Finding,
         *,
-        transaction: RepositoryTransaction | None = None,
+        transaction: AsyncSession | None = None,
     ) -> PublishedExperimentFinding:
         if finding.paper_contributions:
             raise ValueError("experiment-backed Finding cannot use legacy evidence")

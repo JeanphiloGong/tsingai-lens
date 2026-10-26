@@ -4,7 +4,6 @@ from application.feedback.source_coverage import (
     ChatCoverageAudit,
     build_evidence_coverage,
 )
-from application.repositories.chat_repository import ChatModelCall
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -12,6 +11,7 @@ from domain.chat import (
     ChatToolRequest,
     ChatToolResult,
 )
+from repositories.chat_repository import ChatModelCall
 
 
 def _trajectory(

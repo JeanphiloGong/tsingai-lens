@@ -21,9 +21,6 @@ lower-level runtime or persistence implementations.
 `application/` keeps the outer technical layer.
 Inside it, business responsibilities are now grouped as:
 
-- [`repositories/README.md`](repositories/README.md)
-  Storage contracts and their owner-specific input and query-result types
-
 - [`goal/README.md`](goal/README.md)
   Goal Brief intake and research-intent shaping
 - [`source/README.md`](source/README.md)
@@ -43,6 +40,9 @@ Inside it, business responsibilities are now grouped as:
   Retired parallel projection boundary
 
 ## Related Docs
+
+- [`../repositories/README.md`](../repositories/README.md)
+  Concrete PostgreSQL repositories used by application services
 
 - [`../docs/architecture/goal-core-source-layering.md`](../docs/architecture/goal-core-source-layering.md)
   Goal, Source, Core, consumer, and Derived responsibility boundaries

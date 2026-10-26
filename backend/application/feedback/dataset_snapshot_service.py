@@ -9,14 +9,14 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 from uuid import uuid4
 
-from application.repositories.chat_repository import ChatRepository
-from application.repositories.dataset_snapshot_repository import (
-    DatasetSnapshotRepository,
-)
-from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.source.collection_service import CollectionService
 from domain.chat import ChatMessageRole
 from domain.feedback import DatasetSnapshot, DatasetType
+from repositories.chat_repository import ChatRepository
+from repositories.dataset_snapshot_repository import (
+    DatasetSnapshotRepository,
+)
+from repositories.feedback_case_repository import FeedbackCaseRepository
 
 
 @dataclass(frozen=True)

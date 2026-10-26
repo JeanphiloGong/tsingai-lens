@@ -6,18 +6,18 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
-from application.repositories.collection_repository import (
-    CollectionRepository,
-    CollectionSummary,
-    StoredCollection,
-    StoredDocument,
-)
-from application.repositories.object_store import ObjectStore
 from domain.chat.permissions import change_permission, permission_record
 from domain.source import Collection
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.collection_workspace import CollectionPaths
 from infra.persistence.file.object_store import FileObjectStore
+from repositories.collection_repository import (
+    CollectionRepository,
+    CollectionSummary,
+    StoredCollection,
+    StoredDocument,
+)
+from repositories.object_store import ObjectStore
 
 
 def _now_iso() -> str:

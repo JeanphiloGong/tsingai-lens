@@ -5,13 +5,13 @@ from dataclasses import replace
 import pytest
 
 from application.evaluation.core_evaluation_service import CoreEvaluationService
+from application.evaluation.finding_feedback_service import (
+    FindingFeedbackService,
+)
 from application.evaluation.gold_service import EvaluationGoldService
 from application.evaluation.prediction_snapshot_service import (
     CoreArtifactsNotReadyForEvaluationError,
     EvaluationPredictionSnapshotService,
-)
-from application.evaluation.finding_feedback_service import (
-    FindingFeedbackService,
 )
 from domain.core import (
     Finding,
@@ -24,9 +24,12 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.evaluation import FindingCuration, FindingFeedback
-from application.evaluation.record_projection import finding_curation_from_record, finding_feedback_from_record
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
+from repositories.finding_review_repository import (
+    finding_curation_from_record,
+    finding_feedback_from_record,
+)
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
+from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 

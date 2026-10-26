@@ -8,8 +8,6 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
-from application.repositories.chat_repository import ChatRepository
-from application.repositories.feedback_case_repository import FeedbackCaseRepository
 from application.source.collection_service import CollectionService
 from domain.chat import ChatMessageRole
 from domain.feedback import (
@@ -18,6 +16,8 @@ from domain.feedback import (
     FeedbackCase,
     ReviewDecision,
 )
+from repositories.chat_repository import ChatRepository
+from repositories.feedback_case_repository import FeedbackCaseRepository
 
 
 @dataclass(frozen=True)

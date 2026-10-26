@@ -8,9 +8,6 @@ from application.feedback.dataset_service import (
     FeedbackDatasetConflict,
     FeedbackDatasetService,
 )
-from application.repositories.feedback_dataset_sample_repository import (
-    source_digest_for_case,
-)
 from domain.feedback import (
     Dataset,
     DatasetSample,
@@ -18,6 +15,9 @@ from domain.feedback import (
     SampleRevision,
     SftRevisionContent,
     content_digest_for,
+)
+from repositories.feedback_dataset_sample_repository import (
+    source_digest_for_case,
 )
 
 pytestmark = pytest.mark.anyio

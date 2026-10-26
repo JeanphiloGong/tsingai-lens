@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from asyncio import to_thread
-from dataclasses import replace
-from datetime import datetime, timezone
 import json
 import logging
 import math
+from asyncio import to_thread
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -17,19 +17,19 @@ from application.core.document_profiles.extraction import (
 )
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
-    DocumentProfile,
-    PROFILE_STATUS_EXTRACTION_FAILED,
     PROFILE_STATUS_COMPLETED,
+    PROFILE_STATUS_EXTRACTION_FAILED,
+    DocumentProfile,
     summarize_document_profile_collection,
 )
-from application.repositories.document_profile_repository import (
-    DocumentProfileRepository,
-)
-from application.repositories.source_artifact_repository import SourceArtifactRepository
-from domain.source import SourceBlock, SourceDocument, normalize_optional_text
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
+from domain.source import SourceBlock, SourceDocument, normalize_optional_text
+from repositories.document_profile_repository import (
+    DocumentProfileRepository,
+)
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 logger = logging.getLogger(__name__)
 

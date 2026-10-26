@@ -6,11 +6,6 @@ from hashlib import sha256
 
 import pytest
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import (
-    StoredCollection,
-    StoredDocument,
-)
 from domain.source import (
     Collection,
     Document,
@@ -25,12 +20,14 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
 )
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
+    StoredDocument,
 )
-from infra.persistence.postgres.source_artifact_repository import (
-    PostgresSourceArtifactRepository,
+from repositories.source_artifact_repository import (
+    SourceArtifactRepository,
 )
 
 pytestmark = pytest.mark.anyio
@@ -41,7 +38,7 @@ COLLECTION_ID = "col_source"
 
 @pytest.fixture
 async def source_repository(postgres_session_factory):
-    await PostgresAuthRepository(postgres_session_factory).add_user(
+    await AuthRepository(postgres_session_factory).add_user(
         AuthUserRecord(
             user_id="user_source",
             email="source@example.com",
@@ -50,7 +47,7 @@ async def source_repository(postgres_session_factory):
             created_at=datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
         )
     )
-    collections = PostgresCollectionRepository(postgres_session_factory)
+    collections = CollectionRepository(postgres_session_factory)
     await collections.add_collection(
         StoredCollection(
             collection=Collection(
@@ -69,7 +66,7 @@ async def source_repository(postgres_session_factory):
         (_document("doc_a"), _document("doc_b")),
         updated_at=NOW,
     )
-    return PostgresSourceArtifactRepository(postgres_session_factory)
+    return SourceArtifactRepository(postgres_session_factory)
 
 
 def _document(document_id: str) -> StoredDocument:
@@ -208,11 +205,11 @@ async def test_source_existence_does_not_load_artifact_json(
 
 async def test_profile_only_row_is_not_a_prepared_source(source_repository):
     from domain.core import DocumentProfile
-    from infra.persistence.postgres.document_profile_repository import (
-        PostgresDocumentProfileRepository,
+    from repositories.document_profile_repository import (
+        DocumentProfileRepository,
     )
 
-    profiles = PostgresDocumentProfileRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository(source_repository.session_factory)
     await profiles.replace(
         COLLECTION_ID,
         DocumentProfile(

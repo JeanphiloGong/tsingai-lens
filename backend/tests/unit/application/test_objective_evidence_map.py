@@ -5,7 +5,6 @@ from dataclasses import replace
 import pytest
 
 from application.core.objectives.evidence_map import build_objective_evidence_map
-from application.repositories.objective_repository import ObjectiveAnalysis
 from domain.core import (
     DocumentProfile,
     Finding,
@@ -14,6 +13,7 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from repositories.objective_repository import ObjectiveAnalysis
 
 
 def _objective(*, published_version: int | None = 1) -> ResearchObjective:

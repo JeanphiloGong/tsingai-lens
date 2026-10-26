@@ -16,18 +16,20 @@ from application.feedback.sft_sample_builder import (
     SftSampleBuilderProtocol,
 )
 from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
-from application.repositories.feedback_case_repository import FeedbackCaseRepository
-from application.repositories.feedback_dataset_repository import (
-    FeedbackDatasetRepository,
-)
-from application.repositories.feedback_dataset_sample_repository import (
+from domain.feedback import SampleRevision
+from domain.feedback.sample_revision import content_digest_for
+from repositories.analysis_job_repository import (
     DATASET_SAMPLE_BUILD_JOB_TYPE,
     DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
+)
+from repositories.feedback_case_repository import FeedbackCaseRepository
+from repositories.feedback_dataset_repository import (
+    FeedbackDatasetRepository,
+)
+from repositories.feedback_dataset_sample_repository import (
     FeedbackDatasetSampleRepository,
     source_digest_for_case,
 )
-from domain.feedback import SampleRevision
-from domain.feedback.sample_revision import content_digest_for
 
 logger = logging.getLogger(__name__)
 

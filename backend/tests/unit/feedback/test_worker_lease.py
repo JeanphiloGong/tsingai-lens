@@ -6,8 +6,7 @@ from dataclasses import replace
 import pytest
 
 from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
-from application.repositories.analysis_job_repository import AnalysisJob
-
+from repositories.analysis_job_repository import AnalysisJob
 
 pytestmark = pytest.mark.anyio
 

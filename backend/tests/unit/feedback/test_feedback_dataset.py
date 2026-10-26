@@ -8,10 +8,10 @@ from application.feedback.dataset_service import (
     FeedbackDatasetError,
     FeedbackDatasetService,
 )
-from application.repositories.feedback_dataset_sample_repository import (
+from domain.feedback import Dataset, FeedbackCase
+from repositories.feedback_dataset_sample_repository import (
     source_digest_for_case,
 )
-from domain.feedback import Dataset, FeedbackCase
 
 pytestmark = pytest.mark.anyio
 
@@ -55,7 +55,7 @@ class _Samples:
         self.calls = []
 
     async def collect(self, *, samples, jobs):
-        from application.repositories.feedback_dataset_sample_repository import (
+        from repositories.feedback_dataset_sample_repository import (
             CollectedDatasetSample,
         )
 
@@ -99,7 +99,9 @@ async def test_listing_does_not_create_datasets_or_collect_withdrawn_cases() -> 
 
 async def test_collect_reports_source_changed_during_transaction_as_conflict():
     from application.feedback.dataset_service import FeedbackDatasetConflict
-    from application.repositories.feedback_dataset_sample_repository import DatasetSampleRevisionConflict
+    from repositories.feedback_dataset_sample_repository import (
+        DatasetSampleRevisionConflict,
+    )
 
     class RacingSamples(_Samples):
         async def collect(self, **kwargs):

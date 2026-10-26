@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from application.repositories.pipeline_run_repository import (
+from repositories.pipeline_run_repository import (
     PipelineNodeStatus,
     PipelineRun,
     PipelineRunRepository,

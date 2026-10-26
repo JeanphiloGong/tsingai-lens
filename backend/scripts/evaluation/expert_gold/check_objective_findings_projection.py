@@ -901,18 +901,18 @@ async def _local_objective_bundle(
             build_database_engine,
             build_session_factory,
         )
-        from infra.persistence.postgres.finding_review_repository import (  # noqa: PLC0415
-            PostgresFindingReviewRepository,
+        from repositories.finding_review_repository import (  # noqa: PLC0415
+            FindingReviewRepository,
         )
-        from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
-            PostgresObjectiveRepository,
+        from repositories.objective_repository import (  # noqa: PLC0415
+            ObjectiveRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
         try:
             session_factory = build_session_factory(engine)
-            repository = PostgresObjectiveRepository(session_factory)
-            review_repository = PostgresFindingReviewRepository(session_factory)
+            repository = ObjectiveRepository(session_factory)
+            review_repository = FindingReviewRepository(session_factory)
             feedback_service = FindingFeedbackService(
                 review_repository=review_repository,
                 objective_repository=repository,
@@ -1109,13 +1109,13 @@ async def _load_source_index(
             build_database_engine,
             build_session_factory,
         )
-        from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
-            PostgresSourceArtifactRepository,
+        from repositories.source_artifact_repository import (  # noqa: PLC0415
+            SourceArtifactRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
         try:
-            documents = await PostgresSourceArtifactRepository(
+            documents = await SourceArtifactRepository(
                 build_session_factory(engine)
             ).read_collection_documents(collection_id)
         finally:

@@ -10,7 +10,7 @@ import pytest
 
 from domain.core import DocumentProfile
 from domain.source import source_documents_from_records
-from infra.persistence.memory import (
+from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
@@ -123,22 +123,22 @@ async def test_export_trace_writes_current_source_and_objective_views(
     monkeypatch.setattr(trace, "build_session_factory", lambda _engine: None)
     monkeypatch.setattr(
         trace,
-        "PostgresSourceArtifactRepository",
+        "SourceArtifactRepository",
         lambda _sessions: source_repository,
     )
     monkeypatch.setattr(
         trace,
-        "PostgresDocumentProfileRepository",
+        "DocumentProfileRepository",
         lambda _sessions: profile_repository,
     )
     monkeypatch.setattr(
         trace,
-        "PostgresPaperMapRepository",
+        "PaperMapRepository",
         lambda _sessions: MemoryPaperMapRepository(),
     )
     monkeypatch.setattr(
         trace,
-        "PostgresObjectiveRepository",
+        "ObjectiveRepository",
         lambda _sessions: _ObjectiveRepository(),
     )
 

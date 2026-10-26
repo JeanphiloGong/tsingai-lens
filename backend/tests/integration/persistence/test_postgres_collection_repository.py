@@ -8,19 +8,16 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import (
-    StoredCollection,
-    StoredDocument,
-)
 from domain.source import Collection, Document
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
 from infra.persistence.postgres.models.document import Document as DocumentRow
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
+)
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
+    StoredDocument,
 )
 
 pytestmark = pytest.mark.anyio
@@ -28,7 +25,7 @@ pytestmark = pytest.mark.anyio
 
 @pytest.fixture
 async def collection_repository(postgres_session_factory):
-    auth_repository = PostgresAuthRepository(postgres_session_factory)
+    auth_repository = AuthRepository(postgres_session_factory)
     now = datetime(2026, 8, 27, tzinfo=timezone.utc)
     for user_id in ("user_a", "user_b"):
         await auth_repository.add_user(
@@ -40,7 +37,7 @@ async def collection_repository(postgres_session_factory):
                 created_at=now.isoformat(),
             )
         )
-    return PostgresCollectionRepository(postgres_session_factory)
+    return CollectionRepository(postgres_session_factory)
 
 
 def _collection(collection_id: str, owner_user_id: str = "user_a") -> StoredCollection:

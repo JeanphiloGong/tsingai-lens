@@ -1,15 +1,15 @@
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from application.repositories.feedback_dataset_sample_repository import (
-    source_digest_for_case,
-)
 from domain.feedback import Dataset, EvidenceCoverage, FeedbackCase
-from infra.persistence.postgres.feedback_dataset_repository import (
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
+from repositories.feedback_dataset_repository import (
     _row_values,
     _to_record,
 )
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
+from repositories.feedback_dataset_sample_repository import (
+    source_digest_for_case,
+)
 
 
 def test_dataset_storage_timestamps_do_not_enter_domain_or_construction_rules() -> None:

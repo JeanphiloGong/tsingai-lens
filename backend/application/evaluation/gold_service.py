@@ -4,11 +4,11 @@ from typing import Any, Mapping
 
 from application.source.collection_service import CollectionService
 from domain.evaluation import EvaluationGoldItem, EvaluationGoldSet
-from application.evaluation.record_projection import (
+from repositories.evaluation_repository import (
+    EvaluationRepository,
     evaluation_gold_item_from_record,
     evaluation_gold_set_from_record,
 )
-from application.repositories.evaluation_repository import EvaluationRepository
 
 
 class EvaluationGoldService:

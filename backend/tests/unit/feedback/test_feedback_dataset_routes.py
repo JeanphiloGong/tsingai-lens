@@ -8,7 +8,6 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from application.feedback.dataset_export_service import DatasetExportError
-from application.repositories.feedback_dataset_repository import StoredDataset
 from controllers.feedback import task_datasets
 from controllers.feedback.task_dataset_schemas import (
     SampleConfirmRequest,
@@ -24,6 +23,7 @@ from domain.feedback import (
     content_digest_for,
 )
 from main import create_app
+from repositories.feedback_dataset_repository import StoredDataset
 
 
 def _request(service, user_id: str = "user-1"):
@@ -235,10 +235,10 @@ def test_task_dataset_request_accepts_task_types_and_rejects_extra_fields() -> N
 def test_task_dataset_collection_returns_accepted_operation() -> None:
     class Service(_Service):
         async def collect_cases_for_user(self, **kwargs):
-            from application.repositories.feedback_dataset_sample_repository import (
+            from domain.feedback import DatasetSample
+            from repositories.feedback_dataset_sample_repository import (
                 CollectedDatasetSample,
             )
-            from domain.feedback import DatasetSample
 
             sample = DatasetSample.pending(
                 sample_id="sample-1",

@@ -17,6 +17,8 @@ from dataclasses import replace
 from time import perf_counter
 from typing import Any, Callable, Mapping
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
@@ -43,16 +45,15 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisService,
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
-from application.repositories.objective_repository import (
+from domain.core import ResearchObjective
+from infra.llm.usage import capture_llm_usage
+from infra.persistence.postgres.experiment_analysis_transaction import (
+    PostgresExperimentAnalysisTransactionFactory,
+)
+from repositories.objective_repository import (
     ObjectiveAnalysis,
     ObjectiveRepository,
 )
-from application.repositories.transaction import (
-    RepositoryTransaction,
-    RepositoryTransactionFactory,
-)
-from domain.core import ResearchObjective
-from infra.llm.usage import capture_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +66,8 @@ _EVIDENCE_REVIEW_GAP_LIMIT = 200
 
 @asynccontextmanager
 async def _analysis_transaction(
-    factory: RepositoryTransactionFactory | None,
-) -> AsyncIterator[RepositoryTransaction | None]:
+    factory: PostgresExperimentAnalysisTransactionFactory | None,
+) -> AsyncIterator[AsyncSession | None]:
     """Keep experiment records and Objective publication in one write scope."""
 
     if factory is None:
@@ -244,7 +245,7 @@ class ObjectiveAnalysisService:
         objective_input_service: ObjectiveInputService,
         document_profile_service: DocumentProfileService,
         experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
-        experiment_analysis_transaction_factory: RepositoryTransactionFactory
+        experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory
         | None = None,
         experiment_compatibility_projection: ExperimentCompatibilityProjection
         | None = None,

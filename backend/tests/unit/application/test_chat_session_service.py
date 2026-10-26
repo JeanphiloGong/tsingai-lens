@@ -27,7 +27,7 @@ from application.chat.session_service import (
     ChatSessionService,
     ChatSourceContextError,
 )
-from application.repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
+from repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
 from application.chat.capabilities.document_sources import ReadSourceCapability
 from domain.chat import (
     ChatMessage,

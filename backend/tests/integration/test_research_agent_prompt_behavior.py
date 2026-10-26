@@ -18,7 +18,6 @@ from openai import AsyncOpenAI
 
 from application.chat import CapabilityRegistry, ResearchAgentRunner
 from application.chat.agent_runner import AgentRunLimits
-from application.chat.tool_result_projection import tool_result_record
 from application.chat.capabilities import (
     AgentContext,
     BrowseCollectionPapersCapability,
@@ -28,14 +27,14 @@ from application.chat.capabilities import (
     ReadSourceCapability,
     SearchSourcesCapability,
 )
-from application.repositories.collection_repository import StoredDocument
+from application.chat.tool_result_projection import tool_result_record
 from domain.source import Document, SourceDocument
-from infra.persistence.memory import (
+from repositories.collection_repository import StoredDocument
+from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
 )
-
 
 _LIVE = os.environ.get("LENS_RUN_LIVE_PROMPT_TESTS") == "1"
 _FIXTURE = (

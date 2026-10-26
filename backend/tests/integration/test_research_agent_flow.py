@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
-import pytest
 
 from application.chat import (
     CapabilityExecutionContext,
@@ -16,16 +16,15 @@ from application.chat.capabilities import GetCollectionContextCapability
 from application.chat.session_service import ChatSessionService
 from application.pipeline import PipelineRunService
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-    MemoryPipelineRunRepository,
-)
 from main import create_app
 from tests.support.chat_repository import MemoryChatRepository
+from tests.support.repositories import (
+    MemoryDocumentProfileRepository,
+    MemoryPaperMapRepository,
+    MemoryPipelineRunRepository,
+    MemorySourceArtifactRepository,
+)
 from tests.unit.application.test_research_agent_runner import _Model
-
 
 pytestmark = pytest.mark.anyio
 

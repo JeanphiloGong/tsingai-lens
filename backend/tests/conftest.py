@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from dataclasses import replace
-
+from pathlib import Path
 
 import pytest
 
@@ -11,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from application.repositories.auth_repository import AuthSessionRecord, AuthUserRecord
+from repositories.auth_repository import AuthSessionRecord, AuthUserRecord
 
 
 class MemoryAuthRepository:
@@ -86,7 +85,7 @@ def auth_session_service(tmp_path):
 def collection_service(tmp_path, auth_session_service):
     from application.source.collection_service import CollectionService
     from infra.persistence.file import FileCollectionWorkspace
-    from infra.persistence.memory import MemoryCollectionRepository
+    from tests.support.repositories import MemoryCollectionRepository
 
     return CollectionService(
         repository=MemoryCollectionRepository(),

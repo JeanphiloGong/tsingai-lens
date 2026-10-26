@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import SourceReferenceSet
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 @dataclass(frozen=True)

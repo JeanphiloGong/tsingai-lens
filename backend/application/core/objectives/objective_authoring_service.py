@@ -4,15 +4,15 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from application.core.objectives.analysis.experiment_compatibility_projection import (
-    ExperimentCompatibilityProjection,
-)
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
+)
 from application.source.collection_service import CollectionService
 from domain.core import ResearchObjective, is_question_shaped_objective
-from application.repositories.objective_repository import ObjectiveRepository
+from repositories.objective_repository import ObjectiveRepository
 
 
 class ObjectiveAuthoringService:

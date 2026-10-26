@@ -5,15 +5,14 @@ import argparse
 import asyncio
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 from openai import OpenAI
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 EMBEDDING_BATCH_SIZE = 64
@@ -261,14 +260,14 @@ async def main_async() -> int:
         build_database_engine,
         build_session_factory,
     )
-    from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
-        PostgresSourceArtifactRepository,
+    from repositories.source_artifact_repository import (  # noqa: PLC0415
+        SourceArtifactRepository,
     )
 
     fixture = json.loads(args.fixture.resolve().read_text(encoding="utf-8"))
     engine = build_database_engine(DatabaseSettings())
     try:
-        repository = PostgresSourceArtifactRepository(build_session_factory(engine))
+        repository = SourceArtifactRepository(build_session_factory(engine))
         text_units = await repository.list_text_units(args.collection_id)
         blocks = await repository.list_blocks(args.collection_id)
     finally:

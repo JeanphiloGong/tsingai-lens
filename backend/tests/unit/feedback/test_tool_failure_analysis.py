@@ -4,14 +4,9 @@ from dataclasses import replace
 
 import pytest
 
+from application.chat.tool_result_projection import tool_result_record
 from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
 from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
-from application.chat.tool_result_projection import tool_result_record
-from application.repositories.analysis_job_repository import (
-    TOOL_FAILURE_JOB_TYPE,
-    AnalysisJob,
-    tool_failure_idempotency_key,
-)
 from domain.chat import (
     ChatMessage,
     ChatSession,
@@ -22,6 +17,11 @@ from domain.chat import (
     ToolRisk,
 )
 from domain.feedback import tool_failure_signal_id, tool_result_digest
+from repositories.analysis_job_repository import (
+    TOOL_FAILURE_JOB_TYPE,
+    AnalysisJob,
+    tool_failure_idempotency_key,
+)
 
 pytestmark = pytest.mark.anyio
 

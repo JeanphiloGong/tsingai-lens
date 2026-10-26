@@ -10,7 +10,7 @@ import pytest
 
 from domain.core import DocumentProfile
 from domain.source import source_documents_from_records
-from infra.persistence.memory import (
+from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemorySourceArtifactRepository,
 )
@@ -143,17 +143,17 @@ async def test_export_prediction_bundle_uses_current_published_results(
     monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
     monkeypatch.setattr(
         exporter,
-        "PostgresSourceArtifactRepository",
+        "SourceArtifactRepository",
         lambda _sessions: source_repository,
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresDocumentProfileRepository",
+        "DocumentProfileRepository",
         lambda _sessions: profile_repository,
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresObjectiveRepository",
+        "ObjectiveRepository",
         lambda _sessions: _PublishedObjectiveRepository(),
     )
     output = tmp_path / "prediction.json"
@@ -329,17 +329,17 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(
     monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
     monkeypatch.setattr(
         exporter,
-        "PostgresSourceArtifactRepository",
+        "SourceArtifactRepository",
         lambda _sessions: MemorySourceArtifactRepository(),
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresDocumentProfileRepository",
+        "DocumentProfileRepository",
         lambda _sessions: MemoryDocumentProfileRepository(),
     )
     monkeypatch.setattr(
         exporter,
-        "PostgresObjectiveRepository",
+        "ObjectiveRepository",
         lambda _sessions: _PublishedObjectiveRepository(published=False),
     )
     output = tmp_path / "empty.json"

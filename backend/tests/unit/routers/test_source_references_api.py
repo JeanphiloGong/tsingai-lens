@@ -9,16 +9,16 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
-from tests.support.collection_service import build_test_collection_service
-from application.source.reference_workflow_service import (
-    SourceReferenceWorkflowService,
-)
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
+from application.source.reference_workflow_service import (
+    SourceReferenceWorkflowService,
+)
 from controllers.source import references as references_controller
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
-from infra.persistence.memory import MemorySourceArtifactRepository
+from tests.support.collection_service import build_test_collection_service
+from tests.support.repositories import MemorySourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 

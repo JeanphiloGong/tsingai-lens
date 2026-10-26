@@ -9,7 +9,7 @@ from domain.evaluation import (
     EvaluationRun,
     EvaluationScore,
 )
-from application.evaluation.record_projection import (
+from repositories.evaluation_repository import (
     evaluation_failure_from_record,
     evaluation_failure_record,
     evaluation_gold_item_from_record,

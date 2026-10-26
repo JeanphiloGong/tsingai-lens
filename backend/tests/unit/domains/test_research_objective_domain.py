@@ -5,10 +5,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from application.repositories.objective_repository import (
-    OBJECTIVE_ANALYSIS_STATUSES,
-    ObjectiveAnalysis,
-)
 from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
@@ -34,6 +30,10 @@ from domain.core.scientific_fact import (
     ScientificContext,
     ScientificResult,
     ScientificVariable,
+)
+from repositories.objective_repository import (
+    OBJECTIVE_ANALYSIS_STATUSES,
+    ObjectiveAnalysis,
 )
 
 

@@ -4,9 +4,8 @@ import ast
 import math
 from typing import Any, Iterable, Mapping
 
-from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.source import SourceDocument, SourceDocumentTree
-
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 SourceRecord = dict[str, Any]
 

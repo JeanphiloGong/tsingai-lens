@@ -3,8 +3,7 @@ from __future__ import annotations
 import pytest
 
 from domain.core import ResearchObjective
-from infra.persistence.memory.objective_repository import MemoryObjectiveRepository
-
+from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 

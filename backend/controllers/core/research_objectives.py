@@ -13,7 +13,6 @@ from application.core.objectives.finding_summary import FindingSummaryUnavailabl
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
 )
-from application.repositories.objective_repository import StoredObjective
 from controllers.core.research_objective_schemas import (
     FindingDetailResponse,
     FindingListResponse,
@@ -26,6 +25,7 @@ from controllers.core.research_objective_schemas import (
     PaginatedObjectiveListResponse,
 )
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
+from repositories.objective_repository import StoredObjective
 
 
 class DocumentSelectionRequest(BaseModel):

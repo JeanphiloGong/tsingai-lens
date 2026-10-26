@@ -4,14 +4,14 @@ from hashlib import sha256
 
 import pytest
 
-from application.repositories.collection_repository import (
+from domain.source import Collection, Document
+from infra.persistence.file.object_store import FileObjectStore
+from repositories.collection_repository import (
     StoredCollection,
     StoredDocument,
 )
-from domain.source import Collection, Document
-from infra.persistence.file.object_store import FileObjectStore
-from infra.persistence.memory import MemoryCollectionRepository
 from scripts import export_source_tables as export_script
+from tests.support.repositories import MemoryCollectionRepository
 
 pytestmark = pytest.mark.anyio
 

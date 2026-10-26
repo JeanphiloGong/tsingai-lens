@@ -4,12 +4,10 @@ from dataclasses import replace
 
 import pytest
 
-from application.repositories.pipeline_run_repository import (
+from repositories.pipeline_run_repository import (
     PipelineRun,
+    PipelineRunRepository,
     PipelineRunStatus,
-)
-from infra.persistence.postgres.pipeline_run_repository import (
-    PostgresPipelineRunRepository,
 )
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
 
@@ -50,7 +48,7 @@ def _run(
 async def test_document_run_reuses_active_and_matching_completed_work(
     source_repository,
 ) -> None:
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository(source_repository.session_factory)
     first = _run("run-first", "fingerprint-a")
     assert await runs.get_or_create_document_run(first) == (first, True)
 
@@ -77,7 +75,7 @@ async def test_document_run_reuses_active_and_matching_completed_work(
 
 
 async def test_collection_run_reuses_only_active_work(source_repository) -> None:
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository(source_repository.session_factory)
     first = _run(
         "run-discovery-first",
         "scope-a",
@@ -114,7 +112,7 @@ async def test_collection_run_reuses_only_active_work(source_repository) -> None
 async def test_pipeline_run_round_trips_progress_nodes_and_context(
     source_repository,
 ) -> None:
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository(source_repository.session_factory)
     queued = _run("run-round-trip", "fingerprint-a")
     await runs.add_run(queued)
     source_node = queued.node("source_parsing").start(NOW).succeed(
@@ -142,9 +140,9 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
 async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
     source_repository, monkeypatch
 ) -> None:
-    from infra.persistence.postgres import pipeline_run_repository as module
+    from repositories import pipeline_run_repository as module
 
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository(source_repository.session_factory)
     await runs.add_run(_run("history-only", "fingerprint-history"))
 
     def reject_full_hydration(_row):
@@ -161,7 +159,7 @@ async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
 async def test_artifact_retry_bypasses_completed_run_but_reuses_active_run(
     source_repository,
 ):
-    runs = PostgresPipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository(source_repository.session_factory)
     first = _run("run-incomplete-artifacts", "same-input")
     await runs.add_run(first.start(NOW).finish(PipelineRunStatus.COMPLETED, NOW))
     retry, created = await runs.get_or_create_document_run(

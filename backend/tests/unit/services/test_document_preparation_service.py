@@ -7,7 +7,6 @@ from application.core.document_profiles.extraction import (
     DOCUMENT_PROFILE_PROMPT_VERSION,
 )
 from application.pipeline import PipelineRunService
-from application.repositories.collection_repository import StoredDocument
 from application.source.document_preparation_service import (
     DOCUMENT_ANALYSIS_VERSION,
     DocumentPreparationService,
@@ -19,7 +18,8 @@ from application.source.reference_extraction_service import (
 )
 from domain.core import DocumentProfile
 from domain.source import Document, SourceDocument
-from infra.persistence.memory import (
+from repositories.collection_repository import StoredDocument
+from tests.support.repositories import (
     MemoryPipelineRunRepository,
     MemorySourceArtifactRepository,
 )

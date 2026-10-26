@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from hashlib import sha256
-import json
 from typing import Any
 from urllib.parse import urlencode
 
@@ -14,13 +14,13 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
 from application.goal.research_plan_contract import (
     ResearchPlanStructure,
     ResearchPlanVariable,
 )
-from application.goal.experiment_plan_service import ExperimentPlanNotFoundError
-from application.goal.experiment_plan_projection import experiment_plan_record
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from repositories.experiment_plan_repository import experiment_plan_record
 
 
 class ProposeResearchPlanToolRequest(ResearchPlanStructure):

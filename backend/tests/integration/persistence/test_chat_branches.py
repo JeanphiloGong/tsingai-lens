@@ -21,10 +21,6 @@ from application.chat import (
     ResearchAgentRunner,
 )
 from application.chat.session_service import ChatSessionService
-from application.repositories.collection_repository import (
-    StoredCollection,
-    StoredDocument,
-)
 from application.source.collection_service import CollectionService
 from controllers.chat.sessions import router
 from domain.chat import (
@@ -38,10 +34,12 @@ from domain.chat import (
 )
 from domain.source import Collection, Document, SourceBlock, SourceDocument
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository
+from repositories.chat_repository import ChatRepository
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
+    StoredDocument,
 )
 from tests.unit.application.test_chat_session_service import _WriteCapability
 from tests.unit.application.test_research_agent_runner import _Model
@@ -69,12 +67,12 @@ class _Sources:
 
 @pytest.fixture
 async def branch_app(postgres_session_factory, tmp_path):
-    auth = AuthSessionService(PostgresAuthRepository(postgres_session_factory))
+    auth = AuthSessionService(AuthRepository(postgres_session_factory))
     users, cookies = [], []
     for email in ("branch-owner@example.test", "branch-other@example.test"):
         users.append(await auth.create_user(email=email, password="synthetic-test-password"))
         cookies.append((await auth.login(email=email, password="synthetic-test-password"))["session_id"])
-    collections = PostgresCollectionRepository(postgres_session_factory)
+    collections = CollectionRepository(postgres_session_factory)
     await collections.add_collection(
         StoredCollection(
             collection=Collection(
@@ -107,7 +105,7 @@ async def branch_app(postgres_session_factory, tmp_path):
         ),
         updated_at=NOW,
     )
-    repository = PostgresChatRepository(postgres_session_factory)
+    repository = ChatRepository(postgres_session_factory)
     chat = ChatSession.create(session_id="original", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW)
     await repository.add_session(chat)
     call = ChatToolCall.requested(
@@ -184,7 +182,7 @@ async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(bran
     await app.repository.save_trajectory(
         session=original, messages=messages, tool_calls=(), tool_results=(),
     )
-    reloaded = PostgresChatRepository(app.factory)
+    reloaded = ChatRepository(app.factory)
     assert (await reloaded.read_session("original")).is_pinned is True
     assert await reloaded.read_messages("original") == messages
     first = await app.client.get(BASE, params={"collection_id": "collection", "limit": 1})
@@ -403,7 +401,7 @@ async def test_branch_authorization_busy_worker_and_message_boundaries(branch_ap
         assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message_id": message_id})).status_code == 404
     for change in ({"message": " "}, {"message": "bad\x00question"}, {"message": "x" * 12001}, {"request_id": "invalid"}, {"user_id": "other"}):
         assert (await app.client.post(f"{BASE}/original/branches", json={**payload, **change})).status_code == 422
-    other_worker = PostgresChatRepository(app.factory)
+    other_worker = ChatRepository(app.factory)
     async with other_worker.session_execution("original"):
         assert (await app.client.get(f"{BASE}/original/messages")).json()["running"] is True
         assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 409

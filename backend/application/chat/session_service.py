@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from math import isfinite
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
+from math import isfinite
 from typing import Any, Mapping
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -27,22 +27,6 @@ from application.chat.inline_citations import (
     format_message_citations,
 )
 from application.chat.tool_result_projection import tool_result_record
-from application.repositories.analysis_job_repository import (
-    AnalysisJobRepository,
-    correction_signal_idempotency_key,
-    tool_failure_idempotency_key,
-)
-from application.repositories.chat_repository import (
-    ChatModelCall,
-    ChatRepository,
-    ChatResponseSnapshot,
-    ChatSessionBusyError,
-    ChatSessionSummary,
-    ModelCallInput,
-    ModelCallObserver,
-    ModelCallOutcome,
-)
-from application.repositories.source_artifact_repository import SourceArtifactRepository
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -58,6 +42,22 @@ from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackRe
 from domain.chat.permissions import permits_automatic
 from domain.feedback.correction_signal import CorrectionSignal, is_correction_challenge
 from domain.feedback.tool_failure import tool_result_digest
+from repositories.analysis_job_repository import (
+    AnalysisJobRepository,
+    correction_signal_idempotency_key,
+    tool_failure_idempotency_key,
+)
+from repositories.chat_repository import (
+    ChatModelCall,
+    ChatRepository,
+    ChatResponseSnapshot,
+    ChatSessionBusyError,
+    ChatSessionSummary,
+    ModelCallInput,
+    ModelCallObserver,
+    ModelCallOutcome,
+)
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 logger = logging.getLogger(__name__)
 _HEARTBEAT_INTERVAL_SECONDS = 15

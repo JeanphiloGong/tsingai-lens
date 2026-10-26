@@ -28,14 +28,6 @@ from application.core.objectives.objective_analysis_service import (
     ObjectiveExperimentAnalysisService,
     _used_draft_source_labels,
 )
-from application.repositories.objective_repository import (
-    ObjectiveAnalysis,
-    StoredObjective,
-)
-from application.repositories.pipeline_run_repository import (
-    ModelUsage,
-    TokenUsage,
-)
 from domain.core import (
     DocumentProfile,
     Finding,
@@ -45,6 +37,14 @@ from domain.core import (
     ResearchObjective,
 )
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
+from repositories.objective_repository import (
+    ObjectiveAnalysis,
+    StoredObjective,
+)
+from repositories.pipeline_run_repository import (
+    ModelUsage,
+    TokenUsage,
+)
 
 pytestmark = pytest.mark.anyio
 

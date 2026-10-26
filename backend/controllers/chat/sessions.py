@@ -18,10 +18,6 @@ from application.chat.session_service import (
     ChatSessionNotFoundError,
     ChatSourceContextError,
 )
-from application.repositories.chat_repository import (
-    ChatSessionBusyError,
-    ChatSessionHasBranchesError,
-)
 from controllers.chat.schemas import (
     ChatBranchRequest,
     ChatMessageFeedbackRequest,
@@ -36,8 +32,8 @@ from controllers.chat.schemas import (
     ChatSessionCreateRequest,
     ChatSessionListResponse,
     ChatSessionPinRequest,
-    ChatSessionTitleRequest,
     ChatSessionResponse,
+    ChatSessionTitleRequest,
     ChatToolCallResponse,
     ChatToolDecisionRequest,
     ChatTreeNodeResponse,
@@ -47,6 +43,10 @@ from controllers.chat.schemas import (
 )
 from controllers.dependencies.auth import current_user_id
 from domain.chat import ChatResourceRef, ChatSourceContext, ToolPermissionMode
+from repositories.chat_repository import (
+    ChatSessionBusyError,
+    ChatSessionHasBranchesError,
+)
 
 router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
 

@@ -11,20 +11,20 @@ from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import PaperExperimentRevision
-from infra.persistence.postgres.comparison_group_repository import (
-    PostgresComparisonGroupRepository,
-)
 from infra.persistence.postgres.experiment_analysis_transaction import (
     PostgresExperimentAnalysisTransactionFactory,
 )
-from infra.persistence.postgres.experiment_finding_repository import (
-    PostgresExperimentFindingRepository,
+from repositories.comparison_group_repository import (
+    ComparisonGroupRepository,
 )
-from infra.persistence.postgres.objective_experiment_selection_repository import (
-    PostgresObjectiveExperimentSelectionRepository,
+from repositories.experiment_finding_repository import (
+    ExperimentFindingRepository,
 )
-from infra.persistence.postgres.paper_experiment_repository import (
-    PostgresPaperExperimentRepository,
+from repositories.objective_experiment_selection_repository import (
+    ObjectiveExperimentSelectionRepository,
+)
+from repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
 )
 from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
@@ -32,7 +32,6 @@ from tests.integration.persistence.test_postgres_objective_lifecycle import (
     _contribution,
     _queue_and_claim,
 )
-
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_objective_lifecycle",)
 pytestmark = pytest.mark.anyio
@@ -144,7 +143,7 @@ def _cross_paper_finding(
     )
 
 
-class _FailingAfterWriteFindingRepository(PostgresExperimentFindingRepository):
+class _FailingAfterWriteFindingRepository(ExperimentFindingRepository):
     """Flush a Finding, then fail so the enclosing transaction must undo it."""
 
     async def add_finding(self, finding, *, transaction=None):
@@ -157,8 +156,8 @@ async def test_shared_transaction_rolls_back_graph_and_objective_publication(
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
     session_factory = objective_repository.session_factory
-    experiments = PostgresPaperExperimentRepository(session_factory)
-    selections = PostgresObjectiveExperimentSelectionRepository(session_factory)
+    experiments = PaperExperimentRepository(session_factory)
+    selections = ObjectiveExperimentSelectionRepository(session_factory)
     transaction_factory = PostgresExperimentAnalysisTransactionFactory(session_factory)
     revision = _revision()
     selection = _selection(analysis.analysis_version)
@@ -235,9 +234,9 @@ async def test_finding_failure_rolls_back_revisions_selections_groups_and_findin
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
     session_factory = objective_repository.session_factory
-    experiments = PostgresPaperExperimentRepository(session_factory)
-    selections = PostgresObjectiveExperimentSelectionRepository(session_factory)
-    groups = PostgresComparisonGroupRepository(session_factory)
+    experiments = PaperExperimentRepository(session_factory)
+    selections = ObjectiveExperimentSelectionRepository(session_factory)
+    groups = ComparisonGroupRepository(session_factory)
     findings = _FailingAfterWriteFindingRepository(session_factory)
     publisher = ExperimentFindingPublisher(selections, groups, findings)
     transaction_factory = PostgresExperimentAnalysisTransactionFactory(session_factory)

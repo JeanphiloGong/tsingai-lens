@@ -4,8 +4,7 @@ import pytest
 
 from application.pipeline import PipelineRunService
 from application.pipeline.pipeline_run_service import document_preparation_error_message
-from infra.persistence.memory import MemoryPipelineRunRepository
-
+from tests.support.repositories import MemoryPipelineRunRepository
 
 pytestmark = pytest.mark.anyio
 

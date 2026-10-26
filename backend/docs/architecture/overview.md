@@ -22,7 +22,7 @@ Read this page first, then follow the first entry point that matches the task:
 The normal reading path is:
 
 ```text
-HTTP controller -> application use case -> repository port -> storage implementation
+HTTP controller -> application use case -> concrete repository -> PostgreSQL
                          |
                          +-> scientific stage -> model when needed -> grounded records
 ```
@@ -30,7 +30,8 @@ HTTP controller -> application use case -> repository port -> storage implementa
 Start with the owning application README before opening a large service file.
 Controllers authorize the request and shape HTTP responses; application
 services organize work; domain records express scientific objects and their
-invariants; infrastructure implements parsing, model access, and repositories.
+invariants; repositories own SQL and record mapping; infrastructure supplies
+database sessions, ORM tables, parsing, and model access.
 The scientific meaning belongs to the Core services and analysis stages.
 
 [`../../main.py`](../../main.py) is the assembly point. `create_app()` configures
@@ -148,10 +149,11 @@ analysis of an explicitly selected ready subset.
 - `application/chat/` owns conversation, capability trajectory, and approval;
   it references rather than duplicates scientific records.
 - `domain/` owns business objects, evidence, invariants, and business transitions.
-- [`application/repositories/`](../../application/repositories/README.md) owns
-  storage contracts and repository-specific query results. Domain objects do
-  not depend on those contracts.
-- `infra/` owns PostgreSQL, object storage, model providers, and parsing.
+- [`repositories/`](../../repositories/README.md) owns concrete PostgreSQL
+  repositories, their query results, and storage mappings. Services receive
+  these repositories directly; domain objects do not depend on them.
+- `infra/` owns database connections, ORM tables, shared transactions, object
+  storage, model providers, and parsing.
 
 PostgreSQL stores structured current state and analysis history. Object storage
 stores uploaded and extracted bytes. Local files are disposable runtime scratch.
@@ -168,14 +170,14 @@ but have separate owners.
 | Model family | Domain responsibility | Execution, storage, or HTTP owner |
 | --- | --- | --- |
 | Source and Collection | Current paper membership, readable document structure, complete tables, source identities and preparation provenance | Repositories map ORM rows and artifact payloads; controllers own HTTP fields |
-| Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `application/repositories/objective_repository.py` |
-| Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `application/repositories/chat_repository.py` |
+| Core | Research questions, paper experiments, selections, comparison groups, evidence and Findings with their scientific rules | `ObjectiveAnalysis` and its execution status live in `repositories/objective_repository.py` |
+| Chat | Message order, session ownership and branch lineage, selected source context, approved tool decisions and observed results | Model-call requests/outcomes and streamed response snapshots live in `repositories/chat_repository.py` |
 | Feedback | Observed dissatisfaction/correction signals, evidence coverage, annotations, review decisions, sample revisions and export integrity | Jobs and leases live in `analysis_job_repository.py`; sample-build payloads and idempotency inputs live in `feedback_dataset_sample_repository.py` |
 | Goal | Authored experiment-plan content, immutable revision identity and revision-conflict rules | Repositories own record persistence; controllers validate requests and format responses |
 | Evaluation | Reference items, prediction snapshots, scores, failure judgments and expert Finding review | `evaluation_repository.py` owns persistence; controllers own review response schemas |
-| Pipeline | No scientific objects; a successful technical run is not scientific proof | `application/repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
+| Pipeline | No scientific objects; a successful technical run is not scientific proof | `repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
 
-Repository-specific result types stay beside the contract that returns them.
+Repository-specific result types stay beside the concrete repository that returns them.
 `StoredCollection` contains the existing `Collection`, record timestamps, and
 the current `StoredDocument` members. Each `StoredDocument` contains a `Document`
 plus its storage key, stored filename, and record timestamps. Content hashes,
@@ -196,7 +198,8 @@ and the `task_dataset_schemas.py` / `research_objective_schemas.py` files beside
 their feedback and research-objective routes). Only models consumed by
 multiple route files belong in `controllers/schemas/`, including the shared
 Objective/Finding responses and Pipeline Run responses. Service-local results
-stay beside their service, and repository projections beside their contract.
+stay beside their service, and repository projections beside their concrete
+repository.
 `ResearchObjective` owns scientific normalization and transitions; PostgreSQL
 encodes its persisted payload, and controllers format its HTTP response.
 
@@ -217,8 +220,9 @@ contexts into their wire or storage records. The application-owned
 `chat/tool_result_projection.py` preserves the stable tool-result record used
 by model messages and failure digests; Chat domain objects no longer own that
 serialization. Evaluation record mappings and experiment-plan mappings likewise
-live in `application/evaluation/record_projection.py` and
-`application/goal/experiment_plan_projection.py`. These moves preserve existing
+live beside their concrete repositories in `repositories/evaluation_repository.py`,
+`repositories/finding_review_repository.py` and
+`repositories/experiment_plan_repository.py`. These moves preserve existing
 wire fields, persisted records and digest inputs; replacing the explicit
 projections with unqualified `asdict()` can change omitted fields or defaults.
 Core, Source and Feedback domain mapping cleanup is a separate migration and
@@ -230,7 +234,7 @@ input and output payloads isolate the snapshots from caller-owned dictionaries.
 Obsolete artifact-status, evidence-backbone and generic record-normalization
 models have been removed. Their former definitions and exports are not retained
 as compatibility paths. See the
-[repository index](../../application/repositories/README.md) for the current
+[repository index](../../repositories/README.md) for the current
 import locations.
 
 ## Concurrency And Reuse

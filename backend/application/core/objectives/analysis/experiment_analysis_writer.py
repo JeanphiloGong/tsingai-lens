@@ -15,6 +15,8 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from application.core.objectives.analysis.experiment_finding_synthesis import (
     ExperimentFindingSynthesisService,
 )
@@ -23,27 +25,26 @@ from application.core.objectives.analysis.paper_experiment_contract import (
     ReconciledPaperExperimentOutput,
     bind_model_output,
 )
-from application.repositories.experiment_analysis_repository import (
-    ExperimentAnalysisRepository,
-    ExperimentAnalysisWrite,
-)
-from application.repositories.objective_repository import ObjectiveAnalysis
-from application.repositories.paper_experiment_repository import (
-    PaperExperimentRepository,
-    StoredPaperExperimentRevision,
-)
-from application.repositories.transaction import RepositoryTransaction
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import ExperimentComparison, PaperExperimentRevision
 from domain.core.research_objective import ResearchObjective
+from repositories.experiment_analysis_repository import (
+    ExperimentAnalysisRepository,
+    ExperimentAnalysisWrite,
+)
+from repositories.objective_repository import ObjectiveAnalysis
+from repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
+    StoredPaperExperimentRevision,
+)
 
 
 async def _repository_call(
     method: Any,
     *args: Any,
-    transaction: RepositoryTransaction | None,
+    transaction: AsyncSession | None,
     **kwargs: Any,
 ) -> Any:
     """Pass the opaque transaction only when the caller supplied one."""
@@ -509,7 +510,7 @@ async def _resolve_experiment_identity(
     draft: PaperExperimentDraft,
     document_id: str,
     payload: Mapping[str, Any],
-    transaction: RepositoryTransaction | None,
+    transaction: AsyncSession | None,
 ) -> tuple[str, StoredPaperExperimentRevision | None]:
     """Reuse one prior identity when a bounded reread changes its content."""
 
@@ -776,7 +777,7 @@ class ExperimentAnalysisWriter:
         reused_revisions: Sequence[PaperExperimentRevision] = (),
         allow_finding: bool = True,
         created_by: str | None = None,
-        transaction: RepositoryTransaction | None = None,
+        transaction: AsyncSession | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Prepare and commit revisions, selections, groups, and Findings."""
 
@@ -862,7 +863,7 @@ class ExperimentAnalysisWriter:
         self,
         *,
         experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
-        transaction: RepositoryTransaction,
+        transaction: AsyncSession,
         created_by: str | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Persist source-grounded revisions without an Objective snapshot.
@@ -959,7 +960,7 @@ class ExperimentAnalysisWriter:
         created_by: str | None = None,
         parent_finding_id: str | None = None,
         limitations: tuple[str, ...] = (),
-        transaction: RepositoryTransaction | None = None,
+        transaction: AsyncSession | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Copy fixed selections into a new snapshot and synthesize its Finding."""
         selection_map = {
@@ -1024,7 +1025,7 @@ class ExperimentAnalysisWriter:
         experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
         partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
         include_selections: bool,
-        transaction: RepositoryTransaction | None,
+        transaction: AsyncSession | None,
     ) -> _PreparedExperimentSelections:
         if objective.collection_id != collection_id:
             raise ValueError("experiment analysis objective belongs to another collection")
@@ -1188,7 +1189,7 @@ class ExperimentAnalysisWriter:
         draft: PaperExperimentDraft,
         local_key: str,
         allow_partial_archive: bool,
-        transaction: RepositoryTransaction | None,
+        transaction: AsyncSession | None,
     ) -> tuple[
         PaperExperimentRevision,
         tuple[str, ...],

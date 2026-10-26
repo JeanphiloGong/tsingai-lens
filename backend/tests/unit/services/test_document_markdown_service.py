@@ -6,17 +6,17 @@ from io import BytesIO
 import pytest
 from pypdf import PdfWriter
 
-from tests.support.collection_service import (
-    build_test_collection_service,
-    build_test_source_import_service,
-)
 from application.source.document_markdown_service import (
     DocumentMarkdownNotReadyError,
     DocumentMarkdownService,
     SourceDocumentNotFoundError,
 )
 from domain.source import source_documents_from_records
-from infra.persistence.memory import MemorySourceArtifactRepository
+from tests.support.collection_service import (
+    build_test_collection_service,
+    build_test_source_import_service,
+)
+from tests.support.repositories import MemorySourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 

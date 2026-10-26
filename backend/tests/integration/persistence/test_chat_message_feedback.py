@@ -13,17 +13,11 @@ from sqlalchemy import delete, func, inspect, select, update
 
 from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
 from application.chat.session_service import ChatSessionService
-from application.repositories.collection_repository import StoredCollection
 from application.source.collection_service import CollectionService
 from controllers.chat.sessions import router
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult, ToolRisk
 from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
 from infra.persistence.postgres.models import (
     AuthUser,
     ChatMessageFeedbackRow,
@@ -31,6 +25,12 @@ from infra.persistence.postgres.models import (
     ChatSessionRow,
 )
 from infra.persistence.postgres.models.collection import Collection as CollectionRow
+from repositories.auth_repository import AuthRepository
+from repositories.chat_repository import ChatRepository
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
+)
 from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 pytestmark = pytest.mark.anyio
@@ -41,13 +41,13 @@ PATH = "/api/v1/chat-sessions/chat-1/messages/answer/feedback"
 
 @pytest.fixture
 async def feedback_app(postgres_session_factory, tmp_path):
-    auth = AuthSessionService(PostgresAuthRepository(postgres_session_factory))
+    auth = AuthSessionService(AuthRepository(postgres_session_factory))
     users, cookies = [], []
     for email in ("feedback-owner@example.test", "feedback-other@example.test"):
         users.append(await auth.create_user(email=email, password="synthetic-test-password"))
         result = await auth.login(email=email, password="synthetic-test-password")
         cookies.append(result["session_id"])
-    collections = PostgresCollectionRepository(postgres_session_factory)
+    collections = CollectionRepository(postgres_session_factory)
     await collections.add_collection(
         StoredCollection(
             collection=Collection(
@@ -61,7 +61,7 @@ async def feedback_app(postgres_session_factory, tmp_path):
             updated_at=NOW,
         )
     )
-    repository = PostgresChatRepository(postgres_session_factory)
+    repository = ChatRepository(postgres_session_factory)
     chat = ChatSession.create(session_id="chat-1", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW)
     await repository.add_session(chat)
     await repository.add_session(ChatSession.create(session_id="chat-2", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW))

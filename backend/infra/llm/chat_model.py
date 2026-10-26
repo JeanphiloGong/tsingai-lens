@@ -22,9 +22,9 @@ from application.chat.model import (
     ModelTurn,
     ModelUsage,
 )
-from application.repositories.chat_repository import ModelCallInput, ModelCallOutcome
 from domain.chat import ToolRisk
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
+from repositories.chat_repository import ModelCallInput, ModelCallOutcome
 
 logger = logging.getLogger(__name__)
 

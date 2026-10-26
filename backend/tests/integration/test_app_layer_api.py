@@ -7,19 +7,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from application.pipeline import PipelineRunService
-from infra.persistence.memory import (
-    MemoryDocumentProfileRepository,
-    MemoryObjectiveRepository,
-    MemoryPaperMapRepository,
-    MemoryPipelineRunRepository,
-    MemorySourceArtifactRepository,
-)
 from tests.support.chat_repository import MemoryChatRepository
 from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
 from tests.support.objective_review_repository import (
     InMemoryObjectiveReviewRepository,
+)
+from tests.support.repositories import (
+    MemoryDocumentProfileRepository,
+    MemoryObjectiveRepository,
+    MemoryPaperMapRepository,
+    MemoryPipelineRunRepository,
+    MemorySourceArtifactRepository,
 )
 
 API_V1_PREFIX = "/api/v1"

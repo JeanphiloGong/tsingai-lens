@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from application.repositories.auth_repository import AuthUserRecord
-
 import asyncio
 
 import pytest
@@ -11,14 +9,13 @@ from domain.goal import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
 )
-from application.goal.experiment_plan_projection import experiment_plan_from_record
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.experiment_plan_repository import (
-    PostgresExperimentPlanRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.experiment_plan_repository import (
+    ExperimentPlanRepository,
+    experiment_plan_from_record,
 )
-from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
+from repositories.objective_repository import ObjectiveRepository
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
-
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
@@ -43,14 +40,14 @@ async def experiment_plan_repository(source_repository):
             "created_by_tool_call_id": "call-plan-objective",
         }
     )
-    await PostgresObjectiveRepository(
+    await ObjectiveRepository(
         source_repository.session_factory
     ).create_authored_candidate(
         objective,
         created_by_user_id="user_source",
         created_by_tool_call_id="call-plan-objective",
     )
-    await PostgresAuthRepository(source_repository.session_factory).add_user(
+    await AuthRepository(source_repository.session_factory).add_user(
         AuthUserRecord(
             user_id="user_reviewer",
             email="reviewer@example.com",
@@ -59,7 +56,7 @@ async def experiment_plan_repository(source_repository):
             created_at="2026-09-07T00:30:00+00:00",
         )
     )
-    return PostgresExperimentPlanRepository(source_repository.session_factory)
+    return ExperimentPlanRepository(source_repository.session_factory)
 
 
 def _plan(**overrides) -> ExperimentPlanRecord:

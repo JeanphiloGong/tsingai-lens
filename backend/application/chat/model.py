@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import ToolSpec
 from application.chat.context_builder import ChatModelContext
-from application.repositories.chat_repository import (
+from repositories.chat_repository import (
     ModelCallInput,
     ModelCallObserver,
     ModelCallOutcome,

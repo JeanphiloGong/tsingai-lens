@@ -8,24 +8,6 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 from uuid import uuid4
 
-from application.repositories.analysis_job_repository import AnalysisJob
-from application.repositories.feedback_case_repository import FeedbackCaseRepository
-from application.repositories.feedback_dataset_repository import (
-    FeedbackDatasetRepository,
-    StoredDataset,
-)
-from application.repositories.feedback_dataset_sample_repository import (
-    DATASET_SAMPLE_BUILD_JOB_TYPE,
-    DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
-    CollectedDatasetSample,
-    DatasetSampleActionConflict,
-    DatasetSampleRevisionConflict,
-    FeedbackDatasetSampleRepository,
-    build_job_payload,
-    sample_action_digest,
-    sample_build_idempotency_key,
-    source_digest_for_case,
-)
 from application.source.collection_service import CollectionService
 from domain.feedback.dataset import DATASET_TASK_TYPES, Dataset, DatasetTaskType
 from domain.feedback.dataset_sample import DatasetSample, SampleAction
@@ -35,6 +17,26 @@ from domain.feedback.sample_revision import (
     content_digest_for,
     parse_revision_content,
     sanitize_revision_content_mapping,
+)
+from repositories.analysis_job_repository import (
+    DATASET_SAMPLE_BUILD_JOB_TYPE,
+    DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
+    AnalysisJob,
+)
+from repositories.feedback_case_repository import FeedbackCaseRepository
+from repositories.feedback_dataset_repository import (
+    FeedbackDatasetRepository,
+    StoredDataset,
+)
+from repositories.feedback_dataset_sample_repository import (
+    CollectedDatasetSample,
+    DatasetSampleActionConflict,
+    DatasetSampleRevisionConflict,
+    FeedbackDatasetSampleRepository,
+    build_job_payload,
+    sample_action_digest,
+    sample_build_idempotency_key,
+    source_digest_for_case,
 )
 
 

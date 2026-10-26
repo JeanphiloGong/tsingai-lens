@@ -19,7 +19,7 @@ approval gates, and verification rules.
 ## Core Principles
 
 - Keep backend ownership explicit across `controllers/`, `application/`,
-  `domain/`, and `infra/`.
+  `repositories/`, `domain/`, and `infra/`.
 - Before changing domain or workflow logic, model the complete real scenario at
   the affected scope and derive backend responsibilities, dependencies, states,
   and outputs from it.
@@ -140,8 +140,9 @@ dependencies, states, prompts, and verification from it.
   `controllers/goal/*`.
 - `backend/docs/specs/api.md` is the backend API authority for frontend
   integration.
-- Source runtime should remain under `infra/source/*`; persistence seams belong
-  under `infra/persistence/*`.
+- Source runtime should remain under `infra/source/*`. PostgreSQL queries and
+  storage mappings belong under `repositories/`; connections, ORM records,
+  migrations, and file storage remain under `infra/persistence/`.
 - Node-local `README.md` files define local purpose and navigation for owned
   backend seams.
 
@@ -156,20 +157,24 @@ for every layer.
   state, invariants, and state transitions. They must not depend on SQLAlchemy,
   Pydantic, HTTP models, or infrastructure implementations. Application services
   continue to orchestrate use cases.
-- For new or explicitly refactored repositories, place the contract in
-  `application/repositories/<name>_repository.py`. Define its dedicated input
-  and result types in that same file, next to the methods that consume or return
-  them. Do not collect unrelated repository result types in a shared `models.py`
-  or place them in `domain/` merely because several callers use them.
-- Application callers import repository contracts and their result types from
-  that owning contract file, without importing PostgreSQL implementations.
-  Contracts may depend on domain objects; domain objects must not depend on
-  application repository contracts.
-- Repository implementations, ORM records, SQL, database transactions, storage
-  mappings, and implementation-private query types belong in
-  `infra/persistence/`. ORM records and database session state must not escape
-  through public repository results. Repository results must not depend on HTTP
-  response models or transport envelopes.
+- Place each concrete PostgreSQL repository in
+  `repositories/<name>_repository.py`, alongside `application/`. Define its
+  dedicated input and result types in that same file, next to the queries and
+  mappings that consume or return them. Do not collect unrelated repository
+  result types in a shared `models.py` or place them in `domain/` merely because
+  several callers use them.
+- Application callers import concrete repositories and their result types
+  directly from the owning repository file. Do not maintain separate database
+  repository Protocols, alternative runtime stores, or compatibility imports.
+  Existing isolated test doubles belong only under `tests/`.
+- Repositories may depend on domain objects and persistence infrastructure;
+  they must not import application services or controllers. Domain objects must
+  not depend on repositories. Connections, ORM records, migrations, shared
+  transactions, and file storage remain in `infra/persistence/`. ORM records and
+  database session state must not escape through repository results. Explicit
+  `AsyncSession` arguments may coordinate writes in one shared transaction.
+  Repository results must not depend on HTTP response models or transport
+  envelopes.
 - HTTP request and response models belong at the controller boundary. Controllers
   translate application or repository results into the public HTTP contract;
   repositories do not construct API responses.
@@ -193,9 +198,9 @@ serialization used in fingerprints, API shapes, authorization, retries, and
 concurrency. Update direct callers and remove obsolete definitions and imports
 within the approved scope.
 
-Review check: can a new developer find a repository's methods and dedicated
-result types in one file, then identify the domain rules, storage mapping, and
-HTTP conversion without tracing unrelated layers?
+Review check: can a new developer find a repository's queries, storage mappings,
+and dedicated result types in one file, then identify the domain rules and HTTP
+conversion without tracing unrelated layers?
 
 #### Example: Reuse a Domain Model in a Repository Result
 
@@ -205,14 +210,13 @@ the question, material scope, variables, outcomes, and business rules. A caller
 also needs the record timestamps, so the repository result references that
 domain model directly and adds only those timestamps.
 
-Keep this result definition beside the repository contract. The relevant
+Keep this result definition beside the concrete repository. The relevant
 excerpt is:
 
 ```python
-# application/repositories/objective_repository.py
+# repositories/objective_repository.py
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
 
 from domain.core.research_objective import ResearchObjective
 
@@ -222,12 +226,6 @@ class StoredObjective:
     objective: ResearchObjective
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-
-class ObjectiveRepository(Protocol):
-    async def read_objective_record(
-        self, collection_id: str, objective_id: str,
-    ) -> StoredObjective | None: ...
 ```
 
 `objective: ResearchObjective` is a field type declaration: the result contains
@@ -249,7 +247,7 @@ stays at the controller boundary; neither belongs in this result definition.
 
 2. Preserve the explicit layer split.
    Why: this backend relies on readable ownership across
-   `controllers/application/domain/infra`.
+   `controllers/application/repositories/domain/infra`.
    How: add logic to the owning layer and keep dependencies directional.
    Check: no new cross-layer shortcut bypasses the intended seam.
 
@@ -327,8 +325,8 @@ stays at the controller boundary; neither belongs in this result definition.
 ### Default-safe work
 
 - Scoped edits under `backend/controllers/`, `backend/application/`,
-  `backend/domain/`, `backend/infra/`, `backend/docs/`, and `backend/tests/`
-  when directly requested.
+  `backend/repositories/`, `backend/domain/`, `backend/infra/`, `backend/docs/`,
+  and `backend/tests/` when directly requested.
 - Targeted updates to backend node-local `README.md` files and backend runbooks.
 - Local cleanup required to complete an approved backend task.
 

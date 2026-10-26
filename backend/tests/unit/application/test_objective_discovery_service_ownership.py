@@ -11,11 +11,12 @@ from application.core.objectives.objective_discovery_service import (
 from application.core.objectives.objective_input_service import (
     ObjectiveInputService,
 )
-from application.core.objectives.paper_research_map_service import PaperResearchMapService
+from application.core.objectives.paper_research_map_service import (
+    PaperResearchMapService,
+)
 from application.pipeline import PipelineRunService
 from domain.core import ObjectiveFactSet, PreparedDocumentInput
-from infra.persistence.memory import MemoryPipelineRunRepository
-
+from tests.support.repositories import MemoryPipelineRunRepository
 
 pytestmark = pytest.mark.anyio
 

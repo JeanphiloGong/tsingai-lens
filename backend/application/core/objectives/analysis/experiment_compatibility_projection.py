@@ -14,27 +14,27 @@ from dataclasses import dataclass
 from hashlib import sha1
 from typing import Any, Mapping
 
-from application.repositories.comparison_group_repository import ComparisonGroupRepository
-from application.repositories.experiment_finding_repository import (
-    ExperimentFindingRepository,
-)
-from application.repositories.objective_experiment_selection_repository import (
-    ObjectiveExperimentSelectionRepository,
-)
-from application.repositories.objective_repository import ObjectiveRepository
-from application.repositories.paper_experiment_repository import (
-    PaperExperimentRepository,
-    StoredPaperExperimentRevision,
-)
 from domain.core.paper_experiment import (
+    ExperimentalVariant,
     ExperimentComparison,
     ExperimentMeasurementResult,
     ExperimentTestCondition,
-    ExperimentalVariant,
     PaperExperimentRevision,
     SourceReference,
 )
 from domain.core.scientific_fact import ScientificAttribute, ScientificVariable
+from repositories.comparison_group_repository import ComparisonGroupRepository
+from repositories.experiment_finding_repository import (
+    ExperimentFindingRepository,
+)
+from repositories.objective_experiment_selection_repository import (
+    ObjectiveExperimentSelectionRepository,
+)
+from repositories.objective_repository import ObjectiveRepository
+from repositories.paper_experiment_repository import (
+    PaperExperimentRepository,
+    StoredPaperExperimentRevision,
+)
 
 from .experiment_query_service import ExperimentAnalysisBundle, ExperimentQueryService
 

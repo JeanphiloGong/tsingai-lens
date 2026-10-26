@@ -12,22 +12,22 @@ from uuid import uuid4
 
 from application.feedback.analysis_handler import (
     AnalysisInputError,
-    feedback_message_record,
     conversation_before_answer,
+    feedback_message_record,
     read_chat_coverage_audit,
 )
 from application.feedback.source_coverage import build_evidence_coverage
-from application.repositories.analysis_job_repository import (
-    CORRECTION_SIGNAL_JOB_TYPE,
-    CORRECTION_SIGNAL_PAYLOAD_VERSION,
-    correction_signal_idempotency_key,
-)
 from domain.chat import ChatMessage, ChatMessageRole
 from domain.feedback import (
     CorrectionSignal,
     CorrectionSignalAnalysisResult,
     EvidenceCoverage,
     is_correction_challenge,
+)
+from repositories.analysis_job_repository import (
+    CORRECTION_SIGNAL_JOB_TYPE,
+    CORRECTION_SIGNAL_PAYLOAD_VERSION,
+    correction_signal_idempotency_key,
 )
 
 

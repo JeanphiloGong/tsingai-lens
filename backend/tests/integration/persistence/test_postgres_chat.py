@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from application.repositories.auth_repository import AuthUserRecord
-from application.repositories.collection_repository import StoredCollection
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -16,10 +14,11 @@ from domain.chat import (
     ToolRisk,
 )
 from domain.source import Collection
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
+from repositories.auth_repository import AuthRepository, AuthUserRecord
+from repositories.chat_repository import ChatRepository
+from repositories.collection_repository import (
+    CollectionRepository,
+    StoredCollection,
 )
 
 pytestmark = pytest.mark.anyio
@@ -35,7 +34,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         "password_hash": "synthetic-password-hash",
         "created_at": "2026-08-19T00:00:00+00:00",
     }
-    await PostgresAuthRepository(postgres_session_factory).add_user(AuthUserRecord(**user))
+    await AuthRepository(postgres_session_factory).add_user(AuthUserRecord(**user))
     collection = StoredCollection(
         collection=Collection(
             collection_id="col-chat",
@@ -47,10 +46,10 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         created_at="2026-08-19T00:00:00+00:00",
         updated_at="2026-08-19T00:00:00+00:00",
     )
-    await PostgresCollectionRepository(postgres_session_factory).add_collection(
+    await CollectionRepository(postgres_session_factory).add_collection(
         collection
     )
-    repository = PostgresChatRepository(postgres_session_factory)
+    repository = ChatRepository(postgres_session_factory)
     chat = ChatSession.create(
         session_id="chat-1",
         user_id=user["user_id"],
@@ -292,7 +291,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         *(ChatMessage.from_tool_result(message_id=f"msg-result-{index}", session_id=chat.session_id, result=result, created_at="2026-08-19T00:02:01+00:00") for index, result in enumerate(observations)),
     )
     await repository.save_trajectory(session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
-    reloaded = await PostgresChatRepository(postgres_session_factory).read_messages(chat.session_id)
+    reloaded = await ChatRepository(postgres_session_factory).read_messages(chat.session_id)
     assert reloaded == trajectory
     assert await repository.read_message(user_message.message_id) == user_message
     assert await repository.read_message(tool_message.message_id) == tool_message

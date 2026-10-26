@@ -12,17 +12,19 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriteResult,
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
-    PaperExperimentModelOutput,
     PaperExperimentDraftValidationError,
+    PaperExperimentModelOutput,
     ReconciledPaperExperimentOutput,
     prepare_model_output,
 )
 from application.core.objectives.analysis.paper_experiment_extraction import (
     build_source_bundle,
 )
-from application.repositories.source_artifact_repository import SourceArtifactRepository
-from application.repositories.transaction import RepositoryTransactionFactory
 from application.source.collection_service import CollectionService
+from infra.persistence.postgres.experiment_analysis_transaction import (
+    PostgresExperimentAnalysisTransactionFactory,
+)
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 @dataclass(frozen=True)
@@ -126,7 +128,7 @@ class PaperExperimentAuthoringService:
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
         experiment_analysis_writer: ExperimentAnalysisWriter,
-        experiment_analysis_transaction_factory: RepositoryTransactionFactory | None = None,
+        experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.source_artifact_repository = source_artifact_repository

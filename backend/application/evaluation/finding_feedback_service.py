@@ -5,22 +5,21 @@ from datetime import datetime, timezone
 from hashlib import sha1, sha256
 from typing import Any, Mapping
 
-from application.core.objectives.analysis.experiment_compatibility_projection import (
-    ExperimentCompatibilityProjection,
-)
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
+from application.core.objectives.analysis.experiment_compatibility_projection import (
+    ExperimentCompatibilityProjection,
+)
 from domain.core import Finding, ObjectiveEvidence, PaperContribution
 from domain.evaluation import FindingCuration, FindingFeedback
-from application.evaluation.record_projection import (
+from repositories.finding_review_repository import (
+    FindingReviewRepository,
     finding_curation_from_record,
-    finding_feedback_from_record,
     finding_curation_record,
+    finding_feedback_from_record,
 )
-from application.repositories.finding_review_repository import FindingReviewRepository
-from application.repositories.objective_repository import ObjectiveRepository
-
+from repositories.objective_repository import ObjectiveRepository
 
 DATASET_SCHEMA_VERSION = "objective_finding_dataset.v2"
 TRAINING_SCHEMA_VERSION = "objective_finding_training.v2"

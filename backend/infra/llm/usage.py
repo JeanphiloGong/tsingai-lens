@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from threading import Lock
 from typing import Any
 
-from application.repositories.pipeline_run_repository import (
+from repositories.pipeline_run_repository import (
     ExecutionStats,
     ModelUsage,
     TokenUsage,

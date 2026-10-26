@@ -401,8 +401,8 @@ within the existing retry allowance. Each reduces the effective window by 20%,
 rebuilds notes and complete exchanges, and sends again only if the actual input
 is smaller. The effective window and recovery count survive approval
 continuations alongside usage and elapsed time. A pinned request that cannot
-fit, unchanged input, exhausted recovery, or partial visible output stops
-visibly. Recovery sends model requests only; successful capabilities are not
+fit, input unchanged after the allowed reductions, exhausted recovery, or
+partial visible output stops visibly. Recovery sends model requests only; successful capabilities are not
 replayed. Output truncation, authentication failures and rate limits retain
 their separate handling.
 

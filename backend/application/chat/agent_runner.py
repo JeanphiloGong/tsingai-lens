@@ -1529,9 +1529,10 @@ class ResearchAgentRunner:
                 "tools": [spec.model_schema() for spec in tool_specs],
             })
             # A smaller configured window is not enough: the actual payload must shrink.
-            if rejected is not None and request_tokens >= rejected[0]:
-                raise rejected[1]
             try:
+                if rejected is not None and request_tokens >= rejected[0]:
+                    # Try the next smaller budget without resending the same payload.
+                    raise rejected[1]
                 return await self._respond(model_context, tool_specs, progress, text_delta_callback,
                                            finalizing=finalizing)
             except ModelResponseError as exc:

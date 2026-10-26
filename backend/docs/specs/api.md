@@ -632,8 +632,12 @@ same plan version because it adds no capability request/result event.
 Simple answers may have no plan. It never represents Evidence, permission, or a
 scientific conclusion.
 Progress also includes `retry_count`, `remaining_retry_budget`, `retry_attempt`,
-`retry_delay_ms` and `termination_reason`. `model_retry` and `context_compaction`
-describe technical work. The existing snapshot progress stores an internal
+`retry_delay_ms` and `termination_reason`. `model_retry`, `context_compaction`
+and `context_recovery` describe technical work. `context_token_limit` records
+the reduced request window (zero means the configured default), and
+`context_recovery_attempts` counts the bounded reductions within this request,
+including approval continuations. A reduction sends another model request only
+when its input is smaller; successful tool work is preserved. The existing snapshot progress stores an internal
 `context_checkpoint` containing provisional working notes and compacted message
 IDs for recovery; clients must not render it as evidence. Context failures use
 `context_window_exceeded` or `context_compaction_unavailable`, separately from

@@ -800,4 +800,4 @@ async def test_recovery_does_not_replay_partial_output_or_unchanged_small_reques
         await runner._model_turn((_user("active", "Explain the research workflow."),), (), progress, None,
                                  active_user_message_id="active")
     assert len(model.contexts) == 1
-    assert progress.context_recovery_attempts == (1 if reason == "context_window_exceeded" and not partial else 0)
+    assert progress.context_recovery_attempts == (2 if reason == "context_window_exceeded" and not partial else 0)

@@ -4930,3 +4930,77 @@ async def test_oversized_current_question_stops_before_any_provider_call():
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "context_window_exceeded"
     assert not model.contexts
+
+
+@pytest.mark.parametrize("rejections", [1, 3])
+async def test_original_inconel_request_survives_reading_compaction_and_provider_rejection(rejections):
+    """Offline runtime replay; synthetic paper text and model decisions are not scientific evidence."""
+    from hashlib import sha256
+    from pathlib import Path
+    from application.chat.capabilities.document_sources import ReadSourceToolRequest
+
+    prompt = (Path(__file__).resolve().parents[2] / "fixtures/chat/inconel718_parameter_ranking.txt").read_text().rstrip()
+    assert len(prompt) == 10449 and "| B24 |" in prompt
+
+    class Sources(_Capability):
+        async def execute(self, context, arguments):
+            self.executed_arguments.append(arguments.model_dump())
+            content = ("Synthetic test passage: as-built Inconel 718, liquid-floating process; "
+                       "tensile orientation and comparable elongation remain unknown. ") * 150
+            return ChatToolResult(tool_call_id=context.tool_call_id, status="succeeded", data={
+                **arguments.model_dump(), "content": content,
+                "source_digest": sha256(content.encode()).hexdigest(),
+                "content_truncated": False, "next_offset": None,
+            }, resource_refs=(ChatResourceRef("source", arguments.document_id + ":results"),))
+
+    sources = Sources("read_source", ToolRisk.READ, ReadSourceToolRequest)
+    answer = "Directly comparable elongation evidence is insufficient; no validated winner or exact elongation is established."
+
+    class Model(_Model):
+        def __init__(self):
+            super().__init__(*(ModelTurn(tool_calls=(ModelToolCall("read_source", {
+                "document_id": f"paper-{i}", "source_kind": "text_window", "source_ref": "results",
+            }),)) for i in range(6)), ModelTurn(content=answer))
+            self.rejected_inputs = []
+            self.notes_seen = []
+            self.requests_after_rejection = []
+
+        async def respond(self, *, context, **kwargs):
+            assert next(message for message in context.messages if message.message_id == context.active_user_message_id).content == prompt
+            if context.compacting:
+                result = next(message for message in context.messages if message.tool_result is not None)
+                return ModelTurn(content=json.dumps({"scope": "Supplied collection only; Inconel 718; density >= 99.9%.",
+                    "checks": [{"statement": "Synthetic first paper: comparable elongation is unknown.",
+                                "conditions": "As-built; tensile orientation unknown.",
+                                "basis_message_ids": [result.message_id], "unresolved": "Need comparable tensile data."}],
+                    "next_actions": ["Verify comparable tensile conditions before ranking."]}))
+            self.notes_seen.append(context.working_summary)
+            if len(sources.executed_arguments) == 4:
+                tokens = agent_runner_module.ChatContextBuilder.estimate_tokens(context.provider_messages("system"))
+                self.requests_after_rejection.append(tokens)
+                if len(self.rejected_inputs) < rejections:
+                    self.rejected_inputs.append(tokens)
+                    raise ModelResponseError("context rejected", reason="context_window_exceeded", retryable=False)
+            return await super().respond(context=context, **kwargs)
+
+    model = Model()
+    traces = []
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((sources,)))
+    result = await runner.run_turn(context=_context(), previous_messages=(), user_message=prompt,
+                                   progress_callback=traces.append)
+    if rejections == 1:
+        assert result.status is AgentRunStatus.COMPLETED
+        assert result.messages[-1].content == answer
+        assert len(sources.executed_arguments) == 6
+        assert any("tensile orientation unknown" in notes for notes in model.notes_seen[-2:])
+    else:
+        assert result.status is AgentRunStatus.FAILED
+        assert result.error_code == "context_window_exceeded"
+        assert len(sources.executed_arguments) == 4
+    assert any(trace["phase"] == "context_recovery" for trace in traces)
+    assert sum(trace["phase"] == "context_compaction" for trace in traces) >= 3
+    assert all(after < before for before, after in zip(model.requests_after_rejection, model.requests_after_rejection[1:]))
+    assert len({arguments["document_id"] for arguments in sources.executed_arguments}) == len(sources.executed_arguments)
+    assert len([message for message in result.messages if message.tool_result and message.tool_result.data.get("content")]) == len(sources.executed_arguments)
+    assert result.messages[0].content == prompt
+    assert not any(call.risk is ToolRisk.WRITE for call in result.tool_calls)

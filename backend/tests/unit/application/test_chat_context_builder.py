@@ -738,3 +738,66 @@ def test_working_notes_with_no_room_fail_without_returning_an_oversized_summary(
     with pytest.raises(ModelResponseError, match="cannot fit"):
         runner._bounded_working_notes(notes, max_tokens=1)
     assert notes.scope == "Only collection evidence."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure_count,finalizing", [(1, False), (3, False), (1, True)])
+async def test_context_recovery_shrinks_real_requests_and_keeps_full_trajectory(failure_count, finalizing):
+    from application.chat import CapabilityRegistry, ModelResponseError, ModelTurn, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    class Model:
+        def __init__(self):
+            self.requests = []
+
+        async def respond(self, *, context, **kwargs):
+            if context.compacting:
+                return ModelTurn(content='{"scope":"Only comparable Inconel 718 observations.","checks":[],"next_actions":[]}')
+            self.requests.append(context)
+            if len(self.requests) <= failure_count:
+                raise ModelResponseError("context rejected", reason="context_window_exceeded", retryable=False)
+            return ModelTurn(content="Comparable density and elongation evidence remain insufficient.")
+
+    active = _user("active", "Rank Inconel 718 using collection evidence only; density >= 99.9%.")
+    pairs = [_tool_pair(call_id=f"paper-{i}", payload={
+        "document_id": f"paper-{i}", "source_ref": "results",
+        "content": "As-built orientation is unreported; density does not establish elongation. " * 900,
+    }) for i in range(10)]
+    messages = (active, *(message for pair in pairs for message in pair))
+    model = Model()
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    progress = _RunProgress(runner.limits)
+    progress.retry_count = 1
+    progress.model_tokens = 123
+    if failure_count == 3:
+        with pytest.raises(ModelResponseError):
+            await runner._model_turn(messages, (), progress, None, active_user_message_id="active", finalizing=finalizing)
+    else:
+        turn = await runner._model_turn(messages, (), progress, None, active_user_message_id="active", finalizing=finalizing)
+        assert "insufficient" in turn.content
+    assert len(model.requests) == min(failure_count + 1, 3)
+    sizes = [runner.context_builder.estimate_tokens(request.provider_messages("system")) for request in model.requests]
+    assert all(after < before for before, after in zip(sizes, sizes[1:]))
+    assert progress.context_recovery_attempts == min(failure_count, 2)
+    assert progress.retry_count == 1 + min(failure_count, 2)
+    assert progress.model_tokens == 123
+    assert len(messages) == 21 and all(pair[1].tool_result.data["content"].endswith("elongation. ") for pair in pairs)
+    assert all(active in request.messages for request in model.requests)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reason,partial", [("context_window_exceeded", True), ("output_token_limit", False),
+                                           ("context_window_exceeded", False)])
+async def test_recovery_does_not_replay_partial_output_or_unchanged_small_requests(reason, partial):
+    from application.chat import CapabilityRegistry, ModelResponseError, ResearchAgentRunner
+    from application.chat.agent_runner import _RunProgress
+
+    error = ModelResponseError("rejected", reason=reason, partial_content=partial, retryable=False)
+    model = _CompactionModel(error)
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    progress = _RunProgress(runner.limits)
+    with pytest.raises(ModelResponseError):
+        await runner._model_turn((_user("active", "Explain the research workflow."),), (), progress, None,
+                                 active_user_message_id="active")
+    assert len(model.contexts) == 1
+    assert progress.context_recovery_attempts == (1 if reason == "context_window_exceeded" and not partial else 0)

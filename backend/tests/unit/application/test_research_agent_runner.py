@@ -4904,3 +4904,29 @@ async def test_unexpected_model_failure_remains_model_unavailable(exception: Exc
     assert details["retryable"] is False
     assert details["reason"] == "unclassified_provider_error"
     assert details["message_fingerprint"]
+
+
+def test_context_recovery_budget_survives_approval_continuation():
+    original = agent_runner_module._RunProgress(AgentRunLimits())
+    original.context_token_limit = 39000
+    original.context_recovery_attempts = 2
+    original.retry_count = 3
+    original.model_tokens = 1200
+    snapshots = []
+    original.progress_callback = snapshots.append
+    original.trace(_context(), phase="context_recovery")
+    restored = agent_runner_module._RunProgress(original.limits)
+    restored.restore_persisted_progress(snapshots[-1])
+    assert restored.context_token_limit == 39000
+    assert restored.context_recovery_attempts == 2
+    assert restored.retry_count == 3 and restored.model_tokens == 1200
+
+
+async def test_oversized_current_question_stops_before_any_provider_call():
+    model = _Model()
+    runner = ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(()))
+    result = await runner.run_turn(context=_context(), previous_messages=(),
+                                  user_message="Research question with immutable conditions. " * 20000)
+    assert result.status is AgentRunStatus.FAILED
+    assert result.error_code == "context_window_exceeded"
+    assert not model.contexts

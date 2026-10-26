@@ -396,6 +396,15 @@ including system instructions, tool schemas, observations, output reserve and
 protocol margin. Token counts use the existing cl100k tokenizer with 20% reserve;
 operators must choose a window supported by their configured model. Both normal
 decisions and context compaction are checked at the provider boundary.
+Explicit provider context-size rejections receive up to two recovery attempts
+within the existing retry allowance. Each reduces the effective window by 20%,
+rebuilds notes and complete exchanges, and sends again only if the actual input
+is smaller. The effective window and recovery count survive approval
+continuations alongside usage and elapsed time. A pinned request that cannot
+fit, unchanged input, exhausted recovery, or partial visible output stops
+visibly. Recovery sends model requests only; successful capabilities are not
+replayed. Output truncation, authentication failures and rate limits retain
+their separate handling.
 
 Section inspection packs complete Sources into the available result allowance
 and exposes canonical lengths and estimated tokens in the outline. It defaults

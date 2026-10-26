@@ -1274,3 +1274,58 @@ async def test_rename_survives_continuation_and_rejects_non_owner() -> None:
     assert (await service.get_session_for_user(session.session_id, "user-1")).title == "IN718 comparison"
     assert (await service.list_sessions_for_user(collection_id="col-1", user_id="user-1"))[0].title == "IN718 comparison"
     assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
+
+
+@pytest.mark.parametrize("decision", ["approved", "rejected"])
+async def test_approval_continuation_recovers_context_without_repeating_write(decision):
+    from dataclasses import replace
+    from application.chat import ChatContextBuilder
+    from tests.unit.application.test_chat_context_builder import _tool_pair
+
+    class RecoveringModel(_Model):
+        def __init__(self):
+            super().__init__(ModelTurn(tool_calls=(ModelToolCall(
+                name="create_objective_candidate", arguments={"question": "Compare matched elongation conditions."},
+            ),)))
+            self.continuing = False
+            self.requests = []
+
+        async def respond(self, *, context, **kwargs):
+            if context.compacting:
+                return ModelTurn(content='{"scope":"Match material state and test orientation.","checks":[],"next_actions":[]}')
+            if not self.continuing:
+                return await super().respond(context=context, **kwargs)
+            self.requests.append(context)
+            if len(self.requests) == 1:
+                raise ModelResponseError("context rejected", reason="context_window_exceeded", retryable=False)
+            return ModelTurn(content="The reviewed decision is recorded; comparable measurements remain uncertain.")
+
+    repository = _Repository()
+    capability = _WriteCapability()
+    model = RecoveringModel()
+    service = _service(model, repository, capability)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    proposed = await service.post_message_for_user(session.session_id, "user-1", message="Save the reviewed objective.")
+    pending = proposed["pending_approval"]
+    # Represent a long, already persisted investigation preceding the approval request.
+    history = tuple(replace(message, session_id=session.session_id) for i in range(10)
+                    for message in _tool_pair(call_id=f"prior-{i}", payload={
+                        "source_ref": f"results-{i}", "content": "Reported measurements need matched specimen orientation. " * 900,
+                    }))
+    original = repository.messages[session.session_id]
+    repository.messages[session.session_id] = (original[0], *history, *original[1:])
+    model.continuing = True
+    response = await service.decide_tool_call_for_user(
+        session.session_id, pending.tool_call_id, "user-1",
+        arguments_digest=pending.arguments_digest, decision=decision,
+    )
+    assert response["status"] == "completed"
+    assert len(capability.executed) == (1 if decision == "approved" else 0)
+    assert len(model.requests) == 2
+    sizes = [ChatContextBuilder.estimate_tokens(context.provider_messages("system")) for context in model.requests]
+    assert sizes[1] < sizes[0]
+    snapshot = await repository.read_response_snapshot(session.session_id)
+    assert snapshot.progress["context_recovery_attempts"] == 1
+    assert snapshot.progress["retry_count"] == 1
+    saved = repository.messages[session.session_id]
+    assert all(message in saved for message in history)

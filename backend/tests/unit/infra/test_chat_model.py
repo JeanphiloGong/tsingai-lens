@@ -757,3 +757,28 @@ async def test_other_provider_errors_are_not_context_rejections(status, code):
         async with AsyncOpenAI(api_key="test", base_url="https://provider.invalid/v1", http_client=http_client) as client:
             with pytest.raises(APIStatusError):
                 await OpenAIChatModel(client=client).respond(context=ChatModelContext((_message(),)), tool_specs=())
+
+
+async def test_context_rejection_after_streamed_text_preserves_partial_content():
+    from openai import BadRequestError
+
+    class RejectingStream(_Stream):
+        async def __aiter__(self):
+            yield _stream_chunk(content="Already visible")
+            response = httpx.Response(400, request=httpx.Request("POST", "https://provider.invalid"))
+            raise BadRequestError("private provider details", response=response, body={"code": "context_length_exceeded"})
+
+    stream = RejectingStream([])
+    client, completions = _client([])
+
+    async def create(**kwargs):
+        return stream
+
+    completions.create = create
+    text = []
+    with pytest.raises(ModelResponseError) as caught:
+        await OpenAIChatModel(client=client).respond(context=ChatModelContext((_message(),)),
+                                                   tool_specs=(), text_delta_callback=text.append)
+    assert caught.value.partial_content
+    assert caught.value.reason == "context_window_exceeded"
+    assert text == ["Already visible"] and stream.closed

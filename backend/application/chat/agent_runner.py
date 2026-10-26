@@ -103,6 +103,8 @@ _MAX_TOOL_CALLS_PER_RESPONSE = 32
 # serialized request. Keep a small provider-side margin so compaction cannot
 # fill the entire advertised window before output tokens and framing are added.
 _CONTEXT_SAFETY_MARGIN_TOKENS = 4_096
+_MAX_CONTEXT_RECOVERIES = 2
+_CONTEXT_SHRINK_RATIO = 0.8
 # A long trajectory can contain one protocol unit per Source page plus large
 # structured write results. Sending each omitted unit to the model for a
 # runtime summary makes recovery compete with the actual research request.
@@ -495,6 +497,8 @@ class _RunProgress:
     compacted_message_ids: set[str] = field(default_factory=set)
     read_batch_tokens: int = 12_000
     compaction_attempts: int = 0
+    context_token_limit: int = 0
+    context_recovery_attempts: int = 0
     complete_source_identities: set[tuple[str, str, str, str]] = field(default_factory=set)
     model_call_observer: ModelCallObserver | None = None
     model_call_session_id: str | None = None
@@ -550,7 +554,7 @@ class _RunProgress:
         self.restored_elapsed_seconds = elapsed_ms / 1000.0
         for name in (
             "model_cycles", "model_tokens", "prompt_tokens", "completion_tokens",
-            "unreported_model_calls", "retry_count",
+            "unreported_model_calls", "retry_count", "context_token_limit", "context_recovery_attempts",
         ):
             setattr(self, name, max(0, int(number(name))))
         # A continuation is a new runtime slice.  A failed compaction must not
@@ -728,6 +732,8 @@ class _RunProgress:
             "remaining_retry_budget": max(0, self.limits.max_model_retries - self.retry_count),
             "termination_reason": termination_reason, "final_answer_present": final_answer,
             "retry_attempt": retry_attempt, "retry_reason": retry_reason,
+            "context_token_limit": self.context_token_limit,
+            "context_recovery_attempts": self.context_recovery_attempts,
             "http_status": http_status, "retry_delay_ms": retry_delay_ms,
             "execution_plan": (
                 {
@@ -1092,17 +1098,12 @@ class ResearchAgentRunner:
                                 budget_exhausted=False,
                             ),
                         )
-                    turn = await self._respond(
-                        replace(
-                            await self._prepare_model_context(
-                                decision_messages, tool_specs, progress, active_user_message_id=next(
-                                    message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
-                                ),
-                            ),
-                            require_tool_call=False,
-                        ),
-                        tool_specs, progress,
+                    turn = await self._model_turn(
+                        decision_messages, tool_specs, progress,
                         None if non_streaming_retry else text_delta_callback,
+                        active_user_message_id=next(
+                            message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
+                        ),
                     )
                 except ModelResponseError as exc:
                     if exc.reason == "model_allowance_exhausted":
@@ -1512,6 +1513,49 @@ class ResearchAgentRunner:
                     checkpoint=checkpoint, text_delta_callback=text_delta_callback,
                 )
 
+    async def _model_turn(
+        self, messages: tuple[ChatMessage, ...], tool_specs: tuple[ToolSpec, ...],
+        progress: _RunProgress, text_delta_callback: Callable[[str], None] | None,
+        *, active_user_message_id: str, finalizing: bool = False,
+    ) -> ModelTurn:
+        """Build and send one decision, shrinking only rejected context without replaying tools."""
+        rejected: tuple[int, ModelResponseError] | None = None
+        while True:
+            model_context = await self._prepare_model_context(
+                messages, tool_specs, progress, active_user_message_id=active_user_message_id,
+            )
+            request_tokens = self.context_builder.estimate_tokens({
+                "messages": model_context.provider_messages(RESEARCH_AGENT_SYSTEM_PROMPT),
+                "tools": [spec.model_schema() for spec in tool_specs],
+            })
+            # A smaller configured window is not enough: the actual payload must shrink.
+            if rejected is not None and request_tokens >= rejected[0]:
+                raise rejected[1]
+            try:
+                return await self._respond(model_context, tool_specs, progress, text_delta_callback,
+                                           finalizing=finalizing)
+            except ModelResponseError as exc:
+                if (exc.reason != "context_window_exceeded" or exc.partial_content
+                        or progress.context_recovery_attempts >= _MAX_CONTEXT_RECOVERIES
+                        or progress.retry_count >= self.limits.max_model_retries
+                        or progress.remaining_seconds() <= 0
+                        or (not finalizing and progress.stop_before_model() is not None)):
+                    raise
+                previous_limit = self._effective_context_tokens(progress)
+                reduced_limit = int(previous_limit * _CONTEXT_SHRINK_RATIO)
+                if reduced_limit <= self.limits.max_model_output_tokens + 2048:
+                    raise
+                progress.context_token_limit = reduced_limit
+                progress.context_recovery_attempts += 1
+                progress.retry_count += 1
+                rejected = request_tokens, exc
+                logger.info(
+                    "Research context recovery attempt=%d previous_limit=%d context_limit=%d rejected_input_tokens=%d",
+                    progress.context_recovery_attempts, previous_limit, reduced_limit, request_tokens,
+                )
+                progress.trace(AgentContext(messages[0].session_id, "", ""), phase="context_recovery",
+                               retry_attempt=progress.context_recovery_attempts, retry_reason=exc.reason)
+
     async def _respond(
         self,
         model_context: ChatModelContext,
@@ -1540,7 +1584,7 @@ class ResearchAgentRunner:
         )
         model_context = replace(
             model_context,
-            max_context_tokens=self._effective_context_tokens(),
+            max_context_tokens=self._effective_context_tokens(progress),
             model_call_observer=progress.model_call_observer,
             model_call_purpose=purpose,
             model_call_response_message_id=(
@@ -1553,12 +1597,9 @@ class ResearchAgentRunner:
             "messages": model_context.provider_messages(prompt),
             "tools": [spec.model_schema() for spec in tool_specs],
         })
-        if request_tokens + output_limit + 1024 > self.limits.max_context_tokens:
-            raise ModelResponseError("Model request exceeds its context window.",
-                                     reason="context_window_exceeded", retryable=False)
         if not model_context.compacting:
             progress.read_batch_tokens = max(1024, min(16_000,
-                self.limits.max_context_tokens - request_tokens - output_limit - 4096))
+                model_context.max_context_tokens - request_tokens - output_limit - 4096))
         arguments: dict[str, Any] = {
             "context": model_context,
             "tool_specs": tool_specs,
@@ -1584,6 +1625,7 @@ class ResearchAgentRunner:
             turn = await wait_for(self.model.respond(**arguments), timeout=timeout)
         except ModelResponseError as exc:
             progress.record_model_usage(exc.usage)
+            exc.partial_content = exc.partial_content or visible_content
             raise
         except BaseException as exc:
             # Cancellation may prevent the provider's usage trailer from arriving.
@@ -1603,7 +1645,7 @@ class ResearchAgentRunner:
     ) -> ChatModelContext:
         """Compact old operations into provisional notes; the durable trajectory stays intact."""
         execution_plan = progress.execution_plan.to_record() if progress.execution_plan else None
-        context_limit = self._effective_context_tokens()
+        context_limit = self._effective_context_tokens(progress)
         input_budget = self.context_builder.input_budget(
             context_limit=context_limit, output_limit=self.limits.max_model_output_tokens,
             system_prompt=RESEARCH_AGENT_SYSTEM_PROMPT,
@@ -1615,6 +1657,11 @@ class ResearchAgentRunner:
         )
         if prior_reading:
             input_budget -= self.context_builder.estimate_tokens(prior_reading) + 200
+        if progress.working_summary:
+            progress.working_summary = self._bounded_working_notes(
+                ResearchWorkingNotesModelOutput.model_validate_json(progress.working_summary),
+                max_tokens=min(6000, input_budget // 3),
+            ).model_dump_json()
         active = next(message for message in messages if message.message_id == active_user_message_id)
         while True:
             available = tuple(message for message in messages
@@ -1717,8 +1764,9 @@ class ResearchAgentRunner:
             ).model_dump_json()
         return summary
 
-    def _effective_context_tokens(self) -> int:
-        return max(1_024, self.limits.max_context_tokens - _CONTEXT_SAFETY_MARGIN_TOKENS)
+    def _effective_context_tokens(self, progress: _RunProgress | None = None) -> int:
+        configured = max(1_024, self.limits.max_context_tokens - _CONTEXT_SAFETY_MARGIN_TOKENS)
+        return min(configured, progress.context_token_limit) if progress and progress.context_token_limit else configured
 
     def _prior_source_reading(
         self, messages: tuple[ChatMessage, ...] | list[ChatMessage], *,
@@ -1889,13 +1937,11 @@ class ResearchAgentRunner:
         try:
             if progress.remaining_seconds() <= 0:
                 raise TimeoutError("research turn deadline reached")
-            turn = await self._respond(
-                await self._prepare_model_context(
-                    (*messages, instruction), (), progress, active_user_message_id=next(
-                        message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
-                    ),
+            turn = await self._model_turn(
+                (*messages, instruction), (), progress, text_delta_callback, finalizing=True,
+                active_user_message_id=next(
+                    message.message_id for message in reversed(messages) if message.role is ChatMessageRole.USER
                 ),
-                (), progress, text_delta_callback, finalizing=True,
             )
             if turn.tool_calls or not turn.content:
                 raise ValueError("final answer must be answer-only")

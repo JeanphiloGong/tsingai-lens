@@ -10,10 +10,6 @@ Mechanical checks are NOT expert scientific acceptance or full Agent E2E.
 
 from __future__ import annotations
 
-from repositories.paper_map_repository import paper_map_payload
-
-
-from repositories.paper_map_repository import paper_map_from_payload
 
 import argparse
 import json
@@ -33,6 +29,9 @@ from _common import (
 from pydantic import ValidationError
 
 ensure_backend_root_on_path(Path(__file__).resolve().parents[2])
+
+from repositories.paper_map_repository import paper_map_from_payload, paper_map_payload
+from repositories.pipeline_run_repository import execution_stats_record
 
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
@@ -174,9 +173,9 @@ def run_baseline(scenario: dict, runtime, client) -> dict:
             }
             for objective in facts.research_objectives
         ],
-        "execution_stats": usage.execution_stats(
-            duration_ms=int((perf_counter() - started) * 1000)
-        ).to_record(),
+        "execution_stats": execution_stats_record(
+            usage.execution_stats(duration_ms=int((perf_counter() - started) * 1000))
+        ),
         "last_axis_trace": response_client.consume_last_trace(),
         "interest_filter": "none_in_current_discovery_contract",
     }
@@ -294,9 +293,9 @@ def run_proposal(scenario: dict, runtime, client) -> dict:
                     for error in exc.errors(include_input=False, include_url=False)
                 ]
     record["trace"] = response_client.consume_last_trace()
-    record["execution_stats"] = usage.execution_stats(
-        duration_ms=int((perf_counter() - started) * 1000)
-    ).to_record()
+    record["execution_stats"] = execution_stats_record(
+        usage.execution_stats(duration_ms=int((perf_counter() - started) * 1000))
+    )
     record["duration_s"] = round(perf_counter() - started, 3)
     return record
 

@@ -5,7 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import (
+    Any,
+    Iterable,
+    Mapping,
+)
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -25,7 +29,12 @@ from domain.source import (
     SourceTableRow,
     SourceTextUnit,
     build_source_document_tree,
+    normalize_optional_text,
+    render_markdown_table,
+    render_plain_table_text,
+    safe_int,
 )
+from domain.source.artifacts import _is_missing_value
 from infra.persistence.postgres.models.document import Document as DocumentRow
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
@@ -343,12 +352,108 @@ def _artifact_payload(document: SourceDocument) -> dict[str, Any]:
             "creation_date": document.creation_date,
             "metadata": dict(document.metadata),
         },
-        "text_units": [item.to_record() for item in document.text_units],
-        "blocks": [item.to_record() for item in document.blocks],
-        "tables": [item.to_record() for item in document.tables],
-        "table_rows": [item.to_record() for item in document.table_rows],
-        "table_cells": [item.to_record() for item in document.table_cells],
-        "figures": [item.to_record() for item in document.figures],
+        "text_units": [
+            {
+                "id": item.text_unit_id,
+                "text_unit_order": item.text_unit_order,
+                "text": item.text,
+                "n_tokens": item.n_tokens,
+                "document_ids": list(item.document_ids),
+            }
+            for item in document.text_units
+        ],
+        "blocks": [
+            {
+                "block_id": item.block_id,
+                "document_id": item.document_id,
+                "block_type": str(item.block_type),
+                "text": item.text,
+                "block_order": item.block_order,
+                "text_unit_ids": list(item.text_unit_ids),
+                "page": item.page,
+                "heading_path": item.heading_path,
+                "heading_level": item.heading_level,
+            }
+            for item in document.blocks
+        ],
+        "tables": [
+            {
+                "table_id": item.table_id,
+                "document_id": item.document_id,
+                "table_order": item.table_order,
+                "caption_text": item.caption_text,
+                "caption_block_id": item.caption_block_id,
+                "page": item.page,
+                "heading_path": item.heading_path,
+                "row_count": item.row_count,
+                "col_count": item.col_count,
+                "header_row_count": item.header_row_count,
+                "column_headers": list(item.column_headers),
+                "table_matrix": [list(row) for row in item.table_matrix],
+                "table_markdown": render_markdown_table(
+                    [list(row) for row in item.table_matrix],
+                    list(item.column_headers),
+                    header_row_count=item.header_row_count,
+                ),
+                "table_text": render_plain_table_text(
+                    [list(row) for row in item.table_matrix]
+                ),
+                "metadata": dict(item.metadata),
+            }
+            for item in document.tables
+        ],
+        "table_rows": [
+            {
+                "row_id": item.row_id,
+                "document_id": item.document_id,
+                "table_id": item.table_id,
+                "row_index": item.row_index,
+                "row_text": item.row_text,
+                "page": item.page,
+                "heading_path": item.heading_path,
+            }
+            for item in document.table_rows
+        ],
+        "table_cells": [
+            {
+                "cell_id": item.cell_id,
+                "document_id": item.document_id,
+                "id": item.document_id,
+                "table_id": item.table_id,
+                "row_index": item.row_index,
+                "col_index": item.col_index,
+                "cell_text": item.cell_text,
+                "row_span": item.row_span,
+                "col_span": item.col_span,
+                "column_header": item.column_header,
+                "row_header": item.row_header,
+                "row_section": item.row_section,
+                "header_path": item.header_path,
+                "page": item.page,
+                "unit_hint": item.unit_hint,
+            }
+            for item in document.table_cells
+        ],
+        "figures": [
+            {
+                "figure_id": item.figure_id,
+                "document_id": item.document_id,
+                "figure_order": item.figure_order,
+                "figure_label": item.figure_label,
+                "caption_text": item.caption_text,
+                "caption_block_id": item.caption_block_id,
+                "page": item.page,
+                "heading_path": item.heading_path,
+                "image_path": item.image_path,
+                "image_mime_type": item.image_mime_type,
+                "image_width": item.image_width,
+                "image_height": item.image_height,
+                "asset_sha256": item.asset_sha256,
+                "image_size_bytes": item.image_size_bytes,
+                "metadata": dict(item.metadata),
+            }
+            for item in document.figures
+        ],
     }
 
 
@@ -358,34 +463,298 @@ def _document_from_row(row: DocumentPreparationRow) -> SourceDocument:
 
 def _document_from_artifact(artifact: dict[str, Any]) -> SourceDocument:
     document = dict(artifact.get("document") or {})
-    for key in (
-        "text_units",
-        "blocks",
-        "tables",
-        "table_rows",
-        "table_cells",
-        "figures",
-    ):
-        document[key] = artifact.get(key) or []
-    return SourceDocument.from_record(document)
+    return SourceDocument(
+        document_id=str(document.get("document_id") or document.get("id") or ""),
+        document_order=safe_int(document.get("document_order")) or 0,
+        title=str(document.get("title") or ""),
+        text=str(document.get("text") or ""),
+        creation_date=normalize_optional_text(document.get("creation_date")),
+        metadata=_mapping(document.get("metadata")),
+        text_units=tuple(
+            (
+                SourceTextUnit(
+                    text_unit_id=str(item.get("text_unit_id") or item.get("id") or ""),
+                    text_unit_order=safe_int(item.get("text_unit_order")) or 0,
+                    text=str(item.get("text") or ""),
+                    n_tokens=safe_int(item.get("n_tokens")),
+                    document_ids=_string_tuple(item.get("document_ids")),
+                )
+                for item in artifact.get("text_units") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+        blocks=tuple(
+            (
+                SourceBlock(
+                    block_id=str(item.get("block_id") or ""),
+                    document_id=str(item.get("document_id") or item.get("id") or ""),
+                    block_type=str(item.get("block_type") or "paragraph"),
+                    text=str(item.get("text") or ""),
+                    block_order=safe_int(item.get("block_order")) or 0,
+                    text_unit_ids=_string_tuple(item.get("text_unit_ids")),
+                    page=safe_int(item.get("page")),
+                    heading_path=normalize_optional_text(item.get("heading_path")),
+                    heading_level=safe_int(item.get("heading_level")),
+                )
+                for item in artifact.get("blocks") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+        tables=tuple(
+            (
+                SourceTable(
+                    table_id=str(item.get("table_id") or ""),
+                    document_id=str(item.get("document_id") or ""),
+                    table_order=safe_int(item.get("table_order")) or 0,
+                    caption_text=normalize_optional_text(item.get("caption_text")),
+                    caption_block_id=normalize_optional_text(
+                        item.get("caption_block_id")
+                    ),
+                    page=safe_int(item.get("page")),
+                    heading_path=normalize_optional_text(item.get("heading_path")),
+                    column_headers=_string_tuple(item.get("column_headers")),
+                    table_matrix=_table_matrix_tuple(item.get("table_matrix")),
+                    header_row_count=max(
+                        0,
+                        (
+                            safe_int(item.get("header_row_count"))
+                            if safe_int(item.get("header_row_count")) is not None
+                            else 1
+                        ),
+                    ),
+                    metadata=_mapping(item.get("metadata")),
+                )
+                for item in artifact.get("tables") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+        table_rows=tuple(
+            (
+                SourceTableRow(
+                    row_id=str(item.get("row_id") or ""),
+                    document_id=str(item.get("document_id") or ""),
+                    table_id=str(item.get("table_id") or ""),
+                    row_index=safe_int(item.get("row_index")) or 0,
+                    row_text=str(item.get("row_text") or ""),
+                    page=safe_int(item.get("page")),
+                    heading_path=normalize_optional_text(item.get("heading_path")),
+                )
+                for item in artifact.get("table_rows") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+        table_cells=tuple(
+            (
+                SourceTableCell(
+                    cell_id=str(item.get("cell_id") or ""),
+                    document_id=str(item.get("document_id") or item.get("id") or ""),
+                    table_id=str(item.get("table_id") or ""),
+                    row_index=safe_int(item.get("row_index")) or 0,
+                    col_index=safe_int(item.get("col_index")) or 0,
+                    cell_text=str(item.get("cell_text") or ""),
+                    row_span=max(
+                        1,
+                        (
+                            safe_int(item.get("row_span"))
+                            if safe_int(item.get("row_span")) is not None
+                            else 1
+                        ),
+                    ),
+                    col_span=max(
+                        1,
+                        (
+                            safe_int(item.get("col_span"))
+                            if safe_int(item.get("col_span")) is not None
+                            else 1
+                        ),
+                    ),
+                    column_header=bool(item.get("column_header")),
+                    row_header=bool(item.get("row_header")),
+                    row_section=bool(item.get("row_section")),
+                    header_path=normalize_optional_text(item.get("header_path")),
+                    page=safe_int(item.get("page")),
+                    unit_hint=normalize_optional_text(item.get("unit_hint")),
+                )
+                for item in artifact.get("table_cells") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+        figures=tuple(
+            (
+                SourceFigure(
+                    figure_id=str(item.get("figure_id") or ""),
+                    document_id=str(item.get("document_id") or ""),
+                    figure_order=safe_int(item.get("figure_order")) or 0,
+                    figure_label=normalize_optional_text(item.get("figure_label")),
+                    caption_text=normalize_optional_text(item.get("caption_text")),
+                    caption_block_id=normalize_optional_text(
+                        item.get("caption_block_id")
+                    ),
+                    page=safe_int(item.get("page")),
+                    heading_path=normalize_optional_text(item.get("heading_path")),
+                    image_path=normalize_optional_text(item.get("image_path")),
+                    image_mime_type=normalize_optional_text(
+                        item.get("image_mime_type")
+                    ),
+                    image_width=safe_int(item.get("image_width")),
+                    image_height=safe_int(item.get("image_height")),
+                    asset_sha256=normalize_optional_text(item.get("asset_sha256")),
+                    image_size_bytes=safe_int(item.get("image_size_bytes")),
+                    metadata=_mapping(item.get("metadata")),
+                )
+                for item in artifact.get("figures") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+    )
 
 
 def _references_payload(references: SourceReferenceSet) -> dict[str, list[dict[str, Any]]]:
     return {
-        "entries": [item.to_record() for item in references.entries],
-        "mentions": [item.to_record() for item in references.mentions],
-        "resolutions": [item.to_record() for item in references.resolutions],
-        "candidates": [item.to_record() for item in references.candidates],
+        "entries": [
+            {
+                "reference_id": item.reference_id,
+                "document_id": item.document_id,
+                "raw_reference": item.raw_reference,
+                "reference_index": item.reference_index,
+                "title": item.title,
+                "authors_text": item.authors_text,
+                "year": item.year,
+                "doi": item.doi,
+                "source_block_id": item.source_block_id,
+                "page": item.page,
+                "confidence": item.confidence,
+                "metadata": dict(item.metadata),
+            }
+            for item in references.entries
+        ],
+        "mentions": [
+            {
+                "mention_id": item.mention_id,
+                "document_id": item.document_id,
+                "reference_id": item.reference_id,
+                "citation_marker": item.citation_marker,
+                "context_text": item.context_text,
+                "source_block_id": item.source_block_id,
+                "page": item.page,
+                "confidence": item.confidence,
+                "metadata": dict(item.metadata),
+            }
+            for item in references.mentions
+        ],
+        "resolutions": [
+            {
+                "resolution_id": item.resolution_id,
+                "reference_id": item.reference_id,
+                "provider": item.provider,
+                "status": item.status,
+                "resolved_title": item.resolved_title,
+                "resolved_authors_text": item.resolved_authors_text,
+                "resolved_year": item.resolved_year,
+                "resolved_venue": item.resolved_venue,
+                "resolved_doi": item.resolved_doi,
+                "resolved_url": item.resolved_url,
+                "open_access_url": item.open_access_url,
+                "confidence": item.confidence,
+                "metadata": dict(item.metadata),
+            }
+            for item in references.resolutions
+        ],
+        "candidates": [
+            {
+                "candidate_id": item.candidate_id,
+                "reference_id": item.reference_id,
+                "status": item.status,
+                "relevance_score": item.relevance_score,
+                "relevance_reason": item.relevance_reason,
+                "cited_by_document_id": item.cited_by_document_id,
+                "mention_count": item.mention_count,
+                "representative_context": item.representative_context,
+                "resolved_doi": item.resolved_doi,
+                "resolved_url": item.resolved_url,
+                "open_access_url": item.open_access_url,
+                "metadata": dict(item.metadata),
+            }
+            for item in references.candidates
+        ],
     }
 
 
 def _references_from_payload(value: Any) -> SourceReferenceSet:
     payload = dict(value or {})
     return SourceReferenceSet(
-        entries=tuple(SourceReferenceEntry.from_record(item) for item in payload.get("entries") or []),
-        mentions=tuple(SourceReferenceMention.from_record(item) for item in payload.get("mentions") or []),
-        resolutions=tuple(SourceReferenceResolution.from_record(item) for item in payload.get("resolutions") or []),
-        candidates=tuple(SourceReferenceCandidate.from_record(item) for item in payload.get("candidates") or []),
+        entries=tuple(
+            SourceReferenceEntry(
+                reference_id=str(item.get("reference_id") or ""),
+                document_id=str(item.get("document_id") or ""),
+                raw_reference=str(item.get("raw_reference") or ""),
+                reference_index=normalize_optional_text(item.get("reference_index")),
+                title=normalize_optional_text(item.get("title")),
+                authors_text=normalize_optional_text(item.get("authors_text")),
+                year=safe_int(item.get("year")),
+                doi=normalize_optional_text(item.get("doi")),
+                source_block_id=normalize_optional_text(item.get("source_block_id")),
+                page=safe_int(item.get("page")),
+                confidence=float(item.get("confidence") or 0.0),
+                metadata=_mapping(item.get("metadata")),
+            )
+            for item in payload.get("entries") or []
+        ),
+        mentions=tuple(
+            SourceReferenceMention(
+                mention_id=str(item.get("mention_id") or ""),
+                document_id=str(item.get("document_id") or ""),
+                reference_id=normalize_optional_text(item.get("reference_id")),
+                citation_marker=str(item.get("citation_marker") or ""),
+                context_text=str(item.get("context_text") or ""),
+                source_block_id=normalize_optional_text(item.get("source_block_id")),
+                page=safe_int(item.get("page")),
+                confidence=float(item.get("confidence") or 0.0),
+                metadata=_mapping(item.get("metadata")),
+            )
+            for item in payload.get("mentions") or []
+        ),
+        resolutions=tuple(
+            SourceReferenceResolution(
+                resolution_id=str(item.get("resolution_id") or ""),
+                reference_id=str(item.get("reference_id") or ""),
+                provider=str(item.get("provider") or ""),
+                status=str(item.get("status") or "unresolved"),
+                resolved_title=normalize_optional_text(item.get("resolved_title")),
+                resolved_authors_text=normalize_optional_text(
+                    item.get("resolved_authors_text")
+                ),
+                resolved_year=safe_int(item.get("resolved_year")),
+                resolved_venue=normalize_optional_text(item.get("resolved_venue")),
+                resolved_doi=normalize_optional_text(item.get("resolved_doi")),
+                resolved_url=normalize_optional_text(item.get("resolved_url")),
+                open_access_url=normalize_optional_text(item.get("open_access_url")),
+                confidence=float(item.get("confidence") or 0.0),
+                metadata=_mapping(item.get("metadata")),
+            )
+            for item in payload.get("resolutions") or []
+        ),
+        candidates=tuple(
+            SourceReferenceCandidate(
+                candidate_id=str(item.get("candidate_id") or ""),
+                reference_id=str(item.get("reference_id") or ""),
+                status=str(item.get("status") or "metadata_only"),
+                relevance_score=float(item.get("relevance_score") or 0.0),
+                relevance_reason=normalize_optional_text(item.get("relevance_reason")),
+                cited_by_document_id=normalize_optional_text(
+                    item.get("cited_by_document_id")
+                ),
+                mention_count=safe_int(item.get("mention_count")) or 0,
+                representative_context=normalize_optional_text(
+                    item.get("representative_context")
+                ),
+                resolved_doi=normalize_optional_text(item.get("resolved_doi")),
+                resolved_url=normalize_optional_text(item.get("resolved_url")),
+                open_access_url=normalize_optional_text(item.get("open_access_url")),
+                metadata=_mapping(item.get("metadata")),
+            )
+            for item in payload.get("candidates") or []
+        ),
     )
 
 
@@ -404,3 +773,63 @@ def _canonical_json(value: Any) -> str:
 
 
 __all__ = ['SourceArtifactRepository']
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if _is_missing_value(value):
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return (text,)
+            return _string_tuple(parsed)
+        return (text,)
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, Mapping)):
+        return tuple(str(item) for item in value if not _is_missing_value(item))
+    return (str(value),)
+
+
+def _table_matrix_tuple(value: Any) -> tuple[tuple[str, ...], ...]:
+    if _is_missing_value(value):
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return ((text,),)
+        return _table_matrix_tuple(parsed)
+    if not isinstance(value, Iterable) or isinstance(value, (bytes, Mapping)):
+        return ((str(value),),)
+
+    rows = []
+    for row in value:
+        if isinstance(row, str) or not isinstance(row, Iterable):
+            rows.append((str(row),))
+        else:
+            rows.append(tuple(str(cell) for cell in row))
+    return tuple(rows)
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    if _is_missing_value(value):
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, Mapping) else {}
+    return {}

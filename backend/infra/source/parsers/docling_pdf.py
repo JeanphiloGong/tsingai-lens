@@ -1,24 +1,28 @@
 from __future__ import annotations
 
-from io import BytesIO
 import os
+from io import BytesIO
 from typing import Any
 
 import pandas as pd
 
 from domain.source import SourceDocument, SourceTextUnit
+from infra.source.artifact_bundle import (
+    SourceArtifactBundle,
+    source_document_payload,
+    source_text_unit_payload,
+)
+from infra.source.chunking import get_encoding_fn
 from infra.source.config.source_parser_config import SourceParserConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
     DOCUMENTS_FINAL_COLUMNS,
     FIGURES_FINAL_COLUMNS,
     TABLE_CELLS_FINAL_COLUMNS,
-    TABLES_FINAL_COLUMNS,
     TABLE_ROWS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
     TEXT_UNITS_FINAL_COLUMNS,
 )
-from infra.source.artifact_bundle import SourceArtifactBundle
-from infra.source.chunking import get_encoding_fn
 from infra.source.hashing import gen_sha512_hash
 from infra.source.mapping.block_artifacts import (
     build_pdf_blocks,
@@ -57,14 +61,16 @@ def build_pdf_bundle(
     text_units = build_pdf_text_units(document_id, text_items, config)
     final_documents = pd.DataFrame(
         [
-            SourceDocument(
-                document_id=document_id,
-                document_order=0,
-                title=title,
-                text=str(document.export_to_text() or "").strip(),
-                creation_date=row.get("creation_date"),
-                metadata=build_source_metadata(row, parser_name="docling"),
-            ).to_record()
+            source_document_payload(
+                SourceDocument(
+                    document_id=document_id,
+                    document_order=0,
+                    title=title,
+                    text=str(document.export_to_text() or "").strip(),
+                    creation_date=row.get("creation_date"),
+                    metadata=build_source_metadata(row, parser_name="docling"),
+                )
+            )
         ],
         columns=DOCUMENTS_FINAL_COLUMNS,
     )
@@ -112,7 +118,10 @@ def build_pdf_bundle(
 
 def build_pdf_converter() -> Any:
     from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import AcceleratorOptions, PdfPipelineOptions
+    from docling.datamodel.pipeline_options import (
+        AcceleratorOptions,
+        PdfPipelineOptions,
+    )
     from docling.document_converter import DocumentConverter, PdfFormatOption
 
     device = os.getenv("DOCLING_DEVICE", "").strip()
@@ -155,13 +164,15 @@ def build_pdf_text_units(
             ["document_id", "index", "text"],
         )
         rows.append(
-            SourceTextUnit(
-                text_unit_id=row_id,
-                text_unit_order=len(rows),
-                text=text,
-                n_tokens=len(encode(text)),
-                document_ids=(document_id,),
-            ).to_record()
+            source_text_unit_payload(
+                SourceTextUnit(
+                    text_unit_id=row_id,
+                    text_unit_order=len(rows),
+                    text=text,
+                    n_tokens=len(encode(text)),
+                    document_ids=(document_id,),
+                )
+            )
         )
         item["text_unit_id"] = row_id
     return pd.DataFrame(rows, columns=TEXT_UNITS_FINAL_COLUMNS)

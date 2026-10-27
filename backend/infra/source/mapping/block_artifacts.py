@@ -9,6 +9,7 @@ from domain.source import (
     normalize_optional_text,
     update_heading_stack,
 )
+from infra.source.artifact_bundle import source_block_payload
 from infra.source.contracts.artifact_schemas import BLOCKS_FINAL_COLUMNS
 from infra.source.mapping.layout_binding import (
     first_bbox,
@@ -32,15 +33,17 @@ def build_pdf_blocks(
 
     if not any(str(item.get("label") or "").lower() == "title" for item in text_items) and title:
         rows.append(
-            SourceBlock(
-                block_id=f"blk_{document_id}_{order}",
-                document_id=document_id,
-                block_type="title",
-                text=title,
-                block_order=order,
-                heading_path=title,
-                heading_level=0,
-            ).to_record()
+            source_block_payload(
+                SourceBlock(
+                    block_id=f"blk_{document_id}_{order}",
+                    document_id=document_id,
+                    block_type="title",
+                    text=title,
+                    block_order=order,
+                    heading_path=title,
+                    heading_level=0,
+                )
+            )
         )
         order += 1
 
@@ -67,19 +70,21 @@ def build_pdf_blocks(
             heading_path = " > ".join(heading_stack) if heading_stack else None
         block_id = f"blk_{document_id}_{order}"
         rows.append(
-            SourceBlock(
-                block_id=block_id,
-                document_id=document_id,
-                block_type=block_type,
-                text=item["text"],
-                block_order=order,
-                text_unit_ids=tuple(
-                    [item["text_unit_id"]] if item.get("text_unit_id") else []
-                ),
-                page=item["page"],
-                heading_path=heading_path,
-                heading_level=heading_level,
-            ).to_record()
+            source_block_payload(
+                SourceBlock(
+                    block_id=block_id,
+                    document_id=document_id,
+                    block_type=block_type,
+                    text=item["text"],
+                    block_order=order,
+                    text_unit_ids=tuple(
+                        [item["text_unit_id"]] if item.get("text_unit_id") else []
+                    ),
+                    page=item["page"],
+                    heading_path=heading_path,
+                    heading_level=heading_level,
+                )
+            )
         )
         item["block_id"] = block_id
         item["heading_path"] = heading_path
@@ -87,15 +92,17 @@ def build_pdf_blocks(
 
     if not saw_title and title and not rows:
         rows.append(
-            SourceBlock(
-                block_id=f"blk_{document_id}_{order}",
-                document_id=document_id,
-                block_type="title",
-                text=title,
-                block_order=order,
-                heading_path=title,
-                heading_level=0,
-            ).to_record()
+            source_block_payload(
+                SourceBlock(
+                    block_id=f"blk_{document_id}_{order}",
+                    document_id=document_id,
+                    block_type="title",
+                    text=title,
+                    block_order=order,
+                    heading_path=title,
+                    heading_level=0,
+                )
+            )
         )
 
     return pd.DataFrame(rows, columns=BLOCKS_FINAL_COLUMNS)

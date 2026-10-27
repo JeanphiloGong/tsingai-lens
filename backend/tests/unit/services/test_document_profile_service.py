@@ -1,5 +1,6 @@
 from __future__ import annotations
-from application.core.document_profiles.service import _profile_response
+
+from infra.source.artifact_bundle import source_documents_from_records
 
 import pandas as pd
 import pytest
@@ -9,11 +10,12 @@ from application.core.document_profiles.extraction import (
     DocumentProfileModelOutput,
 )
 from application.core.document_profiles.service import (
+    _profile_response,
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
 from domain.core.document_profile import DocumentProfile
-from domain.source import SourceDocument, source_documents_from_records
+from domain.source import SourceDocument
 from infra.source.mapping.plain_text_artifacts import build_plain_text_blocks
 from tests.support.collection_service import (
     build_test_collection_service,

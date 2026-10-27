@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.source.artifact_bundle import source_documents_from_records
+
 import importlib.util
 import json
 from pathlib import Path
@@ -9,7 +11,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from domain.core import DocumentProfile
-from domain.source import source_documents_from_records
 from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemorySourceArtifactRepository,

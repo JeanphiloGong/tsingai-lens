@@ -185,14 +185,14 @@ async def test_artifact_input_service_loads_document_tree():
             )
         ),
     )
-    tree = (await artifact_input_service.load_document_tree(
+    tree = await artifact_input_service.load_document_tree(
         "col_source",
         "doc-1",
         source_repository,
-    )).to_record()
+    )
 
-    assert tree["document_id"] == "doc-1"
-    assert tree["collection_id"] == "col_source"
-    assert tree["root_node_id"] == "node_doc-1_document"
-    assert tree["nodes"]["node_doc-1_block_blk-body"]["text"] == "Evidence text"
-    assert tree["reference_records"]["ref-1"]["raw_reference"].startswith("Smith")
+    assert tree.document_id == "doc-1"
+    assert tree.collection_id == "col_source"
+    assert tree.root_node_id == "node_doc-1_document"
+    assert tree.nodes["node_doc-1_block_blk-body"].text == "Evidence text"
+    assert tree.reference_records["ref-1"].raw_reference.startswith("Smith")

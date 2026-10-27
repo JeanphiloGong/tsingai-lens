@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.source.artifact_bundle import source_documents_from_records
+
 from hashlib import sha256
 from io import BytesIO
 
@@ -11,7 +13,6 @@ from application.source.document_markdown_service import (
     DocumentMarkdownService,
     SourceDocumentNotFoundError,
 )
-from domain.source import source_documents_from_records
 from tests.support.collection_service import (
     build_test_collection_service,
     build_test_source_import_service,

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import (
+    Any,
+)
 
 import pandas as pd
 
 from domain.source import (
+    SourceLayoutBlock,
     SourceTable,
     SourceTableCell,
     build_heading_blocks,
@@ -18,10 +21,15 @@ from domain.source import (
     resolve_heading_path_for_page,
     safe_int,
 )
+from infra.source.artifact_bundle import (
+    source_table_cell_payload,
+    source_table_payload,
+    source_table_row_payload,
+)
 from infra.source.contracts.artifact_schemas import (
     TABLE_CELLS_FINAL_COLUMNS,
-    TABLES_FINAL_COLUMNS,
     TABLE_ROWS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
 )
 from infra.source.hashing import gen_sha512_hash
 from infra.source.mapping.layout_binding import (
@@ -29,7 +37,6 @@ from infra.source.mapping.layout_binding import (
     first_page,
     normalize_label,
 )
-
 
 _TABLE_CONTINUATION_MARKER = re.compile(
     r"^(?:table|tab\.?)[\s_-]*[A-Za-z0-9][A-Za-z0-9.\-]*"
@@ -55,7 +62,17 @@ def build_pdf_tables(
     if not tables:
         return pd.DataFrame(columns=TABLES_FINAL_COLUMNS)
 
-    block_records = blocks.to_dict(orient="records") if blocks is not None else []
+    block_records = [
+        SourceLayoutBlock(
+            block_id=normalize_optional_text(item.get("block_id")),
+            text=normalize_optional_text(item.get("text")),
+            page=safe_int(item.get("page")),
+            block_order=safe_int(item.get("block_order")) or 0,
+            block_type=str(item.get("block_type") or "").strip(),
+            heading_path=normalize_optional_text(item.get("heading_path")),
+        )
+        for item in (blocks.to_dict(orient="records") if blocks is not None else [])
+    ]
     heading_blocks = build_heading_blocks(block_records)
     text_item_by_ref = {
         str(item.get("ref")): item
@@ -103,34 +120,37 @@ def build_pdf_tables(
         ]
 
         rows.append(
-            SourceTable(
-                table_id=table_id,
-                document_id=document_id,
-                table_order=table_order,
-                caption_text=caption_text,
-                caption_block_id=caption_block_id,
-                page=page,
-                heading_path=resolve_heading_path_for_page(page, heading_blocks),
-                column_headers=tuple(column_headers),
-                table_matrix=tuple(tuple(cell for cell in row) for row in matrix),
-                header_row_count=header_row_count,
-                metadata={
-                    "docling_ref": f"#/tables/{table_order - 1}",
-                    "table_label": normalize_label(getattr(table, "label", None)),
-                    "caption_linkage_method": linkage_method,
-                    "column_header_count": len(header_paths),
-                    **(
-                        {"visual_text": visual_text}
-                        if (
-                            visual_text := extract_pdf_table_visual_text(
-                                payload=payload,
-                                table=table,
-                            )
-                        )
-                        else {}
+            source_table_payload(
+                SourceTable(
+                    table_id=table_id,
+                    document_id=document_id,
+                    table_order=table_order,
+                    caption_text=caption_text,
+                    caption_block_id=caption_block_id,
+                    page=page,
+                    heading_path=resolve_heading_path_for_page(page, heading_blocks),
+                    column_headers=tuple(column_headers),
+                    table_matrix=tuple(
+                        (tuple((cell for cell in row)) for row in matrix)
                     ),
-                },
-            ).to_record()
+                    header_row_count=header_row_count,
+                    metadata={
+                        "docling_ref": f"#/tables/{table_order - 1}",
+                        "table_label": normalize_label(getattr(table, "label", None)),
+                        "caption_linkage_method": linkage_method,
+                        "column_header_count": len(header_paths),
+                        **(
+                            {"visual_text": visual_text}
+                            if (
+                                visual_text := extract_pdf_table_visual_text(
+                                    payload=payload, table=table
+                                )
+                            )
+                            else {}
+                        ),
+                    },
+                )
+            )
         )
 
     return pd.DataFrame(rows, columns=TABLES_FINAL_COLUMNS)
@@ -226,39 +246,41 @@ def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
             if not bool(getattr(cell, "column_header", False)):
                 header_path = header_paths.get(col_index)
             rows.append(
-                SourceTableCell(
-                    cell_id=gen_sha512_hash(
-                        {
-                            "document_id": document_id,
-                            "table_id": table_id,
-                            "cell_index": cell_index,
-                            "row_index": row_index,
-                            "col_index": col_index,
-                            "text": cell_text,
-                        },
-                        [
-                            "document_id",
-                            "table_id",
-                            "cell_index",
-                            "row_index",
-                            "col_index",
-                            "text",
-                        ],
-                    ),
-                    document_id=document_id,
-                    table_id=table_id,
-                    row_index=row_index,
-                    col_index=col_index,
-                    cell_text=cell_text,
-                    row_span=max(1, end_row_index - row_index),
-                    col_span=max(1, end_col_index - col_index),
-                    column_header=bool(getattr(cell, "column_header", False)),
-                    row_header=bool(getattr(cell, "row_header", False)),
-                    row_section=bool(getattr(cell, "row_section", False)),
-                    header_path=header_path,
-                    page=table_page,
-                    unit_hint=extract_unit_hint(header_path, cell_text),
-                ).to_record()
+                source_table_cell_payload(
+                    SourceTableCell(
+                        cell_id=gen_sha512_hash(
+                            {
+                                "document_id": document_id,
+                                "table_id": table_id,
+                                "cell_index": cell_index,
+                                "row_index": row_index,
+                                "col_index": col_index,
+                                "text": cell_text,
+                            },
+                            [
+                                "document_id",
+                                "table_id",
+                                "cell_index",
+                                "row_index",
+                                "col_index",
+                                "text",
+                            ],
+                        ),
+                        document_id=document_id,
+                        table_id=table_id,
+                        row_index=row_index,
+                        col_index=col_index,
+                        cell_text=cell_text,
+                        row_span=max(1, end_row_index - row_index),
+                        col_span=max(1, end_col_index - col_index),
+                        column_header=bool(getattr(cell, "column_header", False)),
+                        row_header=bool(getattr(cell, "row_header", False)),
+                        row_section=bool(getattr(cell, "row_section", False)),
+                        header_path=header_path,
+                        page=table_page,
+                        unit_hint=extract_unit_hint(header_path, cell_text),
+                    )
+                )
             )
     return pd.DataFrame(rows, columns=TABLE_CELLS_FINAL_COLUMNS)
 
@@ -272,14 +294,53 @@ def build_pdf_table_rows(
     if table_cells is None or table_cells.empty:
         return pd.DataFrame(columns=TABLE_ROWS_FINAL_COLUMNS)
 
-    block_records = blocks.to_dict(orient="records") if blocks is not None else []
+    block_records = [
+        SourceLayoutBlock(
+            block_id=normalize_optional_text(item.get("block_id")),
+            text=normalize_optional_text(item.get("text")),
+            page=safe_int(item.get("page")),
+            block_order=safe_int(item.get("block_order")) or 0,
+            block_type=str(item.get("block_type") or "").strip(),
+            heading_path=normalize_optional_text(item.get("heading_path")),
+        )
+        for item in (blocks.to_dict(orient="records") if blocks is not None else [])
+    ]
     heading_blocks = build_heading_blocks(block_records)
     source_cells = [
-        SourceTableCell.from_record(record)
+        SourceTableCell(
+            cell_id=str(record.get("cell_id") or ""),
+            document_id=str(record.get("document_id") or record.get("id") or ""),
+            table_id=str(record.get("table_id") or ""),
+            row_index=safe_int(record.get("row_index")) or 0,
+            col_index=safe_int(record.get("col_index")) or 0,
+            cell_text=str(record.get("cell_text") or ""),
+            row_span=max(
+                1,
+                (
+                    safe_int(record.get("row_span"))
+                    if safe_int(record.get("row_span")) is not None
+                    else 1
+                ),
+            ),
+            col_span=max(
+                1,
+                (
+                    safe_int(record.get("col_span"))
+                    if safe_int(record.get("col_span")) is not None
+                    else 1
+                ),
+            ),
+            column_header=bool(record.get("column_header")),
+            row_header=bool(record.get("row_header")),
+            row_section=bool(record.get("row_section")),
+            header_path=normalize_optional_text(record.get("header_path")),
+            page=safe_int(record.get("page")),
+            unit_hint=normalize_optional_text(record.get("unit_hint")),
+        )
         for record in table_cells.to_dict(orient="records")
     ]
     rows = [
-        row.to_record()
+        source_table_row_payload(row)
         for row in build_source_table_rows_from_cells(
             document_id=document_id,
             cells=source_cells,

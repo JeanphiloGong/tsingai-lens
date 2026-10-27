@@ -7,6 +7,8 @@ explicit operator-supplied endpoint. No environment file is loaded here.
 
 from __future__ import annotations
 
+from infra.source.artifact_bundle import source_documents_from_records
+
 import json
 import os
 from datetime import datetime, timezone
@@ -28,7 +30,9 @@ from application.chat.capabilities import (
     SearchSourcesCapability,
 )
 from application.chat.tool_result_projection import tool_result_record
-from domain.source import Document, SourceDocument
+from domain.source import (
+    Document,
+)
 from repositories.collection_repository import StoredDocument
 from tests.support.repositories import (
     MemoryDocumentProfileRepository,
@@ -89,7 +93,16 @@ async def _fixture_collection(collection_service):
     )
     sources = MemorySourceArtifactRepository()
     await sources.replace_document(
-        collection["collection_id"], SourceDocument.from_record(record)
+        collection["collection_id"],
+        source_documents_from_records(
+            documents=[record],
+            text_units=record.get("text_units", ()),
+            blocks=record.get("blocks", ()),
+            tables=record.get("tables", ()),
+            table_rows=record.get("table_rows", ()),
+            table_cells=record.get("table_cells", ()),
+            figures=record.get("figures", ()),
+        )[0],
     )
     return user_id, collection["collection_id"], document_id, sources
 

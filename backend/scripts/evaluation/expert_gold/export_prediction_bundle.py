@@ -15,6 +15,8 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
+from infra.source.artifact_bundle import source_document_payload
+
 from infra.persistence.database import (  # noqa: E402
     DatabaseSettings,
     build_database_engine,
@@ -195,8 +197,22 @@ async def _load_artifacts(
     finally:
         await engine.dispose()
     records = {
-        "documents": [item.to_record() for item in documents],
-        "document_profiles": [item.to_record() for item in profiles],
+        "documents": [source_document_payload(item) for item in documents],
+        "document_profiles": [
+            {
+                "document_id": item.document_id,
+                "title": item.title,
+                "doc_type": item.doc_type,
+                "profile_warnings": list(item.profile_warnings),
+                "confidence": round(float(item.confidence), 2),
+                "profile_status": item.profile_status,
+                "source_fingerprint": item.source_fingerprint,
+                "profile_version": item.profile_version,
+                "profile_fingerprint": item.profile_fingerprint,
+                "generated_at": item.generated_at,
+            }
+            for item in profiles
+        ],
         "objective_evidence": evidence,
         "objective_findings": findings,
     }

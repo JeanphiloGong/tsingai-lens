@@ -15,6 +15,16 @@ DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
+from infra.source.artifact_bundle import (
+    source_block_payload,
+    source_document_payload,
+    source_figure_payload,
+    source_table_cell_payload,
+    source_table_payload,
+    source_table_row_payload,
+    source_text_unit_payload,
+)
+
 from infra.persistence.database import (  # noqa: E402
     DatabaseSettings,
     build_database_engine,
@@ -28,6 +38,7 @@ from repositories.objective_repository import (  # noqa: E402
 )
 from repositories.paper_map_repository import (  # noqa: E402
     PaperMapRepository,
+    paper_map_payload,
 )
 from repositories.source_artifact_repository import (  # noqa: E402
     SourceArtifactRepository,
@@ -175,27 +186,53 @@ async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
         await engine.dispose()
 
     records: dict[str, list[dict[str, Any]]] = {
-        "documents": [item.to_record() for item in documents],
+        "documents": [source_document_payload(item) for item in documents],
         "text_units": [
-            item.to_record() for document in documents for item in document.text_units
+            source_text_unit_payload(item)
+            for document in documents
+            for item in document.text_units
         ],
         "blocks": [
-            item.to_record() for document in documents for item in document.blocks
+            source_block_payload(item)
+            for document in documents
+            for item in document.blocks
         ],
         "figures": [
-            item.to_record() for document in documents for item in document.figures
+            source_figure_payload(item)
+            for document in documents
+            for item in document.figures
         ],
         "tables": [
-            item.to_record() for document in documents for item in document.tables
+            source_table_payload(item)
+            for document in documents
+            for item in document.tables
         ],
         "table_rows": [
-            item.to_record() for document in documents for item in document.table_rows
+            source_table_row_payload(item)
+            for document in documents
+            for item in document.table_rows
         ],
         "table_cells": [
-            item.to_record() for document in documents for item in document.table_cells
+            source_table_cell_payload(item)
+            for document in documents
+            for item in document.table_cells
         ],
-        "document_profiles": [item.to_record() for item in profiles],
-        "paper_maps": [item.to_record() for item in paper_maps],
+        "document_profiles": [
+            {
+                "document_id": item.document_id,
+                "title": item.title,
+                "doc_type": item.doc_type,
+                "profile_warnings": list(item.profile_warnings),
+                "confidence": round(float(item.confidence), 2),
+                "profile_status": item.profile_status,
+                "source_fingerprint": item.source_fingerprint,
+                "profile_version": item.profile_version,
+                "profile_fingerprint": item.profile_fingerprint,
+                "generated_at": item.generated_at,
+            }
+            for item in profiles
+        ],
+        "paper_maps": [paper_map_payload(item) for item in paper_maps],
         "objective_evidence": evidence,
         "objective_findings": findings,
     }

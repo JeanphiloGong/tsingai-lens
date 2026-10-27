@@ -14,6 +14,11 @@ from domain.source import (
     make_table_id,
     update_heading_stack,
 )
+from infra.source.artifact_bundle import (
+    source_block_payload,
+    source_table_cell_payload,
+    source_table_row_payload,
+)
 
 _METHOD_HEADING_PATTERNS = (
     re.compile(r"^(?:\d+(?:\.\d+)*)?\s*(materials?\s+and\s+methods?)$", re.IGNORECASE),
@@ -262,14 +267,16 @@ def _extract_table_rows_from_lines(
                 row_index = 0
             else:
                 rows.append(
-                    SourceTableRow(
-                        row_id=f"row_{table_id}_{row_index}",
-                        document_id=paper_id,
-                        table_id=table_id,
-                        row_index=row_index,
-                        row_text=" | ".join(cell for cell in cells if cell),
-                        heading_path=pending_heading_path,
-                    ).to_record()
+                    source_table_row_payload(
+                        SourceTableRow(
+                            row_id=f"row_{table_id}_{row_index}",
+                            document_id=paper_id,
+                            table_id=table_id,
+                            row_index=row_index,
+                            row_text=" | ".join((cell for cell in cells if cell)),
+                            heading_path=pending_heading_path,
+                        )
+                    )
                 )
             row_index += 1
             continue
@@ -296,17 +303,19 @@ def _build_block_row(
     heading_path: str | None,
     heading_level: int | None,
 ) -> dict[str, Any]:
-    return SourceBlock(
-        block_id=f"blk_{paper_id}_{block_order}",
-        document_id=paper_id,
-        block_type=block_type,
-        text=text,
-        block_order=block_order,
-        text_unit_ids=tuple(text_unit_ids),
-        page=page,
-        heading_path=heading_path,
-        heading_level=heading_level,
-    ).to_record()
+    return source_block_payload(
+        SourceBlock(
+            block_id=f"blk_{paper_id}_{block_order}",
+            document_id=paper_id,
+            block_type=block_type,
+            text=text,
+            block_order=block_order,
+            text_unit_ids=tuple(text_unit_ids),
+            page=page,
+            heading_path=heading_path,
+            heading_level=heading_level,
+        )
+    )
 
 def _looks_like_structural_heading(line: str) -> bool:
     compact = " ".join(str(line or "").split())
@@ -395,16 +404,18 @@ def _extract_table_cells_from_lines(
         for col_index, cell_text in enumerate(source_cells, start=1):
             header_path = None if row_index == 0 else _resolve_header_path(header_cells, col_index - 1)
             rows.append(
-                SourceTableCell(
-                    cell_id=f"cell_{table_id}_{row_index}_{col_index}",
-                    document_id=paper_id,
-                    table_id=table_id,
-                    row_index=row_index,
-                    col_index=col_index - 1,
-                    cell_text=cell_text,
-                    header_path=header_path,
-                    unit_hint=extract_unit_hint(header_path, cell_text),
-                ).to_record()
+                source_table_cell_payload(
+                    SourceTableCell(
+                        cell_id=f"cell_{table_id}_{row_index}_{col_index}",
+                        document_id=paper_id,
+                        table_id=table_id,
+                        row_index=row_index,
+                        col_index=col_index - 1,
+                        cell_text=cell_text,
+                        header_path=header_path,
+                        unit_hint=extract_unit_hint(header_path, cell_text),
+                    )
+                )
             )
         row_index += 1
 

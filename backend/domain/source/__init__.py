@@ -33,7 +33,6 @@ from domain.source.artifacts import (
     render_plain_table_text,
     resolve_heading_path_for_page,
     safe_int,
-    source_documents_from_records,
     update_heading_stack,
 )
 from domain.source.collection import Collection, Document
@@ -73,6 +72,5 @@ __all__ = [
     "render_plain_table_text",
     "resolve_heading_path_for_page",
     "safe_int",
-    "source_documents_from_records",
     "update_heading_stack",
 ]

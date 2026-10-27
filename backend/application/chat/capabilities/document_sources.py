@@ -14,11 +14,11 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.chat.context_builder import ChatContextBuilder
 from application.chat.tool_result_projection import tool_result_record
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from domain.source import render_markdown_table
-from application.chat.context_builder import ChatContextBuilder
-
+from infra.source.artifact_bundle import source_table_payload
 
 _SOURCE_CONTENT_LIMIT = 2_500
 _SEARCH_CONTENT_LIMIT = 800
@@ -297,7 +297,7 @@ class ReadSourceCapability:
             )
             if item is None:
                 return None
-            record = item.to_record()
+            record = source_table_payload(item)
             return {
                 "source_type": "table",
                 "source_kind": "table",
@@ -381,7 +381,9 @@ class SearchSourcesCapability:
                 *(
                     (
                         InspectDocumentSourcesCapability._table_source(table),
-                        str(table.to_record()["table_markdown"] or "").strip(),
+                        str(
+                            source_table_payload(table)["table_markdown"] or ""
+                        ).strip(),
                     )
                     for table in sorted(
                         document.tables, key=lambda item: item.table_order
@@ -508,7 +510,7 @@ class InspectTableCapability:
                 error_message="The requested table Source was not found in this paper.",
             )
 
-        record = table.to_record()
+        record = source_table_payload(table)
         canonical_markdown = str(record["table_markdown"] or "").strip()
         digest = hashlib.sha256(canonical_markdown.encode("utf-8")).hexdigest()
         data_rows = table.table_matrix[table.header_row_count :]
@@ -913,7 +915,7 @@ class InspectDocumentSourcesCapability:
 
     @staticmethod
     def _table_source(table: Any) -> dict[str, Any]:
-        record = table.to_record()
+        record = source_table_payload(table)
         # Empty parser tables are still valid navigation records. Keep their
         # canonical content representation stable instead of letting the
         # digest path call ``encode`` on ``None``.

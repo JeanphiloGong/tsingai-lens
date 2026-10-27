@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-import json
 import math
 import re
 from typing import Any, Iterable, Literal, Mapping
@@ -53,58 +52,6 @@ class SourceDocument:
     def text_unit_ids(self) -> tuple[str, ...]:
         return tuple(text_unit.text_unit_id for text_unit in self.text_units)
 
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceDocument":
-        return cls(
-            document_id=str(value.get("document_id") or value.get("id") or ""),
-            document_order=safe_int(value.get("document_order")) or 0,
-            title=str(value.get("title") or ""),
-            text=str(value.get("text") or ""),
-            creation_date=normalize_optional_text(value.get("creation_date")),
-            metadata=_mapping(value.get("metadata")),
-            text_units=tuple(
-                SourceTextUnit.from_record(item)
-                for item in value.get("text_units") or ()
-                if isinstance(item, Mapping)
-            ),
-            blocks=tuple(
-                SourceBlock.from_record(item)
-                for item in value.get("blocks") or ()
-                if isinstance(item, Mapping)
-            ),
-            tables=tuple(
-                SourceTable.from_record(item)
-                for item in value.get("tables") or ()
-                if isinstance(item, Mapping)
-            ),
-            table_rows=tuple(
-                SourceTableRow.from_record(item)
-                for item in value.get("table_rows") or ()
-                if isinstance(item, Mapping)
-            ),
-            table_cells=tuple(
-                SourceTableCell.from_record(item)
-                for item in value.get("table_cells") or ()
-                if isinstance(item, Mapping)
-            ),
-            figures=tuple(
-                SourceFigure.from_record(item)
-                for item in value.get("figures") or ()
-                if isinstance(item, Mapping)
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "id": self.document_id,
-            "document_order": self.document_order,
-            "title": self.title,
-            "text": self.text,
-            "text_unit_ids": list(self.text_unit_ids),
-            "creation_date": self.creation_date,
-            "metadata": dict(self.metadata),
-        }
-
 
 @dataclass(frozen=True)
 class SourceTextUnit:
@@ -113,25 +60,6 @@ class SourceTextUnit:
     text: str
     n_tokens: int | None
     document_ids: tuple[str, ...]
-
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceTextUnit":
-        return cls(
-            text_unit_id=str(value.get("text_unit_id") or value.get("id") or ""),
-            text_unit_order=safe_int(value.get("text_unit_order")) or 0,
-            text=str(value.get("text") or ""),
-            n_tokens=safe_int(value.get("n_tokens")),
-            document_ids=_string_tuple(value.get("document_ids")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "id": self.text_unit_id,
-            "text_unit_order": self.text_unit_order,
-            "text": self.text,
-            "n_tokens": self.n_tokens,
-            "document_ids": list(self.document_ids),
-        }
 
 
 @dataclass(frozen=True)
@@ -146,33 +74,6 @@ class SourceBlock:
     heading_path: str | None = None
     heading_level: int | None = None
 
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceBlock":
-        return cls(
-            block_id=str(value.get("block_id") or ""),
-            document_id=str(value.get("document_id") or value.get("id") or ""),
-            block_type=str(value.get("block_type") or "paragraph"),
-            text=str(value.get("text") or ""),
-            block_order=safe_int(value.get("block_order")) or 0,
-            text_unit_ids=_string_tuple(value.get("text_unit_ids")),
-            page=safe_int(value.get("page")),
-            heading_path=normalize_optional_text(value.get("heading_path")),
-            heading_level=safe_int(value.get("heading_level")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "block_id": self.block_id,
-            "document_id": self.document_id,
-            "block_type": str(self.block_type),
-            "text": self.text,
-            "block_order": self.block_order,
-            "text_unit_ids": list(self.text_unit_ids),
-            "page": self.page,
-            "heading_path": self.heading_path,
-            "heading_level": self.heading_level,
-        }
-
 
 @dataclass(frozen=True)
 class SourceLayoutBlock:
@@ -182,28 +83,6 @@ class SourceLayoutBlock:
     block_order: int
     block_type: str
     heading_path: str | None
-
-    @classmethod
-    def from_value(
-        cls, value: "SourceBlock | Mapping[str, Any]"
-    ) -> "SourceLayoutBlock":
-        if isinstance(value, SourceBlock):
-            return cls(
-                block_id=value.block_id,
-                text=value.text,
-                page=value.page,
-                block_order=value.block_order,
-                block_type=str(value.block_type),
-                heading_path=value.heading_path,
-            )
-        return cls(
-            block_id=normalize_optional_text(value.get("block_id")),
-            text=normalize_optional_text(value.get("text")),
-            page=safe_int(value.get("page")),
-            block_order=safe_int(value.get("block_order")) or 0,
-            block_type=str(value.get("block_type") or "").strip(),
-            heading_path=normalize_optional_text(value.get("heading_path")),
-        )
 
 
 @dataclass(frozen=True)
@@ -228,51 +107,6 @@ class SourceTable:
     def col_count(self) -> int:
         return max((len(row) for row in self.table_matrix), default=0)
 
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceTable":
-        header_row_count = safe_int(value.get("header_row_count"))
-        return cls(
-            table_id=str(value.get("table_id") or ""),
-            document_id=str(value.get("document_id") or ""),
-            table_order=safe_int(value.get("table_order")) or 0,
-            caption_text=normalize_optional_text(value.get("caption_text")),
-            caption_block_id=normalize_optional_text(value.get("caption_block_id")),
-            page=safe_int(value.get("page")),
-            heading_path=normalize_optional_text(value.get("heading_path")),
-            column_headers=_string_tuple(value.get("column_headers")),
-            table_matrix=_table_matrix_tuple(value.get("table_matrix")),
-            header_row_count=max(
-                0,
-                header_row_count if header_row_count is not None else 1,
-            ),
-            metadata=_mapping(value.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        matrix = [list(row) for row in self.table_matrix]
-        headers = list(self.column_headers)
-        return {
-            "table_id": self.table_id,
-            "document_id": self.document_id,
-            "table_order": self.table_order,
-            "caption_text": self.caption_text,
-            "caption_block_id": self.caption_block_id,
-            "page": self.page,
-            "heading_path": self.heading_path,
-            "row_count": self.row_count,
-            "col_count": self.col_count,
-            "header_row_count": self.header_row_count,
-            "column_headers": headers,
-            "table_matrix": matrix,
-            "table_markdown": render_markdown_table(
-                matrix,
-                headers,
-                header_row_count=self.header_row_count,
-            ),
-            "table_text": render_plain_table_text(matrix),
-            "metadata": dict(self.metadata),
-        }
-
 
 @dataclass(frozen=True)
 class SourceTableCell:
@@ -291,46 +125,6 @@ class SourceTableCell:
     page: int | None = None
     unit_hint: str | None = None
 
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceTableCell":
-        row_span = safe_int(value.get("row_span"))
-        col_span = safe_int(value.get("col_span"))
-        return cls(
-            cell_id=str(value.get("cell_id") or ""),
-            document_id=str(value.get("document_id") or value.get("id") or ""),
-            table_id=str(value.get("table_id") or ""),
-            row_index=safe_int(value.get("row_index")) or 0,
-            col_index=safe_int(value.get("col_index")) or 0,
-            cell_text=str(value.get("cell_text") or ""),
-            row_span=max(1, row_span if row_span is not None else 1),
-            col_span=max(1, col_span if col_span is not None else 1),
-            column_header=bool(value.get("column_header")),
-            row_header=bool(value.get("row_header")),
-            row_section=bool(value.get("row_section")),
-            header_path=normalize_optional_text(value.get("header_path")),
-            page=safe_int(value.get("page")),
-            unit_hint=normalize_optional_text(value.get("unit_hint")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "cell_id": self.cell_id,
-            "document_id": self.document_id,
-            "id": self.document_id,
-            "table_id": self.table_id,
-            "row_index": self.row_index,
-            "col_index": self.col_index,
-            "cell_text": self.cell_text,
-            "row_span": self.row_span,
-            "col_span": self.col_span,
-            "column_header": self.column_header,
-            "row_header": self.row_header,
-            "row_section": self.row_section,
-            "header_path": self.header_path,
-            "page": self.page,
-            "unit_hint": self.unit_hint,
-        }
-
 
 @dataclass(frozen=True)
 class SourceTableRow:
@@ -341,29 +135,6 @@ class SourceTableRow:
     row_text: str
     page: int | None = None
     heading_path: str | None = None
-
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceTableRow":
-        return cls(
-            row_id=str(value.get("row_id") or ""),
-            document_id=str(value.get("document_id") or ""),
-            table_id=str(value.get("table_id") or ""),
-            row_index=safe_int(value.get("row_index")) or 0,
-            row_text=str(value.get("row_text") or ""),
-            page=safe_int(value.get("page")),
-            heading_path=normalize_optional_text(value.get("heading_path")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "row_id": self.row_id,
-            "document_id": self.document_id,
-            "table_id": self.table_id,
-            "row_index": self.row_index,
-            "row_text": self.row_text,
-            "page": self.page,
-            "heading_path": self.heading_path,
-        }
 
 
 @dataclass(frozen=True)
@@ -383,45 +154,6 @@ class SourceFigure:
     asset_sha256: str | None
     image_size_bytes: int | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceFigure":
-        return cls(
-            figure_id=str(value.get("figure_id") or ""),
-            document_id=str(value.get("document_id") or ""),
-            figure_order=safe_int(value.get("figure_order")) or 0,
-            figure_label=normalize_optional_text(value.get("figure_label")),
-            caption_text=normalize_optional_text(value.get("caption_text")),
-            caption_block_id=normalize_optional_text(value.get("caption_block_id")),
-            page=safe_int(value.get("page")),
-            heading_path=normalize_optional_text(value.get("heading_path")),
-            image_path=normalize_optional_text(value.get("image_path")),
-            image_mime_type=normalize_optional_text(value.get("image_mime_type")),
-            image_width=safe_int(value.get("image_width")),
-            image_height=safe_int(value.get("image_height")),
-            asset_sha256=normalize_optional_text(value.get("asset_sha256")),
-            image_size_bytes=safe_int(value.get("image_size_bytes")),
-            metadata=_mapping(value.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "figure_id": self.figure_id,
-            "document_id": self.document_id,
-            "figure_order": self.figure_order,
-            "figure_label": self.figure_label,
-            "caption_text": self.caption_text,
-            "caption_block_id": self.caption_block_id,
-            "page": self.page,
-            "heading_path": self.heading_path,
-            "image_path": self.image_path,
-            "image_mime_type": self.image_mime_type,
-            "image_width": self.image_width,
-            "image_height": self.image_height,
-            "asset_sha256": self.asset_sha256,
-            "image_size_bytes": self.image_size_bytes,
-            "metadata": dict(self.metadata),
-        }
 
 
 def assemble_source_documents(
@@ -506,29 +238,6 @@ def assemble_source_documents(
     )
 
 
-def source_documents_from_records(
-    *,
-    documents: Iterable[Mapping[str, Any]] = (),
-    text_units: Iterable[Mapping[str, Any]] = (),
-    blocks: Iterable[Mapping[str, Any]] = (),
-    tables: Iterable[Mapping[str, Any]] = (),
-    table_rows: Iterable[Mapping[str, Any]] = (),
-    table_cells: Iterable[Mapping[str, Any]] = (),
-    figures: Iterable[Mapping[str, Any]] = (),
-) -> tuple[SourceDocument, ...]:
-    """Build document aggregates from the Source parser's flat records."""
-
-    return assemble_source_documents(
-        documents=(SourceDocument.from_record(item) for item in documents),
-        text_units=(SourceTextUnit.from_record(item) for item in text_units),
-        blocks=(SourceBlock.from_record(item) for item in blocks),
-        tables=(SourceTable.from_record(item) for item in tables),
-        table_rows=(SourceTableRow.from_record(item) for item in table_rows),
-        table_cells=(SourceTableCell.from_record(item) for item in table_cells),
-        figures=(SourceFigure.from_record(item) for item in figures),
-    )
-
-
 @dataclass(frozen=True)
 class SourceReferenceEntry:
     reference_id: str
@@ -544,39 +253,6 @@ class SourceReferenceEntry:
     confidence: float = 0.0
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceEntry":
-        return cls(
-            reference_id=str(value.get("reference_id") or ""),
-            document_id=str(value.get("document_id") or ""),
-            raw_reference=str(value.get("raw_reference") or ""),
-            reference_index=normalize_optional_text(value.get("reference_index")),
-            title=normalize_optional_text(value.get("title")),
-            authors_text=normalize_optional_text(value.get("authors_text")),
-            year=safe_int(value.get("year")),
-            doi=normalize_optional_text(value.get("doi")),
-            source_block_id=normalize_optional_text(value.get("source_block_id")),
-            page=safe_int(value.get("page")),
-            confidence=float(value.get("confidence") or 0.0),
-            metadata=_mapping(value.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "reference_id": self.reference_id,
-            "document_id": self.document_id,
-            "raw_reference": self.raw_reference,
-            "reference_index": self.reference_index,
-            "title": self.title,
-            "authors_text": self.authors_text,
-            "year": self.year,
-            "doi": self.doi,
-            "source_block_id": self.source_block_id,
-            "page": self.page,
-            "confidence": self.confidence,
-            "metadata": dict(self.metadata),
-        }
-
 
 @dataclass(frozen=True)
 class SourceReferenceMention:
@@ -589,33 +265,6 @@ class SourceReferenceMention:
     page: int | None = None
     confidence: float = 0.0
     metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceMention":
-        return cls(
-            mention_id=str(value.get("mention_id") or ""),
-            document_id=str(value.get("document_id") or ""),
-            reference_id=normalize_optional_text(value.get("reference_id")),
-            citation_marker=str(value.get("citation_marker") or ""),
-            context_text=str(value.get("context_text") or ""),
-            source_block_id=normalize_optional_text(value.get("source_block_id")),
-            page=safe_int(value.get("page")),
-            confidence=float(value.get("confidence") or 0.0),
-            metadata=_mapping(value.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "mention_id": self.mention_id,
-            "document_id": self.document_id,
-            "reference_id": self.reference_id,
-            "citation_marker": self.citation_marker,
-            "context_text": self.context_text,
-            "source_block_id": self.source_block_id,
-            "page": self.page,
-            "confidence": self.confidence,
-            "metadata": dict(self.metadata),
-        }
 
 
 @dataclass(frozen=True)
@@ -634,43 +283,6 @@ class SourceReferenceResolution:
     confidence: float = 0.0
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceResolution":
-        return cls(
-            resolution_id=str(value.get("resolution_id") or ""),
-            reference_id=str(value.get("reference_id") or ""),
-            provider=str(value.get("provider") or ""),
-            status=str(value.get("status") or "unresolved"),
-            resolved_title=normalize_optional_text(value.get("resolved_title")),
-            resolved_authors_text=normalize_optional_text(
-                value.get("resolved_authors_text")
-            ),
-            resolved_year=safe_int(value.get("resolved_year")),
-            resolved_venue=normalize_optional_text(value.get("resolved_venue")),
-            resolved_doi=normalize_optional_text(value.get("resolved_doi")),
-            resolved_url=normalize_optional_text(value.get("resolved_url")),
-            open_access_url=normalize_optional_text(value.get("open_access_url")),
-            confidence=float(value.get("confidence") or 0.0),
-            metadata=_mapping(value.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "resolution_id": self.resolution_id,
-            "reference_id": self.reference_id,
-            "provider": self.provider,
-            "status": self.status,
-            "resolved_title": self.resolved_title,
-            "resolved_authors_text": self.resolved_authors_text,
-            "resolved_year": self.resolved_year,
-            "resolved_venue": self.resolved_venue,
-            "resolved_doi": self.resolved_doi,
-            "resolved_url": self.resolved_url,
-            "open_access_url": self.open_access_url,
-            "confidence": self.confidence,
-            "metadata": dict(self.metadata),
-        }
-
 
 @dataclass(frozen=True)
 class SourceReferenceCandidate:
@@ -686,43 +298,6 @@ class SourceReferenceCandidate:
     resolved_url: str | None = None
     open_access_url: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def from_record(cls, value: Mapping[str, Any]) -> "SourceReferenceCandidate":
-        return cls(
-            candidate_id=str(value.get("candidate_id") or ""),
-            reference_id=str(value.get("reference_id") or ""),
-            status=str(value.get("status") or "metadata_only"),
-            relevance_score=float(value.get("relevance_score") or 0.0),
-            relevance_reason=normalize_optional_text(value.get("relevance_reason")),
-            cited_by_document_id=normalize_optional_text(
-                value.get("cited_by_document_id")
-            ),
-            mention_count=safe_int(value.get("mention_count")) or 0,
-            representative_context=normalize_optional_text(
-                value.get("representative_context")
-            ),
-            resolved_doi=normalize_optional_text(value.get("resolved_doi")),
-            resolved_url=normalize_optional_text(value.get("resolved_url")),
-            open_access_url=normalize_optional_text(value.get("open_access_url")),
-            metadata=_mapping(value.get("metadata")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "candidate_id": self.candidate_id,
-            "reference_id": self.reference_id,
-            "status": self.status,
-            "relevance_score": self.relevance_score,
-            "relevance_reason": self.relevance_reason,
-            "cited_by_document_id": self.cited_by_document_id,
-            "mention_count": self.mention_count,
-            "representative_context": self.representative_context,
-            "resolved_doi": self.resolved_doi,
-            "resolved_url": self.resolved_url,
-            "open_access_url": self.open_access_url,
-            "metadata": dict(self.metadata),
-        }
 
 
 @dataclass(frozen=True)
@@ -774,27 +349,6 @@ class SourceDocumentNode:
             warnings=self.warnings,
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "node_id": self.node_id,
-            "document_id": self.document_id,
-            "parent_id": self.parent_id,
-            "child_ids": list(self.child_ids),
-            "node_type": str(self.node_type),
-            "semantic_role": self.semantic_role,
-            "title": self.title,
-            "text": self.text,
-            "level": self.level,
-            "order": self.order,
-            "heading_path": list(self.heading_path),
-            "source_ref_kind": self.source_ref_kind,
-            "source_ref_id": self.source_ref_id,
-            "page_start": self.page_start,
-            "page_end": self.page_end,
-            "text_unit_ids": list(self.text_unit_ids),
-            "warnings": list(self.warnings),
-        }
-
 
 @dataclass(frozen=True)
 class SourceDocumentTree:
@@ -825,60 +379,38 @@ class SourceDocumentTree:
                 return node
         return None
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "collection_id": self.collection_id,
-            "root_node_id": self.root_node_id,
-            "nodes": {
-                node_id: node.to_record()
-                for node_id, node in sorted(
-                    self.nodes.items(),
-                    key=lambda item: item[1].order,
-                )
-            },
-            "reference_records": {
-                reference_id: reference.to_record()
-                for reference_id, reference in self.reference_records.items()
-            },
-        }
-
 
 def build_heading_blocks(
-    blocks: Iterable[SourceBlock | Mapping[str, Any]],
-) -> list[SourceLayoutBlock]:
+    blocks: Iterable[SourceBlock | SourceLayoutBlock],
+) -> list[SourceBlock | SourceLayoutBlock]:
     return sorted(
-        [
-            block
-            for block in (SourceLayoutBlock.from_value(item) for item in blocks)
-            if block.heading_path
-        ],
+        [block for block in blocks if block.heading_path],
         key=lambda item: (item.page is None, item.page or 0, item.block_order),
     )
 
 
 def build_figure_caption_blocks(
-    blocks: Iterable[SourceBlock | Mapping[str, Any]],
-) -> list[SourceLayoutBlock]:
+    blocks: Iterable[SourceBlock | SourceLayoutBlock],
+) -> list[SourceBlock | SourceLayoutBlock]:
     return _build_caption_blocks(blocks, "figure_caption")
 
 
 def build_table_caption_blocks(
-    blocks: Iterable[SourceBlock | Mapping[str, Any]],
-) -> list[SourceLayoutBlock]:
+    blocks: Iterable[SourceBlock | SourceLayoutBlock],
+) -> list[SourceBlock | SourceLayoutBlock]:
     return _build_caption_blocks(blocks, "table_caption")
 
 
 def find_nearest_caption_block(
     *,
     page: int | None,
-    caption_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+    caption_blocks: Iterable[SourceBlock | SourceLayoutBlock],
     used_block_ids: set[str],
-) -> SourceLayoutBlock | None:
+) -> SourceBlock | SourceLayoutBlock | None:
     normalized_page = safe_int(page)
     candidates = [
         block
-        for block in _coerce_layout_blocks(caption_blocks)
+        for block in caption_blocks
         if block.block_id
         and block.block_id not in used_block_ids
         and (normalized_page is None or block.page == normalized_page)
@@ -893,9 +425,9 @@ def find_nearest_caption_block(
 
 def resolve_heading_path_for_page(
     page: int | None,
-    heading_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+    heading_blocks: Iterable[SourceBlock | SourceLayoutBlock],
 ) -> str | None:
-    blocks = _coerce_layout_blocks(heading_blocks)
+    blocks = list(heading_blocks)
     if not blocks:
         return None
     normalized_page = safe_int(page)
@@ -916,14 +448,14 @@ def build_source_table_rows_from_cells(
     *,
     document_id: str,
     cells: Iterable[SourceTableCell],
-    heading_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
+    heading_blocks: Iterable[SourceBlock | SourceLayoutBlock],
 ) -> list[SourceTableRow]:
     grouped: dict[str, list[SourceTableCell]] = {}
     for cell in cells:
         grouped.setdefault(cell.table_id, []).append(cell)
 
     rows: list[SourceTableRow] = []
-    headings = _coerce_layout_blocks(heading_blocks)
+    headings = list(heading_blocks)
     for table_id, table_cells in grouped.items():
         row_indices = sorted({cell.row_index for cell in table_cells})
         for row_index in row_indices:
@@ -1080,86 +612,11 @@ def _is_missing_value(value: Any) -> bool:
     return False
 
 
-def _string_tuple(value: Any) -> tuple[str, ...]:
-    if _is_missing_value(value):
-        return ()
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return ()
-        if text.startswith("[") and text.endswith("]"):
-            try:
-                parsed = json.loads(text)
-            except json.JSONDecodeError:
-                return (text,)
-            return _string_tuple(parsed)
-        return (text,)
-    if isinstance(value, Iterable) and not isinstance(value, (bytes, Mapping)):
-        return tuple(str(item) for item in value if not _is_missing_value(item))
-    return (str(value),)
-
-
-def _table_matrix_tuple(value: Any) -> tuple[tuple[str, ...], ...]:
-    if _is_missing_value(value):
-        return ()
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return ()
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return ((text,),)
-        return _table_matrix_tuple(parsed)
-    if not isinstance(value, Iterable) or isinstance(value, (bytes, Mapping)):
-        return ((str(value),),)
-
-    rows = []
-    for row in value:
-        if isinstance(row, str) or not isinstance(row, Iterable):
-            rows.append((str(row),))
-        else:
-            rows.append(tuple(str(cell) for cell in row))
-    return tuple(rows)
-
-
-def _mapping(value: Any) -> Mapping[str, Any]:
-    if _is_missing_value(value):
-        return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-        return dict(parsed) if isinstance(parsed, Mapping) else {}
-    return {}
-
-
 def _build_caption_blocks(
-    blocks: Iterable[SourceBlock | Mapping[str, Any]],
+    blocks: Iterable[SourceBlock | SourceLayoutBlock],
     block_type: str,
-) -> list[SourceLayoutBlock]:
-    return [
-        block
-        for block in (SourceLayoutBlock.from_value(item) for item in blocks)
-        if block.block_type == block_type
-    ]
-
-
-def _coerce_layout_blocks(
-    blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
-) -> list[SourceLayoutBlock]:
-    return [
-        block
-        if isinstance(block, SourceLayoutBlock)
-        else SourceLayoutBlock.from_value(block)
-        for block in blocks
-    ]
+) -> list[SourceBlock | SourceLayoutBlock]:
+    return [block for block in blocks if block.block_type == block_type]
 
 
 def _source_node_id(document_id: str, kind: str, source_id: str) -> str:
@@ -1562,6 +1019,5 @@ __all__ = [
     "render_plain_table_text",
     "resolve_heading_path_for_page",
     "safe_int",
-    "source_documents_from_records",
     "update_heading_stack",
 ]

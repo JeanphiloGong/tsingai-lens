@@ -1127,7 +1127,9 @@ async def _load_source_index(
             "page": getattr(block, "page", None),
         }
     for table in (item for document in documents for item in document.tables):
-        record = table.to_record()
+        from infra.source.artifact_bundle import source_table_payload
+
+        record = source_table_payload(table)
         metadata = _mapping(record.get("metadata"))
         index[(table.document_id, "table", table.table_id)] = {
             "text": _text(

@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.source.artifact_bundle import source_documents_from_records
 from repositories.document_profile_repository import _from_row
 from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
@@ -25,7 +27,6 @@ from controllers.core import documents as documents_controller
 from domain.core import DocumentProfile
 from domain.source import (
     Document,
-    source_documents_from_records,
 )
 from tests.support.collection_service import (
     build_test_collection_service,

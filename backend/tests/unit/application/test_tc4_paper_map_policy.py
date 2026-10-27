@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.source.artifact_bundle import source_documents_from_records
+
 from repositories.paper_map_repository import paper_map_from_payload
 
 import json
@@ -14,7 +16,7 @@ from application.core.objectives.paper_research_map_service import (
 )
 from application.core.objectives.paper_map_aggregation import PaperMapAggregator
 from domain.core import PaperResearchMap
-from domain.source import build_source_document_tree, source_documents_from_records
+from domain.source import build_source_document_tree
 
 
 FIXTURE_PATH = (

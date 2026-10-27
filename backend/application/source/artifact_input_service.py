@@ -5,6 +5,15 @@ import math
 from typing import Any, Iterable, Mapping
 
 from domain.source import SourceDocument, SourceDocumentTree
+from infra.source.artifact_bundle import (
+    source_block_payload,
+    source_document_payload,
+    source_figure_payload,
+    source_table_cell_payload,
+    source_table_payload,
+    source_table_row_payload,
+    source_text_unit_payload,
+)
 from repositories.source_artifact_repository import SourceArtifactRepository
 
 SourceRecord = dict[str, Any]
@@ -17,9 +26,11 @@ async def load_collection_inputs(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    documents = _records(document.to_record() for document in source_documents)
+    documents = _records(
+        source_document_payload(document) for document in source_documents
+    )
     text_units = _records(
-        text_unit.to_record()
+        source_text_unit_payload(text_unit)
         for document in source_documents
         for text_unit in document.text_units
     )
@@ -34,7 +45,7 @@ async def load_blocks_artifact(
         collection_id, source_artifact_repository
     )
     return _records(
-        block.to_record()
+        source_block_payload(block)
         for document in source_documents
         for block in document.blocks
     )
@@ -48,7 +59,7 @@ async def load_table_rows_artifact(
         collection_id, source_artifact_repository
     )
     return _records(
-        row.to_record()
+        source_table_row_payload(row)
         for document in source_documents
         for row in document.table_rows
     )
@@ -62,7 +73,7 @@ async def load_table_cells_artifact(
         collection_id, source_artifact_repository
     )
     return _records(
-        cell.to_record()
+        source_table_cell_payload(cell)
         for document in source_documents
         for cell in document.table_cells
     )
@@ -73,7 +84,7 @@ async def load_figures_artifact(
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     return _records(
-        figure.to_record()
+        source_figure_payload(figure)
         for figure in await source_artifact_repository.list_figures(collection_id)
     )
 
@@ -86,7 +97,7 @@ async def load_tables_artifact(
         collection_id, source_artifact_repository
     )
     return _records(
-        table.to_record()
+        source_table_payload(table)
         for document in source_documents
         for table in document.tables
     )

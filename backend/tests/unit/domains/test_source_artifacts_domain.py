@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+
+from infra.source.artifact_bundle import (
+    source_table_cell_payload,
+    source_table_payload,
+    source_table_row_payload,
+    source_documents_from_records,
+)
+
 import pytest
 
 from domain.source import (
@@ -62,7 +70,7 @@ def test_source_table_record_renders_complete_table_payload():
         metadata={"source": "test"},
     )
 
-    record = table.to_record()
+    record = source_table_payload(table)
 
     assert record["row_count"] == 2
     assert record["col_count"] == 2
@@ -95,7 +103,7 @@ def test_source_table_record_renders_flattened_headers_without_header_rows_as_da
         header_row_count=2,
     )
 
-    record = table.to_record()
+    record = source_table_payload(table)
 
     assert record["header_row_count"] == 2
     assert (
@@ -158,7 +166,7 @@ def test_source_table_rows_bind_heading_by_page():
     )
 
     assert len(rows) == 1
-    record = rows[0].to_record()
+    record = source_table_row_payload(rows[0])
     assert record["row_text"] == "A | 123 MPa"
     assert record["heading_path"] == "Results"
     assert "bbox" not in record
@@ -206,15 +214,17 @@ def test_source_table_rows_keep_raw_cell_text_without_domain_specific_rewrite():
 
 
 def test_source_table_cell_record_keeps_document_id_alias():
-    record = SourceTableCell(
-        cell_id="cell-1",
-        document_id="doc-1",
-        table_id="tbl-doc-1",
-        row_index=1,
-        col_index=0,
-        cell_text="A",
-        header_path="Sample",
-    ).to_record()
+    record = source_table_cell_payload(
+        SourceTableCell(
+            cell_id="cell-1",
+            document_id="doc-1",
+            table_id="tbl-doc-1",
+            row_index=1,
+            col_index=0,
+            cell_text="A",
+            header_path="Sample",
+        )
+    )
 
     assert record["document_id"] == "doc-1"
     assert record["id"] == "doc-1"
@@ -235,7 +245,10 @@ def test_source_table_cell_record_preserves_logical_topology():
         row_section=True,
     )
 
-    restored = SourceTableCell.from_record(cell.to_record())
+    restored = source_documents_from_records(
+        documents=[{"id": cell.document_id}],
+        table_cells=[source_table_cell_payload(cell)],
+    )[0].table_cells[0]
 
     assert restored.row_span == 2
     assert restored.col_span == 3

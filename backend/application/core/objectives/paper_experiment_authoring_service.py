@@ -24,6 +24,7 @@ from application.source.collection_service import CollectionService
 from infra.persistence.postgres.experiment_analysis_transaction import (
     PostgresExperimentAnalysisTransactionFactory,
 )
+from infra.source.artifact_bundle import source_table_payload
 from repositories.source_artifact_repository import SourceArtifactRepository
 
 
@@ -87,7 +88,7 @@ def _source_payloads(document: Any) -> tuple[Mapping[str, Any], ...]:
                 }
             )
     for table in sorted(document.tables, key=lambda item: item.table_order):
-        record = table.to_record()
+        record = source_table_payload(table)
         payloads.append(
             {
                 "source_type": "table",

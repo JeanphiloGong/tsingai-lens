@@ -1,3 +1,4 @@
+from infra.source.artifact_bundle import source_documents_from_records
 import asyncio
 import json
 from pathlib import Path
@@ -16,7 +17,9 @@ from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesToolRequest,
 )
 from application.chat.tool_result_projection import tool_result_record
-from domain.source.artifacts import SourceBlock, SourceDocument
+from domain.source.artifacts import (
+    SourceBlock,
+)
 from tests.support.repositories import (
     MemoryDocumentProfileRepository,
     MemoryPaperMapRepository,
@@ -204,10 +207,27 @@ def test_normal_pagination_is_not_a_warning():
 
 def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing():
     fixture = Path(__file__).resolve().parents[2] / "fixtures" / "agent_p002" / "source_document.json"
-    source_document = SourceDocument.from_record(json.loads(fixture.read_text(encoding="utf-8")))
+    record = json.loads(fixture.read_text(encoding="utf-8"))
+    source_document = source_documents_from_records(
+        documents=[record],
+        text_units=record.get("text_units", ()),
+        blocks=record.get("blocks", ()),
+        tables=record.get("tables", ()),
+        table_rows=record.get("table_rows", ()),
+        table_cells=record.get("table_cells", ()),
+        figures=record.get("figures", ()),
+    )[0]
     records = [
-        {"document_id": source_document.document_id, "original_filename": "P002-preheating.pdf", "status": "ready"},
-        {"document_id": "paper-2", "original_filename": "Missing.pdf", "status": "ready"},
+        {
+            "document_id": source_document.document_id,
+            "original_filename": "P002-preheating.pdf",
+            "status": "ready",
+        },
+        {
+            "document_id": "paper-2",
+            "original_filename": "Missing.pdf",
+            "status": "ready",
+        },
     ]
     collection_service = SimpleNamespace(
         get_collection_for_user=AsyncMock(return_value={"documents": records}),

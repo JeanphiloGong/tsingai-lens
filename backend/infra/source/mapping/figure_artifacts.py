@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import hashlib
-from io import BytesIO
 import logging
 import re
+from io import BytesIO
 from typing import Any
 
 import pandas as pd
 
 from domain.source import (
     SourceFigure,
+    SourceLayoutBlock,
     build_figure_caption_blocks,
     build_heading_blocks,
     find_nearest_caption_block,
     normalize_optional_text,
     resolve_heading_path_for_page,
+    safe_int,
 )
+from infra.source.artifact_bundle import source_figure_payload
 from infra.source.contracts.artifact_schemas import FIGURES_FINAL_COLUMNS
 from infra.source.hashing import gen_sha512_hash
 from infra.source.mapping.layout_binding import (
@@ -39,7 +42,17 @@ def build_pdf_figures(
     if not pictures:
         return pd.DataFrame(columns=FIGURES_FINAL_COLUMNS), {}
 
-    block_records = blocks.to_dict(orient="records") if blocks is not None else []
+    block_records = [
+        SourceLayoutBlock(
+            block_id=normalize_optional_text(item.get("block_id")),
+            text=normalize_optional_text(item.get("text")),
+            page=safe_int(item.get("page")),
+            block_order=safe_int(item.get("block_order")) or 0,
+            block_type=str(item.get("block_type") or "").strip(),
+            heading_path=normalize_optional_text(item.get("heading_path")),
+        )
+        for item in (blocks.to_dict(orient="records") if blocks is not None else [])
+    ]
     heading_blocks = build_heading_blocks(block_records)
     text_item_by_ref = {
         str(item.get("ref")): item
@@ -109,27 +122,33 @@ def build_pdf_figures(
                 figure_assets[image_path] = image_bytes
 
             rows.append(
-                SourceFigure(
-                    figure_id=figure_id,
-                    document_id=document_id,
-                    figure_order=figure_order,
-                    figure_label=_extract_figure_label(caption_text),
-                    caption_text=caption_text,
-                    caption_block_id=caption_block_id,
-                    page=page,
-                    heading_path=resolve_heading_path_for_page(page, heading_blocks),
-                    image_path=image_path,
-                    image_mime_type=image_mime_type,
-                    image_width=image_width,
-                    image_height=image_height,
-                    asset_sha256=asset_sha256,
-                    metadata={
-                        "docling_ref": f"#/pictures/{figure_order - 1}",
-                        "picture_label": normalize_label(getattr(picture, "label", None)),
-                        "caption_linkage_method": linkage_method,
-                        "asset_source": asset_source,
-                    },
-                ).to_record()
+                source_figure_payload(
+                    SourceFigure(
+                        figure_id=figure_id,
+                        document_id=document_id,
+                        figure_order=figure_order,
+                        figure_label=_extract_figure_label(caption_text),
+                        caption_text=caption_text,
+                        caption_block_id=caption_block_id,
+                        page=page,
+                        heading_path=resolve_heading_path_for_page(
+                            page, heading_blocks
+                        ),
+                        image_path=image_path,
+                        image_mime_type=image_mime_type,
+                        image_width=image_width,
+                        image_height=image_height,
+                        asset_sha256=asset_sha256,
+                        metadata={
+                            "docling_ref": f"#/pictures/{figure_order - 1}",
+                            "picture_label": normalize_label(
+                                getattr(picture, "label", None)
+                            ),
+                            "caption_linkage_method": linkage_method,
+                            "asset_source": asset_source,
+                        },
+                    )
+                )
             )
     finally:
         if pdf_document is not None:
@@ -205,8 +224,8 @@ def _open_pdf_document(payload: bytes) -> Any:
 
 
 def _crop_picture_from_pdf(*, pdf_document: Any, picture: Any) -> Any | None:
-    from PIL import Image
     import fitz
+    from PIL import Image
 
     page_number = first_page(getattr(picture, "prov", None))
     bbox = first_bbox(getattr(picture, "prov", None))

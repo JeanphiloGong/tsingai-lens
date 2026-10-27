@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from infra.source.artifact_bundle import source_documents_from_records
+
+
 from repositories.paper_map_repository import (
     paper_map_payload,
     research_scope_payload,
     source_ref_payload,
+    research_scope_from_payload,
+    paper_map_from_payload,
 )
-
-
-from repositories.paper_map_repository import research_scope_from_payload
-from repositories.paper_map_repository import paper_map_from_payload
 
 import json
 from threading import Lock
@@ -35,7 +36,6 @@ from domain.core import PaperResearchMap, PaperResearchScope
 from domain.source import (
     SourceDocument,
     build_source_document_tree,
-    source_documents_from_records,
 )
 from infra.llm.usage import capture_llm_usage, record_llm_completion
 

@@ -684,13 +684,12 @@ class FakeObjectiveInputService:
             if document_ids is not None and "paper-1" not in document_ids:
                 return ()
             return (
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "title": "Heat treatment paper",
-                        "doc_type": "experimental",
-                        "confidence": 0.9,
-                    }
+                DocumentProfile(
+                    document_id="paper-1",
+                    title="Heat treatment paper",
+                    doc_type="experimental",
+                    confidence=0.9,
+                    profile_warnings=(),
                 ),
             )
 

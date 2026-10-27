@@ -1,4 +1,6 @@
 from __future__ import annotations
+from repositories.document_profile_repository import _from_row
+from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 from hashlib import sha256
 from io import BytesIO
@@ -51,7 +53,7 @@ async def _store_document_profiles(
     for row in profiles:
         await document_profile_service.document_profile_repository.replace(
             collection_id,
-            DocumentProfile.from_mapping(row)
+            _from_row(DocumentPreparationRow(document_id=row["document_id"], profile_json=row))
         )
 
 

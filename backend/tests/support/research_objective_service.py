@@ -142,14 +142,12 @@ async def seed_document_profiles(
     for document in documents:
         title = document.title
         profiles.append(
-            DocumentProfile.from_mapping(
-                {
-                    "document_id": document.document_id,
-                    "title": title,
-                    "doc_type": "review" if "Review" in title else "experimental",
-                    "profile_warnings": [],
-                    "confidence": 0.9,
-                }
+            DocumentProfile(
+                document_id=document.document_id,
+                title=title,
+                doc_type="review" if "Review" in title else "experimental",
+                profile_warnings=(),
+                confidence=0.9,
             )
         )
     for profile in profiles:

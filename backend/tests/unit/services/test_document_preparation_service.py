@@ -313,14 +313,12 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
         async def finish_run(self, run_id: str, **fields):
             return {"run_id": run_id, **fields}
 
-    profile = DocumentProfile.from_mapping(
-        {
-            "document_id": document_id,
-            "title": "Paper",
-            "doc_type": "experimental",
-            "profile_warnings": [],
-            "confidence": 0.9,
-        }
+    profile = DocumentProfile(
+        document_id=document_id,
+        title="Paper",
+        doc_type="experimental",
+        profile_warnings=(),
+        confidence=0.9,
     )
 
     class ProfileService:
@@ -412,14 +410,12 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
             return None
 
         async def build_document_profile(self, *_args, **_lineage):
-            return DocumentProfile.from_mapping(
-                {
-                    "document_id": document_id,
-                    "title": "Paper",
-                    "doc_type": "experimental",
-                    "profile_warnings": [],
-                    "confidence": 0.9,
-                }
+            return DocumentProfile(
+                document_id=document_id,
+                title="Paper",
+                doc_type="experimental",
+                profile_warnings=(),
+                confidence=0.9,
             )
 
     async def parse_document(_collection_id, _document):
@@ -512,14 +508,12 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             return None
 
         async def build_document_profile(self, owner: str, selected: str, **_lineage):
-            return DocumentProfile.from_mapping(
-                {
-                    "document_id": document_id,
-                    "title": "Paper",
-                    "doc_type": "experimental",
-                    "profile_warnings": [],
-                    "confidence": 0.9,
-                }
+            return DocumentProfile(
+                document_id=document_id,
+                title="Paper",
+                doc_type="experimental",
+                profile_warnings=(),
+                confidence=0.9,
             )
 
     collection_service = CollectionService()

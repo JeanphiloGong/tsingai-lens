@@ -140,7 +140,7 @@ class DocumentProfileService:
             )
         )
         items = [
-            profile.to_record()
+            _profile_response(profile)
             for profile in matched_profiles[offset : offset + limit]
         ]
         return {
@@ -163,7 +163,7 @@ class DocumentProfileService:
         await self.collection_service.get_collection(collection_id)
         profile = await self.read_document_profile(collection_id, document_id)
         if profile is not None:
-            return profile.to_record()
+            return _profile_response(profile)
         if not await self.document_profile_repository.list_collection(collection_id):
             raise DocumentProfilesNotReadyError(collection_id)
         raise DocumentNotFoundError(collection_id, document_id)
@@ -374,15 +374,13 @@ class DocumentProfileService:
         profile_warnings = list(extracted.profile_warnings)
         if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in profile_warnings:
             profile_warnings.append("classification_uncertain")
-        return DocumentProfile.from_mapping(
-            {
-                "document_id": document_id,
-                "title": title,
-                "doc_type": str(extracted.doc_type or DOC_TYPE_UNCERTAIN),
-                "profile_warnings": profile_warnings,
-                "confidence": extracted.confidence,
-                "profile_status": PROFILE_STATUS_COMPLETED,
-            }
+        return DocumentProfile(
+            document_id=document_id,
+            title=title,
+            doc_type=extracted.doc_type,
+            profile_warnings=tuple(profile_warnings),
+            confidence=round(extracted.confidence, 2),
+            profile_status=PROFILE_STATUS_COMPLETED,
         )
 
     def _build_document_profile_payload(
@@ -614,3 +612,18 @@ class DocumentProfileService:
             return stored_to_source[title_value]
 
         return file_lookup["single_source_filename"]
+
+
+def _profile_response(profile: DocumentProfile) -> dict[str, Any]:
+    return {
+        "document_id": profile.document_id,
+        "title": profile.title,
+        "doc_type": profile.doc_type,
+        "profile_warnings": list(profile.profile_warnings),
+        "confidence": round(float(profile.confidence), 2),
+        "profile_status": profile.profile_status,
+        "source_fingerprint": profile.source_fingerprint,
+        "profile_version": profile.profile_version,
+        "profile_fingerprint": profile.profile_fingerprint,
+        "generated_at": profile.generated_at,
+    }

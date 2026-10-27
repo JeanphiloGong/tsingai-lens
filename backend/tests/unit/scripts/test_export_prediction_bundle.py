@@ -125,14 +125,12 @@ async def test_export_prediction_bundle_uses_current_published_results(
     profile_repository = MemoryDocumentProfileRepository()
     await profile_repository.replace(
         "col-test",
-        DocumentProfile.from_mapping(
-            {
-                "document_id": "paper-1",
-                "title": "Prediction Paper",
-                "doc_type": "experimental",
-                "profile_warnings": [],
-                "confidence": 0.9,
-            }
+        DocumentProfile(
+            document_id="paper-1",
+            title="Prediction Paper",
+            doc_type="experimental",
+            profile_warnings=(),
+            confidence=0.9,
         )
     )
     monkeypatch.setattr(

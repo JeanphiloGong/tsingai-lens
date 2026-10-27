@@ -237,21 +237,19 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
         findings=(_finding(evidence),),
         evidence_records=evidence,
         profiles=(
-            DocumentProfile.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "title": "Heat treatment study A",
-                    "doc_type": "experimental",
-                    "confidence": 0.9,
-                }
+            DocumentProfile(
+                document_id="paper-1",
+                title="Heat treatment study A",
+                doc_type="experimental",
+                confidence=0.9,
+                profile_warnings=(),
             ),
-            DocumentProfile.from_mapping(
-                {
-                    "document_id": "paper-2",
-                    "title": "Heat treatment study B",
-                    "doc_type": "experimental",
-                    "confidence": 0.9,
-                }
+            DocumentProfile(
+                document_id="paper-2",
+                title="Heat treatment study B",
+                doc_type="experimental",
+                confidence=0.9,
+                profile_warnings=(),
             ),
         ),
     )

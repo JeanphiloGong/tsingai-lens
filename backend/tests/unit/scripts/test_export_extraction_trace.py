@@ -105,14 +105,12 @@ async def test_export_trace_writes_current_source_and_objective_views(
     profile_repository = MemoryDocumentProfileRepository()
     await profile_repository.replace(
         "col-test",
-        DocumentProfile.from_mapping(
-            {
-                "document_id": "paper-1",
-                "title": "Trace Paper",
-                "doc_type": "experimental",
-                "profile_warnings": [],
-                "confidence": 0.9,
-            }
+        DocumentProfile(
+            document_id="paper-1",
+            title="Trace Paper",
+            doc_type="experimental",
+            profile_warnings=(),
+            confidence=0.9,
         )
     )
     monkeypatch.setattr(

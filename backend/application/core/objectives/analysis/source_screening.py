@@ -1137,7 +1137,18 @@ def _build_objective_paper_frame_payload(
             "title": getattr(document, "title", None),
             "source_filename": _resolve_source_filename(document),
         },
-        "document_profile": profile.to_record() if profile else {},
+        "document_profile": {
+            "document_id": profile.document_id,
+            "title": profile.title,
+            "doc_type": profile.doc_type,
+            "profile_warnings": list(profile.profile_warnings),
+            "confidence": round(float(profile.confidence), 2),
+            "profile_status": profile.profile_status,
+            "source_fingerprint": profile.source_fingerprint,
+            "profile_version": profile.profile_version,
+            "profile_fingerprint": profile.profile_fingerprint,
+            "generated_at": profile.generated_at,
+        } if profile else {},
         "source_units": source_units,
     }
 

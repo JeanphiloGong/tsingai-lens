@@ -39,14 +39,12 @@ pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts"
 pytestmark = pytest.mark.anyio
 
 def _profile(document_id: str, title: str) -> DocumentProfile:
-    return DocumentProfile.from_mapping(
-        {
-            "document_id": document_id,
-            "title": title,
-            "doc_type": "experimental",
-            "profile_warnings": [],
-            "confidence": 0.9,
-        }
+    return DocumentProfile(
+        document_id=document_id,
+        title=title,
+        doc_type="experimental",
+        profile_warnings=(),
+        confidence=0.9,
     )
 
 

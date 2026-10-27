@@ -1,4 +1,5 @@
 from __future__ import annotations
+from application.core.document_profiles.service import _profile_response
 
 import pandas as pd
 import pytest
@@ -243,11 +244,12 @@ async def test_document_profile_service_combines_filters_before_paginating(tmp_p
     ):
         await profile_service.document_profile_repository.replace(
             collection_id,
-            DocumentProfile.from_mapping(
-                {
-                    **row,
-                    "confidence": 0.9,
-                }
+            DocumentProfile(
+                confidence=0.9,
+                document_id=row["document_id"],
+                title=row["title"],
+                doc_type=row["doc_type"],
+                profile_warnings=tuple(row["profile_warnings"]),
             )
         )
 
@@ -372,7 +374,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     with caplog.at_level("WARNING"):
         profiles = await _build_profiles(profile_service, collection_id)
 
-    records = {profile.document_id: profile.to_record() for profile in profiles}
+    records = {profile.document_id: _profile_response(profile) for profile in profiles}
     assert records["paper-failed"]["doc_type"] == "uncertain"
     assert records["paper-failed"]["confidence"] == 0.0
     assert records["paper-failed"]["profile_warnings"] == [
@@ -446,7 +448,7 @@ async def test_document_profile_service_round_trips_repository_storage_fields(tm
     await _build_profiles(profile_service, collection_id)
 
     restored = await profile_service.read_document_profiles(collection_id)
-    assert isinstance(restored[0].to_record()["profile_warnings"], list)
+    assert isinstance(_profile_response(restored[0])["profile_warnings"], list)
 
 
 async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypatch):

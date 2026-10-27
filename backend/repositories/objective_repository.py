@@ -1583,7 +1583,6 @@ class ObjectiveRepository:
             )
 
     @staticmethod
-    @staticmethod
     def _objective_from_row(row: ObjectiveResearchRecord) -> ResearchObjective:
         return ResearchObjective(
             collection_id=row.collection_id,

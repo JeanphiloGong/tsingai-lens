@@ -1336,7 +1336,7 @@ async def test_approval_continuation_recovers_context_without_repeating_write(de
     assert all(message in saved for message in history)
 
 
-def test_canonical_objective_table_keeps_rendered_content_and_grounding() -> None:
+async def test_canonical_objective_table_keeps_rendered_content_and_grounding() -> None:
     table = SourceTable(
         table_id="table-1",
         document_id="paper-1",

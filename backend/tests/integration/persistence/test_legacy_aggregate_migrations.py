@@ -1,5 +1,7 @@
 """Exercise historical PostgreSQL shapes independently of the current ORM."""
 
+from pathlib import Path
+
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -8,7 +10,8 @@ from sqlalchemy import MetaData, Table, inspect, select
 
 from infra.persistence.postgres.base import Base
 from tests.integration.persistence.database_cleanup import reset_postgres_schema
-from tests.integration.conftest import BACKEND_ROOT
+
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _upgrade(connection, revision: str) -> None:

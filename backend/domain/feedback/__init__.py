@@ -43,7 +43,6 @@ from domain.feedback.sample_revision import (
     SampleRevision,
     SftRevisionContent,
     content_digest_for,
-    parse_revision_content,
 )
 from domain.feedback.tool_failure import (
     TOOL_FAILURE_SIGNAL_TYPE,
@@ -91,7 +90,6 @@ __all__ = [
     "SampleRevision",
     "SftRevisionContent",
     "content_digest_for",
-    "parse_revision_content",
     "EXPORT_SCHEMA_VERSION",
     "DatasetExport",
     "ExportFormat",

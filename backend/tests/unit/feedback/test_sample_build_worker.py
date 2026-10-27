@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.feedback_dataset_sample_repository import revision_content_from_json
+
 import asyncio
 from dataclasses import replace
 
@@ -12,7 +14,6 @@ from domain.feedback import (
     Dataset,
     DatasetSample,
     FeedbackCase,
-    PreferenceRevisionContent,
     SampleRevision,
 )
 from repositories.analysis_job_repository import AnalysisJob
@@ -182,7 +183,7 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
     if task_type == "preference":
         previous = SampleRevision.build_worker(
             revision_id="previous-revision", sample_id=sample.sample_id, revision_no=1,
-            content=PreferenceRevisionContent.from_mapping({
+            content=revision_content_from_json({
                 "schema_version": "literature-preference.v1",
                 "messages": [{"role": "user", "content": "比较 A、B。"}],
                 "context": [{"document_title": "文献 B", "text": "证据原文"}],

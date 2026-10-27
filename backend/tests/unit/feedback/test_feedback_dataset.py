@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.feedback_dataset_sample_repository import revision_content_from_json
+
 from datetime import datetime, timezone
 
 import pytest
@@ -153,7 +155,7 @@ async def test_needs_input_can_save_its_first_complete_human_revision(excerpt: s
                "context": [{"document_title": "B", "text": excerpt}],
                "target": excerpt, "evidence": [{"document_title": "B", "text": excerpt}]}
     saved = await service.update_sample(user_id="user-1", dataset_id=dataset.dataset_id, sample_id="sample-1",
-        expected_revision_id=None, expected_generation=1, content=content)
+        expected_revision_id=None, expected_generation=1, content=revision_content_from_json(content))
     assert saved.status == "needs_confirmation"
     assert samples.revision.revision_no == 1
     assert samples.revision.author_kind == "human"
@@ -169,7 +171,7 @@ async def test_needs_input_can_save_its_first_complete_human_revision(excerpt: s
         assert samples.revision.provenance["source_refs"] == []
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
         await service.update_sample(user_id="user-1", dataset_id=dataset.dataset_id, sample_id="sample-1",
-            expected_revision_id=None, expected_generation=1, content=content)
+            expected_revision_id=None, expected_generation=1, content=revision_content_from_json(content))
 
 
 @pytest.mark.anyio

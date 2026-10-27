@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from repositories.feedback_dataset_sample_repository import revision_content_from_json
+
 import asyncio
 import json
 import os
@@ -22,7 +24,9 @@ from application.feedback.dataset_export_service import FeedbackDatasetExportSer
 from application.feedback.dataset_service import FeedbackDatasetService
 from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
-from domain.feedback.sample_revision import SampleRevision, SftRevisionContent
+from domain.feedback.sample_revision import (
+    SampleRevision,
+)
 from infra.persistence.postgres.models.feedback import (
     FeedbackAnnotationRow,
     FeedbackCaseRow,
@@ -169,13 +173,13 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     from application.feedback.dataset_service import FeedbackDatasetConflict
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
         await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
-            expected_revision_id=None, expected_generation=sample.generation + 1, content=content)
+            expected_revision_id=None, expected_generation=sample.generation + 1, content=revision_content_from_json(content))
     saved = await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
-        expected_revision_id=None, expected_generation=sample.generation, content=content)
+        expected_revision_id=None, expected_generation=sample.generation, content=revision_content_from_json(content))
     assert saved.status == "needs_confirmation" and saved.confirmed_revision_id is None
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
         await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
-            expected_revision_id=None, expected_generation=sample.generation, content=content)
+            expected_revision_id=None, expected_generation=sample.generation, content=revision_content_from_json(content))
     await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
         expected_revision_id=saved.current_revision_id)
     exports = FeedbackDatasetExportService(dataset_service=service, sample_repository=samples,
@@ -482,7 +486,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     assert new is not None and new.lease_version == old.lease_version + 1
     revision = SampleRevision.build_worker(
         revision_id=f"revision_{uuid4().hex[:32]}", sample_id=sample.sample_id, revision_no=1,
-        content=SftRevisionContent.from_mapping({
+        content=revision_content_from_json({
             "schema_version": "literature-sft.v1",
             "messages": [{"role": "user", "content": "Compare A and B."}],
             "context": [{"document_title": "B", "text": "Preheated at 200 C."}],

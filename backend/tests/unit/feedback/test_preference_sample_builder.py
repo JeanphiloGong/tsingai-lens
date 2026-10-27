@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.feedback_dataset_sample_repository import revision_content_from_json
+
 
 import pytest
 
@@ -13,7 +15,6 @@ from domain.feedback import (
     Dataset,
     DatasetSample,
     FeedbackCase,
-    PreferenceRevisionContent,
     SampleRevision,
 )
 
@@ -271,7 +272,7 @@ def test_validation_rejects_different_inputs_and_treats_label_as_explicit() -> N
 async def test_builder_does_not_invent_matching_input_digests(extra, reason, has_previous):
     previous = SampleRevision.build_worker(
         revision_id="previous-revision", sample_id="sample-1", revision_no=1,
-        content=PreferenceRevisionContent.from_mapping({
+        content=revision_content_from_json({
             "schema_version": "literature-preference.v1",
             "messages": [{"role": "user", "content": "比较 A、B。"}],
             "context": [{"document_title": "B", "text": "证据"}],
@@ -296,7 +297,7 @@ async def test_builder_does_not_invent_matching_input_digests(extra, reason, has
 async def test_rebuild_uses_current_evidence_when_previous_revision_is_stale(input_digest, spec_version):
     previous = SampleRevision.build_worker(
         revision_id="old-revision", sample_id="sample-1", revision_no=1,
-        content=PreferenceRevisionContent.from_mapping({
+        content=revision_content_from_json({
             "schema_version": "literature-preference.v1",
             "messages": [{"role": "user", "content": "旧问题"}],
             "context": [{"document_title": "B", "text": "旧证据"}],

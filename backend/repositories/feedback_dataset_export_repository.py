@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from repositories.feedback_dataset_sample_repository import revision_content_json
+
 import hashlib
 import json
 from copy import deepcopy
@@ -20,7 +22,7 @@ from domain.feedback.dataset_export import (
     ExportPreview,
     member_digest,
 )
-from domain.feedback.sample_revision import parse_revision_content
+from repositories.feedback_dataset_sample_repository import revision_content_from_json
 from infra.persistence.postgres.models.feedback import FeedbackCaseRow
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetExportMemberRow,
@@ -84,8 +86,24 @@ class FeedbackDatasetExportRepository:
                 FeedbackDatasetExportPreviewRow(
                     preview_id=preview.preview_id,
                     dataset_id=preview.dataset_id,
-                    members=[member.to_record() for member in preview.members],
-                    issues=[issue.to_record() for issue in preview.issues],
+                    members=[{
+                        'sample_id': member.sample_id,
+                        'source_case_id': member.source_case_id,
+                        'revision_id': member.revision_id,
+                        'revision_no': member.revision_no,
+                        'content': revision_content_json(member.content),
+                        'content_digest': member.content_digest,
+                        'input_digest': member.input_digest,
+                        'provenance': deepcopy(member.provenance),
+                        'row_key': member.row_key,
+                    } for member in preview.members],
+                    issues=[{
+                        'sample_id': issue.sample_id,
+                        'revision_id': issue.revision_id,
+                        'code': issue.code,
+                        'message': issue.message,
+                        'question': issue.question,
+                    } for issue in preview.issues],
                     preview_digest=preview.preview_digest,
                     requested_count=preview.requested_count,
                     exportable_count=preview.exportable_count,
@@ -262,7 +280,7 @@ async def _read_current_members(
             source_case_id=sample.source_case_id,
             revision_id=revision.revision_id,
             revision_no=revision.revision_no,
-            content=parse_revision_content(revision.content),
+            content=revision_content_from_json(revision.content),
             content_digest=revision.content_digest,
             input_digest=revision.input_digest,
             provenance=deepcopy(revision.provenance or {}),
@@ -301,7 +319,7 @@ async def _read_export_locked(
                 source_case_id=samples[member.sample_id].source_case_id,
                 revision_id=member.revision_id,
                 revision_no=revisions[member.revision_id].revision_no,
-                content=parse_revision_content(revisions[member.revision_id].content),
+                content=revision_content_from_json(revisions[member.revision_id].content),
                 content_digest=member.content_digest,
                 input_digest=member.input_digest,
                 provenance=deepcopy(revisions[member.revision_id].provenance or {}),
@@ -349,7 +367,7 @@ def _member(value: dict[str, Any]) -> ExportMember:
         source_case_id=str(value["source_case_id"]),
         revision_id=str(value["revision_id"]),
         revision_no=int(value["revision_no"]),
-        content=parse_revision_content(value["content"]),
+        content=revision_content_from_json(value["content"]),
         content_digest=str(value["content_digest"]),
         input_digest=str(value["input_digest"]),
         provenance=deepcopy(value.get("provenance") or {}),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -131,7 +132,15 @@ def validate_evaluation(value: Mapping[str, Any]) -> EvaluationRevisionContent:
         raise ValueError("evaluation_reference_missing")
     if mode not in {"reference", "rubric"}:
         raise ValueError("evaluation_mode_invalid")
-    return EvaluationRevisionContent.from_mapping({**dict(value), "criteria": criteria})
+    return EvaluationRevisionContent(
+        schema_version=str(value.get('schema_version') or ''),
+        messages=tuple(value.get('messages') or ()),
+        context=tuple(value.get('context') or ()),
+        reference=str(value.get('reference') or ''),
+        criteria=criteria,
+        evaluation_mode=str(value.get('evaluation_mode') or 'reference'),
+        evidence=tuple(value.get('evidence') or ()),
+    )
 
 
 def _mode(snapshot: Mapping[str, Any]) -> EvaluationMode | None:

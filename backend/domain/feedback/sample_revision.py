@@ -88,27 +88,6 @@ class SftRevisionContent:
         object.__setattr__(self, "evidence", evidence)
         object.__setattr__(self, "target", target)
 
-    @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "SftRevisionContent":
-        if not isinstance(value, Mapping):
-            raise ValueError("SFT content must be an object")
-        return cls(
-            schema_version=str(value.get("schema_version") or ""),  # type: ignore[arg-type]
-            messages=tuple(value.get("messages") or ()),
-            context=tuple(value.get("context") or ()),
-            target=str(value.get("target") or ""),
-            evidence=tuple(value.get("evidence") or ()),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "messages": [dict(item) for item in self.messages],
-            "context": [dict(item) for item in self.context],
-            "target": self.target,
-            "evidence": [dict(item) for item in self.evidence],
-        }
-
 
 @dataclass(frozen=True)
 class PreferenceRevisionContent:
@@ -150,36 +129,6 @@ class PreferenceRevisionContent:
         object.__setattr__(self, "rationale", rationale)
         object.__setattr__(self, "evidence", evidence)
 
-    @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "PreferenceRevisionContent":
-        if not isinstance(value, Mapping):
-            raise ValueError("preference content must be an object")
-        human = value.get("human_preference", value.get("preference"))
-        return cls(
-            schema_version=str(value.get("schema_version") or ""),  # type: ignore[arg-type]
-            messages=tuple(value.get("messages") or ()),
-            context=tuple(value.get("context") or ()),
-            response_a=str(value.get("response_a") or ""),
-            response_b=str(value.get("response_b") or ""),
-            suggested_preference=value.get("suggested_preference"),
-            rationale=str(value.get("rationale") or ""),
-            evidence=tuple(value.get("evidence") or ()),
-            human_preference=human,
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "messages": [dict(item) for item in self.messages],
-            "context": [dict(item) for item in self.context],
-            "response_a": self.response_a,
-            "response_b": self.response_b,
-            "suggested_preference": self.suggested_preference,
-            "rationale": self.rationale,
-            "evidence": [dict(item) for item in self.evidence],
-            "human_preference": self.human_preference,
-        }
-
 
 @dataclass(frozen=True)
 class EvaluationRevisionContent:
@@ -216,31 +165,6 @@ class EvaluationRevisionContent:
         object.__setattr__(self, "criteria", criteria)
         object.__setattr__(self, "evaluation_mode", mode)
         object.__setattr__(self, "evidence", evidence)
-
-    @classmethod
-    def from_mapping(cls, value: Mapping[str, Any]) -> "EvaluationRevisionContent":
-        if not isinstance(value, Mapping):
-            raise ValueError("evaluation content must be an object")
-        return cls(
-            schema_version=str(value.get("schema_version") or ""),  # type: ignore[arg-type]
-            messages=tuple(value.get("messages") or ()),
-            context=tuple(value.get("context") or ()),
-            reference=str(value.get("reference") or ""),
-            criteria=tuple(value.get("criteria") or ()),
-            evaluation_mode=str(value.get("evaluation_mode") or "reference"),  # type: ignore[arg-type]
-            evidence=tuple(value.get("evidence") or ()),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "messages": [dict(item) for item in self.messages],
-            "context": [dict(item) for item in self.context],
-            "reference": self.reference,
-            "criteria": list(self.criteria),
-            "evaluation_mode": self.evaluation_mode,
-            "evidence": [dict(item) for item in self.evidence],
-        }
 
 
 RevisionContent: TypeAlias = SftRevisionContent | PreferenceRevisionContent | EvaluationRevisionContent
@@ -308,25 +232,9 @@ class SampleRevision:
             job_id=job_id,
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "revision_id": self.revision_id,
-            "sample_id": self.sample_id,
-            "revision_no": self.revision_no,
-            "author_kind": self.author_kind,
-            "content": self.content.to_record(),
-            "content_digest": self.content_digest,
-            "input_digest": self.input_digest,
-            "construction_spec_version": self.construction_spec_version,
-            "provenance": _copy_mapping(self.provenance),
-            "created_at": self.created_at,
-            "created_by": self.created_by,
-            "job_id": self.job_id,
-        }
-
 
 def content_digest_for(content: RevisionContent) -> str:
-    payload = content.to_record()
+    payload = content_fingerprint_basis(content)
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -334,47 +242,6 @@ def content_digest_for(content: RevisionContent) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return sha256(encoded).hexdigest()
-
-
-def parse_revision_content(value: Mapping[str, Any]) -> RevisionContent:
-    schema_version = str(value.get("schema_version") or "")
-    if schema_version == SFT_SCHEMA_VERSION:
-        return SftRevisionContent.from_mapping(value)
-    if schema_version == PREFERENCE_SCHEMA_VERSION:
-        return PreferenceRevisionContent.from_mapping(value)
-    if schema_version == EVALUATION_SCHEMA_VERSION:
-        return EvaluationRevisionContent.from_mapping(value)
-    raise ValueError("unsupported sample revision schema")
-
-
-def sanitize_revision_content_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
-    """Clean newly submitted model-facing text before it becomes immutable."""
-
-    result = json.loads(json.dumps(dict(value), ensure_ascii=False))
-    result["messages"] = [
-        {**dict(item), "content": strip_internal_references(item.get("content"))}
-        for item in result.get("messages") or ()
-        if isinstance(item, Mapping)
-    ]
-    for key in ("context", "evidence"):
-        result[key] = [
-            {
-                **dict(item),
-                "document_title": strip_internal_references(item.get("document_title")),
-                "text": strip_internal_references(item.get("text")),
-            }
-            for item in result.get(key) or ()
-            if isinstance(item, Mapping)
-        ]
-    for key in ("target", "reference", "rationale", "response_a", "response_b"):
-        if isinstance(result.get(key), str):
-            result[key] = strip_internal_references(result[key])
-    if isinstance(result.get("criteria"), list):
-        result["criteria"] = [
-            strip_internal_references(item) if isinstance(item, str) else item
-            for item in result["criteria"]
-        ]
-    return result
 
 
 def _message(value: Any) -> dict[str, str]:
@@ -444,5 +311,37 @@ __all__ = [
     "SampleRevision",
     "SftRevisionContent",
     "content_digest_for",
-    "parse_revision_content",
 ]
+
+
+def content_fingerprint_basis(content: RevisionContent) -> dict[str, Any]:
+    if isinstance(content, SftRevisionContent):
+        return {
+            'schema_version': content.schema_version,
+            'messages': [dict(item) for item in content.messages],
+            'context': [dict(item) for item in content.context],
+            'target': content.target,
+            'evidence': [dict(item) for item in content.evidence],
+        }
+    if isinstance(content, PreferenceRevisionContent):
+        return {
+            'schema_version': content.schema_version,
+            'messages': [dict(item) for item in content.messages],
+            'context': [dict(item) for item in content.context],
+            'response_a': content.response_a,
+            'response_b': content.response_b,
+            'suggested_preference': content.suggested_preference,
+            'rationale': content.rationale,
+            'evidence': [dict(item) for item in content.evidence],
+            'human_preference': content.human_preference,
+        }
+    else:
+        return {
+            'schema_version': content.schema_version,
+            'messages': [dict(item) for item in content.messages],
+            'context': [dict(item) for item in content.context],
+            'reference': content.reference,
+            'criteria': list(content.criteria),
+            'evaluation_mode': content.evaluation_mode,
+            'evidence': [dict(item) for item in content.evidence],
+        }

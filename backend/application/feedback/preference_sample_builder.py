@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -214,7 +215,17 @@ def validate_preference(value: Mapping[str, Any]) -> PreferenceRevisionContent:
         raise ValueError("preference_response_missing")
     if response_a == response_b:
         raise ValueError("preference_responses_identical")
-    return PreferenceRevisionContent.from_mapping(value)
+    return PreferenceRevisionContent(
+        schema_version=str(value.get('schema_version') or ''),
+        messages=tuple(value.get('messages') or ()),
+        context=tuple(value.get('context') or ()),
+        response_a=str(value.get('response_a') or ''),
+        response_b=str(value.get('response_b') or ''),
+        suggested_preference=value.get('suggested_preference'),
+        rationale=str(value.get('rationale') or ''),
+        evidence=tuple(value.get('evidence') or ()),
+        human_preference=value.get('human_preference', value.get('preference')),
+    )
 
 
 def _first_text(snapshot: Mapping[str, Any], *keys: str) -> str:

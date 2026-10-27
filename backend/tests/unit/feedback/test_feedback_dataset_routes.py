@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from repositories.feedback_dataset_sample_repository import revision_content_json
+
+from repositories.feedback_dataset_sample_repository import revision_content_from_json
+
 import asyncio
 from types import SimpleNamespace
 
@@ -19,7 +23,6 @@ from domain.feedback import (
     DatasetSample,
     FeedbackCase,
     SampleRevision,
-    SftRevisionContent,
     content_digest_for,
 )
 from main import create_app
@@ -63,7 +66,7 @@ def _sample() -> DatasetSample:
 
 
 def _revision() -> SampleRevision:
-    content = SftRevisionContent.from_mapping(
+    content = revision_content_from_json(
         {
             "schema_version": "literature-sft.v1",
             "messages": [{"role": "user", "content": "比较 A、B。"}],
@@ -327,7 +330,7 @@ def test_first_revision_request_passes_null_revision_and_generation_to_service()
     payload = SampleRevisionUpdateRequest.model_validate({
         "expected_revision_id": None,
         "expected_generation": 3,
-        "content": _revision().content.to_record(),
+        "content": revision_content_json(_revision().content),
     })
     response = asyncio.run(task_datasets.update_dataset_sample(
         "fdset_1", "sample-1", payload, _request(Service()),

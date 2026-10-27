@@ -8,6 +8,7 @@ DatasetExport.  A migrated sample is never confirmed automatically.
 
 from __future__ import annotations
 
+
 import argparse
 import asyncio
 from dataclasses import dataclass
@@ -208,12 +209,14 @@ def legacy_row_to_content(
     try:
         # Import lazily so this pure conversion remains easy to exercise from
         # the migration unit tests.
-        from domain.feedback.sample_revision import parse_revision_content
+        from repositories.feedback_dataset_sample_repository import (
+            revision_content_from_json, revision_content_json,
+        )
 
-        parsed = parse_revision_content(content)
+        parsed = revision_content_from_json(content)
     except (TypeError, ValueError) as exc:
         return None, (f"legacy_content_invalid:{str(exc)}",)
-    return parsed.to_record(), ()
+    return revision_content_json(parsed), ()
 
 
 def build_plan_from_records(

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from repositories.feedback_dataset_sample_repository import revision_content_json
+
+from repositories.feedback_dataset_sample_repository import revision_content_from_json
+
 import json
 from dataclasses import replace
 
@@ -48,7 +52,7 @@ def _dataset() -> Dataset:
 
 
 def _content(index: int = 1) -> SftRevisionContent:
-    return SftRevisionContent.from_mapping(
+    return revision_content_from_json(
         {
             "schema_version": "literature-sft.v1",
             "messages": [{"role": "user", "content": f"比较文献 {index} 的预热条件。"}],
@@ -472,7 +476,7 @@ async def test_export_without_excerpts_preserves_input_and_identity(task_type) -
 
 
 async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected() -> None:
-    content = PreferenceRevisionContent.from_mapping(
+    content = revision_content_from_json(
         {
             "schema_version": "literature-preference.v1",
             "messages": [{"role": "user", "content": "比较 A、B。"}],
@@ -492,8 +496,8 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
     assert preview.exportable_count == 0
     assert any(issue.code == "preference_not_pairwise" for issue in preview.issues)
 
-    content_with_label = PreferenceRevisionContent.from_mapping(
-        {**content.to_record(), "human_preference": "b"}
+    content_with_label = revision_content_from_json(
+        {**revision_content_json(content), "human_preference": "b"}
     )
     samples.members = [_content_member(content_with_label, sample_id="preference-1")]
     preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
@@ -516,7 +520,7 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
 
 @pytest.mark.anyio
 async def test_evaluation_export_keeps_reference_and_criteria_outside_input() -> None:
-    content = EvaluationRevisionContent.from_mapping(
+    content = revision_content_from_json(
         {
             "schema_version": "literature-evaluation.v1",
             "messages": [{"role": "user", "content": "比较 A、B。"}],
@@ -559,12 +563,12 @@ async def test_published_files_load_offline_without_review_data_in_input(tmp_pat
         "evidence": [{"document_title": "P006.pdf", "text": "Review-only evidence marker"}],
     }
     if task_type == "sft":
-        content = SftRevisionContent.from_mapping({**common, "target": "每个条件三次拉伸测试。"})
+        content = revision_content_from_json({**common, "target": "每个条件三次拉伸测试。"})
     elif task_type == "preference":
-        content = PreferenceRevisionContent.from_mapping({**common, "response_a": "每个条件三次拉伸测试。",
+        content = revision_content_from_json({**common, "response_a": "每个条件三次拉伸测试。",
             "response_b": "每个条件一次。", "human_preference": "a", "rationale": "Private review rationale"})
     else:
-        content = EvaluationRevisionContent.from_mapping({**common, "reference": "每个条件三次拉伸测试。",
+        content = revision_content_from_json({**common, "reference": "每个条件三次拉伸测试。",
             "criteria": ["明确三次测试。"], "evaluation_mode": "reference"})
     service = _service(_Samples(_content_member(content, sample_id="p006")), _Exports(), replace(_dataset(), task_type=task_type))
     preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
@@ -592,3 +596,29 @@ async def test_published_files_load_offline_without_review_data_in_input(tmp_pat
     prepare_export(export_path=bundle, output_dir=prepared_dir, revision="test")
     prepared = load_prepared(prepared_dir)
     assert prepared["counts"] == {"train": 0, "eval": 1}
+
+
+def test_frozen_content_and_preview_fingerprints_keep_their_stored_contract():
+    from pathlib import Path
+    import json
+    from domain.feedback.dataset_export import ExportIssue, ExportMember, ExportPreview, member_digest
+    from domain.feedback.sample_revision import content_digest_for
+    from repositories.feedback_dataset_sample_repository import revision_content_from_json, revision_content_json
+
+    fixtures = json.loads((Path(__file__).parents[2] / "fixtures" / "sample_revision_fingerprints.json").read_text())
+    for fixture in fixtures:
+        content = revision_content_from_json(fixture["content"])
+        assert revision_content_json(content) == fixture["content"]
+        assert content_digest_for(content) == fixture["content_digest"]
+        member = ExportMember(
+            sample_id="sample-fixed", source_case_id="case-fixed", revision_id="revision-fixed", revision_no=2,
+            content=content, content_digest=fixture["content_digest"], input_digest="a" * 64,
+            provenance={"paper_order": ["b", "a"], "scope": {"collection": "collection-fixed"}},
+        )
+        preview = ExportPreview.build(
+            preview_id="preview-fixed", dataset_id="dataset-fixed", members=(member,),
+            issues=(ExportIssue(sample_id="sample-other", revision_id=None, code="not_confirmed", message="尚未确认", question="控制条件是否一致？"),),
+            created_at="2026-10-27T00:00:00Z", expires_at="2026-10-28T00:00:00Z",
+        )
+        assert preview.preview_digest == fixture["preview_digest"]
+        assert member_digest((member,)) == fixture["member_digest"]

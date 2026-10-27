@@ -16,6 +16,7 @@ from domain.feedback.sample_revision import (
     RevisionContent,
     SftRevisionContent,
     content_digest_for,
+    content_fingerprint_basis,
 )
 
 
@@ -67,19 +68,6 @@ class ExportMember:
             f"{self.sample_id}:{self.revision_id}".encode("utf-8")
         ).hexdigest()
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "sample_id": self.sample_id,
-            "source_case_id": self.source_case_id,
-            "revision_id": self.revision_id,
-            "revision_no": self.revision_no,
-            "content": self.content.to_record(),
-            "content_digest": self.content_digest,
-            "input_digest": self.input_digest,
-            "provenance": _copy(self.provenance),
-            "row_key": self.row_key,
-        }
-
 
 @dataclass(frozen=True)
 class ExportIssue:
@@ -88,15 +76,6 @@ class ExportIssue:
     code: str
     message: str
     question: str = ""
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "sample_id": self.sample_id,
-            "revision_id": self.revision_id,
-            "code": self.code,
-            "message": self.message,
-            "question": self.question,
-        }
 
 
 @dataclass(frozen=True)
@@ -132,8 +111,24 @@ class ExportPreview:
         digest_basis = {
             "schema_versions": sorted({member.content.schema_version for member in members}),
             "dataset_id": dataset_id,
-            "members": [member.to_record() for member in members],
-            "issues": [issue.to_record() for issue in issues],
+            "members": [{
+                'sample_id': member.sample_id,
+                'source_case_id': member.source_case_id,
+                'revision_id': member.revision_id,
+                'revision_no': member.revision_no,
+                'content': content_fingerprint_basis(member.content),
+                'content_digest': member.content_digest,
+                'input_digest': member.input_digest,
+                'provenance': _copy(member.provenance),
+                'row_key': member.row_key,
+            } for member in members],
+            "issues": [{
+                'sample_id': issue.sample_id,
+                'revision_id': issue.revision_id,
+                'code': issue.code,
+                'message': issue.message,
+                'question': issue.question,
+            } for issue in issues],
         }
         return cls(
             preview_id=preview_id,
@@ -144,19 +139,6 @@ class ExportPreview:
             created_at=created_at,
             expires_at=expires_at,
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "preview_id": self.preview_id,
-            "dataset_id": self.dataset_id,
-            "requested_count": self.requested_count,
-            "exportable_count": self.exportable_count,
-            "issues": [issue.to_record() for issue in self.issues],
-            "members": [member.to_record() for member in self.members],
-            "preview_digest": self.preview_digest,
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -212,23 +194,6 @@ class DatasetExport:
     @property
     def row_count(self) -> int:
         return len(self.rows)
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "export_id": self.export_id,
-            "dataset_id": self.dataset_id,
-            "export_no": self.export_no,
-            "schema_version": self.schema_version,
-            "row_count": self.row_count,
-            "content_digest": self.content_digest,
-            "provenance_digest": self.provenance_digest,
-            "manifest_digest": self.manifest_digest,
-            "manifest": _copy(self.manifest),
-            "preview_id": self.preview_id,
-            "preview_digest": self.preview_digest,
-            "created_by": self.created_by,
-            "created_at": self.created_at,
-        }
 
 
 def member_digest(members: tuple[ExportMember, ...]) -> str:

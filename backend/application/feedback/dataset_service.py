@@ -14,9 +14,8 @@ from domain.feedback.dataset_sample import DatasetSample, SampleAction
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.sample_revision import (
     SampleRevision,
+    RevisionContent,
     content_digest_for,
-    parse_revision_content,
-    sanitize_revision_content_mapping,
 )
 from repositories.analysis_job_repository import (
     DATASET_SAMPLE_BUILD_JOB_TYPE,
@@ -313,7 +312,7 @@ class FeedbackDatasetService:
         dataset_id: str,
         sample_id: str,
         expected_revision_id: str | None,
-        content: dict[str, Any],
+        content: RevisionContent,
         expected_generation: int | None = None,
     ) -> DatasetSample:
         dataset = await self.read_for_user(user_id=user_id, dataset_id=dataset_id)
@@ -333,10 +332,7 @@ class FeedbackDatasetService:
         current = await repository.read_revision(expected_revision_id) if expected_revision_id else None
         if expected_revision_id and (current is None or current.sample_id != sample_id):
             raise FeedbackDatasetError("sample_current_revision_missing")
-        try:
-            parsed = parse_revision_content(sanitize_revision_content_mapping(content))
-        except ValueError as exc:
-            raise FeedbackDatasetError(str(exc)) from exc
+        parsed = content
         if parsed.schema_version != _schema_for_task(dataset.task_type):
             raise FeedbackDatasetError("sample_content_task_type_mismatch")
         case = await self._case_repository().read_case(sample.source_case_id)

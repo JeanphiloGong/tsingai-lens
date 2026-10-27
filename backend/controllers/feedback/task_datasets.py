@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+from domain.feedback.sample_revision import (
+    RevisionContent, SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
+    strip_internal_references,
+)
+from controllers.feedback.task_dataset_schemas import (
+    SftRevisionContentRequest, PreferenceRevisionContentRequest, EvaluationRevisionContentRequest,
+)
+
 import re
 from dataclasses import asdict
 from typing import Literal
@@ -460,7 +468,7 @@ async def update_dataset_sample(
             sample_id=sample_id,
             expected_revision_id=payload.expected_revision_id,
             expected_generation=payload.expected_generation,
-            content=payload.content.model_dump(mode="json"),
+            content=_content_for_revision(payload.content),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="dataset sample not found") from exc
@@ -469,7 +477,7 @@ async def update_dataset_sample(
             status_code=409,
             detail={"code": str(exc), "message": "sample has a newer revision"},
         ) from exc
-    except FeedbackDatasetError as exc:
+    except (FeedbackDatasetError, ValueError) as exc:
         raise HTTPException(
             status_code=422,
             detail={"code": str(exc), "message": str(exc)},
@@ -587,3 +595,48 @@ async def collect_feedback_cases(
 
 
 __all__ = ["router"]
+
+
+def _content_for_revision(
+    value: SftRevisionContentRequest | PreferenceRevisionContentRequest | EvaluationRevisionContentRequest,
+) -> RevisionContent:
+    messages = tuple({**item, "content": strip_internal_references(item["content"])} for item in value.messages)
+    context = tuple({
+        **item,
+        'document_title': strip_internal_references(item.get('document_title')),
+        'text': strip_internal_references(item.get('text')),
+    } for item in value.context)
+    evidence = tuple({
+        **item,
+        'document_title': strip_internal_references(item.get('document_title')),
+        'text': strip_internal_references(item.get('text')),
+    } for item in value.evidence)
+    if isinstance(value, SftRevisionContentRequest):
+        return SftRevisionContent(
+            schema_version=value.schema_version,
+            messages=messages,
+            context=context,
+            target=strip_internal_references(value.target),
+            evidence=evidence,
+        )
+    if isinstance(value, PreferenceRevisionContentRequest):
+        return PreferenceRevisionContent(
+            schema_version=value.schema_version,
+            messages=messages,
+            context=context,
+            response_a=strip_internal_references(value.response_a),
+            response_b=strip_internal_references(value.response_b),
+            suggested_preference=value.suggested_preference,
+            rationale=strip_internal_references(value.rationale),
+            evidence=evidence,
+            human_preference=value.human_preference,
+        )
+    return EvaluationRevisionContent(
+        schema_version=value.schema_version,
+        messages=messages,
+        context=context,
+        reference=strip_internal_references(value.reference),
+        criteria=tuple((strip_internal_references(item) for item in value.criteria)),
+        evaluation_mode=value.evaluation_mode,
+        evidence=evidence,
+    )

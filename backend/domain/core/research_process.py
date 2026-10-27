@@ -83,108 +83,6 @@ class SourceObservation:
             )
         object.__setattr__(self, "derived_from_observation_ids", parents)
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "SourceObservation":
-        source_refs = tuple(
-            dict(item)
-            for item in payload.get("source_refs") or ()
-            if isinstance(item, Mapping)
-        )
-        first_source_ref = source_refs[0] if source_refs else {}
-        observation_id = str(
-            payload.get("observation_id") or payload.get("evidence_id") or ""
-        ).strip()
-        if not observation_id:
-            identity = json.dumps(
-                [
-                    payload.get("objective_id"),
-                    payload.get("document_id"),
-                    payload.get("source_kind") or first_source_ref.get("source_kind"),
-                    payload.get("source_ref") or first_source_ref.get("source_ref"),
-                    payload.get("observation_role") or payload.get("evidence_role"),
-                    payload.get("reported_result"),
-                    payload.get("scientific_context"),
-                ],
-                ensure_ascii=True,
-                sort_keys=True,
-                default=str,
-            )
-            observation_id = f"evd_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-        selection_status = str(payload.get("selection_status") or "extracted").strip()
-        status = str(payload.get("status") or "").strip()
-        if not status:
-            status = "unvalidated"
-        source_excerpt = str(
-            payload.get("source_excerpt")
-            or first_source_ref.get("source_excerpt")
-            or ""
-        ).strip()
-        return cls(
-            observation_id=observation_id,
-            collection_id=str(payload.get("collection_id") or "unknown").strip(),
-            objective_id=str(payload.get("objective_id") or "").strip(),
-            document_id=str(payload.get("document_id") or "").strip(),
-            source_kind=str(
-                payload.get("source_kind")
-                or first_source_ref.get("source_kind")
-                or "text_window"
-            ).strip(),
-            source_ref=str(
-                payload.get("source_ref")
-                or first_source_ref.get("source_ref")
-                or (observation_id if status == "rejected" else "")
-            ).strip(),
-            observation_role=str(
-                payload.get("observation_role")
-                or payload.get("evidence_role")
-                or "unknown"
-            ).strip(),
-            source_excerpt=source_excerpt,
-            changed_variables=tuple(
-                ScientificVariable.from_mapping(item)
-                for item in payload.get("changed_variables") or ()
-                if isinstance(item, Mapping)
-            ),
-            comparison=(
-                ScientificComparison.from_mapping(payload["comparison"])
-                if isinstance(payload.get("comparison"), Mapping)
-                else None
-            ),
-            reported_result=(
-                ScientificResult.from_mapping(payload["reported_result"])
-                if isinstance(payload.get("reported_result"), Mapping)
-                else None
-            ),
-            scientific_context=(
-                ScientificContext.from_mapping(payload["scientific_context"])
-                if isinstance(payload.get("scientific_context"), Mapping)
-                else ScientificContext()
-            ),
-            confidence=float(payload.get("confidence") or 0),
-            selection_status=selection_status,
-            selection_reason=(
-                str(payload["selection_reason"]).strip()
-                if payload.get("selection_reason")
-                else None
-            ),
-            attribution_scope=str(
-                payload.get("attribution_scope") or "not_attributable"
-            ).strip(),
-            resolution_status=str(
-                payload.get("resolution_status") or "unknown"
-            ).strip(),
-            failure_reason=(
-                str(payload["failure_reason"]).strip()
-                if payload.get("failure_reason")
-                else None
-            ),
-            status=status,
-            source_refs=source_refs,
-            derived_from_observation_ids=tuple(
-                payload.get("derived_from_observation_ids") or ()
-            ),
-        )
-
     @property
     def evidence_id(self) -> str:
         """Stable identifier used by the persisted ObjectiveEvidence format."""
@@ -194,35 +92,6 @@ class SourceObservation:
     def evidence_role(self) -> str:
         """Legacy extraction spelling for the observation's scientific role."""
         return self.observation_role
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "observation_id": self.observation_id,
-            "evidence_id": self.observation_id,
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "observation_role": self.observation_role,
-            "evidence_role": self.observation_role,
-            "source_excerpt": self.source_excerpt,
-            "changed_variables": [item.to_record() for item in self.changed_variables],
-            "comparison": self.comparison.to_record() if self.comparison else None,
-            "reported_result": (
-                self.reported_result.to_record() if self.reported_result else None
-            ),
-            "scientific_context": self.scientific_context.to_record(),
-            "confidence": self.confidence,
-            "selection_status": self.selection_status,
-            "selection_reason": self.selection_reason,
-            "attribution_scope": self.attribution_scope,
-            "resolution_status": self.resolution_status,
-            "failure_reason": self.failure_reason,
-            "status": self.status,
-            "source_refs": [dict(item) for item in self.source_refs],
-            "derived_from_observation_ids": list(self.derived_from_observation_ids),
-        }
 
     @property
     def has_scientific_content(self) -> bool:
@@ -234,7 +103,36 @@ class SourceObservation:
         )
 
 
+def build_source_observation_id(
+    *,
+    objective_id: str | None,
+    document_id: str | None,
+    source_kind: str | None,
+    source_ref: str | None,
+    observation_role: str | None,
+    reported_result: Mapping[str, Any] | None,
+    scientific_context: Mapping[str, Any] | None,
+) -> str:
+    """Preserve the identity of a captured Source fact before normalization."""
+    identity = json.dumps(
+        [
+            objective_id,
+            document_id,
+            source_kind,
+            source_ref,
+            observation_role,
+            reported_result,
+            scientific_context,
+        ],
+        ensure_ascii=True,
+        sort_keys=True,
+        default=str,
+    )
+    return f"evd_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+
+
 __all__ = [
     "SOURCE_OBSERVATION_STATUSES",
     "SourceObservation",
+    "build_source_observation_id",
 ]

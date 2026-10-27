@@ -54,20 +54,6 @@ class ScientificAttribute:
                 f"unsupported scientific context scope: {self.context_scope}"
             )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ScientificAttribute":
-        value = _scientific_scalar(payload.get("value"))
-        return cls(
-            name=_text(payload.get("name")) or "",
-            value=value if value is not None else "",
-            unit=_text(payload.get("unit")),
-            context_scope=_choice(
-                payload.get("context_scope"),
-                SCIENTIFIC_CONTEXT_SCOPES,
-                "unknown",
-            ),
-            applies_to_outcomes=_terms(payload.get("applies_to_outcomes")),
-        )
 
     def to_record(self) -> dict[str, Any]:
         record = {"name": self.name, "value": self.value, "unit": self.unit}
@@ -93,14 +79,6 @@ class ScientificVariable:
         if not _text(self.name):
             raise ValueError("scientific variable requires name")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ScientificVariable":
-        return cls(
-            name=_text(payload.get("name")) or "",
-            baseline_value=_scientific_scalar(payload.get("baseline_value")),
-            target_value=_scientific_scalar(payload.get("target_value")),
-            unit=_text(payload.get("unit")),
-        )
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -133,17 +111,6 @@ class ScientificComparison:
                 "comparable scientific comparison cannot have incomparability reasons"
             )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ScientificComparison":
-        return cls(
-            baseline_label=_text(payload.get("baseline_label")) or "",
-            target_label=_text(payload.get("target_label")) or "",
-            axis_names=_terms(payload.get("axis_names")),
-            comparable=payload.get("comparable") is True,
-            incomparability_reasons=_terms(
-                payload.get("incomparability_reasons")
-            ),
-        )
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -176,22 +143,6 @@ class ScientificResult:
         if self.result_kind not in SCIENTIFIC_RESULT_KINDS:
             raise ValueError(f"unsupported scientific result kind: {self.result_kind}")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ScientificResult":
-        return cls(
-            outcome=_text(payload.get("outcome")) or "",
-            value=_scientific_scalar(payload.get("value")),
-            unit=_text(payload.get("unit")),
-            direction=_choice(
-                payload.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
-            ),
-            result_text=_text(payload.get("result_text")) or "",
-            baseline_value=_scientific_scalar(payload.get("baseline_value")),
-            target_value=_scientific_scalar(payload.get("target_value")),
-            result_kind=_choice(
-                payload.get("result_kind"), SCIENTIFIC_RESULT_KINDS, "observed"
-            ),
-        )
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -215,14 +166,6 @@ class ScientificContext:
     process: tuple[ScientificAttribute, ...] = ()
     test: tuple[ScientificAttribute, ...] = ()
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ScientificContext":
-        return cls(
-            material=_attributes(payload.get("material")),
-            sample=_attributes(payload.get("sample")),
-            process=_attributes(payload.get("process")),
-            test=_attributes(payload.get("test")),
-        )
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -235,16 +178,6 @@ class ScientificContext:
     @property
     def has_content(self) -> bool:
         return bool(self.material or self.sample or self.process or self.test)
-
-
-def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ScientificAttribute.from_mapping(item)
-        for item in value
-        if isinstance(item, Mapping)
-    )
 
 
 def _scientific_scalar(value: Any) -> ScientificScalar | None:

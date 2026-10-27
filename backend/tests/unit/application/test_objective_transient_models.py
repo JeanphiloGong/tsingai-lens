@@ -1,10 +1,10 @@
-
-
-from application.core.objectives.analysis.source_screening import PaperFrameSourceDisposition
 import pytest
 
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.analysis.source_screening import (
+    PaperFrameSourceDisposition,
+    PaperAnalysisFrame,
+)
 from domain.core import SourceObservation
 
 
@@ -51,10 +51,10 @@ def test_evidence_candidate_does_not_accept_legacy_paper_id() -> None:
 
 
 def test_source_observation_requires_current_identity_fields() -> None:
-    with pytest.raises(ValueError, match="objective_id"):
-        SourceObservation.from_mapping({"paper_id": "doc_legacy"})
+    with pytest.raises(TypeError, match="paper_id"):
+        SourceObservation(paper_id="doc_legacy")
 
 
 def test_source_observation_does_not_accept_legacy_anchor_only_payload() -> None:
-    with pytest.raises(ValueError, match="objective_id"):
-        SourceObservation.from_mapping({"anchor_ids": ["anchor_legacy"]})
+    with pytest.raises(TypeError, match="anchor_ids"):
+        SourceObservation(anchor_ids=["anchor_legacy"])

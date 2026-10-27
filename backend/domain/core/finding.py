@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
-import math
-import re
 from typing import Any, Final, Mapping
 
 from domain.core.research_objective import (
@@ -14,11 +14,15 @@ from domain.core.research_objective import (
     PaperContribution,
 )
 from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
     SCIENTIFIC_RESULT_DIRECTIONS,
     ScientificAttribute,
     ScientificContext,
 )
-
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 
 FINDING_ASSERTION_STRENGTHS: Final[frozenset[str]] = frozenset(
     {"causal", "associative", "descriptive"}
@@ -471,8 +475,145 @@ class Finding:
                 for item in _mapping_list(payload.get("mechanisms"))
             ),
             scientific_context=(
-                ScientificContext.from_mapping(
-                    _mapping(payload.get("scientific_context"))
+                ScientificContext(
+                    material=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                _mapping(payload.get("scientific_context")).get(
+                                    "material"
+                                )
+                                if isinstance(
+                                    _mapping(payload.get("scientific_context")).get(
+                                        "material"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    sample=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                _mapping(payload.get("scientific_context")).get(
+                                    "sample"
+                                )
+                                if isinstance(
+                                    _mapping(payload.get("scientific_context")).get(
+                                        "sample"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    process=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                _mapping(payload.get("scientific_context")).get(
+                                    "process"
+                                )
+                                if isinstance(
+                                    _mapping(payload.get("scientific_context")).get(
+                                        "process"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    test=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                _mapping(payload.get("scientific_context")).get("test")
+                                if isinstance(
+                                    _mapping(payload.get("scientific_context")).get(
+                                        "test"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
                 )
             ),
             limitations=_strings(payload.get("limitations")),
@@ -480,17 +621,13 @@ class Finding:
                 FindingPaperContribution.from_mapping(item)
                 for item in _mapping_list(payload.get("paper_contributions"))
             ),
-            origin=_choice(
-                payload.get("origin"), FINDING_ORIGINS, "system_generated"
-            ),
+            origin=_choice(payload.get("origin"), FINDING_ORIGINS, "system_generated"),
             source_analysis_version=(
                 _positive_int(payload.get("source_analysis_version")) or None
             ),
             parent_finding_id=_text(payload.get("parent_finding_id")),
             created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(
-                payload.get("created_by_tool_call_id")
-            ),
+            created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
             created_at=_datetime_or_none(payload.get("created_at")),
             warnings=_strings(payload.get("warnings")),
             selection_ids=_strings(payload.get("selection_ids")),

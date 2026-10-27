@@ -3,9 +3,11 @@ from __future__ import annotations
 import pytest
 
 import domain.core as core_domain
+from application.core.objectives.analysis.source_extraction import (
+    _observation_from_extraction,
+)
 from domain.core import (
     ObjectiveEvidence,
-    SourceObservation,
 )
 
 
@@ -50,7 +52,7 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
         "confidence": 0.9,
     }
 
-    observation = SourceObservation.from_mapping(
+    observation = _observation_from_extraction(
         {
             **payload,
             "observation_id": "obs-1",
@@ -87,7 +89,7 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
 
 
 def test_source_observation_ignores_legacy_anchor_ids() -> None:
-    observation = SourceObservation.from_mapping(
+    observation = _observation_from_extraction(
         {
             "observation_id": "obs-1",
             "collection_id": "col-1",
@@ -113,12 +115,12 @@ def test_source_observation_ignores_legacy_anchor_ids() -> None:
     assert observation.reported_result is not None
     assert observation.reported_result.value == 82
     assert observation.has_scientific_content
-    assert "evidence_anchor_ids" not in observation.to_record()
+    assert not hasattr(observation, "evidence_anchor_ids")
 
 
 def test_source_observation_rejects_missing_provenance() -> None:
     with pytest.raises(ValueError, match="source_ref"):
-        SourceObservation.from_mapping(
+        _observation_from_extraction(
             {
                 "observation_id": "obs-1",
                 "collection_id": "col-1",
@@ -138,7 +140,7 @@ def test_source_observation_rejects_missing_provenance() -> None:
 
 
 def test_source_observation_accepts_extraction_record_shape() -> None:
-    observation = SourceObservation.from_mapping(
+    observation = _observation_from_extraction(
         {
             "evidence_id": "evd-1",
             "objective_id": "obj-1",
@@ -169,11 +171,11 @@ def test_source_observation_accepts_extraction_record_shape() -> None:
     assert observation.collection_id == "unknown"
     assert observation.source_refs[0]["source_ref"] == "table-1"
     assert observation.source_excerpt == "Yield strength was 900 MPa."
-    assert observation.to_record()["evidence_id"] == "evd-1"
+    assert observation.evidence_id == "evd-1"
 
 
 def test_rejected_source_observation_can_record_read_failure_without_excerpt() -> None:
-    observation = SourceObservation.from_mapping(
+    observation = _observation_from_extraction(
         {
             "evidence_id": "failed-1",
             "objective_id": "obj-1",
@@ -190,3 +192,42 @@ def test_rejected_source_observation_can_record_read_failure_without_excerpt() -
 
     assert observation.status == "rejected"
     assert not observation.has_scientific_content
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "objective_id": "obj-1",
+            "document_id": "doc-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "evidence_role": "direct_result",
+            "reported_result": {
+                "outcome": "porosity",
+                "value": 0.4,
+                "unit": "%",
+                "direction": "decrease",
+                "result_text": "Porosity was 0.4%.",
+            },
+            "confidence": 0.8,
+            "expected_id": "evd_15e62ff28a9508c537814ef6",
+        },
+        {
+            "objective_id": "obj-1",
+            "document_id": "doc-1",
+            "source_kind": "text_window",
+            "source_ref": "methods-1",
+            "evidence_role": "condition_context",
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Ti-6Al-4V"}]
+            },
+            "confidence": 0.7,
+            "expected_id": "evd_e4234b70b849ef0881f593a6",
+        },
+    ],
+)
+def test_extraction_preserves_source_observation_identity(payload):
+    assert (
+        _observation_from_extraction(payload).observation_id == payload["expected_id"]
+    )

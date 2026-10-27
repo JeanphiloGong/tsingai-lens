@@ -13,7 +13,15 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from domain.core.scientific_fact import ScientificAttribute, ScientificVariable
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    ScientificAttribute,
+    ScientificVariable,
+)
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 
 PAPER_EXPERIMENT_DESIGN_TYPES = frozenset(
     {"parallel", "factorial", "dose_response", "observational", "unknown"}
@@ -118,7 +126,19 @@ def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     return tuple(
-        ScientificAttribute.from_mapping(item)
+        ScientificAttribute(
+            name=scientific_text(item.get("name")) or "",
+            value=(
+                scientific_scalar(item.get("value"))
+                if scientific_scalar(item.get("value")) is not None
+                else ""
+            ),
+            unit=scientific_text(item.get("unit")),
+            context_scope=scientific_choice(
+                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
+            ),
+            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
+        )
         for item in value
         if isinstance(item, Mapping)
     )
@@ -128,7 +148,12 @@ def _variables(value: Any) -> tuple[ScientificVariable, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     return tuple(
-        ScientificVariable.from_mapping(item)
+        ScientificVariable(
+            name=scientific_text(item.get("name")) or "",
+            baseline_value=scientific_scalar(item.get("baseline_value")),
+            target_value=scientific_scalar(item.get("target_value")),
+            unit=scientific_text(item.get("unit")),
+        )
         for item in value
         if isinstance(item, Mapping)
     )

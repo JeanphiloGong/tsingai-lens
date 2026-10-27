@@ -11,11 +11,19 @@ from hashlib import sha1
 from typing import Any, Final, Mapping
 
 from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    SCIENTIFIC_RESULT_KINDS,
+    ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
 )
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 
 PAPER_RELEVANCE_VALUES: Final[frozenset[str]] = frozenset(
     {"high", "medium", "low", "irrelevant", "uncertain"}
@@ -1300,7 +1308,29 @@ class ObjectiveEvidence:
         )
         reported_result_payload = payload.get("reported_result")
         reported_result = (
-            ScientificResult.from_mapping(reported_result_payload)
+            ScientificResult(
+                outcome=scientific_text(reported_result_payload.get("outcome")) or "",
+                value=scientific_scalar(reported_result_payload.get("value")),
+                unit=scientific_text(reported_result_payload.get("unit")),
+                direction=scientific_choice(
+                    reported_result_payload.get("direction"),
+                    SCIENTIFIC_RESULT_DIRECTIONS,
+                    "unknown",
+                ),
+                result_text=scientific_text(reported_result_payload.get("result_text"))
+                or "",
+                baseline_value=scientific_scalar(
+                    reported_result_payload.get("baseline_value")
+                ),
+                target_value=scientific_scalar(
+                    reported_result_payload.get("target_value")
+                ),
+                result_kind=scientific_choice(
+                    reported_result_payload.get("result_kind"),
+                    SCIENTIFIC_RESULT_KINDS,
+                    "observed",
+                ),
+            )
             if isinstance(reported_result_payload, Mapping)
             else None
         )
@@ -1336,7 +1366,23 @@ class ObjectiveEvidence:
             selection_reason=_text(payload.get("selection_reason")),
             changed_variables=_scientific_variables(payload.get("changed_variables")),
             comparison=(
-                ScientificComparison.from_mapping(payload["comparison"])
+                ScientificComparison(
+                    baseline_label=scientific_text(
+                        payload["comparison"].get("baseline_label")
+                    )
+                    or "",
+                    target_label=scientific_text(
+                        payload["comparison"].get("target_label")
+                    )
+                    or "",
+                    axis_names=scientific_terms(
+                        payload["comparison"].get("axis_names")
+                    ),
+                    comparable=payload["comparison"].get("comparable") is True,
+                    incomparability_reasons=scientific_terms(
+                        payload["comparison"].get("incomparability_reasons")
+                    ),
+                )
                 if isinstance(payload.get("comparison"), Mapping)
                 else None
             ),
@@ -1347,7 +1393,132 @@ class ObjectiveEvidence:
                 "not_attributable",
             ),
             scientific_context=(
-                ScientificContext.from_mapping(payload["scientific_context"])
+                ScientificContext(
+                    material=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                payload["scientific_context"].get("material")
+                                if isinstance(
+                                    payload["scientific_context"].get("material"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    sample=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                payload["scientific_context"].get("sample")
+                                if isinstance(
+                                    payload["scientific_context"].get("sample"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    process=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                payload["scientific_context"].get("process")
+                                if isinstance(
+                                    payload["scientific_context"].get("process"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    test=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                payload["scientific_context"].get("test")
+                                if isinstance(
+                                    payload["scientific_context"].get("test"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                )
                 if isinstance(payload.get("scientific_context"), Mapping)
                 else ScientificContext()
             ),
@@ -1359,20 +1530,14 @@ class ObjectiveEvidence:
             failure_reason=_text(payload.get("failure_reason")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
             related_source_refs_explicit="related_source_refs" in payload,
-            origin=_choice(
-                payload.get("origin"), EVIDENCE_ORIGINS, "system_generated"
-            ),
+            origin=_choice(payload.get("origin"), EVIDENCE_ORIGINS, "system_generated"),
             source_analysis_version=_positive_int_or_none(
                 payload.get("source_analysis_version")
             ),
             supersedes_evidence_id=_text(payload.get("supersedes_evidence_id")),
-            superseded_by_evidence_id=_text(
-                payload.get("superseded_by_evidence_id")
-            ),
+            superseded_by_evidence_id=_text(payload.get("superseded_by_evidence_id")),
             created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(
-                payload.get("created_by_tool_call_id")
-            ),
+            created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
             created_at=_datetime_or_none(payload.get("created_at")),
             authoring_note=_text(payload.get("authoring_note")),
             warnings=normalize_objective_terms(payload.get("warnings")),
@@ -1758,7 +1923,12 @@ def _scientific_variables(value: Any) -> tuple[ScientificVariable, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     variables = tuple(
-        ScientificVariable.from_mapping(item)
+        ScientificVariable(
+            name=scientific_text(item.get("name")) or "",
+            baseline_value=scientific_scalar(item.get("baseline_value")),
+            target_value=scientific_scalar(item.get("target_value")),
+            unit=scientific_text(item.get("unit")),
+        )
         for item in value
         if isinstance(item, Mapping)
     )

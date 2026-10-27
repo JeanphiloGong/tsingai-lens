@@ -1,20 +1,5 @@
 from __future__ import annotations
 
-from repositories.paper_map_repository import (
-    coverage_payload,
-    paper_map_payload,
-    research_scope_payload,
-    research_signal_payload,
-    review_synthesis_payload,
-)
-
-
-from repositories.paper_map_repository import _review_item
-from repositories.paper_map_repository import research_scope_from_payload
-from repositories.paper_map_repository import research_signal_from_payload
-from repositories.paper_map_repository import coverage_from_payload
-from repositories.paper_map_repository import paper_map_from_payload
-
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
@@ -41,6 +26,7 @@ from domain.core import (
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (
+    ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
@@ -49,6 +35,18 @@ from domain.core.scientific_fact import (
 from repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
+)
+from repositories.paper_map_repository import (
+    _review_item,
+    coverage_from_payload,
+    coverage_payload,
+    paper_map_from_payload,
+    paper_map_payload,
+    research_scope_from_payload,
+    research_scope_payload,
+    research_signal_from_payload,
+    research_signal_payload,
+    review_synthesis_payload,
 )
 
 
@@ -732,10 +730,16 @@ def test_excluded_paper_contribution_requires_reason() -> None:
 def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch) -> None:
     selected = _candidate_evidence().select(evidence_role="direct_result")
 
-    result = ScientificResult.from_mapping({
-        "outcome": "strength", "value": 610, "unit": "MPa",
-        "result_text": "The heat-treated sample reached 610 MPa.",
-    })
+    result = ScientificResult(
+        outcome="strength",
+        value=610,
+        unit="MPa",
+        direction="unknown",
+        result_text="The heat-treated sample reached 610 MPa.",
+        baseline_value=None,
+        target_value=None,
+        result_kind="observed",
+    )
 
     def reject_serialization(_self):
         pytest.fail("scientific state transitions must not serialize existing Evidence")
@@ -763,24 +767,46 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
                 target_value="heat-treated",
             ),
         ),
-        comparison=ScientificComparison.from_mapping({
-            "baseline_label": "as-built",
-            "target_label": "heat-treated",
-            "axis_names": ["heat treatment"],
-            "comparable": True,
-        }),
-        reported_result=ScientificResult.from_mapping({
-            "outcome": "yield strength",
-            "value": 610,
-            "unit": "MPa",
-            "direction": "increase",
-            "result_text": "The heat-treated sample reached 610 MPa.",
-        }),
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="heat-treated",
+            axis_names=("heat treatment",),
+            comparable=True,
+            incomparability_reasons=(),
+        ),
+        reported_result=ScientificResult(
+            outcome="yield strength",
+            value=610,
+            unit="MPa",
+            direction="increase",
+            result_text="The heat-treated sample reached 610 MPa.",
+            baseline_value=None,
+            target_value=None,
+            result_kind="observed",
+        ),
         attribution_scope="isolated_effect",
-        scientific_context=ScientificContext.from_mapping({
-            "material": [{"name": "alloy", "value": "316L"}],
-            "test": [{"name": "method", "value": "tensile test"}],
-        }),
+        scientific_context=ScientificContext(
+            material=(
+                ScientificAttribute(
+                    name="alloy",
+                    value="316L",
+                    unit=None,
+                    context_scope="unknown",
+                    applies_to_outcomes=(),
+                ),
+            ),
+            sample=(),
+            process=(),
+            test=(
+                ScientificAttribute(
+                    name="method",
+                    value="tensile test",
+                    unit=None,
+                    context_scope="unknown",
+                    applies_to_outcomes=(),
+                ),
+            ),
+        ),
     )
 
     assert candidate.selection_status == "candidate"
@@ -990,9 +1016,20 @@ def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
         evidence_role="condition_context",
     ).select(evidence_role="condition_context")
     extracted = evidence.mark_extracted(
-        scientific_context=ScientificContext.from_mapping({
-            "test": [{"name": "temperature", "value": 25, "unit": "C"}]
-        })
+        scientific_context=ScientificContext(
+            material=(),
+            sample=(),
+            process=(),
+            test=(
+                ScientificAttribute(
+                    name="temperature",
+                    value=25,
+                    unit="C",
+                    context_scope="unknown",
+                    applies_to_outcomes=(),
+                ),
+            ),
+        )
     )
 
     assert extracted.supports_finding is True
@@ -1004,7 +1041,20 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
 
     with pytest.raises(ValueError, match="rejected -> extracted"):
         rejected.mark_extracted(
-            scientific_context=ScientificContext.from_mapping({"process": [{"name": "state", "value": "invalid"}]})
+            scientific_context=ScientificContext(
+                material=(),
+                sample=(),
+                process=(
+                    ScientificAttribute(
+                        name="state",
+                        value="invalid",
+                        unit=None,
+                        context_scope="unknown",
+                        applies_to_outcomes=(),
+                    ),
+                ),
+                test=(),
+            )
         )
     with pytest.raises(ValueError, match="identity and source"):
         _candidate_evidence(source_excerpt="")

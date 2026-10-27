@@ -6,9 +6,11 @@ from repositories.feedback_dataset_sample_repository import revision_content_fro
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from application.feedback.dataset_export_service import DatasetExportError
@@ -336,3 +338,50 @@ def test_first_revision_request_passes_null_revision_and_generation_to_service()
         "fdset_1", "sample-1", payload, _request(Service()),
     ))
     assert response.status == "needs_confirmation"
+
+
+@pytest.mark.parametrize(
+    ("schema_version", "task_fields"),
+    [
+        ("literature-sft.v1", {"target": "人工回答"}),
+        (
+            "literature-preference.v1",
+            {"response_a": "候选回答 A", "response_b": "候选回答 B"},
+        ),
+        (
+            "literature-evaluation.v1",
+            {"reference": "参考回答", "criteria": ["引用与原文一致"]},
+        ),
+    ],
+)
+def test_sample_update_rejects_missing_message_content_before_write(
+    schema_version, task_fields, monkeypatch,
+) -> None:
+    service = SimpleNamespace(update_sample=AsyncMock(return_value=_sample()))
+    app = FastAPI()
+    app.include_router(task_datasets.router, prefix="/api/v1")
+    app.state.feedback_dataset_service = service
+    monkeypatch.setattr(
+        task_datasets, "current_user_id", AsyncMock(return_value="user-1")
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.patch(
+            "/api/v1/feedback-datasets/fdset_1/samples/sample-1",
+            json={
+                "expected_revision_id": "revision-1",
+                "content": {
+                    "schema_version": schema_version,
+                    "messages": [{"role": "user"}],
+                    "context": [{"document_title": "文献 A", "text": "原文"}],
+                    "evidence": [{"document_title": "文献 A", "text": "原文"}],
+                    **task_fields,
+                },
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == (
+        "SFT messages require a valid role and content"
+    )
+    service.update_sample.assert_not_awaited()

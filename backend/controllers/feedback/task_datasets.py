@@ -600,7 +600,7 @@ __all__ = ["router"]
 def _content_for_revision(
     value: SftRevisionContentRequest | PreferenceRevisionContentRequest | EvaluationRevisionContentRequest,
 ) -> RevisionContent:
-    messages = tuple({**item, "content": strip_internal_references(item["content"])} for item in value.messages)
+    messages = tuple({**item, "content": strip_internal_references(item.get("content"))} for item in value.messages)
     context = tuple({
         **item,
         'document_title': strip_internal_references(item.get('document_title')),

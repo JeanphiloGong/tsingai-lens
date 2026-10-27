@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperStudyDisposition,
+    ResearchObjective,
+    _positive_int_or_none,
+    _text,
+    build_research_objective_id,
+    normalize_objective_confidence,
+    normalize_objective_terms,
+)
+
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -34,28 +44,29 @@ from repositories.objective_repository import (
 )
 from repositories.pipeline_run_repository import (
     ExecutionStats,
-    ModelUsage,
-    TokenUsage,
 )
 
 
 def _objective() -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["paper-1"],
-            "confidence": 0.9,
-            "source_relationship_ids": ["relationship-1"],
-            "rank": 1,
-            "confirmation_status": "confirmed",
-            "active_analysis_version": 1,
-            "published_analysis_version": 1,
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id="obj-1",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        source_relationship_ids=("relationship-1",),
+        rank=1,
+        confirmation_status="confirmed",
+        active_analysis_version=1,
+        published_analysis_version=1,
     )
 
 
@@ -65,18 +76,14 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
         objective_id="obj-1",
         analysis_version=1,
         document_inputs=(
-            PreparedDocumentInput("paper-1", "fingerprint-paper-1"),
+            PreparedDocumentInput(
+                document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"
+            ),
         ),
         pipeline_version="test.v1",
         model_name="model-1",
         prompt_versions={"paper_framing": "paper_framing.v1"},
-        stats=ExecutionStats(
-            duration_ms=1250,
-            model_usage=(
-                ModelUsage("model-1", 2, TokenUsage(300, 50, 350)),
-            ),
-            prompt_versions={"paper_framing": "paper_framing.v1"},
-        ),
+        stats=ExecutionStats(duration_ms=None, model_usage=(), prompt_versions={}),
         diagnostics=(
             {
                 "trace_type": "table_matrix_repair",
@@ -504,18 +511,33 @@ def _client(
 
 
 def _ranked_objective(rank: int) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": f"obj-{rank}",
-            "question": f"How does variable {rank} affect outcome {rank}?",
-            "variables": [f"variable {rank}"],
-            "outcomes": [f"outcome {rank}"],
-            "seed_document_ids": [f"paper-{rank}"],
-            "confidence": 1 - rank / 100,
-            "source_relationship_ids": [f"relationship-{rank}"],
-            "rank": rank,
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id=_text(f"obj-{rank}")
+        or build_research_objective_id(
+            question=_text(f"How does variable {rank} affect outcome {rank}?") or "",
+            material_scope=(),
+            variables=normalize_objective_terms([f"variable {rank}"]),
+            outcomes=normalize_objective_terms([f"outcome {rank}"]),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question=_text(f"How does variable {rank} affect outcome {rank}?") or "",
+        material_scope=(),
+        variables=normalize_objective_terms([f"variable {rank}"]),
+        outcomes=normalize_objective_terms([f"outcome {rank}"]),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=normalize_objective_terms([f"paper-{rank}"]),
+        excluded_document_ids=(),
+        confidence=normalize_objective_confidence(1 - rank / 100),
+        reason=None,
+        source_relationship_ids=normalize_objective_terms([f"relationship-{rank}"]),
+        rank=_positive_int_or_none(rank),
     )
 
 
@@ -523,23 +545,19 @@ def _ranked_facts(count: int) -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
         document_inputs=tuple(
-            PreparedDocumentInput(
-                f"paper-{rank}", f"fingerprint-paper-{rank}"
-            )
+            PreparedDocumentInput(f"paper-{rank}", f"fingerprint-paper-{rank}")
             for rank in range(1, count + 1)
         ),
         research_objectives=tuple(
             _ranked_objective(rank) for rank in range(1, count + 1)
         ),
         study_dispositions=tuple(
-            PaperStudyDisposition.from_mapping(
-                {
-                    "document_id": f"paper-{rank}",
-                    "study_id": f"study-{rank}",
-                    "relationship_id": f"relationship-{rank}",
-                    "status": "promoted",
-                    "objective_id": f"obj-{rank}",
-                }
+            PaperStudyDisposition(
+                document_id=_text(f"paper-{rank}") or "",
+                study_id=_text(f"study-{rank}") or "",
+                relationship_id=_text(f"relationship-{rank}") or "",
+                status=PaperStudyDisposition._status("promoted"),
+                objective_id=_text(f"obj-{rank}"),
             )
             for rank in range(1, count + 1)
         ),
@@ -550,18 +568,18 @@ def _default_objective_facts() -> ObjectiveFactSet:
     return ObjectiveFactSet(
         research_objectives_ready=True,
         document_inputs=(
-            PreparedDocumentInput("paper-1", "fingerprint-paper-1"),
+            PreparedDocumentInput(
+                document_id="paper-1", preparation_fingerprint="fingerprint-paper-1"
+            ),
         ),
         research_objectives=(_objective(),),
         study_dispositions=(
-            PaperStudyDisposition.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "study_id": "study-1",
-                    "relationship_id": "relationship-1",
-                    "status": "promoted",
-                    "objective_id": "obj-1",
-                }
+            PaperStudyDisposition(
+                document_id="paper-1",
+                study_id="study-1",
+                relationship_id="relationship-1",
+                status=PaperStudyDisposition._status("promoted"),
+                objective_id="obj-1",
             ),
         ),
     )

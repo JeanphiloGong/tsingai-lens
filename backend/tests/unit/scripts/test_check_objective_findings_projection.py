@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.core.research_objective import ResearchObjective
+
 import importlib.util
 import json
 import sys
@@ -166,17 +168,23 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
         async def read_objective(self, _collection_id, _objective_id):
             from domain.core.research_objective import ResearchObjective
 
-            return ResearchObjective.from_mapping(
-                {
-                    "collection_id": "col-1",
-                    "objective_id": "objective-1",
-                    "question": "Does preheat affect elongation?",
-                    "variables": ["preheat"],
-                    "outcomes": ["elongation"],
-                    "confirmation_status": "confirmed",
-                    "active_analysis_version": 2,
-                    "published_analysis_version": 2,
-                }
+            return ResearchObjective(
+                collection_id="col-1",
+                objective_id="objective-1",
+                question="Does preheat affect elongation?",
+                material_scope=(),
+                variables=("preheat",),
+                outcomes=("elongation",),
+                mechanisms=(),
+                constraints=(),
+                requested_comparator=None,
+                seed_document_ids=(),
+                excluded_document_ids=(),
+                confidence=0.0,
+                reason=None,
+                confirmation_status="confirmed",
+                active_analysis_version=2,
+                published_analysis_version=2,
             )
 
         async def read_analysis(self, *_args):

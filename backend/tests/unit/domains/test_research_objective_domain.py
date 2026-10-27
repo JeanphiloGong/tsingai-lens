@@ -1,5 +1,22 @@
 from __future__ import annotations
 
+
+from domain.core.research_objective import (
+    Mapping,
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_ORIGINS,
+    PreparedDocumentInput,
+    ResearchObjective,
+    _choice,
+    _datetime_or_none,
+    _objective_derivation_basis,
+    _positive_int_or_none,
+    _text,
+    build_research_objective_id,
+    normalize_objective_confidence,
+    normalize_objective_terms,
+)
+
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
@@ -33,8 +50,11 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from repositories.objective_repository import (
-    OBJECTIVE_ANALYSIS_STATUSES,
+    OBJECTIVE_ANALYSIS_ORIGINS,
+    OBJECTIVE_ANALYSIS_RECORD_SOURCES,
     ObjectiveAnalysis,
+    execution_stats_from_json,
+    OBJECTIVE_ANALYSIS_STATUSES,
 )
 from repositories.paper_map_repository import (
     _review_item,
@@ -246,7 +266,59 @@ def _objective(**overrides) -> ResearchObjective:
         "seed_document_ids": ["paper-1", "paper-2"],
     }
     payload.update(overrides)
-    return ResearchObjective.from_mapping(payload)
+    return ResearchObjective(
+        collection_id=_text(payload.get("collection_id")) or "",
+        objective_id=_text(payload.get("objective_id"))
+        or build_research_objective_id(
+            question=_text(payload.get("question")) or "",
+            material_scope=normalize_objective_terms(payload.get("material_scope")),
+            variables=normalize_objective_terms(payload.get("variables")),
+            outcomes=normalize_objective_terms(payload.get("outcomes")),
+            mechanisms=normalize_objective_terms(payload.get("mechanisms")),
+            constraints=normalize_objective_terms(payload.get("constraints")),
+            requested_comparator=_text(payload.get("requested_comparator")),
+            parent_objective_id=_text(payload.get("parent_objective_id")),
+            parent_analysis_version=_positive_int_or_none(
+                payload.get("parent_analysis_version")
+            ),
+        ),
+        question=_text(payload.get("question")) or "",
+        material_scope=normalize_objective_terms(payload.get("material_scope")),
+        variables=normalize_objective_terms(payload.get("variables")),
+        outcomes=normalize_objective_terms(payload.get("outcomes")),
+        mechanisms=normalize_objective_terms(payload.get("mechanisms")),
+        constraints=normalize_objective_terms(payload.get("constraints")),
+        requested_comparator=_text(payload.get("requested_comparator")),
+        seed_document_ids=normalize_objective_terms(payload.get("seed_document_ids")),
+        excluded_document_ids=normalize_objective_terms(
+            payload.get("excluded_document_ids")
+        ),
+        confidence=normalize_objective_confidence(payload.get("confidence")),
+        reason=_text(payload.get("reason")),
+        source_relationship_ids=normalize_objective_terms(
+            payload.get("source_relationship_ids")
+        ),
+        parent_objective_id=_text(payload.get("parent_objective_id")),
+        parent_analysis_version=_positive_int_or_none(
+            payload.get("parent_analysis_version")
+        ),
+        derivation_basis=_objective_derivation_basis(payload.get("derivation_basis")),
+        rank=_positive_int_or_none(payload.get("rank")),
+        confirmation_status=_choice(
+            payload.get("confirmation_status"),
+            OBJECTIVE_CONFIRMATION_STATUSES,
+            "candidate",
+        ),
+        active_analysis_version=_positive_int_or_none(
+            payload.get("active_analysis_version")
+        ),
+        published_analysis_version=_positive_int_or_none(
+            payload.get("published_analysis_version")
+        ),
+        origin=_choice(payload.get("origin"), OBJECTIVE_ORIGINS, "system_discovered"),
+        created_by_user_id=_text(payload.get("created_by_user_id")),
+        created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
+    )
 
 
 def _analysis(**overrides) -> ObjectiveAnalysis:
@@ -327,20 +399,30 @@ def test_build_research_objective_id_covers_complete_scientific_intent() -> None
 
 
 def test_research_objective_normalizes_scope_and_round_trips() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "question": "How does heat treatment affect corrosion resistance?",
-            "material_scope": ["316L", "316L", ""],
-            "variables": ["heat treatment", None],
-            "outcomes": ("corrosion", "EIS"),
-            "mechanisms": ["passive film stability"],
-            "constraints": ["LPBF", "room-temperature electrochemical testing"],
-            "requested_comparator": "as-built material",
-            "seed_document_ids": ["paper-1", "paper-2"],
-            "excluded_document_ids": ["paper-3"],
-            "confidence": 1.2,
-        }
+    objective = ResearchObjective(
+        collection_id="collection-1",
+        objective_id=build_research_objective_id(
+            question="How does heat treatment affect corrosion resistance?",
+            material_scope=("316L",),
+            variables=("heat treatment",),
+            outcomes=("corrosion", "EIS"),
+            mechanisms=("passive film stability",),
+            constraints=("LPBF", "room-temperature electrochemical testing"),
+            requested_comparator="as-built material",
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question="How does heat treatment affect corrosion resistance?",
+        material_scope=("316L",),
+        variables=("heat treatment",),
+        outcomes=("corrosion", "EIS"),
+        mechanisms=("passive film stability",),
+        constraints=("LPBF", "room-temperature electrochemical testing"),
+        requested_comparator="as-built material",
+        seed_document_ids=("paper-1", "paper-2"),
+        excluded_document_ids=("paper-3",),
+        confidence=1.0,
+        reason=None,
     )
 
     record = asdict(objective)
@@ -429,7 +511,71 @@ def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> No
         }
     )
 
-    authored = ObjectiveAnalysis.from_mapping(payload)
+    authored = ObjectiveAnalysis(
+        collection_id=_text(payload.get("collection_id")) or "",
+        objective_id=_text(payload.get("objective_id")) or "",
+        analysis_version=int(payload.get("analysis_version") or 0),
+        document_inputs=tuple(
+            (
+                PreparedDocumentInput(
+                    document_id=_text(item.get("document_id")) or "",
+                    preparation_fingerprint=_text(item.get("preparation_fingerprint"))
+                    or "",
+                )
+                for item in payload.get("document_inputs") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+        pipeline_version=_text(payload.get("pipeline_version")) or "",
+        model_name=_text(payload.get("model_name")),
+        prompt_versions={
+            str(key): str(value)
+            for key, value in dict(payload.get("prompt_versions") or {}).items()
+        },
+        stats=execution_stats_from_json(payload.get("stats")),
+        status=_text(payload.get("status")) or "queued",
+        phase=_text(payload.get("phase")) or "queued",
+        processed_document_count=int(payload.get("processed_document_count") or 0),
+        total_document_count=int(payload.get("total_document_count") or 0),
+        current_document_id=_text(payload.get("current_document_id")),
+        progress_message=_text(payload.get("progress_message")),
+        error_code=_text(payload.get("error_code")),
+        error_message=_text(payload.get("error_message")),
+        created_at=_datetime_or_none(payload.get("created_at")),
+        started_at=_datetime_or_none(payload.get("started_at")),
+        completed_at=_datetime_or_none(payload.get("completed_at")),
+        diagnostics=tuple(
+            (
+                dict(item)
+                for item in payload.get("diagnostics") or ()
+                if isinstance(item, Mapping)
+            )
+        ),
+        origin=_choice(
+            payload.get("origin"), OBJECTIVE_ANALYSIS_ORIGINS, "system_generated"
+        ),
+        scientific_record_source=_choice(
+            payload.get("scientific_record_source"),
+            OBJECTIVE_ANALYSIS_RECORD_SOURCES,
+            (
+                "experiment_graph"
+                if _choice(
+                    payload.get("origin"),
+                    OBJECTIVE_ANALYSIS_ORIGINS,
+                    "system_generated",
+                )
+                == "system_generated"
+                else "authored_snapshot"
+            ),
+        ),
+        source_analysis_version=_positive_int_or_none(
+            payload.get("source_analysis_version")
+        ),
+        created_by_user_id=_text(payload.get("created_by_user_id")),
+        created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
+        abstention_reason=_text(payload.get("abstention_reason")),
+        abstention_note=_text(payload.get("abstention_note")),
+    )
 
     assert authored.scientific_record_source == "authored_snapshot"
 
@@ -499,8 +645,12 @@ def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:
 
 def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
     document_inputs = (
-        PreparedDocumentInput("paper-1", "fingerprint-1"),
-        PreparedDocumentInput("paper-2", "fingerprint-2"),
+        PreparedDocumentInput(
+            document_id="paper-1", preparation_fingerprint="fingerprint-1"
+        ),
+        PreparedDocumentInput(
+            document_id="paper-2", preparation_fingerprint="fingerprint-2"
+        ),
     )
 
     analysis = ObjectiveAnalysis(
@@ -533,7 +683,11 @@ def test_objective_analysis_rejects_document_count_that_differs_from_manifest() 
             collection_id="collection-1",
             objective_id="objective-1",
             analysis_version=1,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             pipeline_version="objective-analysis.v1",
             model_name=None,
             prompt_versions={},
@@ -1566,7 +1720,11 @@ def test_ready_objective_fact_set_requires_every_relationship_exactly_once() -> 
     with pytest.raises(ValueError, match="pending"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1591,7 +1749,11 @@ def test_ready_objective_fact_set_rejects_duplicate_relationship_accounting() ->
     with pytest.raises(ValueError, match="duplicate|exactly once|more than once"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             study_dispositions=(rejected, rejected),
         )
 
@@ -1604,7 +1766,11 @@ def test_ready_objective_fact_set_rejects_unknown_relationship_disposition() -> 
     with pytest.raises(ValueError, match="unselected"):
         ObjectiveFactSet(
             research_objectives_ready=True,
-            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+            ),
             study_dispositions=(
                 _study_disposition(
                     skim,
@@ -1645,8 +1811,12 @@ def test_ready_objective_fact_set_rejects_cross_document_objective_lineage() -> 
         ObjectiveFactSet(
             research_objectives_ready=True,
             document_inputs=(
-                PreparedDocumentInput("paper-1", "fingerprint-1"),
-                PreparedDocumentInput("paper-2", "fingerprint-2"),
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
+                ),
+                PreparedDocumentInput(
+                    document_id="paper-2", preparation_fingerprint="fingerprint-2"
+                ),
             ),
             research_objectives=(objective,),
             study_dispositions=(
@@ -1692,7 +1862,11 @@ def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separatel
 
     facts = ObjectiveFactSet(
         research_objectives_ready=True,
-        document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-1"),),
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="paper-1", preparation_fingerprint="fingerprint-1"
+            ),
+        ),
         research_objectives=(density_objective, strength_objective),
         study_dispositions=(
             _study_disposition(

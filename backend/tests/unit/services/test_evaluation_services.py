@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperStudyDisposition,
+    ResearchObjective,
+    _text,
+    normalize_objective_terms,
+)
+
 from repositories.paper_map_repository import paper_map_from_payload
 
 from dataclasses import replace
@@ -317,19 +324,24 @@ async def test_evaluation_gold_service_rejects_gold_item_outside_collection():
 
 async def _published_objective_repository() -> MemoryObjectiveRepository:
     repository = MemoryObjectiveRepository()
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-1",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["doc-1"],
-            "confidence": 0.9,
-            "source_relationship_ids": [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID],
-            "rank": 1,
-        }
+    objective = ResearchObjective(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        source_relationship_ids=normalize_objective_terms(
+            [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID]
+        ),
+        rank=1,
     )
     skim = paper_map_from_payload(
         {
@@ -371,14 +383,12 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
             document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
-                PaperStudyDisposition.from_mapping(
-                    {
-                        "document_id": "doc-1",
-                        "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                        "relationship_id": _TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
-                        "status": "promoted",
-                        "objective_id": objective.objective_id,
-                    }
+                PaperStudyDisposition(
+                    document_id="doc-1",
+                    study_id=_text(_TEMPERATURE_STRENGTH_STUDY_ID) or "",
+                    relationship_id=_text(_TEMPERATURE_STRENGTH_RELATIONSHIP_ID) or "",
+                    status=PaperStudyDisposition._status("promoted"),
+                    objective_id=_text(objective.objective_id),
                 ),
             ),
         ),
@@ -655,19 +665,24 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
 
 
 async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-candidate",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["doc-1"],
-            "confidence": 0.9,
-            "source_relationship_ids": [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID],
-            "rank": 1,
-        }
+    objective = ResearchObjective(
+        collection_id="col-gold",
+        objective_id="obj-candidate",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        source_relationship_ids=normalize_objective_terms(
+            [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID]
+        ),
+        rank=1,
     )
     skim = paper_map_from_payload(
         {
@@ -709,14 +724,12 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
             document_inputs=(_DOC_1_INPUT,),
             research_objectives=(objective,),
             study_dispositions=(
-                PaperStudyDisposition.from_mapping(
-                    {
-                        "document_id": "doc-1",
-                        "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                        "relationship_id": _TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
-                        "status": "promoted",
-                        "objective_id": objective.objective_id,
-                    }
+                PaperStudyDisposition(
+                    document_id="doc-1",
+                    study_id=_text(_TEMPERATURE_STRENGTH_STUDY_ID) or "",
+                    relationship_id=_text(_TEMPERATURE_STRENGTH_RELATIONSHIP_ID) or "",
+                    status=PaperStudyDisposition._status("promoted"),
+                    objective_id=_text(objective.objective_id),
                 ),
             ),
         ),

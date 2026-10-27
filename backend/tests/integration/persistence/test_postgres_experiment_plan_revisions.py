@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    ResearchObjective,
+    _text,
+    build_research_objective_id,
+)
+
 import asyncio
 
 import pytest
@@ -25,20 +31,34 @@ OBJECTIVE_ID = "objective-plan-revisions"
 
 @pytest.fixture
 async def experiment_plan_repository(source_repository):
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": OBJECTIVE_ID,
-            "question": "How does laser power affect porosity?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["laser power"],
-            "outcomes": ["porosity"],
-            "seed_document_ids": ["doc_a"],
-            "confidence": 0,
-            "origin": "chat_assisted",
-            "created_by_user_id": "user_source",
-            "created_by_tool_call_id": "call-plan-objective",
-        }
+    objective = ResearchObjective(
+        collection_id=_text(COLLECTION_ID) or "",
+        objective_id=_text(OBJECTIVE_ID)
+        or build_research_objective_id(
+            question="How does laser power affect porosity?",
+            material_scope=("Ti-6Al-4V",),
+            variables=("laser power",),
+            outcomes=("porosity",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question="How does laser power affect porosity?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("porosity",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc_a",),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        origin="chat_assisted",
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-plan-objective",
     )
     await ObjectiveRepository(
         source_repository.session_factory

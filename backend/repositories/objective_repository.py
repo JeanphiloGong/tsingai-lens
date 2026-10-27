@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from repositories.pipeline_run_repository import execution_stats_record
-
-from repositories.pipeline_run_repository import execution_stats_from_json
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
@@ -17,11 +14,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from domain.core import PaperStudyDisposition
 from domain.core.finding import Finding
 from domain.core.research_objective import (
+    Mapping,
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_ORIGINS,
+    PaperStudyDisposition,
+    PreparedDocumentInput,
+    ResearchObjective,
+    _choice,
+    _datetime_or_none,
+    _objective_derivation_basis,
+    _positive_int_or_none,
+    _text,
+    normalize_objective_confidence,
+    normalize_objective_terms,
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
-    PreparedDocumentInput,
-    ResearchObjective,
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document_preparation import (
@@ -32,7 +40,11 @@ from infra.persistence.postgres.models.objective import (
     ObjectiveResearchRecord,
 )
 from infra.persistence.postgres.transaction import database_session_scope
-from repositories.pipeline_run_repository import ExecutionStats
+from repositories.pipeline_run_repository import (
+    execution_stats_record,
+    execution_stats_from_json,
+    ExecutionStats,
+)
 
 OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"queued", "running", "succeeded", "failed"}
@@ -252,62 +264,6 @@ class ObjectiveAnalysis:
             and self.scientific_record_source == "experiment_graph"
         )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveAnalysis":
-        origin = _choice(
-            payload.get("origin"),
-            OBJECTIVE_ANALYSIS_ORIGINS,
-            "system_generated",
-        )
-        default_record_source = (
-            "experiment_graph" if origin == "system_generated" else "authored_snapshot"
-        )
-        return cls(
-            collection_id=_text(payload.get("collection_id")) or "",
-            objective_id=_text(payload.get("objective_id")) or "",
-            analysis_version=int(payload.get("analysis_version") or 0),
-            document_inputs=tuple(
-                PreparedDocumentInput.from_mapping(item)
-                for item in payload.get("document_inputs") or ()
-                if isinstance(item, Mapping)
-            ),
-            pipeline_version=_text(payload.get("pipeline_version")) or "",
-            model_name=_text(payload.get("model_name")),
-            prompt_versions={
-                str(key): str(value)
-                for key, value in dict(payload.get("prompt_versions") or {}).items()
-            },
-            stats=execution_stats_from_json(payload.get("stats")),
-            status=_text(payload.get("status")) or "queued",
-            phase=_text(payload.get("phase")) or "queued",
-            processed_document_count=int(payload.get("processed_document_count") or 0),
-            total_document_count=int(payload.get("total_document_count") or 0),
-            current_document_id=_text(payload.get("current_document_id")),
-            progress_message=_text(payload.get("progress_message")),
-            error_code=_text(payload.get("error_code")),
-            error_message=_text(payload.get("error_message")),
-            created_at=_datetime_or_none(payload.get("created_at")),
-            started_at=_datetime_or_none(payload.get("started_at")),
-            completed_at=_datetime_or_none(payload.get("completed_at")),
-            diagnostics=tuple(
-                dict(item)
-                for item in payload.get("diagnostics") or ()
-                if isinstance(item, Mapping)
-            ),
-            origin=origin,
-            scientific_record_source=_choice(
-                payload.get("scientific_record_source"),
-                OBJECTIVE_ANALYSIS_RECORD_SOURCES,
-                default_record_source,
-            ),
-            source_analysis_version=_positive_int_or_none(
-                payload.get("source_analysis_version")
-            ),
-            created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
-            abstention_reason=_text(payload.get("abstention_reason")),
-            abstention_note=_text(payload.get("abstention_note")),
-        )
 
     def start(self, *, started_at: datetime | None = None) -> "ObjectiveAnalysis":
         return self._transition(
@@ -515,7 +471,13 @@ class ObjectiveRepository:
             return ObjectiveFactSet(
                 research_objectives_ready=collection.discovery_ready,
                 document_inputs=tuple(
-                    PreparedDocumentInput.from_mapping(item)
+                    PreparedDocumentInput(
+                        document_id=_text(item.get("document_id")) or "",
+                        preparation_fingerprint=_text(
+                            item.get("preparation_fingerprint")
+                        )
+                        or "",
+                    )
                     for item in collection.discovery_document_inputs
                 ),
                 research_objectives=tuple(
@@ -524,7 +486,16 @@ class ObjectiveRepository:
                     if objective_id in by_id
                 ),
                 study_dispositions=tuple(
-                    PaperStudyDisposition.from_mapping(item)
+                    PaperStudyDisposition(
+                        document_id=_text(item.get("document_id")) or "",
+                        study_id=_text(item.get("study_id")) or "",
+                        relationship_id=_text(item.get("relationship_id")) or "",
+                        status=PaperStudyDisposition._status(
+                            item.get("status") or "pending"
+                        ),
+                        objective_id=_text(item.get("objective_id")),
+                        reason=_text(item.get("reason")),
+                    )
                     for item in collection.discovery_study_dispositions
                 ),
             )
@@ -1233,8 +1204,54 @@ class ObjectiveRepository:
             return tuple(ObjectiveEvidence.from_mapping(item) for item in page), total
 
     @staticmethod
+    @staticmethod
     def _objective_from_row(row: ObjectiveResearchRecord) -> ResearchObjective:
-        return ResearchObjective.from_mapping(row.payload)
+        return ResearchObjective(
+            collection_id=row.collection_id,
+            objective_id=row.objective_id,
+            question=_text(row.payload.get("question")) or "",
+            material_scope=normalize_objective_terms(row.payload.get("material_scope")),
+            variables=normalize_objective_terms(row.payload.get("variables")),
+            outcomes=normalize_objective_terms(row.payload.get("outcomes")),
+            mechanisms=normalize_objective_terms(row.payload.get("mechanisms")),
+            constraints=normalize_objective_terms(row.payload.get("constraints")),
+            requested_comparator=_text(row.payload.get("requested_comparator")),
+            seed_document_ids=normalize_objective_terms(
+                row.payload.get("seed_document_ids")
+            ),
+            excluded_document_ids=normalize_objective_terms(
+                row.payload.get("excluded_document_ids")
+            ),
+            confidence=normalize_objective_confidence(row.payload.get("confidence")),
+            reason=_text(row.payload.get("reason")),
+            source_relationship_ids=normalize_objective_terms(
+                row.payload.get("source_relationship_ids")
+            ),
+            parent_objective_id=_text(row.payload.get("parent_objective_id")),
+            parent_analysis_version=_positive_int_or_none(
+                row.payload.get("parent_analysis_version")
+            ),
+            derivation_basis=_objective_derivation_basis(
+                row.payload.get("derivation_basis")
+            ),
+            rank=_positive_int_or_none(row.payload.get("rank")),
+            confirmation_status=_choice(
+                row.payload.get("confirmation_status"),
+                OBJECTIVE_CONFIRMATION_STATUSES,
+                "candidate",
+            ),
+            active_analysis_version=_positive_int_or_none(
+                row.payload.get("active_analysis_version")
+            ),
+            published_analysis_version=_positive_int_or_none(
+                row.payload.get("published_analysis_version")
+            ),
+            origin=_choice(
+                row.payload.get("origin"), OBJECTIVE_ORIGINS, "system_discovered"
+            ),
+            created_by_user_id=_text(row.payload.get("created_by_user_id")),
+            created_by_tool_call_id=_text(row.payload.get("created_by_tool_call_id")),
+        )
 
     @staticmethod
     def _objective_record_from_row(
@@ -1248,7 +1265,77 @@ class ObjectiveRepository:
 
     @staticmethod
     def _analysis_from_row(row: ObjectiveAnalysisRecord) -> ObjectiveAnalysis:
-        return ObjectiveAnalysis.from_mapping(row.payload)
+        return ObjectiveAnalysis(
+            collection_id=_text(row.payload.get("collection_id")) or "",
+            objective_id=_text(row.payload.get("objective_id")) or "",
+            analysis_version=int(row.payload.get("analysis_version") or 0),
+            document_inputs=tuple(
+                (
+                    PreparedDocumentInput(
+                        document_id=_text(item.get("document_id")) or "",
+                        preparation_fingerprint=_text(
+                            item.get("preparation_fingerprint")
+                        )
+                        or "",
+                    )
+                    for item in row.payload.get("document_inputs") or ()
+                    if isinstance(item, Mapping)
+                )
+            ),
+            pipeline_version=_text(row.payload.get("pipeline_version")) or "",
+            model_name=_text(row.payload.get("model_name")),
+            prompt_versions={
+                str(key): str(value)
+                for key, value in dict(row.payload.get("prompt_versions") or {}).items()
+            },
+            stats=execution_stats_from_json(row.payload.get("stats")),
+            status=_text(row.payload.get("status")) or "queued",
+            phase=_text(row.payload.get("phase")) or "queued",
+            processed_document_count=int(
+                row.payload.get("processed_document_count") or 0
+            ),
+            total_document_count=int(row.payload.get("total_document_count") or 0),
+            current_document_id=_text(row.payload.get("current_document_id")),
+            progress_message=_text(row.payload.get("progress_message")),
+            error_code=_text(row.payload.get("error_code")),
+            error_message=_text(row.payload.get("error_message")),
+            created_at=_datetime_or_none(row.payload.get("created_at")),
+            started_at=_datetime_or_none(row.payload.get("started_at")),
+            completed_at=_datetime_or_none(row.payload.get("completed_at")),
+            diagnostics=tuple(
+                (
+                    dict(item)
+                    for item in row.payload.get("diagnostics") or ()
+                    if isinstance(item, Mapping)
+                )
+            ),
+            origin=_choice(
+                row.payload.get("origin"),
+                OBJECTIVE_ANALYSIS_ORIGINS,
+                "system_generated",
+            ),
+            scientific_record_source=_choice(
+                row.payload.get("scientific_record_source"),
+                OBJECTIVE_ANALYSIS_RECORD_SOURCES,
+                (
+                    "experiment_graph"
+                    if _choice(
+                        row.payload.get("origin"),
+                        OBJECTIVE_ANALYSIS_ORIGINS,
+                        "system_generated",
+                    )
+                    == "system_generated"
+                    else "authored_snapshot"
+                ),
+            ),
+            source_analysis_version=_positive_int_or_none(
+                row.payload.get("source_analysis_version")
+            ),
+            created_by_user_id=_text(row.payload.get("created_by_user_id")),
+            created_by_tool_call_id=_text(row.payload.get("created_by_tool_call_id")),
+            abstention_reason=_text(row.payload.get("abstention_reason")),
+            abstention_note=_text(row.payload.get("abstention_note")),
+        )
 
     @staticmethod
     def _new_objective_row(

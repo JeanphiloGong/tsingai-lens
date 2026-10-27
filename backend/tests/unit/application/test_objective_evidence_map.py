@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.core.research_objective import ResearchObjective, _positive_int_or_none
+
 from dataclasses import replace
 
 import pytest
@@ -17,20 +19,23 @@ from repositories.objective_repository import ObjectiveAnalysis
 
 
 def _objective(*, published_version: int | None = 1) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "How does heat treatment affect tensile strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["heat treatment temperature"],
-            "outcomes": ["ultimate tensile strength"],
-            "seed_document_ids": ["paper-1", "paper-2", "paper-3"],
-            "confidence": 0.9,
-            "confirmation_status": "confirmed",
-            "active_analysis_version": published_version,
-            "published_analysis_version": published_version,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="How does heat treatment affect tensile strength?",
+        material_scope=("Alloy A",),
+        variables=("heat treatment temperature",),
+        outcomes=("ultimate tensile strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1", "paper-2", "paper-3"),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        confirmation_status="confirmed",
+        active_analysis_version=_positive_int_or_none(published_version),
+        published_analysis_version=_positive_int_or_none(published_version),
     )
 
 

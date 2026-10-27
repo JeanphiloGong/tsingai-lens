@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.core.research_objective import ResearchObjective
+
 from datetime import UTC, datetime
 
 from domain.core import PreparedDocumentInput, ResearchObjective
@@ -8,18 +10,21 @@ from repositories.objective_repository import ObjectiveAnalysis, ObjectiveReposi
 
 
 def _objective() -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["paper-1", "paper-2"],
-            "confidence": 0.9,
-            "rank": 1,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1", "paper-2"),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        rank=1,
     )
 
 
@@ -82,7 +87,11 @@ def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> 
         collection_id="collection-1",
         objective_id="objective-1",
         analysis_version=1,
-        document_inputs=(PreparedDocumentInput("paper-1", "preparation-1"),),
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="paper-1", preparation_fingerprint="preparation-1"
+            ),
+        ),
         pipeline_version="objective-analysis.v2",
         model_name="model-a",
         prompt_versions={},

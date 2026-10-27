@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from copy import deepcopy
 import json
 
@@ -15,7 +16,10 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
     build_bundle_from_routes,
     build_source_bundle,
 )
-from domain.core.research_objective import ResearchObjective
+from domain.core.research_objective import (
+    ResearchObjective,
+    normalize_objective_terms,
+)
 
 
 class FakeStructuredResponseClient:
@@ -50,17 +54,20 @@ class FakeStructuredResponseClient:
 
 
 def _objective(*, outcome: str = "elongation") -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "Does preheating change elongation?",
-            "material_scope": ["316L"],
-            "variables": ["preheating"],
-            "outcomes": [outcome],
-            "seed_document_ids": ["document-1"],
-            "confidence": 1.0,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="Does preheating change elongation?",
+        material_scope=("316L",),
+        variables=("preheating",),
+        outcomes=normalize_objective_terms([outcome]),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("document-1",),
+        excluded_document_ids=(),
+        confidence=1.0,
+        reason=None,
     )
 
 

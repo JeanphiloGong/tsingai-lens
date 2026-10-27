@@ -1,5 +1,11 @@
 """Moved execution records preserve publication and failure history in PostgreSQL."""
 
+from domain.core.research_objective import (
+    ResearchObjective,
+    _text,
+    build_research_objective_id,
+)
+
 import pytest
 
 from domain.core import (
@@ -32,24 +38,50 @@ async def objective_repository(source_repository):
             COLLECTION_ID, _source(document_id, title=document_id),
         )
     repository = ObjectiveRepository(source_repository.session_factory)
-    objective = ResearchObjective.from_mapping({
-        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
-        "question": "How does laser power affect tensile strength?",
-        "material_scope": ["Ti-6Al-4V"], "variables": ["laser power"],
-        "outcomes": ["tensile strength"], "seed_document_ids": ["doc_a", "doc_b"],
-    })
+    objective = ResearchObjective(
+        collection_id=_text(COLLECTION_ID) or "",
+        objective_id=_text(OBJECTIVE_ID)
+        or build_research_objective_id(
+            question="How does laser power affect tensile strength?",
+            material_scope=("Ti-6Al-4V",),
+            variables=("laser power",),
+            outcomes=("tensile strength",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question="How does laser power affect tensile strength?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("tensile strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc_a", "doc_b"),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+    )
     await repository.replace(COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,)))
     return repository
 
 
 async def _queue_and_claim(repository):
     objective, queued = await repository.queue_analysis(
-        COLLECTION_ID, OBJECTIVE_ID,
+        COLLECTION_ID,
+        OBJECTIVE_ID,
         document_inputs=(
-            PreparedDocumentInput("doc_a", "fingerprint-doc-a"),
-            PreparedDocumentInput("doc_b", "fingerprint-doc-b"),
+            PreparedDocumentInput(
+                document_id="doc_a", preparation_fingerprint="fingerprint-doc-a"
+            ),
+            PreparedDocumentInput(
+                document_id="doc_b", preparation_fingerprint="fingerprint-doc-b"
+            ),
         ),
-        pipeline_version="objective-analysis.v1", model_name="test-model",
+        pipeline_version="objective-analysis.v1",
+        model_name="test-model",
         prompt_versions={"finding": "v1"},
     )
     claimed = await repository.claim_analysis(COLLECTION_ID, OBJECTIVE_ID, queued.analysis_version)
@@ -117,16 +149,21 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
 
     sessions = source_repository.session_factory
     repository = ObjectiveRepository(sessions)
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": "preheat-elongation",
-            "question": "Does preheat change elongation in 316L?",
-            "material_scope": ["316L"],
-            "variables": ["preheat"],
-            "outcomes": ["elongation"],
-            "confirmation_status": "confirmed",
-        }
+    objective = ResearchObjective(
+        collection_id=_text(COLLECTION_ID) or "",
+        objective_id="preheat-elongation",
+        question="Does preheat change elongation in 316L?",
+        material_scope=("316L",),
+        variables=("preheat",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
     )
     await repository.replace(
         COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,))
@@ -244,20 +281,28 @@ async def test_published_evidence_gap_survives_a_failed_followup(
     source_repository,
 ) -> None:
     repository = ObjectiveRepository(source_repository.session_factory)
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": "laser-power-porosity",
-            "question": "How does laser power affect porosity in Ti-6Al-4V?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["laser power"],
-            "outcomes": ["porosity"],
-            "seed_document_ids": ["doc_a", "doc_b"],
-        }
+    objective = ResearchObjective(
+        collection_id=_text(COLLECTION_ID) or "",
+        objective_id="laser-power-porosity",
+        question="How does laser power affect porosity in Ti-6Al-4V?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("porosity",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("doc_a", "doc_b"),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
     )
     inputs = (
-        PreparedDocumentInput("doc_a", "prepared-a"),
-        PreparedDocumentInput("doc_b", "prepared-b"),
+        PreparedDocumentInput(
+            document_id="doc_a", preparation_fingerprint="prepared-a"
+        ),
+        PreparedDocumentInput(
+            document_id="doc_b", preparation_fingerprint="prepared-b"
+        ),
     )
     await repository.replace(
         COLLECTION_ID, ObjectiveFactSet(research_objectives=(objective,))

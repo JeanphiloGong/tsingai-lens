@@ -13,7 +13,10 @@ from application.core.objectives.analysis.paper_experiment_contract import (
     prepare_model_output,
     reconcile_model_output,
 )
-from domain.core.research_objective import ResearchObjective
+from domain.core.research_objective import (
+    ResearchObjective,
+    normalize_objective_terms,
+)
 
 
 def _output_payload() -> dict:
@@ -930,16 +933,20 @@ def _readiness_output(
 
 
 def _readiness_objective(*, outcome: str = "elongation") -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "Does preheating affect the reported outcome?",
-            "material_scope": ["316L"],
-            "variables": ["preheating"],
-            "outcomes": [outcome],
-            "confidence": 1.0,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="Does preheating affect the reported outcome?",
+        material_scope=("316L",),
+        variables=("preheating",),
+        outcomes=normalize_objective_terms([outcome]),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=1.0,
+        reason=None,
     )
 
 

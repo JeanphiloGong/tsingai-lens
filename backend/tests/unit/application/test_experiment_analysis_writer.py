@@ -24,15 +24,20 @@ from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
 from domain.core.research_objective import (
+    PreparedDocumentInput,
+    ResearchObjective,
+    normalize_objective_terms,
     ObjectiveFactSet,
     PaperContribution,
-    ResearchObjective,
 )
 from repositories.experiment_analysis_repository import (
     ExperimentAnalysisWrite,
     StoredExperimentAnalysis,
 )
-from repositories.objective_repository import ObjectiveAnalysis
+from repositories.objective_repository import (
+    ExecutionStats,
+    ObjectiveAnalysis,
+)
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
@@ -49,40 +54,44 @@ def anyio_backend():
 def _objective(
     *, variables: tuple[str, ...] = ("preheat",)
 ) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "Does preheat change elongation?",
-            "material_scope": ["316L"],
-            "variables": list(variables),
-            "outcomes": ["elongation"],
-            "confirmation_status": "confirmed",
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="Does preheat change elongation?",
+        material_scope=("316L",),
+        variables=normalize_objective_terms(list(variables)),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
     )
 
 
 def _analysis(version: int = 1) -> ObjectiveAnalysis:
-    return ObjectiveAnalysis.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": version,
-            "document_inputs": [
-                {
-                    "document_id": "paper-a",
-                    "preparation_fingerprint": "prepared-a",
-                },
-                {
-                    "document_id": "paper-b",
-                    "preparation_fingerprint": "prepared-b",
-                },
-            ],
-            "pipeline_version": "test",
-            "status": "succeeded",
-            "processed_document_count": 2,
-            "total_document_count": 2,
-        }
+    return ObjectiveAnalysis(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=int(version or 0),
+        document_inputs=(
+            PreparedDocumentInput(
+                document_id="paper-a", preparation_fingerprint="prepared-a"
+            ),
+            PreparedDocumentInput(
+                document_id="paper-b", preparation_fingerprint="prepared-b"
+            ),
+        ),
+        pipeline_version="test",
+        model_name=None,
+        prompt_versions={str(key): str(value) for key, value in dict({}).items()},
+        stats=ExecutionStats(duration_ms=None, model_usage=(), prompt_versions={}),
+        status="succeeded",
+        processed_document_count=int(2),
+        total_document_count=int(2),
     )
 
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from repositories.paper_map_repository import paper_map_payload, research_scope_payload
 
-from repositories.paper_map_repository import paper_map_from_payload
+from repositories.paper_map_repository import (
+    paper_map_payload,
+    research_scope_payload,
+    paper_map_from_payload,
+)
 
 from itertools import permutations
 from typing import Any
@@ -16,7 +19,11 @@ from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from domain.core import PaperResearchMap, PreparedDocumentInput, ResearchObjective
-from domain.core.research_objective import PaperResearchRelationship, PaperResearchScope
+from domain.core.research_objective import (
+    ResearchObjective,
+    PaperResearchRelationship,
+    PaperResearchScope,
+)
 
 
 class _GroupingExtractor:
@@ -2214,34 +2221,41 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
     )
     inventory = ObjectiveCandidateService._relationship_inventory(skims)
     objectives = (
-        ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-test",
-                "objective_id": "objective-fewer-relationships",
-                "question": "How does factor b affect outcome b?",
-                "variables": ["factor b"],
-                "outcomes": ["outcome b"],
-                "seed_document_ids": ["paper-b-1", "paper-b-2"],
-                "source_relationship_ids": [
-                    "relationship-b-1",
-                    "relationship-b-2",
-                ],
-            }
+        ResearchObjective(
+            collection_id="collection-test",
+            objective_id="objective-fewer-relationships",
+            question="How does factor b affect outcome b?",
+            material_scope=(),
+            variables=("factor b",),
+            outcomes=("outcome b",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=("paper-b-1", "paper-b-2"),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            source_relationship_ids=("relationship-b-1", "relationship-b-2"),
         ),
-        ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-test",
-                "objective_id": "objective-more-relationships",
-                "question": "How does factor a affect outcome a?",
-                "variables": ["factor a"],
-                "outcomes": ["outcome a"],
-                "seed_document_ids": ["paper-a-1", "paper-a-2"],
-                "source_relationship_ids": [
-                    "relationship-a-1",
-                    "relationship-a-2",
-                    "relationship-a-3",
-                ],
-            }
+        ResearchObjective(
+            collection_id="collection-test",
+            objective_id="objective-more-relationships",
+            question="How does factor a affect outcome a?",
+            material_scope=(),
+            variables=("factor a",),
+            outcomes=("outcome a",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=("paper-a-1", "paper-a-2"),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            source_relationship_ids=(
+                "relationship-a-1",
+                "relationship-a-2",
+                "relationship-a-3",
+            ),
         ),
     )
 
@@ -2279,33 +2293,37 @@ def test_ranking_prefers_structured_result_sources_before_relationship_count():
     )
     inventory = ObjectiveCandidateService._relationship_inventory(skims)
     objectives = (
-        ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-test",
-                "objective_id": "objective-block",
-                "question": "How does laser power affect relative density?",
-                "variables": ["laser power"],
-                "outcomes": ["relative density"],
-                "seed_document_ids": ["paper-block-a", "paper-block-b"],
-                "source_relationship_ids": [
-                    "relationship-block-a",
-                    "relationship-block-b",
-                ],
-            }
+        ResearchObjective(
+            collection_id="collection-test",
+            objective_id="objective-block",
+            question="How does laser power affect relative density?",
+            material_scope=(),
+            variables=("laser power",),
+            outcomes=("relative density",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=("paper-block-a", "paper-block-b"),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            source_relationship_ids=("relationship-block-a", "relationship-block-b"),
         ),
-        ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-test",
-                "objective_id": "objective-table",
-                "question": "How does laser power affect relative density?",
-                "variables": ["laser power"],
-                "outcomes": ["relative density"],
-                "seed_document_ids": ["paper-table-a", "paper-table-b"],
-                "source_relationship_ids": [
-                    "relationship-table-a",
-                    "relationship-table-b",
-                ],
-            }
+        ResearchObjective(
+            collection_id="collection-test",
+            objective_id="objective-table",
+            question="How does laser power affect relative density?",
+            material_scope=(),
+            variables=("laser power",),
+            outcomes=("relative density",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=("paper-table-a", "paper-table-b"),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            source_relationship_ids=("relationship-table-a", "relationship-table-b"),
         ),
     )
 
@@ -2359,41 +2377,45 @@ def test_ranking_prefers_structured_results_from_independent_papers():
     )
     inventory = ObjectiveCandidateService._relationship_inventory(skims)
     objectives = (
-        ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-test",
-                "objective_id": "objective-concentrated",
-                "question": "How does laser power affect relative density?",
-                "variables": ["laser power"],
-                "outcomes": ["relative density"],
-                "seed_document_ids": [
-                    "paper-concentrated-a",
-                    "paper-concentrated-b",
-                ],
-                "source_relationship_ids": [
-                    "relationship-concentrated-a",
-                    "relationship-concentrated-b",
-                    "relationship-concentrated-table-1",
-                    "relationship-concentrated-table-2",
-                ],
-            }
+        ResearchObjective(
+            collection_id="collection-test",
+            objective_id="objective-concentrated",
+            question="How does laser power affect relative density?",
+            material_scope=(),
+            variables=("laser power",),
+            outcomes=("relative density",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=("paper-concentrated-a", "paper-concentrated-b"),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            source_relationship_ids=(
+                "relationship-concentrated-a",
+                "relationship-concentrated-b",
+                "relationship-concentrated-table-1",
+                "relationship-concentrated-table-2",
+            ),
         ),
-        ResearchObjective.from_mapping(
-            {
-                "collection_id": "collection-test",
-                "objective_id": "objective-distributed",
-                "question": "How does laser power affect relative density?",
-                "variables": ["laser power"],
-                "outcomes": ["relative density"],
-                "seed_document_ids": [
-                    "paper-distributed-a",
-                    "paper-distributed-b",
-                ],
-                "source_relationship_ids": [
-                    "relationship-distributed-a",
-                    "relationship-distributed-b",
-                ],
-            }
+        ResearchObjective(
+            collection_id="collection-test",
+            objective_id="objective-distributed",
+            question="How does laser power affect relative density?",
+            material_scope=(),
+            variables=("laser power",),
+            outcomes=("relative density",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=("paper-distributed-a", "paper-distributed-b"),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            source_relationship_ids=(
+                "relationship-distributed-a",
+                "relationship-distributed-b",
+            ),
         ),
     )
 

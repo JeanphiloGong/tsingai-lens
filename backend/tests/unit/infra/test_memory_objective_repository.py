@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    ResearchObjective,
+    build_research_objective_id,
+)
+
 import pytest
 
 from domain.core import ResearchObjective
@@ -14,19 +19,33 @@ def anyio_backend() -> str:
 
 
 def _authored_objective() -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "question": "How does laser power affect tensile strength?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["laser power"],
-            "outcomes": ["tensile strength"],
-            "seed_document_ids": ["paper-1"],
-            "confidence": 0,
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-create",
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id=build_research_objective_id(
+            question="How does laser power affect tensile strength?",
+            material_scope=("Ti-6Al-4V",),
+            variables=("laser power",),
+            outcomes=("tensile strength",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            parent_objective_id=None,
+            parent_analysis_version=None,
+        ),
+        question="How does laser power affect tensile strength?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("tensile strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1",),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-create",
     )
 
 

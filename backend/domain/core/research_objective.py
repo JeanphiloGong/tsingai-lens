@@ -19,11 +19,11 @@ from domain.core.scientific_fact import (
     ScientificContext,
     ScientificResult,
     ScientificVariable,
+    _choice as scientific_choice,
+    _scientific_scalar as scientific_scalar,
+    _terms as scientific_terms,
+    _text as scientific_text,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 
 PAPER_RELEVANCE_VALUES: Final[frozenset[str]] = frozenset(
     {"high", "medium", "low", "irrelevant", "uncertain"}
@@ -314,19 +314,6 @@ class PaperStudyDisposition:
         except ValueError as exc:
             raise ValueError(f"unsupported paper study disposition status: {value}") from exc
 
-    @classmethod
-    def from_mapping(
-        cls,
-        payload: Mapping[str, Any],
-    ) -> "PaperStudyDisposition":
-        return cls(
-            document_id=_text(payload.get("document_id")) or "",
-            study_id=_text(payload.get("study_id")) or "",
-            relationship_id=_text(payload.get("relationship_id")) or "",
-            status=cls._status(payload.get("status") or "pending"),
-            objective_id=_text(payload.get("objective_id")),
-            reason=_text(payload.get("reason")),
-        )
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -512,14 +499,6 @@ class PreparedDocumentInput:
                 "prepared document input requires preparation_fingerprint"
             )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PreparedDocumentInput":
-        return cls(
-            document_id=_text(payload.get("document_id")) or "",
-            preparation_fingerprint=(
-                _text(payload.get("preparation_fingerprint")) or ""
-            ),
-        )
 
     def to_record(self) -> dict[str, str]:
         return {
@@ -643,76 +622,6 @@ class ResearchObjective:
         ):
             raise ValueError("published analysis cannot be newer than active analysis")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchObjective":
-        question = _text(payload.get("question")) or ""
-        material_scope = normalize_objective_terms(payload.get("material_scope"))
-        variables = normalize_objective_terms(payload.get("variables"))
-        outcomes = normalize_objective_terms(payload.get("outcomes"))
-        mechanisms = normalize_objective_terms(payload.get("mechanisms"))
-        constraints = normalize_objective_terms(payload.get("constraints"))
-        requested_comparator = _text(payload.get("requested_comparator"))
-        return cls(
-            collection_id=_text(payload.get("collection_id")) or "",
-            objective_id=_text(payload.get("objective_id"))
-            or build_research_objective_id(
-                question=question,
-                material_scope=material_scope,
-                variables=variables,
-                outcomes=outcomes,
-                mechanisms=mechanisms,
-                constraints=constraints,
-                requested_comparator=requested_comparator,
-                parent_objective_id=_text(payload.get("parent_objective_id")),
-                parent_analysis_version=_positive_int_or_none(
-                    payload.get("parent_analysis_version")
-                ),
-            ),
-            question=question,
-            material_scope=material_scope,
-            variables=variables,
-            outcomes=outcomes,
-            mechanisms=mechanisms,
-            constraints=constraints,
-            requested_comparator=requested_comparator,
-            seed_document_ids=normalize_objective_terms(
-                payload.get("seed_document_ids")
-            ),
-            excluded_document_ids=normalize_objective_terms(
-                payload.get("excluded_document_ids")
-            ),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            reason=_text(payload.get("reason")),
-            source_relationship_ids=normalize_objective_terms(
-                payload.get("source_relationship_ids")
-            ),
-            parent_objective_id=_text(payload.get("parent_objective_id")),
-            parent_analysis_version=_positive_int_or_none(
-                payload.get("parent_analysis_version")
-            ),
-            derivation_basis=_objective_derivation_basis(
-                payload.get("derivation_basis")
-            ),
-            rank=_positive_int_or_none(payload.get("rank")),
-            confirmation_status=_choice(
-                payload.get("confirmation_status"),
-                OBJECTIVE_CONFIRMATION_STATUSES,
-                "candidate",
-            ),
-            active_analysis_version=_positive_int_or_none(
-                payload.get("active_analysis_version")
-            ),
-            published_analysis_version=_positive_int_or_none(
-                payload.get("published_analysis_version")
-            ),
-            origin=_choice(
-                payload.get("origin"),
-                OBJECTIVE_ORIGINS,
-                "system_discovered",
-            ),
-            created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
-        )
 
     def confirm(self) -> "ResearchObjective":
         if self.confirmation_status != "candidate":

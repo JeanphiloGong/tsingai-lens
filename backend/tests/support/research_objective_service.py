@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_ORIGINS,
+    ResearchObjective,
+    _choice,
+    _objective_derivation_basis,
+    _positive_int_or_none,
+    _text,
+    build_research_objective_id,
+    normalize_objective_confidence,
+    normalize_objective_terms,
+)
+
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
@@ -25,14 +38,82 @@ from tests.support.repositories.objective_repository import MemoryObjectiveRepos
 
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-test",
-            "question": "How does process condition affect the target outcome?",
-            "variables": ["process condition"],
-            "outcomes": ["target outcome"],
-            **payload,
-        }
+    return ResearchObjective(
+        collection_id=_text(payload.get("collection_id", "collection-test")) or "",
+        objective_id=_text(payload.get("objective_id", None))
+        or build_research_objective_id(
+            question=_text(
+                payload.get(
+                    "question", "How does process condition affect the target outcome?"
+                )
+            )
+            or "",
+            material_scope=normalize_objective_terms(
+                payload.get("material_scope", None)
+            ),
+            variables=normalize_objective_terms(
+                payload.get("variables", ["process condition"])
+            ),
+            outcomes=normalize_objective_terms(
+                payload.get("outcomes", ["target outcome"])
+            ),
+            mechanisms=normalize_objective_terms(payload.get("mechanisms", None)),
+            constraints=normalize_objective_terms(payload.get("constraints", None)),
+            requested_comparator=_text(payload.get("requested_comparator", None)),
+            parent_objective_id=_text(payload.get("parent_objective_id", None)),
+            parent_analysis_version=_positive_int_or_none(
+                payload.get("parent_analysis_version", None)
+            ),
+        ),
+        question=_text(
+            payload.get(
+                "question", "How does process condition affect the target outcome?"
+            )
+        )
+        or "",
+        material_scope=normalize_objective_terms(payload.get("material_scope", None)),
+        variables=normalize_objective_terms(
+            payload.get("variables", ["process condition"])
+        ),
+        outcomes=normalize_objective_terms(payload.get("outcomes", ["target outcome"])),
+        mechanisms=normalize_objective_terms(payload.get("mechanisms", None)),
+        constraints=normalize_objective_terms(payload.get("constraints", None)),
+        requested_comparator=_text(payload.get("requested_comparator", None)),
+        seed_document_ids=normalize_objective_terms(
+            payload.get("seed_document_ids", None)
+        ),
+        excluded_document_ids=normalize_objective_terms(
+            payload.get("excluded_document_ids", None)
+        ),
+        confidence=normalize_objective_confidence(payload.get("confidence", None)),
+        reason=_text(payload.get("reason", None)),
+        source_relationship_ids=normalize_objective_terms(
+            payload.get("source_relationship_ids", None)
+        ),
+        parent_objective_id=_text(payload.get("parent_objective_id", None)),
+        parent_analysis_version=_positive_int_or_none(
+            payload.get("parent_analysis_version", None)
+        ),
+        derivation_basis=_objective_derivation_basis(
+            payload.get("derivation_basis", None)
+        ),
+        rank=_positive_int_or_none(payload.get("rank", None)),
+        confirmation_status=_choice(
+            payload.get("confirmation_status", None),
+            OBJECTIVE_CONFIRMATION_STATUSES,
+            "candidate",
+        ),
+        active_analysis_version=_positive_int_or_none(
+            payload.get("active_analysis_version", None)
+        ),
+        published_analysis_version=_positive_int_or_none(
+            payload.get("published_analysis_version", None)
+        ),
+        origin=_choice(
+            payload.get("origin", None), OBJECTIVE_ORIGINS, "system_discovered"
+        ),
+        created_by_user_id=_text(payload.get("created_by_user_id", None)),
+        created_by_tool_call_id=_text(payload.get("created_by_tool_call_id", None)),
     )
 
 

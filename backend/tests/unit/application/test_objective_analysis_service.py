@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 
-from domain.core.research_objective import normalize_objective_terms
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    ResearchObjective,
+    _choice,
+    _positive_int_or_none,
+    normalize_objective_terms,
+)
 
 
 import asyncio
@@ -71,20 +77,25 @@ def _objective(
     published: int | None = None,
     confirmation_status: str = "confirmed",
 ) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "How does temperature affect strength?",
-            "material_scope": ["Alloy A"],
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "seed_document_ids": ["paper-1"],
-            "confidence": 0.9,
-            "confirmation_status": confirmation_status,
-            "active_analysis_version": published,
-            "published_analysis_version": published,
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="How does temperature affect strength?",
+        material_scope=("Alloy A",),
+        variables=("temperature",),
+        outcomes=("strength",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1",),
+        excluded_document_ids=(),
+        confidence=0.9,
+        reason=None,
+        confirmation_status=_choice(
+            confirmation_status, OBJECTIVE_CONFIRMATION_STATUSES, "candidate"
+        ),
+        active_analysis_version=_positive_int_or_none(published),
+        published_analysis_version=_positive_int_or_none(published),
     )
 
 

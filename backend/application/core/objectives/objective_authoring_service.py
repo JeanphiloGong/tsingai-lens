@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    ResearchObjective,
+    _text,
+    build_research_objective_id,
+    normalize_objective_terms,
+)
+
 from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
@@ -75,26 +82,44 @@ class ObjectiveAuthoringService:
                 derivation_basis=derivation_basis,
             )
 
-        objective = ResearchObjective.from_mapping(
-            {
-                "collection_id": collection_id,
-                "question": question,
-                "material_scope": material_scope,
-                "variables": variables,
-                "outcomes": outcomes,
-                "mechanisms": mechanisms,
-                "constraints": constraints,
-                "requested_comparator": requested_comparator,
-                "seed_document_ids": seed_document_ids,
-                "excluded_document_ids": excluded_document_ids,
-                "confidence": 0,
-                "origin": "chat_assisted",
-                "created_by_user_id": user_id,
-                "created_by_tool_call_id": tool_call_id,
-                "parent_objective_id": parent_objective_id,
-                "parent_analysis_version": parent_analysis_version,
-                "derivation_basis": derivation_basis or [],
-            }
+        question = question.strip()
+        material_terms = normalize_objective_terms(material_scope)
+        variable_terms = normalize_objective_terms(variables)
+        outcome_terms = normalize_objective_terms(outcomes)
+        mechanism_terms = normalize_objective_terms(mechanisms)
+        constraint_terms = normalize_objective_terms(constraints)
+        comparator = _text(requested_comparator)
+        parent_id = _text(parent_objective_id)
+        objective = ResearchObjective(
+            collection_id=collection_id,
+            objective_id=build_research_objective_id(
+                question=question,
+                material_scope=material_terms,
+                variables=variable_terms,
+                outcomes=outcome_terms,
+                mechanisms=mechanism_terms,
+                constraints=constraint_terms,
+                requested_comparator=comparator,
+                parent_objective_id=parent_id,
+                parent_analysis_version=parent_analysis_version,
+            ),
+            question=question,
+            material_scope=material_terms,
+            variables=variable_terms,
+            outcomes=outcome_terms,
+            mechanisms=mechanism_terms,
+            constraints=constraint_terms,
+            requested_comparator=comparator,
+            seed_document_ids=normalize_objective_terms(seed_document_ids),
+            excluded_document_ids=normalize_objective_terms(excluded_document_ids),
+            confidence=0,
+            reason=None,
+            origin="chat_assisted",
+            created_by_user_id=user_id,
+            created_by_tool_call_id=tool_call_id,
+            parent_objective_id=parent_id,
+            parent_analysis_version=parent_analysis_version,
+            derivation_basis=tuple(derivation_basis or ()),
         )
         if not is_question_shaped_objective(objective):
             raise ValueError("chat-assisted objective question is not question-shaped")

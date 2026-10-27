@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_ORIGINS,
+    ResearchObjective,
+    _choice,
+    _objective_derivation_basis,
+    _positive_int_or_none,
+    _text,
+    build_research_objective_id,
+    normalize_objective_confidence,
+    normalize_objective_terms,
+)
+
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -40,31 +53,73 @@ class _ObjectiveAuthoringService:
 
     async def create_chat_assisted_candidate(self, **kwargs) -> ResearchObjective:
         self.calls.append(kwargs)
-        return ResearchObjective.from_mapping(
-            {
-                **kwargs,
-                "objective_id": "objective-derived",
-                "origin": "chat_assisted",
-                "confidence": 0,
-                "created_by_user_id": kwargs["user_id"],
-                "created_by_tool_call_id": kwargs["tool_call_id"],
-            }
+        return ResearchObjective(
+            collection_id=_text(kwargs.get("collection_id", None)) or "",
+            objective_id="objective-derived",
+            question=_text(kwargs.get("question", None)) or "",
+            material_scope=normalize_objective_terms(
+                kwargs.get("material_scope", None)
+            ),
+            variables=normalize_objective_terms(kwargs.get("variables", None)),
+            outcomes=normalize_objective_terms(kwargs.get("outcomes", None)),
+            mechanisms=normalize_objective_terms(kwargs.get("mechanisms", None)),
+            constraints=normalize_objective_terms(kwargs.get("constraints", None)),
+            requested_comparator=_text(kwargs.get("requested_comparator", None)),
+            seed_document_ids=normalize_objective_terms(
+                kwargs.get("seed_document_ids", None)
+            ),
+            excluded_document_ids=normalize_objective_terms(
+                kwargs.get("excluded_document_ids", None)
+            ),
+            confidence=0.0,
+            reason=_text(kwargs.get("reason", None)),
+            source_relationship_ids=normalize_objective_terms(
+                kwargs.get("source_relationship_ids", None)
+            ),
+            parent_objective_id=_text(kwargs.get("parent_objective_id", None)),
+            parent_analysis_version=_positive_int_or_none(
+                kwargs.get("parent_analysis_version", None)
+            ),
+            derivation_basis=_objective_derivation_basis(
+                kwargs.get("derivation_basis", None)
+            ),
+            rank=_positive_int_or_none(kwargs.get("rank", None)),
+            confirmation_status=_choice(
+                kwargs.get("confirmation_status", None),
+                OBJECTIVE_CONFIRMATION_STATUSES,
+                "candidate",
+            ),
+            active_analysis_version=_positive_int_or_none(
+                kwargs.get("active_analysis_version", None)
+            ),
+            published_analysis_version=_positive_int_or_none(
+                kwargs.get("published_analysis_version", None)
+            ),
+            origin="chat_assisted",
+            created_by_user_id=_text(kwargs["user_id"]),
+            created_by_tool_call_id=_text(kwargs["tool_call_id"]),
         )
 
 
 class _ParentObjectiveRepository:
     def __init__(self, published_version: int = 3) -> None:
-        self.parent = ResearchObjective.from_mapping(
-            {
-                "collection_id": "col-1",
-                "objective_id": "objective-parent",
-                "question": "How does preheating affect elongation?",
-                "variables": ["preheating"],
-                "outcomes": ["elongation"],
-                "confirmation_status": "confirmed",
-                "active_analysis_version": published_version,
-                "published_analysis_version": published_version,
-            }
+        self.parent = ResearchObjective(
+            collection_id="col-1",
+            objective_id="objective-parent",
+            question="How does preheating affect elongation?",
+            material_scope=(),
+            variables=("preheating",),
+            outcomes=("elongation",),
+            mechanisms=(),
+            constraints=(),
+            requested_comparator=None,
+            seed_document_ids=(),
+            excluded_document_ids=(),
+            confidence=0.0,
+            reason=None,
+            confirmation_status="confirmed",
+            active_analysis_version=_positive_int_or_none(published_version),
+            published_analysis_version=_positive_int_or_none(published_version),
         )
         self.finding = SimpleNamespace(
             finding_id="finding-1",
@@ -292,21 +347,26 @@ async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call()
 
 async def test_derived_candidate_lineage_round_trips_through_memory_repository() -> None:
     repository = MemoryObjectiveRepository()
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-derived",
-            "question": "How does intermediate preheating affect fatigue life?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["build-plate preheating"],
-            "outcomes": ["fatigue life"],
-            "parent_objective_id": "objective-parent",
-            "parent_analysis_version": 3,
-            "derivation_basis": _lineage(),
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-derived",
-        }
+    objective = ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-derived",
+        question="How does intermediate preheating affect fatigue life?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("build-plate preheating",),
+        outcomes=("fatigue life",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=3,
+        derivation_basis=_objective_derivation_basis(_lineage()),
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-derived",
     )
 
     await repository.create_authored_candidate(
@@ -324,18 +384,23 @@ async def test_derived_candidate_lineage_round_trips_through_memory_repository()
 
 async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> None:
     repository = MemoryObjectiveRepository()
-    first = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-derived",
-            "question": "How does intermediate preheating affect fatigue life?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["build-plate preheating"],
-            "outcomes": ["fatigue life"],
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-retry",
-        }
+    first = ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-derived",
+        question="How does intermediate preheating affect fatigue life?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("build-plate preheating",),
+        outcomes=("fatigue life",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-retry",
     )
     second = replace(
         first,
@@ -359,21 +424,26 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> No
 
 async def test_authored_candidate_retry_with_same_lineage_remains_idempotent() -> None:
     repository = MemoryObjectiveRepository()
-    first = ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-derived",
-            "question": "How does intermediate preheating affect fatigue life?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["build-plate preheating"],
-            "outcomes": ["fatigue life"],
-            "parent_objective_id": "objective-parent",
-            "parent_analysis_version": 3,
-            "derivation_basis": _lineage(),
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-idempotent",
-        }
+    first = ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-derived",
+        question="How does intermediate preheating affect fatigue life?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("build-plate preheating",),
+        outcomes=("fatigue life",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        parent_objective_id="objective-parent",
+        parent_analysis_version=3,
+        derivation_basis=_objective_derivation_basis(_lineage()),
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-idempotent",
     )
     await repository.create_authored_candidate(
         first,
@@ -398,21 +468,26 @@ def _service(*, repository: MemoryObjectiveRepository) -> ObjectiveAuthoringServ
 
 
 def _published_parent() -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "objective-parent",
-            "question": "How does preheating affect elongation?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["preheating"],
-            "outcomes": ["elongation"],
-            "confirmation_status": "confirmed",
-            "active_analysis_version": 3,
-            "published_analysis_version": 3,
-            "origin": "chat_assisted",
-            "created_by_user_id": "user-1",
-            "created_by_tool_call_id": "call-parent",
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id="objective-parent",
+        question="How does preheating affect elongation?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("preheating",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
+        active_analysis_version=3,
+        published_analysis_version=3,
+        origin="chat_assisted",
+        created_by_user_id="user-1",
+        created_by_tool_call_id="call-parent",
     )
 
 
@@ -707,11 +782,127 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
         "parent_analysis_version": 3,
         "derivation_basis": _lineage(),
     }
-    first = ResearchObjective.from_mapping(
-        {**common, "parent_objective_id": "objective-parent-a"}
+    first = ResearchObjective(
+        collection_id=_text(common.get("collection_id", None)) or "",
+        objective_id=_text(common.get("objective_id", None))
+        or build_research_objective_id(
+            question=_text(common.get("question", None)) or "",
+            material_scope=normalize_objective_terms(
+                common.get("material_scope", None)
+            ),
+            variables=normalize_objective_terms(common.get("variables", None)),
+            outcomes=normalize_objective_terms(common.get("outcomes", None)),
+            mechanisms=normalize_objective_terms(common.get("mechanisms", None)),
+            constraints=normalize_objective_terms(common.get("constraints", None)),
+            requested_comparator=_text(common.get("requested_comparator", None)),
+            parent_objective_id="objective-parent-a",
+            parent_analysis_version=_positive_int_or_none(
+                common.get("parent_analysis_version", None)
+            ),
+        ),
+        question=_text(common.get("question", None)) or "",
+        material_scope=normalize_objective_terms(common.get("material_scope", None)),
+        variables=normalize_objective_terms(common.get("variables", None)),
+        outcomes=normalize_objective_terms(common.get("outcomes", None)),
+        mechanisms=normalize_objective_terms(common.get("mechanisms", None)),
+        constraints=normalize_objective_terms(common.get("constraints", None)),
+        requested_comparator=_text(common.get("requested_comparator", None)),
+        seed_document_ids=normalize_objective_terms(
+            common.get("seed_document_ids", None)
+        ),
+        excluded_document_ids=normalize_objective_terms(
+            common.get("excluded_document_ids", None)
+        ),
+        confidence=normalize_objective_confidence(common.get("confidence", None)),
+        reason=_text(common.get("reason", None)),
+        source_relationship_ids=normalize_objective_terms(
+            common.get("source_relationship_ids", None)
+        ),
+        parent_objective_id="objective-parent-a",
+        parent_analysis_version=_positive_int_or_none(
+            common.get("parent_analysis_version", None)
+        ),
+        derivation_basis=_objective_derivation_basis(
+            common.get("derivation_basis", None)
+        ),
+        rank=_positive_int_or_none(common.get("rank", None)),
+        confirmation_status=_choice(
+            common.get("confirmation_status", None),
+            OBJECTIVE_CONFIRMATION_STATUSES,
+            "candidate",
+        ),
+        active_analysis_version=_positive_int_or_none(
+            common.get("active_analysis_version", None)
+        ),
+        published_analysis_version=_positive_int_or_none(
+            common.get("published_analysis_version", None)
+        ),
+        origin=_choice(
+            common.get("origin", None), OBJECTIVE_ORIGINS, "system_discovered"
+        ),
+        created_by_user_id=_text(common.get("created_by_user_id", None)),
+        created_by_tool_call_id=_text(common.get("created_by_tool_call_id", None)),
     )
-    second = ResearchObjective.from_mapping(
-        {**common, "parent_objective_id": "objective-parent-b"}
+    second = ResearchObjective(
+        collection_id=_text(common.get("collection_id", None)) or "",
+        objective_id=_text(common.get("objective_id", None))
+        or build_research_objective_id(
+            question=_text(common.get("question", None)) or "",
+            material_scope=normalize_objective_terms(
+                common.get("material_scope", None)
+            ),
+            variables=normalize_objective_terms(common.get("variables", None)),
+            outcomes=normalize_objective_terms(common.get("outcomes", None)),
+            mechanisms=normalize_objective_terms(common.get("mechanisms", None)),
+            constraints=normalize_objective_terms(common.get("constraints", None)),
+            requested_comparator=_text(common.get("requested_comparator", None)),
+            parent_objective_id="objective-parent-b",
+            parent_analysis_version=_positive_int_or_none(
+                common.get("parent_analysis_version", None)
+            ),
+        ),
+        question=_text(common.get("question", None)) or "",
+        material_scope=normalize_objective_terms(common.get("material_scope", None)),
+        variables=normalize_objective_terms(common.get("variables", None)),
+        outcomes=normalize_objective_terms(common.get("outcomes", None)),
+        mechanisms=normalize_objective_terms(common.get("mechanisms", None)),
+        constraints=normalize_objective_terms(common.get("constraints", None)),
+        requested_comparator=_text(common.get("requested_comparator", None)),
+        seed_document_ids=normalize_objective_terms(
+            common.get("seed_document_ids", None)
+        ),
+        excluded_document_ids=normalize_objective_terms(
+            common.get("excluded_document_ids", None)
+        ),
+        confidence=normalize_objective_confidence(common.get("confidence", None)),
+        reason=_text(common.get("reason", None)),
+        source_relationship_ids=normalize_objective_terms(
+            common.get("source_relationship_ids", None)
+        ),
+        parent_objective_id="objective-parent-b",
+        parent_analysis_version=_positive_int_or_none(
+            common.get("parent_analysis_version", None)
+        ),
+        derivation_basis=_objective_derivation_basis(
+            common.get("derivation_basis", None)
+        ),
+        rank=_positive_int_or_none(common.get("rank", None)),
+        confirmation_status=_choice(
+            common.get("confirmation_status", None),
+            OBJECTIVE_CONFIRMATION_STATUSES,
+            "candidate",
+        ),
+        active_analysis_version=_positive_int_or_none(
+            common.get("active_analysis_version", None)
+        ),
+        published_analysis_version=_positive_int_or_none(
+            common.get("published_analysis_version", None)
+        ),
+        origin=_choice(
+            common.get("origin", None), OBJECTIVE_ORIGINS, "system_discovered"
+        ),
+        created_by_user_id=_text(common.get("created_by_user_id", None)),
+        created_by_tool_call_id=_text(common.get("created_by_tool_call_id", None)),
     )
 
     assert first.objective_id != second.objective_id

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -11,12 +12,16 @@ from application.core.objectives.finding_authoring_service import (
 )
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.research_objective import (
-    ObjectiveFactSet,
-    PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
+    _text,
+    ObjectiveFactSet,
+    PaperContribution,
 )
-from repositories.objective_repository import ObjectiveAnalysis
+from repositories.objective_repository import (
+    ExecutionStats,
+    ObjectiveAnalysis,
+)
 from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
 pytestmark = pytest.mark.anyio
@@ -28,28 +33,41 @@ def anyio_backend():
 
 
 def _objective() -> ResearchObjective:
-    return ResearchObjective.from_mapping({
-        "collection_id": "collection-1",
-        "objective_id": "objective-1",
-        "question": "Does treatment change outcome?",
-        "variables": ["treatment"],
-        "outcomes": ["outcome"],
-        "confirmation_status": "confirmed",
-        "active_analysis_version": 1,
-    })
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="Does treatment change outcome?",
+        material_scope=(),
+        variables=("treatment",),
+        outcomes=("outcome",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
+        active_analysis_version=1,
+    )
 
 
 def _analysis(version: int, status: str) -> ObjectiveAnalysis:
-    return ObjectiveAnalysis.from_mapping({
-        "collection_id": "collection-1",
-        "objective_id": "objective-1",
-        "analysis_version": version,
-        "document_inputs": [{"document_id": "paper-1", "preparation_fingerprint": "p1"}],
-        "pipeline_version": "test",
-        "status": status,
-        "processed_document_count": 1,
-        "total_document_count": 1,
-    })
+    return ObjectiveAnalysis(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=int(version or 0),
+        document_inputs=(
+            PreparedDocumentInput(document_id="paper-1", preparation_fingerprint="p1"),
+        ),
+        pipeline_version="test",
+        model_name=None,
+        prompt_versions={str(key): str(value) for key, value in dict({}).items()},
+        stats=ExecutionStats(duration_ms=None, model_usage=(), prompt_versions={}),
+        status=_text(status) or "queued",
+        processed_document_count=int(1),
+        total_document_count=int(1),
+    )
 
 
 def _selection() -> ObjectiveExperimentSelection:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from domain.core.scientific_fact import (
     ScientificAttribute,
     ScientificVariable,
@@ -19,20 +20,27 @@ from domain.core.paper_experiment import (
     _text,
     _strings,
 )
-from domain.core.research_objective import ResearchObjective
+from domain.core.research_objective import (
+    ResearchObjective,
+)
 
 
 def _objective() -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "Does preheat affect elongation?",
-            "material_scope": ["316L"],
-            "variables": ["preheat"],
-            "outcomes": ["elongation"],
-            "confirmation_status": "confirmed",
-        }
+    return ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="Does preheat affect elongation?",
+        material_scope=("316L",),
+        variables=("preheat",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
     )
 
 
@@ -316,15 +324,21 @@ def test_does_not_merge_incompatible_methods_or_invent_measurement_only_finding(
 
 
 def test_matches_non_ascii_objective_terms_without_dropping_them() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "question": "预热是否影响延伸率？",
-            "variables": ["预热"],
-            "outcomes": ["elongation"],
-            "confirmation_status": "confirmed",
-        }
+    objective = ResearchObjective(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        question="预热是否影响延伸率？",
+        material_scope=(),
+        variables=("预热",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=(),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
+        confirmation_status="confirmed",
     )
     revision = _revision(
         "experiment-a",

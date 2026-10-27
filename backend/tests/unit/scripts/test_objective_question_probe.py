@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import importlib.util
 import json
 import sys
@@ -8,7 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from domain.core.research_objective import ResearchObjective
+from domain.core.research_objective import (
+    ResearchObjective,
+)
 
 
 @pytest.fixture
@@ -160,17 +163,20 @@ def test_core_probe_preserves_reading_scope_original_sources_and_joint_factors(
 def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
     probe, monkeypatch
 ):
-    objective = ResearchObjective.from_mapping(
-        {
-            "collection_id": "probe",
-            "objective_id": "objective-1",
-            "question": "How does preheat temperature affect elongation?",
-            "material_scope": ["316L"],
-            "variables": ["preheat temperature"],
-            "outcomes": ["elongation"],
-            "seed_document_ids": ["paper-1"],
-            "confirmation_status": "candidate",
-        }
+    objective = ResearchObjective(
+        collection_id="probe",
+        objective_id="objective-1",
+        question="How does preheat temperature affect elongation?",
+        material_scope=("316L",),
+        variables=("preheat temperature",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=("paper-1",),
+        excluded_document_ids=(),
+        confidence=0.0,
+        reason=None,
     )
     monkeypatch.setattr(
         probe.ObjectiveCandidateService,

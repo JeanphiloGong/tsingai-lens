@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    ResearchObjective,
+    _text,
+    build_research_objective_id,
+    normalize_objective_terms,
+)
+
 
 import json
 import logging
@@ -293,22 +300,36 @@ class ObjectiveCandidateService:
                 )
                 for paper in proposal.papers
             )
-            objective = ResearchObjective.from_mapping(
-                {
-                    "collection_id": collection_id,
-                    "question": proposal.question,
-                    "material_scope": proposal.material_scope,
-                    "variables": proposal.variables,
-                    "outcomes": [proposal.outcome],
-                    "constraints": proposal.constraints,
-                    "reason": proposal.reason,
-                    "rank": rank,
-                    "seed_document_ids": [
-                        p.paper_map.document_id
-                        for p in selections
-                        if p.role == "inspect"
-                    ],
-                }
+            question = proposal.question.strip()
+            material_scope = normalize_objective_terms(proposal.material_scope)
+            variables = normalize_objective_terms(proposal.variables)
+            outcomes = (proposal.outcome.strip(),)
+            constraints = normalize_objective_terms(proposal.constraints)
+            objective = ResearchObjective(
+                collection_id=collection_id,
+                objective_id=build_research_objective_id(
+                    question=question,
+                    material_scope=material_scope,
+                    variables=variables,
+                    outcomes=outcomes,
+                    mechanisms=(),
+                    constraints=constraints,
+                    requested_comparator=None,
+                ),
+                question=question,
+                material_scope=material_scope,
+                variables=variables,
+                outcomes=outcomes,
+                mechanisms=(),
+                constraints=constraints,
+                requested_comparator=None,
+                seed_document_ids=normalize_objective_terms(
+                    [p.paper_map.document_id for p in selections if p.role == "inspect"]
+                ),
+                excluded_document_ids=(),
+                confidence=0,
+                reason=_text(proposal.reason),
+                rank=rank,
             )
             candidates.append(CandidateQuestion(objective, selections))
         return CandidateQuestionBatch(tuple(candidates), parsed.abstention_reason)
@@ -902,7 +923,9 @@ class ObjectiveCandidateService:
             outcome_keys.add(objective_outcome_key)
             outcomes.append(objective_outcome)
         confidence = self._objective_confidence(studies, relationships)
-        material_scope = self._shared_study_values(studies, "material_scope")
+        material_scope = normalize_objective_terms(
+            self._shared_study_values(studies, "material_scope")
+        )
         material_scope_was_missing = any(
             not self._known_material_keys(study.material_scope) for study in studies
         )
@@ -924,25 +947,42 @@ class ObjectiveCandidateService:
                 "Material scope was retained from the unambiguous non-conflicting "
                 "source anchor."
             )
-        objective_payload = {
-            "collection_id": collection_id,
-            "question": self._objective_question(variables, tuple(outcomes)),
-            "variables": list(variables),
-            "outcomes": outcomes,
-            "material_scope": material_scope,
-            "mechanisms": [],
-            "constraints": self._shared_study_constraints(
+        question = self._objective_question(variables, tuple(outcomes))
+        outcome_terms = normalize_objective_terms(outcomes)
+        constraints = normalize_objective_terms(
+            self._shared_study_constraints(
                 studies,
                 excluded_axes=(*variables, *outcomes),
-            ),
-            "requested_comparator": None,
-            "seed_document_ids": seed_document_ids,
-            "source_relationship_ids": list(relationship_ids),
-            "confidence": confidence,
-            "reason": " ".join(reason_parts),
-        }
+            )
+        )
         try:
-            return ResearchObjective.from_mapping(objective_payload), None
+            return (
+                ResearchObjective(
+                    collection_id=collection_id,
+                    objective_id=build_research_objective_id(
+                        question=question,
+                        material_scope=material_scope,
+                        variables=variables,
+                        outcomes=outcome_terms,
+                        mechanisms=(),
+                        constraints=constraints,
+                        requested_comparator=None,
+                    ),
+                    question=question,
+                    material_scope=material_scope,
+                    variables=variables,
+                    outcomes=outcome_terms,
+                    mechanisms=(),
+                    constraints=constraints,
+                    requested_comparator=None,
+                    seed_document_ids=normalize_objective_terms(seed_document_ids),
+                    excluded_document_ids=(),
+                    source_relationship_ids=relationship_ids,
+                    confidence=confidence,
+                    reason=" ".join(reason_parts),
+                ),
+                None,
+            )
         except (TypeError, ValueError) as exc:
             return (
                 None,

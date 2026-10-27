@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.core.research_objective import ResearchObjective, normalize_objective_terms
+
 from repositories.paper_map_repository import paper_map_from_payload
 
 from dataclasses import replace
@@ -23,17 +25,20 @@ def anyio_backend() -> str:
 
 
 def _objective(*, seed_document_ids: tuple[str, ...] = ("paper-seed",)) -> ResearchObjective:
-    return ResearchObjective.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "question": "How does laser power affect elongation?",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["laser power"],
-            "outcomes": ["elongation"],
-            "seed_document_ids": list(seed_document_ids),
-            "confidence": 0.8,
-        }
+    return ResearchObjective(
+        collection_id="col-1",
+        objective_id="obj-1",
+        question="How does laser power affect elongation?",
+        material_scope=("Ti-6Al-4V",),
+        variables=("laser power",),
+        outcomes=("elongation",),
+        mechanisms=(),
+        constraints=(),
+        requested_comparator=None,
+        seed_document_ids=normalize_objective_terms(list(seed_document_ids)),
+        excluded_document_ids=(),
+        confidence=0.8,
+        reason=None,
     )
 
 

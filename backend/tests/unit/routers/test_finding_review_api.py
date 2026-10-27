@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+
+from domain.core.research_objective import PreparedDocumentInput, _text
+
 import json
 
 from fastapi import FastAPI
@@ -12,7 +15,10 @@ from repositories.finding_review_repository import (
     finding_curation_from_record,
     finding_feedback_from_record,
 )
-from repositories.objective_repository import ObjectiveAnalysis
+from repositories.objective_repository import (
+    ExecutionStats,
+    ObjectiveAnalysis,
+)
 
 
 class _Service:
@@ -25,34 +31,33 @@ class _Service:
         )
 
         self.authoring_kwargs = kwargs
-        analysis = ObjectiveAnalysis.from_mapping(
-            {
-                "collection_id": kwargs["collection_id"],
-                "objective_id": kwargs["objective_id"],
-                "analysis_version": 2,
-                "document_inputs": [
-                    {
-                        "document_id": "paper-1",
-                        "preparation_fingerprint": "fingerprint-1",
-                    }
-                ],
-                "pipeline_version": "test.v1",
-                "model_name": "model-1",
-                "prompt_versions": {},
-                "status": "succeeded",
-                "phase": "completed",
-                "processed_document_count": 1,
-                "total_document_count": 1,
-                "origin": "hybrid",
-                "source_analysis_version": 1,
-                "created_by_user_id": kwargs["created_by_user_id"],
-                "abstention_reason": kwargs.get("abstention_reason"),
-                "abstention_note": (
-                    "\n".join(kwargs.get("limitations", ()))
-                    if kwargs.get("abstention_reason")
-                    else None
+        analysis = ObjectiveAnalysis(
+            collection_id=_text(kwargs["collection_id"]) or "",
+            objective_id=_text(kwargs["objective_id"]) or "",
+            analysis_version=int(2),
+            document_inputs=(
+                PreparedDocumentInput(
+                    document_id="paper-1", preparation_fingerprint="fingerprint-1"
                 ),
-            }
+            ),
+            pipeline_version="test.v1",
+            model_name="model-1",
+            prompt_versions={str(key): str(value) for key, value in dict({}).items()},
+            stats=ExecutionStats(duration_ms=None, model_usage=(), prompt_versions={}),
+            status="succeeded",
+            phase="completed",
+            processed_document_count=int(1),
+            total_document_count=int(1),
+            origin="hybrid",
+            scientific_record_source="authored_snapshot",
+            source_analysis_version=1,
+            created_by_user_id=_text(kwargs["created_by_user_id"]),
+            abstention_reason=_text(kwargs.get("abstention_reason")),
+            abstention_note=_text(
+                "\n".join(kwargs.get("limitations", ()))
+                if kwargs.get("abstention_reason")
+                else None
+            ),
         )
         finding = Finding.from_mapping(
             {

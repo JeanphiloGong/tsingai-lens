@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -14,6 +15,7 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
     stable_draft_experiment_id,
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
+    PaperExperimentDraft,
     PaperExperimentModelOutput,
     ReconciledPaperExperimentOutput,
     reconcile_model_output,
@@ -265,7 +267,24 @@ def _draft_output(
             }
         ],
     }
-    output = PaperExperimentModelOutput.from_mapping(payload)
+    output = PaperExperimentModelOutput(
+        document_id=(payload)["document_id"],
+        source_fingerprint=(payload)["source_fingerprint"],
+        source_labels=(payload).get("source_labels", {}),
+        experiments=tuple(
+            PaperExperimentDraft(
+                payload={
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"source_labels", "unresolved_issues"}
+                },
+                source_labels=tuple(item.get("source_labels", ())),
+                unresolved_issues=tuple(item.get("unresolved_issues", ())),
+            )
+            for item in (payload).get("experiments", ())
+        ),
+        unresolved_issues=tuple((payload).get("unresolved_issues", ())),
+    )
     return reconcile_model_output(output, accepted_experiment_keys=("series-1",))
 
 
@@ -321,7 +340,24 @@ def _partial_archive_without_variants(
             }
         ],
     }
-    output = PaperExperimentModelOutput.from_mapping(payload)
+    output = PaperExperimentModelOutput(
+        document_id=(payload)["document_id"],
+        source_fingerprint=(payload)["source_fingerprint"],
+        source_labels=(payload).get("source_labels", {}),
+        experiments=tuple(
+            PaperExperimentDraft(
+                payload={
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"source_labels", "unresolved_issues"}
+                },
+                source_labels=tuple(item.get("source_labels", ())),
+                unresolved_issues=tuple(item.get("unresolved_issues", ())),
+            )
+            for item in (payload).get("experiments", ())
+        ),
+        unresolved_issues=tuple((payload).get("unresolved_issues", ())),
+    )
     return reconcile_model_output(
         output,
         accepted_experiment_keys=("unresolved-series",),
@@ -359,14 +395,24 @@ def _mixed_valid_invalid_comparison_experiment(document_id: str):
         "source_labels": list(draft.source_labels),
         "unresolved_issues": list(draft.unresolved_issues),
     }
-    output = PaperExperimentModelOutput.from_mapping(
-        {
-            "document_id": base.output.document_id,
-            "source_fingerprint": base.output.source_fingerprint,
-            "source_labels": base.output.source_labels,
-            "experiments": [experiment_payload],
-            "unresolved_issues": list(base.output.unresolved_issues),
-        }
+    output = PaperExperimentModelOutput(
+        document_id=base.output.document_id,
+        source_fingerprint=base.output.source_fingerprint,
+        source_labels=base.output.source_labels,
+        experiments=(
+            PaperExperimentDraft(
+                payload={
+                    key: value
+                    for key, value in experiment_payload.items()
+                    if key not in {"source_labels", "unresolved_issues"}
+                },
+                source_labels=tuple(experiment_payload.get("source_labels", ())),
+                unresolved_issues=tuple(
+                    experiment_payload.get("unresolved_issues", ())
+                ),
+            ),
+        ),
+        unresolved_issues=tuple(list(base.output.unresolved_issues)),
     )
     return reconcile_model_output(
         output,
@@ -403,7 +449,24 @@ def _physical_split_experiment(
         "experiments": [first, second],
     }
     return reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(payload),
+        PaperExperimentModelOutput(
+            document_id=(payload)["document_id"],
+            source_fingerprint=(payload)["source_fingerprint"],
+            source_labels=(payload).get("source_labels", {}),
+            experiments=tuple(
+                PaperExperimentDraft(
+                    payload={
+                        key: value
+                        for key, value in item.items()
+                        if key not in {"source_labels", "unresolved_issues"}
+                    },
+                    source_labels=tuple(item.get("source_labels", ())),
+                    unresolved_issues=tuple(item.get("unresolved_issues", ())),
+                )
+                for item in (payload).get("experiments", ())
+            ),
+            unresolved_issues=tuple((payload).get("unresolved_issues", ())),
+        ),
         accepted_experiment_keys=("split-a", "split-b"),
     )
 
@@ -739,13 +802,22 @@ async def test_writer_keeps_selection_for_exact_partial_protocol() -> None:
         }
     )
     experiment = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(
-            {
-                "document_id": base.output.document_id,
-                "source_fingerprint": base.output.source_fingerprint,
-                "source_labels": base.output.source_labels,
-                "experiments": [payload],
-            }
+        PaperExperimentModelOutput(
+            document_id=base.output.document_id,
+            source_fingerprint=base.output.source_fingerprint,
+            source_labels=base.output.source_labels,
+            experiments=(
+                PaperExperimentDraft(
+                    payload={
+                        key: value
+                        for key, value in payload.items()
+                        if key not in {"source_labels", "unresolved_issues"}
+                    },
+                    source_labels=tuple(payload.get("source_labels", ())),
+                    unresolved_issues=tuple(payload.get("unresolved_issues", ())),
+                ),
+            ),
+            unresolved_issues=(),
         ),
         accepted_experiment_keys=("series-1",),
     )
@@ -997,13 +1069,24 @@ async def test_parent_identity_is_reused_when_reread_adds_variant_context():
         {"name": "build orientation", "value": "vertical"}
     ]
     reread = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(
-            {
-                "document_id": "paper-a",
-                "source_fingerprint": "prepared-v2",
-                "source_labels": reread.output.source_labels,
-                "experiments": [reread_payload],
-            }
+        PaperExperimentModelOutput(
+            document_id="paper-a",
+            source_fingerprint="prepared-v2",
+            source_labels=reread.output.source_labels,
+            experiments=(
+                PaperExperimentDraft(
+                    payload={
+                        key: value
+                        for key, value in reread_payload.items()
+                        if key not in {"source_labels", "unresolved_issues"}
+                    },
+                    source_labels=tuple(reread_payload.get("source_labels", ())),
+                    unresolved_issues=tuple(
+                        reread_payload.get("unresolved_issues", ())
+                    ),
+                ),
+            ),
+            unresolved_issues=(),
         ),
         accepted_experiment_keys=("series-1",),
     )
@@ -1046,23 +1129,34 @@ async def test_parent_identity_is_reused_for_objective_variant_subset():
     ]
     subset_payload["comparisons"] = []
     subset = reconcile_model_output(
-        PaperExperimentModelOutput.from_mapping(
-            {
-                "document_id": "paper-a",
-                "source_fingerprint": "prepared-paper-a-subset",
-                "source_labels": {
-                    **subset.output.source_labels,
-                    "table": {
-                        **subset.output.source_labels["table"],
-                        "source_fingerprint": "prepared-paper-a-subset",
-                    },
-                    "methods": {
-                        **subset.output.source_labels["methods"],
-                        "source_fingerprint": "prepared-paper-a-subset",
-                    },
+        PaperExperimentModelOutput(
+            document_id="paper-a",
+            source_fingerprint="prepared-paper-a-subset",
+            source_labels={
+                **subset.output.source_labels,
+                "table": {
+                    **subset.output.source_labels["table"],
+                    "source_fingerprint": "prepared-paper-a-subset",
                 },
-                "experiments": [subset_payload],
-            }
+                "methods": {
+                    **subset.output.source_labels["methods"],
+                    "source_fingerprint": "prepared-paper-a-subset",
+                },
+            },
+            experiments=(
+                PaperExperimentDraft(
+                    payload={
+                        key: value
+                        for key, value in subset_payload.items()
+                        if key not in {"source_labels", "unresolved_issues"}
+                    },
+                    source_labels=tuple(subset_payload.get("source_labels", ())),
+                    unresolved_issues=tuple(
+                        subset_payload.get("unresolved_issues", ())
+                    ),
+                ),
+            ),
+            unresolved_issues=(),
         ),
         accepted_experiment_keys=("series-1",),
     )

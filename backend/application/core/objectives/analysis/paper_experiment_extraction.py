@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 import json
 from time import monotonic
@@ -10,8 +11,8 @@ from typing import Any, Literal, Mapping, Sequence
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from application.core.objectives.analysis.paper_experiment_contract import (
+    parse_paper_experiment_response,
     DraftReadiness,
-    PaperExperimentModelOutput,
     ReconciledPaperExperimentOutput,
     SOURCE_REPORTED_IDENTIFIER_FIELDS,
     assess_draft_readiness,
@@ -703,7 +704,7 @@ class PaperExperimentExtractor:
                     raise ProviderTechnicalError(type(exc).__name__) from exc
 
                 raw = response.model_dump(mode="python", exclude_unset=True)
-                output = PaperExperimentModelOutput.from_model_mapping(
+                output = parse_paper_experiment_response(
                     raw,
                     document_id=bundle.document_id,
                     source_fingerprint=bundle.source_fingerprint,

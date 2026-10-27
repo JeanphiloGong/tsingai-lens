@@ -258,10 +258,6 @@ class PaperExperimentDraft:
     unresolved_issues: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
-        if not isinstance(self.payload, Mapping):
-            raise TypeError("draft payload must be an object")
-        if any(not isinstance(item, Mapping) for item in self.unresolved_issues):
-            raise ValueError("draft unresolved_issues must contain only objects")
         forbidden_path = _first_forbidden_field(self.payload)
         if forbidden_path is None:
             forbidden_path = _first_forbidden_field(
@@ -284,24 +280,6 @@ class PaperExperimentDraft:
             tuple(dict(item) for item in self.unresolved_issues),
         )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperExperimentDraft":
-        if not isinstance(payload, Mapping):
-            raise ValueError("experiments must contain only objects")
-        return cls(
-            payload={
-                key: value
-                for key, value in payload.items()
-                if key not in {"source_labels", "unresolved_issues"}
-            },
-            source_labels=_string_items(
-                payload.get("source_labels"), field="experiment source_labels"
-            ),
-            unresolved_issues=_mapping_items(
-                payload.get("unresolved_issues"), field="experiment unresolved_issues"
-            ),
-        )
-
 
 @dataclass(frozen=True)
 class PaperExperimentModelOutput:
@@ -320,14 +298,6 @@ class PaperExperimentModelOutput:
     def __post_init__(self) -> None:
         if not self.document_id.strip() or not self.source_fingerprint.strip():
             raise ValueError("model output requires document_id and source_fingerprint")
-        if any(not isinstance(item, PaperExperimentDraft) for item in self.experiments):
-            raise ValueError("experiments must contain PaperExperimentDraft objects")
-        if not isinstance(self.source_labels, Mapping):
-            raise ValueError("source_labels must be an object")
-        if any(not isinstance(value, Mapping) for value in self.source_labels.values()):
-            raise ValueError("source_labels values must be objects")
-        if any(not isinstance(item, Mapping) for item in self.unresolved_issues):
-            raise ValueError("unresolved_issues must contain only objects")
         forbidden_path = _first_forbidden_field(
             self.unresolved_issues, "unresolved_issues"
         )
@@ -343,120 +313,85 @@ class PaperExperimentModelOutput:
             tuple(dict(item) for item in self.unresolved_issues),
         )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperExperimentModelOutput":
-        """Parse a trusted application envelope.
 
-        Raw provider JSON should use :meth:`from_model_mapping`, which injects
-        the request context and the service-owned source-label catalog.
-        """
-        if not isinstance(payload, Mapping):
-            raise ValueError("model output must be an object")
-        forbidden = next(
-            (
-                str(key)
-                for key in payload
-                if _is_forbidden_field(str(key))
-                and str(key) not in {"document_id", "source_fingerprint"}
-            ),
-            None,
+def parse_paper_experiment_response(
+    payload: Mapping[str, Any],
+    *,
+    document_id: str,
+    source_fingerprint: str,
+    source_labels: Mapping[str, Mapping[str, Any]],
+) -> "PaperExperimentModelOutput":
+    """Parse raw model JSON and attach service-owned request context."""
+
+    if not isinstance(payload, Mapping):
+        raise ValueError("model output must be an object")
+    forbidden_context = next(
+        (
+            str(key)
+            for key in payload
+            if str(key)
+            in {
+                "document_id",
+                "source_fingerprint",
+                "collection_id",
+                "objective_id",
+            }
+        ),
+        None,
+    )
+    if forbidden_context is not None:
+        raise ValueError(
+            "raw model output cannot contain request context fields: "
+            f"{forbidden_context}"
         )
-        if forbidden is not None:
-            raise ValueError(
-                "model output cannot contain formal identity, request ownership, "
-                f"source reference, or validation fields: {forbidden}"
-            )
-        experiment_items = _mapping_items(payload.get("experiments"), field="experiments")
-        source_catalog = payload.get("source_labels")
-        if source_catalog is not None and not isinstance(source_catalog, Mapping):
-            raise ValueError("source_labels must be an object")
-        if isinstance(source_catalog, Mapping) and any(
-            not isinstance(value, Mapping) for value in source_catalog.values()
+    raw_source_labels = payload.get("source_labels")
+    if raw_source_labels is not None:
+        if not isinstance(raw_source_labels, (list, tuple)) or any(
+            not isinstance(item, str) for item in raw_source_labels
         ):
-            raise ValueError("source_labels values must be objects")
-        unresolved_items = _mapping_items(
-            payload.get("unresolved_issues"), field="unresolved_issues"
-        )
-        return cls(
-            document_id=str(payload.get("document_id") or "").strip(),
-            source_fingerprint=str(payload.get("source_fingerprint") or "").strip(),
-            experiments=tuple(
-                PaperExperimentDraft.from_mapping(item)
-                for item in experiment_items
-            ),
-            source_labels={
-                str(key): dict(value)
-                for key, value in dict(source_catalog or {}).items()
-            },
-            unresolved_issues=tuple(dict(item) for item in unresolved_items),
-        )
-
-    @classmethod
-    def from_model_mapping(
-        cls,
-        payload: Mapping[str, Any],
-        *,
-        document_id: str,
-        source_fingerprint: str,
-        source_labels: Mapping[str, Mapping[str, Any]],
-    ) -> "PaperExperimentModelOutput":
-        """Parse raw model JSON and attach service-owned request context."""
-
-        forbidden_context = next(
-            (
-                str(key)
-                for key in payload
-                if str(key)
-                in {
-                    "document_id",
-                    "source_fingerprint",
-                    "collection_id",
-                    "objective_id",
-                }
-            ),
-            None,
-        )
-        if forbidden_context is not None:
             raise ValueError(
-                "raw model output cannot contain request context fields: "
-                f"{forbidden_context}"
+                "raw model output source_labels must be a list of supplied labels"
             )
-        raw_source_labels = payload.get("source_labels")
-        if raw_source_labels is not None:
-            if not isinstance(raw_source_labels, (list, tuple)) or any(
-                not isinstance(item, str) for item in raw_source_labels
-            ):
-                raise ValueError(
-                    "raw model output source_labels must be a list of supplied labels"
-                )
-            unknown_labels = sorted(set(raw_source_labels) - set(source_labels))
-            if unknown_labels:
-                raise ValueError(
-                    "raw model output referenced unknown source labels: "
-                    + ", ".join(unknown_labels)
-                )
-        experiment_items = _mapping_items(payload.get("experiments"), field="experiments")
-        unresolved_items = _mapping_items(
-            payload.get("unresolved_issues"), field="unresolved_issues"
-        )
-        forbidden = _first_forbidden_field(
-            {key: value for key, value in payload.items() if key != "source_labels"}
-        )
-        if forbidden is not None:
+        unknown_labels = sorted(set(raw_source_labels) - set(source_labels))
+        if unknown_labels:
             raise ValueError(
-                "raw model output cannot contain formal identity, request "
-                f"ownership, source reference, or validation fields: {forbidden}"
+                "raw model output referenced unknown source labels: "
+                + ", ".join(unknown_labels)
             )
-        return cls(
-            document_id=document_id,
-            source_fingerprint=source_fingerprint,
-            experiments=tuple(
-                PaperExperimentDraft.from_mapping(item)
-                for item in experiment_items
-            ),
-            source_labels=source_labels,
-            unresolved_issues=tuple(dict(item) for item in unresolved_items),
+    experiment_items = _mapping_items(payload.get("experiments"), field="experiments")
+    unresolved_items = _mapping_items(
+        payload.get("unresolved_issues"), field="unresolved_issues"
+    )
+    forbidden = _first_forbidden_field(
+        {key: value for key, value in payload.items() if key != "source_labels"}
+    )
+    if forbidden is not None:
+        raise ValueError(
+            "raw model output cannot contain formal identity, request "
+            f"ownership, source reference, or validation fields: {forbidden}"
         )
+    return PaperExperimentModelOutput(
+        document_id=document_id,
+        source_fingerprint=source_fingerprint,
+        experiments=tuple(
+            PaperExperimentDraft(
+                payload={
+                    key: value
+                    for key, value in item.items()
+                    if key not in {"source_labels", "unresolved_issues"}
+                },
+                source_labels=_string_items(
+                    item.get("source_labels"), field="experiment source_labels"
+                ),
+                unresolved_issues=_mapping_items(
+                    item.get("unresolved_issues"), field="experiment unresolved_issues"
+                ),
+            )
+            for item in experiment_items
+        ),
+        source_labels=source_labels,
+        unresolved_issues=tuple(dict(item) for item in unresolved_items),
+    )
 
 
 @dataclass(frozen=True)
@@ -2797,7 +2732,7 @@ def _preserve_reported_measurement_scope(
     paper may report ``as-SLM`` or ``mechanical test`` without proving one
     concrete variant/test edge.  The adapter must retain that evidence in the
     existing JSON scope and unresolved-issue fields instead of silently
-    dropping unknown Draft keys during ``from_mapping``.
+    dropping unknown Draft keys during response parsing.
     """
 
     result = dict(content)
@@ -2963,6 +2898,7 @@ __all__ = [
     "DraftReadiness",
     "PaperExperimentDraft",
     "PaperExperimentModelOutput",
+    "parse_paper_experiment_response",
     "ReconciledPaperExperimentOutput",
     "assess_draft_readiness",
     "bind_model_output",

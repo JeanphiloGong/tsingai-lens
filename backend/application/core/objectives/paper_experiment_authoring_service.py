@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import json
 from dataclasses import dataclass
 from hashlib import sha256
@@ -12,8 +13,8 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriteResult,
 )
 from application.core.objectives.analysis.paper_experiment_contract import (
+    parse_paper_experiment_response,
     PaperExperimentDraftValidationError,
-    PaperExperimentModelOutput,
     ReconciledPaperExperimentOutput,
     prepare_model_output,
 )
@@ -170,7 +171,7 @@ class PaperExperimentAuthoringService:
             source_payloads=source_payloads,
         )
         try:
-            output = PaperExperimentModelOutput.from_model_mapping(
+            output = parse_paper_experiment_response(
                 raw_draft,
                 document_id=document_id,
                 source_fingerprint=source_fingerprint,

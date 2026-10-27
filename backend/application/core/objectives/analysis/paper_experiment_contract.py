@@ -2,14 +2,37 @@
 
 from __future__ import annotations
 
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    _text as scientific_text,
+    _terms as scientific_terms,
+    _scientific_scalar as scientific_scalar,
+    _choice as scientific_choice,
+    ScientificAttribute,
+    ScientificVariable,
+)
+
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import re
-from typing import Any, Iterable, Mapping, Sequence
+from typing import (
+    Mapping,
+    Any,
+    Iterable,
+    Sequence,
+)
 import unicodedata
 
-from domain.core.paper_experiment import PaperExperimentRevision, SourceReference
+from domain.core.paper_experiment import (
+    SourceReference,
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    ExperimentComparison,
+    ReportedInterpretation,
+    PaperExperimentRevision,
+)
 from domain.core.research_objective import ResearchObjective
 
 
@@ -2128,7 +2151,13 @@ def bind_model_output(
         raise ValueError("formal identity count must match draft experiment count")
 
     labels = {
-        label: SourceReference.from_mapping(reference)
+        label: SourceReference(
+            document_id=_text(reference.get("document_id")),
+            source_fingerprint=_text(reference.get("source_fingerprint")),
+            source_kind=_text(reference.get("source_kind")),
+            source_ref=_text(reference.get("source_ref")),
+            quote=_text(reference.get("quote")),
+        )
         for label, reference in model_output.source_labels.items()
     }
     revisions: list[PaperExperimentRevision] = []
@@ -2162,10 +2191,6 @@ def bind_model_output(
         content["source_refs"] = _dedupe_records(
             item for item in draft_source_refs if isinstance(item, Mapping)
         )
-        content["experiment_id"] = experiment_id
-        content["experiment_version"] = experiment_version
-        content["document_id"] = document_id
-        content["source_fingerprint"] = source_fingerprint
         relevant_issues = _issues_for_draft(
             output,
             draft=draft,
@@ -2188,7 +2213,339 @@ def bind_model_output(
             )
         content = _preserve_reported_measurement_scope(content)
         content = _resolve_measurement_bindings(content)
-        revisions.append(PaperExperimentRevision.from_mapping(content))
+        revisions.append(
+            PaperExperimentRevision(
+                experiment_id=experiment_id,
+                document_id=document_id,
+                experiment_version=experiment_version,
+                source_fingerprint=source_fingerprint,
+                label=_text(content.get("label")),
+                scope_description=_text(content.get("scope_description")),
+                design_type=_text(content.get("design_type")) or "unknown",
+                identity_status=_text(content.get("identity_status")) or "unknown",
+                binding_status=_text(content.get("binding_status")) or "draft",
+                variants=tuple(
+                    (
+                        ExperimentalVariant(
+                            variant_key=_text(
+                                item.get("variant_key") or item.get("variant_id")
+                            ),
+                            variant_label=_text(item.get("variant_label")),
+                            subject_attributes=_attributes(
+                                item.get("subject_attributes")
+                            ),
+                            intervention_attributes=_attributes(
+                                item.get("intervention_attributes")
+                            ),
+                            state=_attributes(item.get("state")),
+                            population_scope=(
+                                _mapping(item.get("population_scope"))
+                                if item.get("population_scope") is not None
+                                else None
+                            ),
+                            source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            binding_source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("binding_source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            binding_status=_text(item.get("binding_status"))
+                            or "uncertain",
+                            notes=_strings(item.get("notes")),
+                            identity_specificity=_text(item.get("identity_specificity"))
+                            or "unknown",
+                            missing_dimensions=_strings(item.get("missing_dimensions")),
+                            identity_evidence=_strings(item.get("identity_evidence")),
+                        )
+                        for item in content.get("variants")
+                        or content.get("experimental_variants")
+                        or ()
+                        if isinstance(item, Mapping)
+                    )
+                ),
+                test_conditions=tuple(
+                    (
+                        ExperimentTestCondition(
+                            test_key=_text(
+                                item.get("test_key") or item.get("test_condition_id")
+                            ),
+                            test_type=_text(
+                                item.get("test_type") or item.get("property_type")
+                            ),
+                            parameters=_attributes(item.get("parameters")),
+                            population_scope=(
+                                _mapping(item.get("population_scope"))
+                                if item.get("population_scope") is not None
+                                else None
+                            ),
+                            source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            binding_status=_text(item.get("binding_status"))
+                            or "uncertain",
+                            notes=_strings(item.get("notes")),
+                            protocol_specificity=_text(item.get("protocol_specificity"))
+                            or "unknown",
+                            test_identity_status=_text(item.get("test_identity_status"))
+                            or "unknown",
+                            protocol_completeness=_text(
+                                item.get("protocol_completeness")
+                            )
+                            or "unknown",
+                            missing_parameters=_strings(item.get("missing_parameters")),
+                            method=_text(item.get("method")) or None,
+                            standard=_text(item.get("standard")) or None,
+                            outcome_scope=_strings(item.get("outcome_scope")),
+                            binding_source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("binding_source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            protocol_evidence=_strings(item.get("protocol_evidence")),
+                        )
+                        for item in content.get("test_conditions") or ()
+                        if isinstance(item, Mapping)
+                    )
+                ),
+                measurements=tuple(
+                    (
+                        ExperimentMeasurementResult(
+                            measurement_key=_text(
+                                item.get("measurement_key")
+                                or item.get("measurement_id")
+                                or item.get("result_id")
+                            ),
+                            outcome=_text(
+                                item.get("outcome") or item.get("property_normalized")
+                            ),
+                            variant_key=_text(
+                                item.get("variant_key") or item.get("variant_id")
+                            )
+                            or None,
+                            test_key=_text(
+                                item.get("test_key") or item.get("test_condition_id")
+                            )
+                            or None,
+                            value=item.get("value", item.get("value_numeric")),
+                            unit=_text(item.get("unit")) or None,
+                            result_text=_text(
+                                item.get("result_text") or item.get("value_text")
+                            )
+                            or None,
+                            statistics=_mapping(item.get("statistics")),
+                            measurement_scope=_mapping(item.get("measurement_scope")),
+                            result_kind=_text(item.get("result_kind")) or "measured",
+                            source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            binding_source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("binding_source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            binding_status=_text(item.get("binding_status"))
+                            or "uncertain",
+                            notes=_strings(item.get("notes")),
+                        )
+                        for item in content.get("measurements") or ()
+                        if isinstance(item, Mapping)
+                    )
+                ),
+                comparisons=tuple(
+                    (
+                        ExperimentComparison(
+                            comparison_key=_text(
+                                item.get("comparison_key") or item.get("comparison_id")
+                            ),
+                            baseline_variant_key=_text(
+                                item.get("baseline_variant_key")
+                                or item.get("baseline_variant_id")
+                            ),
+                            target_variant_key=_text(
+                                item.get("target_variant_key")
+                                or item.get("target_variant_id")
+                            ),
+                            outcome=_text(item.get("outcome")),
+                            baseline_measurement_keys=_strings(
+                                item.get("baseline_measurement_keys")
+                                or item.get("baseline_measurement_ids")
+                            ),
+                            target_measurement_keys=_strings(
+                                item.get("target_measurement_keys")
+                                or item.get("target_measurement_ids")
+                            ),
+                            changed_variables=_variables(item.get("changed_variables")),
+                            matched_conditions=_attributes(
+                                item.get("matched_conditions")
+                            ),
+                            basis=_text(item.get("basis")) or "reported",
+                            direction=_text(item.get("direction")) or "unknown",
+                            reported_statement=_text(item.get("reported_statement"))
+                            or None,
+                            attribution_scope=_text(item.get("attribution_scope"))
+                            or "undetermined",
+                            status=_text(item.get("status")) or "insufficient_context",
+                            reasons=_strings(item.get("reasons")),
+                            source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            binding_source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("binding_source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                            relation_status=_text(item.get("relation_status"))
+                            or "uncertain",
+                        )
+                        for item in content.get("comparisons") or ()
+                        if isinstance(item, Mapping)
+                    )
+                ),
+                reported_interpretations=tuple(
+                    (
+                        ReportedInterpretation(
+                            statement=_text(item.get("statement")),
+                            kind=_text(item.get("kind")) or "result_summary",
+                            measurement_keys=_strings(
+                                item.get("measurement_keys")
+                                or item.get("measurement_ids")
+                            ),
+                            comparison_keys=_strings(
+                                item.get("comparison_keys")
+                                or item.get("comparison_ids")
+                            ),
+                            source_refs=tuple(
+                                (
+                                    SourceReference(
+                                        document_id=_text(item.get("document_id")),
+                                        source_fingerprint=_text(
+                                            item.get("source_fingerprint")
+                                        ),
+                                        source_kind=_text(item.get("source_kind")),
+                                        source_ref=_text(item.get("source_ref")),
+                                        quote=_text(item.get("quote")),
+                                    )
+                                    for item in item.get("source_refs") or ()
+                                    if isinstance(item, Mapping)
+                                )
+                            ),
+                        )
+                        for item in content.get("reported_interpretations") or ()
+                        if isinstance(item, Mapping)
+                    )
+                ),
+                source_refs=tuple(
+                    (
+                        SourceReference(
+                            document_id=_text(item.get("document_id")),
+                            source_fingerprint=_text(item.get("source_fingerprint")),
+                            source_kind=_text(item.get("source_kind")),
+                            source_ref=_text(item.get("source_ref")),
+                            quote=_text(item.get("quote")),
+                        )
+                        for item in content.get("source_refs") or ()
+                        if isinstance(item, Mapping)
+                    )
+                ),
+                unresolved_issues=tuple(
+                    (
+                        dict(item)
+                        for item in content.get("unresolved_issues") or ()
+                        if isinstance(item, Mapping)
+                    )
+                ),
+            )
+        )
     return tuple(revisions)
 
 
@@ -2239,7 +2596,15 @@ def _resolve_boundary_evidence_refs(
             reference = labels.get(label)
             if reference is None:
                 raise ValueError(f"unknown source label: {label}")
-            resolved.append(reference.to_record())
+            resolved.append(
+                {
+                    "document_id": reference.document_id,
+                    "source_fingerprint": reference.source_fingerprint,
+                    "source_kind": reference.source_kind,
+                    "source_ref": reference.source_ref,
+                    "quote": reference.quote,
+                }
+            )
     return _dedupe_records(resolved)
 
 
@@ -2889,7 +3254,15 @@ def _resolve_source_labels(value: Any, labels: Mapping[str, SourceReference]) ->
             for label in source_label_values:
                 if not isinstance(label, str) or label not in labels:
                     raise ValueError(f"unknown source label: {label}")
-                refs.append(labels[label].to_record())
+                refs.append(
+                    {
+                        "document_id": labels[label].document_id,
+                        "source_fingerprint": labels[label].source_fingerprint,
+                        "source_kind": labels[label].source_kind,
+                        "source_ref": labels[label].source_ref,
+                        "quote": labels[label].quote,
+                    }
+                )
             result[resolved_field] = refs
     return result
 
@@ -2905,3 +3278,54 @@ __all__ = [
     "prepare_model_output",
     "reconcile_model_output",
 ]
+
+
+def _text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
+
+
+def _strings(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple, set)):
+        return ()
+    return tuple(item for item in (_text(item) for item in value) if item)
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(
+        ScientificAttribute(
+            name=scientific_text(item.get("name")) or "",
+            value=(
+                scientific_scalar(item.get("value"))
+                if scientific_scalar(item.get("value")) is not None
+                else ""
+            ),
+            unit=scientific_text(item.get("unit")),
+            context_scope=scientific_choice(
+                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
+            ),
+            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
+        )
+        for item in value
+        if isinstance(item, Mapping)
+    )
+
+
+def _variables(value: Any) -> tuple[ScientificVariable, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(
+        ScientificVariable(
+            name=scientific_text(item.get("name")) or "",
+            baseline_value=scientific_scalar(item.get("baseline_value")),
+            target_value=scientific_scalar(item.get("target_value")),
+            unit=scientific_text(item.get("unit")),
+        )
+        for item in value
+        if isinstance(item, Mapping)
+    )

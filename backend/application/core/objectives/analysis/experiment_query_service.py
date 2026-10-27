@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from domain.core.paper_experiment import (
+    SourceReference,
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    ExperimentComparison,
+    ReportedInterpretation,
+    PaperExperimentRevision,
+)
+
 import csv
 import io
 import json
@@ -35,37 +45,49 @@ class ExperimentAnalysisBundle:
 
     def to_record(self) -> dict[str, Any]:
         return {
-            "selections": [{
-                'selection_id': item.selection_id,
-                'objective_id': item.objective_id,
-                'analysis_version': item.analysis_version,
-                'experiment_id': item.experiment_id,
-                'experiment_version': item.experiment_version,
-                'outcome': item.outcome,
-                'measurement_keys': list(item.measurement_keys),
-                'comparison_keys': list(item.comparison_keys),
-                'missing_context': list(item.missing_context),
-                'reasons': list(item.reasons),
-            } for item in self.selections],
-            "comparison_groups": [{
-                'group_id': item.group_id,
-                'objective_id': item.objective_id,
-                'analysis_version': item.analysis_version,
-                'outcome': item.outcome,
-                'comparison_target': item.comparison_target,
-                'comparison_basis': list(item.comparison_basis),
-                'members': [{
-                    'selection_id': item.selection_id,
-                    'role': item.role,
-                    'comparability': item.comparability,
-                    'reason': item.reason,
-                } for item in item.members],
-                'normalizations': [dict(item) for item in item.normalizations],
-                'status': item.status,
-                'limitations': list(item.limitations),
-            } for item in self.groups],
+            "selections": [
+                {
+                    "selection_id": item.selection_id,
+                    "objective_id": item.objective_id,
+                    "analysis_version": item.analysis_version,
+                    "experiment_id": item.experiment_id,
+                    "experiment_version": item.experiment_version,
+                    "outcome": item.outcome,
+                    "measurement_keys": list(item.measurement_keys),
+                    "comparison_keys": list(item.comparison_keys),
+                    "missing_context": list(item.missing_context),
+                    "reasons": list(item.reasons),
+                }
+                for item in self.selections
+            ],
+            "comparison_groups": [
+                {
+                    "group_id": item.group_id,
+                    "objective_id": item.objective_id,
+                    "analysis_version": item.analysis_version,
+                    "outcome": item.outcome,
+                    "comparison_target": item.comparison_target,
+                    "comparison_basis": list(item.comparison_basis),
+                    "members": [
+                        {
+                            "selection_id": item.selection_id,
+                            "role": item.role,
+                            "comparability": item.comparability,
+                            "reason": item.reason,
+                        }
+                        for item in item.members
+                    ],
+                    "normalizations": [dict(item) for item in item.normalizations],
+                    "status": item.status,
+                    "limitations": list(item.limitations),
+                }
+                for item in self.groups
+            ],
             "findings": [item.to_record() for item in self.findings],
-            "experiments": [item.revision.to_record() for item in self.revisions],
+            "experiments": [
+                _paper_experiment_revision_response(item.revision)
+                for item in self.revisions
+            ],
         }
 
 
@@ -258,64 +280,108 @@ class ExperimentQueryService:
                         "variant_key": measurement.variant_key or "",
                         "variant_label": variant.variant_label if variant else "",
                         "variant_subject_attributes": json.dumps(
-                            [item.to_record() for item in variant.subject_attributes]
-                            if variant
-                            else [],
+                            (
+                                [
+                                    item.to_record()
+                                    for item in variant.subject_attributes
+                                ]
+                                if variant
+                                else []
+                            ),
                             ensure_ascii=False,
                             sort_keys=True,
                         ),
                         "variant_intervention_attributes": json.dumps(
-                            [item.to_record() for item in variant.intervention_attributes]
-                            if variant
-                            else [],
+                            (
+                                [
+                                    item.to_record()
+                                    for item in variant.intervention_attributes
+                                ]
+                                if variant
+                                else []
+                            ),
                             ensure_ascii=False,
                             sort_keys=True,
                         ),
                         "variant_state": json.dumps(
-                            [item.to_record() for item in variant.state]
-                            if variant
-                            else [],
+                            (
+                                [item.to_record() for item in variant.state]
+                                if variant
+                                else []
+                            ),
                             ensure_ascii=False,
                             sort_keys=True,
                         ),
                         "variant_population_scope": json.dumps(
-                            dict(variant.population_scope)
-                            if variant and variant.population_scope is not None
-                            else {},
+                            (
+                                dict(variant.population_scope)
+                                if variant and variant.population_scope is not None
+                                else {}
+                            ),
                             ensure_ascii=False,
                             sort_keys=True,
                         ),
-                        "variant_binding_status": variant.binding_status if variant else "",
+                        "variant_binding_status": (
+                            variant.binding_status if variant else ""
+                        ),
                         "variant_source_refs": json.dumps(
-                            [item.to_record() for item in variant.source_refs]
-                            if variant
-                            else [],
+                            (
+                                [
+                                    {
+                                        "document_id": item.document_id,
+                                        "source_fingerprint": item.source_fingerprint,
+                                        "source_kind": item.source_kind,
+                                        "source_ref": item.source_ref,
+                                        "quote": item.quote,
+                                    }
+                                    for item in variant.source_refs
+                                ]
+                                if variant
+                                else []
+                            ),
                             ensure_ascii=False,
                         ),
                         "variant_binding_source_refs": json.dumps(
-                            [item.to_record() for item in variant.binding_source_refs]
-                            if variant
-                            else [],
+                            (
+                                [
+                                    {
+                                        "document_id": item.document_id,
+                                        "source_fingerprint": item.source_fingerprint,
+                                        "source_kind": item.source_kind,
+                                        "source_ref": item.source_ref,
+                                        "quote": item.quote,
+                                    }
+                                    for item in variant.binding_source_refs
+                                ]
+                                if variant
+                                else []
+                            ),
                             ensure_ascii=False,
                         ),
                         "test_key": measurement.test_key or "",
                         "test_type": test.test_type if test else "",
                         "test_parameters": json.dumps(
-                            [item.to_record() for item in test.parameters]
-                            if test
-                            else [],
+                            (
+                                [item.to_record() for item in test.parameters]
+                                if test
+                                else []
+                            ),
                             ensure_ascii=False,
                             sort_keys=True,
                         ),
                         "test_population_scope": json.dumps(
-                            dict(test.population_scope)
-                            if test and test.population_scope is not None
-                            else {},
+                            (
+                                dict(test.population_scope)
+                                if test and test.population_scope is not None
+                                else {}
+                            ),
                             ensure_ascii=False,
                             sort_keys=True,
                         ),
                         "test_method": test.method if test and test.method else "",
-                        "test_standard": test.standard if test and test.standard else "",
+                        "test_standard": (
+                            test.standard if test and test.standard else ""
+                        ),
                         "test_outcome_scope": json.dumps(
                             list(test.outcome_scope) if test else [],
                             ensure_ascii=False,
@@ -335,15 +401,37 @@ class ExperimentQueryService:
                         ),
                         "test_binding_status": test.binding_status if test else "",
                         "test_source_refs": json.dumps(
-                            [item.to_record() for item in test.source_refs]
-                            if test
-                            else [],
+                            (
+                                [
+                                    {
+                                        "document_id": item.document_id,
+                                        "source_fingerprint": item.source_fingerprint,
+                                        "source_kind": item.source_kind,
+                                        "source_ref": item.source_ref,
+                                        "quote": item.quote,
+                                    }
+                                    for item in test.source_refs
+                                ]
+                                if test
+                                else []
+                            ),
                             ensure_ascii=False,
                         ),
                         "test_binding_source_refs": json.dumps(
-                            [item.to_record() for item in test.binding_source_refs]
-                            if test
-                            else [],
+                            (
+                                [
+                                    {
+                                        "document_id": item.document_id,
+                                        "source_fingerprint": item.source_fingerprint,
+                                        "source_kind": item.source_kind,
+                                        "source_ref": item.source_ref,
+                                        "quote": item.quote,
+                                    }
+                                    for item in test.binding_source_refs
+                                ]
+                                if test
+                                else []
+                            ),
                             ensure_ascii=False,
                         ),
                         "test_protocol_evidence": json.dumps(
@@ -351,26 +439,52 @@ class ExperimentQueryService:
                             ensure_ascii=False,
                         ),
                         "outcome": measurement.outcome,
-                        "value": "" if measurement.value is None else str(measurement.value),
+                        "value": (
+                            "" if measurement.value is None else str(measurement.value)
+                        ),
                         "unit": measurement.unit or "",
                         "result_text": measurement.result_text or "",
                         "statistics": json.dumps(
-                            dict(measurement.statistics), ensure_ascii=False, sort_keys=True
+                            dict(measurement.statistics),
+                            ensure_ascii=False,
+                            sort_keys=True,
                         ),
                         "measurement_scope": json.dumps(
-                            dict(measurement.measurement_scope), ensure_ascii=False, sort_keys=True
+                            dict(measurement.measurement_scope),
+                            ensure_ascii=False,
+                            sort_keys=True,
                         ),
                         "source_refs": json.dumps(
-                            [item.to_record() for item in measurement.source_refs],
+                            [
+                                {
+                                    "document_id": item.document_id,
+                                    "source_fingerprint": item.source_fingerprint,
+                                    "source_kind": item.source_kind,
+                                    "source_ref": item.source_ref,
+                                    "quote": item.quote,
+                                }
+                                for item in measurement.source_refs
+                            ],
                             ensure_ascii=False,
                         ),
                         "binding_source_refs": json.dumps(
-                            [item.to_record() for item in measurement.binding_source_refs],
+                            [
+                                {
+                                    "document_id": item.document_id,
+                                    "source_fingerprint": item.source_fingerprint,
+                                    "source_kind": item.source_kind,
+                                    "source_ref": item.source_ref,
+                                    "quote": item.quote,
+                                }
+                                for item in measurement.binding_source_refs
+                            ],
                             ensure_ascii=False,
                         ),
                         "binding_status": measurement.binding_status,
                         "result_kind": measurement.result_kind,
-                        "notes": json.dumps(list(measurement.notes), ensure_ascii=False),
+                        "notes": json.dumps(
+                            list(measurement.notes), ensure_ascii=False
+                        ),
                         "comparison_keys": json.dumps(
                             list(comparison_keys), ensure_ascii=False
                         ),
@@ -434,3 +548,153 @@ class ExperimentQueryService:
 
 
 __all__ = ["ExperimentAnalysisBundle", "ExperimentQueryService"]
+
+
+def _source_reference_response(value: SourceReference) -> dict[str, str]:
+    return {
+        "document_id": value.document_id,
+        "source_fingerprint": value.source_fingerprint,
+        "source_kind": value.source_kind,
+        "source_ref": value.source_ref,
+        "quote": value.quote,
+    }
+
+
+def _experimental_variant_response(value: ExperimentalVariant) -> dict[str, Any]:
+    return {
+        "variant_key": value.variant_key,
+        "variant_label": value.variant_label,
+        "subject_attributes": [item.to_record() for item in value.subject_attributes],
+        "intervention_attributes": [
+            item.to_record() for item in value.intervention_attributes
+        ],
+        "state": [item.to_record() for item in value.state],
+        "population_scope": (
+            dict(value.population_scope) if value.population_scope is not None else None
+        ),
+        "source_refs": [_source_reference_response(item) for item in value.source_refs],
+        "binding_source_refs": [
+            _source_reference_response(item) for item in value.binding_source_refs
+        ],
+        "binding_status": value.binding_status,
+        "notes": list(value.notes),
+        "identity_specificity": value.identity_specificity,
+        "missing_dimensions": list(value.missing_dimensions),
+        "identity_evidence": list(value.identity_evidence),
+    }
+
+
+def _experiment_test_condition_response(
+    value: ExperimentTestCondition,
+) -> dict[str, Any]:
+    return {
+        "test_key": value.test_key,
+        "test_type": value.test_type,
+        "parameters": [item.to_record() for item in value.parameters],
+        "population_scope": (
+            dict(value.population_scope) if value.population_scope is not None else None
+        ),
+        "source_refs": [_source_reference_response(item) for item in value.source_refs],
+        "binding_status": value.binding_status,
+        "notes": list(value.notes),
+        "protocol_specificity": value.protocol_specificity,
+        "test_identity_status": value.test_identity_status,
+        "protocol_completeness": value.protocol_completeness,
+        "missing_parameters": list(value.missing_parameters),
+        "method": value.method,
+        "standard": value.standard,
+        "outcome_scope": list(value.outcome_scope),
+        "binding_source_refs": [
+            _source_reference_response(item) for item in value.binding_source_refs
+        ],
+        "protocol_evidence": list(value.protocol_evidence),
+    }
+
+
+def _experiment_measurement_result_response(
+    value: ExperimentMeasurementResult,
+) -> dict[str, Any]:
+    return {
+        "measurement_key": value.measurement_key,
+        "outcome": value.outcome,
+        "variant_key": value.variant_key,
+        "test_key": value.test_key,
+        "value": value.value,
+        "unit": value.unit,
+        "result_text": value.result_text,
+        "statistics": dict(value.statistics),
+        "measurement_scope": dict(value.measurement_scope),
+        "result_kind": value.result_kind,
+        "source_refs": [_source_reference_response(item) for item in value.source_refs],
+        "binding_source_refs": [
+            _source_reference_response(item) for item in value.binding_source_refs
+        ],
+        "binding_status": value.binding_status,
+        "notes": list(value.notes),
+    }
+
+
+def _experiment_comparison_response(value: ExperimentComparison) -> dict[str, Any]:
+    return {
+        "comparison_key": value.comparison_key,
+        "baseline_variant_key": value.baseline_variant_key,
+        "target_variant_key": value.target_variant_key,
+        "outcome": value.outcome,
+        "baseline_measurement_keys": list(value.baseline_measurement_keys),
+        "target_measurement_keys": list(value.target_measurement_keys),
+        "changed_variables": [item.to_record() for item in value.changed_variables],
+        "matched_conditions": [item.to_record() for item in value.matched_conditions],
+        "basis": value.basis,
+        "direction": value.direction,
+        "reported_statement": value.reported_statement,
+        "attribution_scope": value.attribution_scope,
+        "status": value.status,
+        "reasons": list(value.reasons),
+        "source_refs": [_source_reference_response(item) for item in value.source_refs],
+        "binding_source_refs": [
+            _source_reference_response(item) for item in value.binding_source_refs
+        ],
+        "relation_status": value.relation_status,
+    }
+
+
+def _reported_interpretation_response(value: ReportedInterpretation) -> dict[str, Any]:
+    return {
+        "statement": value.statement,
+        "kind": value.kind,
+        "measurement_keys": list(value.measurement_keys),
+        "comparison_keys": list(value.comparison_keys),
+        "source_refs": [_source_reference_response(item) for item in value.source_refs],
+    }
+
+
+def _paper_experiment_revision_response(
+    value: PaperExperimentRevision,
+) -> dict[str, Any]:
+    return {
+        "experiment_id": value.experiment_id,
+        "document_id": value.document_id,
+        "experiment_version": value.experiment_version,
+        "source_fingerprint": value.source_fingerprint,
+        "label": value.label,
+        "scope_description": value.scope_description,
+        "design_type": value.design_type,
+        "identity_status": value.identity_status,
+        "binding_status": value.binding_status,
+        "variants": [_experimental_variant_response(item) for item in value.variants],
+        "test_conditions": [
+            _experiment_test_condition_response(item) for item in value.test_conditions
+        ],
+        "measurements": [
+            _experiment_measurement_result_response(item) for item in value.measurements
+        ],
+        "comparisons": [
+            _experiment_comparison_response(item) for item in value.comparisons
+        ],
+        "reported_interpretations": [
+            _reported_interpretation_response(item)
+            for item in value.reported_interpretations
+        ],
+        "source_refs": [_source_reference_response(item) for item in value.source_refs],
+        "unresolved_issues": [dict(item) for item in value.unresolved_issues],
+    }

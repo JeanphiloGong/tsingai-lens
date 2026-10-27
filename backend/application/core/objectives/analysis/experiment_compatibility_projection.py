@@ -666,7 +666,16 @@ class ExperimentCompatibilityProjection:
             "source_ref": source_refs[0].source_ref,
             "source_excerpt": source_refs[0].quote,
             "page_numbers": [],
-            "related_source_refs": [item.to_record() for item in source_refs[1:]],
+            "related_source_refs": [
+                {
+                    "document_id": item.document_id,
+                    "source_fingerprint": item.source_fingerprint,
+                    "source_kind": item.source_kind,
+                    "source_ref": item.source_ref,
+                    "quote": item.quote,
+                }
+                for item in source_refs[1:]
+            ],
             "evidence_role": "direct_result",
             "selection_status": "extracted",
             "selection_reason": "; ".join(selection.reasons) or None,
@@ -756,26 +765,39 @@ class ExperimentCompatibilityProjection:
             "source_ref": source_refs[0].source_ref,
             "source_excerpt": source_refs[0].quote,
             "page_numbers": [],
-            "related_source_refs": [item.to_record() for item in source_refs[1:]],
+            "related_source_refs": [
+                {
+                    "document_id": item.document_id,
+                    "source_fingerprint": item.source_fingerprint,
+                    "source_kind": item.source_kind,
+                    "source_ref": item.source_ref,
+                    "quote": item.quote,
+                }
+                for item in source_refs[1:]
+            ],
             "evidence_role": "direct_result",
             "selection_status": "extracted",
             "selection_reason": "; ".join(selection.reasons) or None,
-            "evidence_status": (
-                "comparable" if comparable else "non_comparable"
-            ),
+            "evidence_status": ("comparable" if comparable else "non_comparable"),
             "evidence_status_reason": (
                 "The paper reports a source-grounded comparison."
                 if comparable
                 else "; ".join(comparison.reasons)
                 or "The paper comparison lacks sufficient context."
             ),
-            "changed_variables": [item.to_record() for item in comparison.changed_variables],
+            "changed_variables": [
+                item.to_record() for item in comparison.changed_variables
+            ],
             "comparison": {
-                "baseline_label": _variant_label(revision, comparison.baseline_variant_key),
+                "baseline_label": _variant_label(
+                    revision, comparison.baseline_variant_key
+                ),
                 "target_label": _variant_label(revision, comparison.target_variant_key),
                 "axis_names": [item.name for item in comparison.changed_variables],
                 "comparable": comparable,
-                "incomparability_reasons": list(comparison.reasons) if not comparable else [],
+                "incomparability_reasons": (
+                    list(comparison.reasons) if not comparable else []
+                ),
             },
             "reported_result": {
                 "outcome": comparison.outcome,
@@ -789,7 +811,9 @@ class ExperimentCompatibilityProjection:
             },
             "attribution_scope": attribution,
             "scientific_context": _context_record(
-                _by_key(revision.variants, "variant_key", comparison.target_variant_key),
+                _by_key(
+                    revision.variants, "variant_key", comparison.target_variant_key
+                ),
                 _by_key(
                     revision.test_conditions,
                     "test_key",

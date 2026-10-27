@@ -2,16 +2,37 @@
 
 from __future__ import annotations
 
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    _text as scientific_text,
+    _terms as scientific_terms,
+    _scientific_scalar as scientific_scalar,
+    _choice as scientific_choice,
+    ScientificAttribute,
+    ScientificVariable,
+)
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import (
+    Mapping,
+    Any,
+)
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.paper_experiment import (
+    SourceReference,
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    ExperimentComparison,
+    ReportedInterpretation,
+    PaperExperimentRevision,
+)
 from infra.persistence.postgres.models.paper_experiment import (
     ExperimentalVariantRow,
     ExperimentComparisonMeasurementRow,
@@ -193,9 +214,7 @@ async def _add_revision(
     created_by: str | None = None,
     created_at: datetime | None = None,
 ) -> StoredPaperExperimentRevision:
-    # Rebuild at the trust boundary so even a mutated frozen instance cannot
-    # bypass cross-component domain validation.
-    validated = PaperExperimentRevision.from_mapping(revision.to_record())
+    validated = revision
     timestamp = created_at or datetime.now(timezone.utc)
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
@@ -224,7 +243,16 @@ async def _add_revision(
         design_type=validated.design_type,
         identity_status=validated.identity_status,
         binding_status=validated.binding_status,
-        source_refs_json=[item.to_record() for item in validated.source_refs],
+        source_refs_json=[
+            {
+                "document_id": item.document_id,
+                "source_fingerprint": item.source_fingerprint,
+                "source_kind": item.source_kind,
+                "source_ref": item.source_ref,
+                "quote": item.quote,
+            }
+            for item in validated.source_refs
+        ],
         unresolved_issues_json=[dict(item) for item in validated.unresolved_issues],
         created_at=timestamp,
         created_by=created_by,
@@ -268,9 +296,25 @@ async def _add_components(
                     if item.population_scope is not None
                     else None
                 ),
-                source_refs_json=[value.to_record() for value in item.source_refs],
+                source_refs_json=[
+                    {
+                        "document_id": value.document_id,
+                        "source_fingerprint": value.source_fingerprint,
+                        "source_kind": value.source_kind,
+                        "source_ref": value.source_ref,
+                        "quote": value.quote,
+                    }
+                    for value in item.source_refs
+                ],
                 binding_source_refs_json=[
-                    value.to_record() for value in item.binding_source_refs
+                    {
+                        "document_id": value.document_id,
+                        "source_fingerprint": value.source_fingerprint,
+                        "source_kind": value.source_kind,
+                        "source_ref": value.source_ref,
+                        "quote": value.quote,
+                    }
+                    for value in item.binding_source_refs
                 ],
                 binding_status=item.binding_status,
                 notes_json=list(item.notes),
@@ -294,7 +338,16 @@ async def _add_components(
                     if item.population_scope is not None
                     else None
                 ),
-                source_refs_json=[value.to_record() for value in item.source_refs],
+                source_refs_json=[
+                    {
+                        "document_id": value.document_id,
+                        "source_fingerprint": value.source_fingerprint,
+                        "source_kind": value.source_kind,
+                        "source_ref": value.source_ref,
+                        "quote": value.quote,
+                    }
+                    for value in item.source_refs
+                ],
                 binding_status=item.binding_status,
                 notes_json=list(item.notes),
                 protocol_specificity=item.protocol_specificity,
@@ -305,7 +358,14 @@ async def _add_components(
                 standard=item.standard,
                 outcome_scope_json=list(item.outcome_scope),
                 binding_source_refs_json=[
-                    value.to_record() for value in item.binding_source_refs
+                    {
+                        "document_id": value.document_id,
+                        "source_fingerprint": value.source_fingerprint,
+                        "source_kind": value.source_kind,
+                        "source_ref": value.source_ref,
+                        "quote": value.quote,
+                    }
+                    for value in item.binding_source_refs
                 ],
                 protocol_evidence_json=list(item.protocol_evidence),
             )
@@ -332,9 +392,25 @@ async def _add_components(
                 statistics_json=dict(item.statistics),
                 measurement_scope_json=dict(item.measurement_scope),
                 result_kind=item.result_kind,
-                source_refs_json=[value.to_record() for value in item.source_refs],
+                source_refs_json=[
+                    {
+                        "document_id": value.document_id,
+                        "source_fingerprint": value.source_fingerprint,
+                        "source_kind": value.source_kind,
+                        "source_ref": value.source_ref,
+                        "quote": value.quote,
+                    }
+                    for value in item.source_refs
+                ],
                 binding_source_refs_json=[
-                    value.to_record() for value in item.binding_source_refs
+                    {
+                        "document_id": value.document_id,
+                        "source_fingerprint": value.source_fingerprint,
+                        "source_kind": value.source_kind,
+                        "source_ref": value.source_ref,
+                        "quote": value.quote,
+                    }
+                    for value in item.binding_source_refs
                 ],
                 binding_status=item.binding_status,
                 notes_json=list(item.notes),
@@ -362,9 +438,25 @@ async def _add_components(
             attribution_scope=item.attribution_scope,
             status=item.status,
             reasons_json=list(item.reasons),
-            source_refs_json=[value.to_record() for value in item.source_refs],
+            source_refs_json=[
+                {
+                    "document_id": value.document_id,
+                    "source_fingerprint": value.source_fingerprint,
+                    "source_kind": value.source_kind,
+                    "source_ref": value.source_ref,
+                    "quote": value.quote,
+                }
+                for value in item.source_refs
+            ],
             binding_source_refs_json=[
-                value.to_record() for value in item.binding_source_refs
+                {
+                    "document_id": value.document_id,
+                    "source_fingerprint": value.source_fingerprint,
+                    "source_kind": value.source_kind,
+                    "source_ref": value.source_ref,
+                    "quote": value.quote,
+                }
+                for value in item.binding_source_refs
             ],
             relation_status=item.relation_status,
         )
@@ -399,7 +491,16 @@ async def _add_components(
                 kind=item.kind,
                 measurement_keys_json=list(item.measurement_keys),
                 comparison_keys_json=list(item.comparison_keys),
-                source_refs_json=[value.to_record() for value in item.source_refs],
+                source_refs_json=[
+                    {
+                        "document_id": value.document_id,
+                        "source_fingerprint": value.source_fingerprint,
+                        "source_kind": value.source_kind,
+                        "source_ref": value.source_ref,
+                        "quote": value.quote,
+                    }
+                    for value in item.source_refs
+                ],
             )
             for position, item in enumerate(revision.reported_interpretations)
         ]
@@ -468,118 +569,298 @@ async def _stored_revision(
         )
         sides[link.side].append(link.measurement_key)
 
-    payload = {
-        "experiment_id": row.experiment_id,
-        "document_id": row.document_id,
-        "experiment_version": row.experiment_version,
-        "source_fingerprint": row.source_fingerprint,
-        "label": row.label,
-        "scope_description": row.scope_description,
-        "design_type": row.design_type,
-        "identity_status": row.identity_status,
-        "binding_status": row.binding_status,
-        "source_refs": list(row.source_refs_json),
-        "unresolved_issues": list(row.unresolved_issues_json),
-        "variants": [
-            {
-                "variant_key": item.variant_key,
-                "variant_label": item.variant_label,
-                "subject_attributes": list(item.subject_attributes_json),
-                "intervention_attributes": list(
-                    item.intervention_attributes_json
-                ),
-                "state": list(item.state_json),
-                "population_scope": item.population_scope_json,
-                "source_refs": list(item.source_refs_json),
-                "binding_source_refs": list(item.binding_source_refs_json),
-                "binding_status": item.binding_status,
-                "notes": list(item.notes_json),
-                "identity_specificity": item.identity_specificity,
-                "missing_dimensions": list(item.missing_dimensions_json),
-                "identity_evidence": list(item.identity_evidence_json),
-            }
-            for item in variants
-        ],
-        "test_conditions": [
-            {
-                "test_key": item.test_key,
-                "test_type": item.test_type,
-                "parameters": list(item.parameters_json),
-                "population_scope": item.population_scope_json,
-                "source_refs": list(item.source_refs_json),
-                "binding_status": item.binding_status,
-                "notes": list(item.notes_json),
-                "protocol_specificity": item.protocol_specificity,
-                "test_identity_status": item.test_identity_status,
-                "protocol_completeness": item.protocol_completeness,
-                "missing_parameters": list(item.missing_parameters_json),
-                "method": item.method,
-                "standard": item.standard,
-                "outcome_scope": list(item.outcome_scope_json),
-                "binding_source_refs": list(item.binding_source_refs_json),
-                "protocol_evidence": list(item.protocol_evidence_json),
-            }
-            for item in tests
-        ],
-        "measurements": [
-            {
-                "measurement_key": item.measurement_key,
-                "variant_key": item.variant_key,
-                "test_key": item.test_key,
-                "outcome": item.outcome,
-                "value": _domain_value(item.value_numeric, item.value_text),
-                "result_text": item.result_text,
-                "unit": item.unit,
-                "statistics": dict(item.statistics_json),
-                "measurement_scope": dict(item.measurement_scope_json),
-                "result_kind": item.result_kind,
-                "source_refs": list(item.source_refs_json),
-                "binding_source_refs": list(item.binding_source_refs_json),
-                "binding_status": item.binding_status,
-                "notes": list(item.notes_json),
-            }
-            for item in measurements
-        ],
-        "comparisons": [
-            {
-                "comparison_key": item.comparison_key,
-                "baseline_variant_key": item.baseline_variant_key,
-                "target_variant_key": item.target_variant_key,
-                "outcome": item.outcome,
-                "baseline_measurement_keys": links_by_comparison.get(
-                    item.comparison_key, {}
-                ).get("baseline", []),
-                "target_measurement_keys": links_by_comparison.get(
-                    item.comparison_key, {}
-                ).get("target", []),
-                "changed_variables": list(item.changed_variables_json),
-                "matched_conditions": list(item.matched_conditions_json),
-                "basis": item.basis,
-                "direction": item.direction,
-                "reported_statement": item.reported_statement,
-                "attribution_scope": item.attribution_scope,
-                "status": item.status,
-                "reasons": list(item.reasons_json),
-                "source_refs": list(item.source_refs_json),
-                "binding_source_refs": list(item.binding_source_refs_json),
-                "relation_status": item.relation_status,
-            }
-            for item in comparisons
-        ],
-        "reported_interpretations": [
-            {
-                "statement": item.statement,
-                "kind": item.kind,
-                "measurement_keys": list(item.measurement_keys_json),
-                "comparison_keys": list(item.comparison_keys_json),
-                "source_refs": list(item.source_refs_json),
-            }
-            for item in interpretations
-        ],
-    }
     return StoredPaperExperimentRevision(
         revision_id=revision_id,
-        revision=PaperExperimentRevision.from_mapping(payload),
+        revision=PaperExperimentRevision(
+            experiment_id=_text(row.experiment_id),
+            document_id=_text(row.document_id),
+            experiment_version=int(row.experiment_version or 0),
+            source_fingerprint=_text(row.source_fingerprint),
+            label=_text(row.label),
+            scope_description=_text(row.scope_description),
+            design_type=_text(row.design_type) or "unknown",
+            identity_status=_text(row.identity_status) or "unknown",
+            binding_status=_text(row.binding_status) or "draft",
+            variants=tuple(
+                (
+                    ExperimentalVariant(
+                        variant_key=_text(item.variant_key or None),
+                        variant_label=_text(item.variant_label),
+                        subject_attributes=_attributes(
+                            list(item.subject_attributes_json)
+                        ),
+                        intervention_attributes=_attributes(
+                            list(item.intervention_attributes_json)
+                        ),
+                        state=_attributes(list(item.state_json)),
+                        population_scope=(
+                            _mapping(item.population_scope_json)
+                            if item.population_scope_json is not None
+                            else None
+                        ),
+                        source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        binding_source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.binding_source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        binding_status=_text(item.binding_status) or "uncertain",
+                        notes=_strings(list(item.notes_json)),
+                        identity_specificity=_text(item.identity_specificity)
+                        or "unknown",
+                        missing_dimensions=_strings(list(item.missing_dimensions_json)),
+                        identity_evidence=_strings(list(item.identity_evidence_json)),
+                    )
+                    for item in variants
+                )
+            ),
+            test_conditions=tuple(
+                (
+                    ExperimentTestCondition(
+                        test_key=_text(item.test_key or None),
+                        test_type=_text(item.test_type or None),
+                        parameters=_attributes(list(item.parameters_json)),
+                        population_scope=(
+                            _mapping(item.population_scope_json)
+                            if item.population_scope_json is not None
+                            else None
+                        ),
+                        source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        binding_status=_text(item.binding_status) or "uncertain",
+                        notes=_strings(list(item.notes_json)),
+                        protocol_specificity=_text(item.protocol_specificity)
+                        or "unknown",
+                        test_identity_status=_text(item.test_identity_status)
+                        or "unknown",
+                        protocol_completeness=_text(item.protocol_completeness)
+                        or "unknown",
+                        missing_parameters=_strings(list(item.missing_parameters_json)),
+                        method=_text(item.method) or None,
+                        standard=_text(item.standard) or None,
+                        outcome_scope=_strings(list(item.outcome_scope_json)),
+                        binding_source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.binding_source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        protocol_evidence=_strings(list(item.protocol_evidence_json)),
+                    )
+                    for item in tests
+                )
+            ),
+            measurements=tuple(
+                (
+                    ExperimentMeasurementResult(
+                        measurement_key=_text(item.measurement_key or None),
+                        outcome=_text(item.outcome or None),
+                        variant_key=_text(item.variant_key or None) or None,
+                        test_key=_text(item.test_key or None) or None,
+                        value=_domain_value(item.value_numeric, item.value_text),
+                        unit=_text(item.unit) or None,
+                        result_text=_text(item.result_text or None) or None,
+                        statistics=_mapping(dict(item.statistics_json)),
+                        measurement_scope=_mapping(dict(item.measurement_scope_json)),
+                        result_kind=_text(item.result_kind) or "measured",
+                        source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        binding_source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.binding_source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        binding_status=_text(item.binding_status) or "uncertain",
+                        notes=_strings(list(item.notes_json)),
+                    )
+                    for item in measurements
+                )
+            ),
+            comparisons=tuple(
+                (
+                    ExperimentComparison(
+                        comparison_key=_text(item.comparison_key or None),
+                        baseline_variant_key=_text(item.baseline_variant_key or None),
+                        target_variant_key=_text(item.target_variant_key or None),
+                        outcome=_text(item.outcome),
+                        baseline_measurement_keys=_strings(
+                            links_by_comparison.get(item.comparison_key, {}).get(
+                                "baseline", []
+                            )
+                            or None
+                        ),
+                        target_measurement_keys=_strings(
+                            links_by_comparison.get(item.comparison_key, {}).get(
+                                "target", []
+                            )
+                            or None
+                        ),
+                        changed_variables=_variables(list(item.changed_variables_json)),
+                        matched_conditions=_attributes(
+                            list(item.matched_conditions_json)
+                        ),
+                        basis=_text(item.basis) or "reported",
+                        direction=_text(item.direction) or "unknown",
+                        reported_statement=_text(item.reported_statement) or None,
+                        attribution_scope=_text(item.attribution_scope)
+                        or "undetermined",
+                        status=_text(item.status) or "insufficient_context",
+                        reasons=_strings(list(item.reasons_json)),
+                        source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        binding_source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.binding_source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                        relation_status=_text(item.relation_status) or "uncertain",
+                    )
+                    for item in comparisons
+                )
+            ),
+            reported_interpretations=tuple(
+                (
+                    ReportedInterpretation(
+                        statement=_text(item.statement),
+                        kind=_text(item.kind) or "result_summary",
+                        measurement_keys=_strings(
+                            list(item.measurement_keys_json) or None
+                        ),
+                        comparison_keys=_strings(
+                            list(item.comparison_keys_json) or None
+                        ),
+                        source_refs=tuple(
+                            (
+                                SourceReference(
+                                    document_id=_text(item.get("document_id")),
+                                    source_fingerprint=_text(
+                                        item.get("source_fingerprint")
+                                    ),
+                                    source_kind=_text(item.get("source_kind")),
+                                    source_ref=_text(item.get("source_ref")),
+                                    quote=_text(item.get("quote")),
+                                )
+                                for item in list(item.source_refs_json) or ()
+                                if isinstance(item, Mapping)
+                            )
+                        ),
+                    )
+                    for item in interpretations
+                )
+            ),
+            source_refs=tuple(
+                (
+                    SourceReference(
+                        document_id=_text(item.get("document_id")),
+                        source_fingerprint=_text(item.get("source_fingerprint")),
+                        source_kind=_text(item.get("source_kind")),
+                        source_ref=_text(item.get("source_ref")),
+                        quote=_text(item.get("quote")),
+                    )
+                    for item in list(row.source_refs_json) or ()
+                    if isinstance(item, Mapping)
+                )
+            ),
+            unresolved_issues=tuple(
+                (
+                    dict(item)
+                    for item in list(row.unresolved_issues_json) or ()
+                    if isinstance(item, Mapping)
+                )
+            ),
+        ),
         created_at=_aware(row.created_at),
         created_by=row.created_by,
         archived_at=_aware(row.archived_at) if row.archived_at is not None else None,
@@ -615,3 +896,54 @@ def _constraint_name(exc: IntegrityError) -> str | None:
 
 
 __all__ = ['PaperExperimentRepository', 'PaperExperimentRevisionConflictError', 'StoredPaperExperimentRevision']
+
+
+def _text(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
+
+
+def _strings(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple, set)):
+        return ()
+    return tuple(item for item in (_text(item) for item in value) if item)
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(
+        ScientificAttribute(
+            name=scientific_text(item.get("name")) or "",
+            value=(
+                scientific_scalar(item.get("value"))
+                if scientific_scalar(item.get("value")) is not None
+                else ""
+            ),
+            unit=scientific_text(item.get("unit")),
+            context_scope=scientific_choice(
+                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
+            ),
+            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
+        )
+        for item in value
+        if isinstance(item, Mapping)
+    )
+
+
+def _variables(value: Any) -> tuple[ScientificVariable, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(
+        ScientificVariable(
+            name=scientific_text(item.get("name")) or "",
+            baseline_value=scientific_scalar(item.get("baseline_value")),
+            target_value=scientific_scalar(item.get("target_value")),
+            unit=scientific_text(item.get("unit")),
+        )
+        for item in value
+        if isinstance(item, Mapping)
+    )

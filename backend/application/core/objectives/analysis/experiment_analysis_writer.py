@@ -595,12 +595,11 @@ def same_revision_content(
     left: PaperExperimentRevision,
     right: PaperExperimentRevision,
 ) -> bool:
-    left_record = left.to_record()
-    right_record = right.to_record()
-    for record in (left_record, right_record):
-        record.pop("experiment_version", None)
-        record.pop("experiment_id", None)
-    return left_record == right_record
+    return left == replace(
+        right,
+        experiment_id=left.experiment_id,
+        experiment_version=left.experiment_version,
+    )
 
 
 def _numeric_value(value: Any) -> float | None:

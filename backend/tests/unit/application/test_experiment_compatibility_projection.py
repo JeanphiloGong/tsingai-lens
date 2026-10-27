@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificVariable,
+)
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -14,7 +19,14 @@ from controllers.schemas.core.research_objectives import (
 )
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.paper_experiment import (
+    SourceReference,
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    ExperimentComparison,
+    PaperExperimentRevision,
+)
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
@@ -28,113 +40,105 @@ def anyio_backend():
 
 
 def _revision() -> PaperExperimentRevision:
-    source = {
-        "document_id": "paper-1",
-        "source_fingerprint": "prepared-1",
-        "source_kind": "table",
-        "source_ref": "table-2",
-        "quote": "NP 72%; P150 82% elongation",
-    }
-    return PaperExperimentRevision.from_mapping(
-        {
-            "experiment_id": "experiment-1",
-            "document_id": "paper-1",
-            "experiment_version": 1,
-            "source_fingerprint": "prepared-1",
-            "label": "Preheat series",
-            "scope_description": "NP and P150 tensile results",
-            "design_type": "parallel",
-            "identity_status": "identified",
-            "binding_status": "bound",
-            "variants": [
-                {
-                    "variant_key": "np",
-                    "variant_label": "NP",
-                    "subject_attributes": [
-                        {"name": "alloy", "value": "316L"}
-                    ],
-                    "intervention_attributes": [
-                        {"name": "preheat", "value": 0, "unit": "C"}
-                    ],
-                    "source_refs": [source],
-                    "binding_source_refs": [source],
-                    "binding_status": "direct",
-                },
-                {
-                    "variant_key": "p150",
-                    "variant_label": "P150",
-                    "subject_attributes": [
-                        {"name": "alloy", "value": "316L"}
-                    ],
-                    "intervention_attributes": [
-                        {"name": "preheat", "value": 150, "unit": "C"}
-                    ],
-                    "source_refs": [source],
-                    "binding_source_refs": [source],
-                    "binding_status": "direct",
-                },
-            ],
-            "test_conditions": [
-                {
-                    "test_key": "tensile",
-                    "test_type": "tensile",
-                    "parameters": [{"name": "temperature", "value": 25, "unit": "C"}],
-                    "source_refs": [source],
-                    "binding_status": "direct",
-                }
-            ],
-            "measurements": [
-                {
-                    "measurement_key": "np-elongation",
-                    "outcome": "elongation",
-                    "variant_key": "np",
-                    "test_key": "tensile",
-                    "value": 72,
-                    "unit": "%",
-                    "result_text": "NP elongation 72%",
-                    "source_refs": [source],
-                    "binding_source_refs": [source],
-                    "binding_status": "direct",
-                },
-                {
-                    "measurement_key": "p150-elongation",
-                    "outcome": "elongation",
-                    "variant_key": "p150",
-                    "test_key": "tensile",
-                    "value": 82,
-                    "unit": "%",
-                    "result_text": "P150 elongation 82%",
-                    "source_refs": [source],
-                    "binding_source_refs": [source],
-                    "binding_status": "direct",
-                },
-            ],
-            "comparisons": [
-                {
-                    "comparison_key": "np-vs-p150",
-                    "baseline_variant_key": "np",
-                    "target_variant_key": "p150",
-                    "outcome": "elongation",
-                    "baseline_measurement_keys": ["np-elongation"],
-                    "target_measurement_keys": ["p150-elongation"],
-                    "changed_variables": [
-                        {
-                            "name": "preheat",
-                            "baseline_value": 0,
-                            "target_value": 150,
-                            "unit": "C",
-                        }
-                    ],
-                    "basis": "reported",
-                    "direction": "increase",
-                    "attribution_scope": "isolated_effect",
-                    "status": "ready",
-                    "source_refs": [source],
-                    "binding_source_refs": [source],
-                    "relation_status": "direct",
-                }
-            ],
-        }
+    source = SourceReference(
+        document_id="paper-1",
+        source_fingerprint="prepared-1",
+        source_kind="table",
+        source_ref="table-2",
+        quote="NP 72%; P150 82% elongation",
+    )
+    return PaperExperimentRevision(
+        experiment_id="experiment-1",
+        document_id="paper-1",
+        experiment_version=int(1),
+        source_fingerprint="prepared-1",
+        label="Preheat series",
+        scope_description="NP and P150 tensile results",
+        design_type="parallel",
+        identity_status="identified",
+        binding_status="bound",
+        variants=(
+            ExperimentalVariant(
+                variant_key="np",
+                variant_label="NP",
+                subject_attributes=(ScientificAttribute(name="alloy", value="316L"),),
+                intervention_attributes=(
+                    ScientificAttribute(name="preheat", value=0, unit="C"),
+                ),
+                source_refs=(source,),
+                binding_source_refs=(source,),
+                binding_status="direct",
+            ),
+            ExperimentalVariant(
+                variant_key="p150",
+                variant_label="P150",
+                subject_attributes=(ScientificAttribute(name="alloy", value="316L"),),
+                intervention_attributes=(
+                    ScientificAttribute(name="preheat", value=150, unit="C"),
+                ),
+                source_refs=(source,),
+                binding_source_refs=(source,),
+                binding_status="direct",
+            ),
+        ),
+        test_conditions=(
+            ExperimentTestCondition(
+                test_key="tensile",
+                test_type="tensile",
+                parameters=(
+                    ScientificAttribute(name="temperature", value=25, unit="C"),
+                ),
+                source_refs=(source,),
+                binding_status="direct",
+            ),
+        ),
+        measurements=(
+            ExperimentMeasurementResult(
+                measurement_key="np-elongation",
+                outcome="elongation",
+                variant_key="np",
+                test_key="tensile",
+                value=72,
+                unit="%",
+                result_text="NP elongation 72%",
+                source_refs=(source,),
+                binding_source_refs=(source,),
+                binding_status="direct",
+            ),
+            ExperimentMeasurementResult(
+                measurement_key="p150-elongation",
+                outcome="elongation",
+                variant_key="p150",
+                test_key="tensile",
+                value=82,
+                unit="%",
+                result_text="P150 elongation 82%",
+                source_refs=(source,),
+                binding_source_refs=(source,),
+                binding_status="direct",
+            ),
+        ),
+        comparisons=(
+            ExperimentComparison(
+                comparison_key="np-vs-p150",
+                baseline_variant_key="np",
+                target_variant_key="p150",
+                outcome="elongation",
+                baseline_measurement_keys=("np-elongation",),
+                target_measurement_keys=("p150-elongation",),
+                changed_variables=(
+                    ScientificVariable(
+                        name="preheat", baseline_value=0, target_value=150, unit="C"
+                    ),
+                ),
+                direction="increase",
+                attribution_scope="isolated_effect",
+                status="ready",
+                source_refs=(source,),
+                binding_source_refs=(source,),
+                relation_status="direct",
+            ),
+        ),
     )
 
 

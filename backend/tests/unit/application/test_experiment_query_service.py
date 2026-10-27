@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+)
+
 from datetime import datetime, timezone
 
 import pytest
@@ -9,7 +13,12 @@ from application.core.objectives.analysis.experiment_query_service import (
 )
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.paper_experiment import (
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    PaperExperimentRevision,
+)
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
@@ -23,73 +32,71 @@ def anyio_backend():
 
 
 def _revision() -> PaperExperimentRevision:
-    return PaperExperimentRevision.from_mapping(
-        {
-            "experiment_id": "exp-1",
-            "document_id": "doc-1",
-            "experiment_version": 1,
-            "source_fingerprint": "prep-1",
-            "label": "Preheat series",
-            "scope_description": "A and B",
-            "design_type": "parallel",
-            "identity_status": "identified",
-            "binding_status": "bound",
-            "variants": [
-                {
-                    "variant_key": "A",
-                    "variant_label": "NP",
-                    "subject_attributes": [
-                        {"name": "material", "value": "316L"}
-                    ],
-                    "intervention_attributes": [
-                        {"name": "preheat", "value": "0 C"}
-                    ],
-                    "state": [{"name": "orientation", "value": "vertical"}],
-                    "population_scope": {"kind": "group", "n": 5},
-                },
-                {
-                    "variant_key": "B",
-                    "variant_label": "P150",
-                    "subject_attributes": [
-                        {"name": "material", "value": "316L"}
-                    ],
-                    "intervention_attributes": [
-                        {"name": "preheat", "value": "150 C"}
-                    ],
-                    "state": [{"name": "orientation", "value": "vertical"}],
-                    "population_scope": {"kind": "group", "n": 5},
-                },
-            ],
-            "test_conditions": [
-                {
-                    "test_key": "t1",
-                    "test_type": "tensile",
-                    "parameters": [{"name": "strain_rate", "value": "0.001 /s"}],
-                    "population_scope": {"kind": "group", "n": 5},
-                    "method": "uniaxial tensile",
-                    "standard": "ASTM E8",
-                    "outcome_scope": ["elongation"],
-                }
-            ],
-            "measurements": [
-                {
-                    "measurement_key": "a-elongation",
-                    "outcome": "elongation",
-                    "variant_key": "A",
-                    "test_key": "t1",
-                    "value": 72,
-                    "unit": "%",
-                },
-                {
-                    "measurement_key": "b-elongation",
-                    "outcome": "elongation",
-                    "variant_key": "B",
-                    "test_key": "t1",
-                    "value": 82,
-                    "unit": "%",
-                },
-            ],
-        }
+    return PaperExperimentRevision(
+        experiment_id="exp-1",
+        document_id="doc-1",
+        experiment_version=int(1),
+        source_fingerprint="prep-1",
+        label="Preheat series",
+        scope_description="A and B",
+        design_type="parallel",
+        identity_status="identified",
+        binding_status="bound",
+        variants=(
+            ExperimentalVariant(
+                variant_key="A",
+                variant_label="NP",
+                subject_attributes=(
+                    ScientificAttribute(name="material", value="316L"),
+                ),
+                intervention_attributes=(
+                    ScientificAttribute(name="preheat", value="0 C"),
+                ),
+                state=(ScientificAttribute(name="orientation", value="vertical"),),
+                population_scope=dict({"kind": "group", "n": 5}),
+            ),
+            ExperimentalVariant(
+                variant_key="B",
+                variant_label="P150",
+                subject_attributes=(
+                    ScientificAttribute(name="material", value="316L"),
+                ),
+                intervention_attributes=(
+                    ScientificAttribute(name="preheat", value="150 C"),
+                ),
+                state=(ScientificAttribute(name="orientation", value="vertical"),),
+                population_scope=dict({"kind": "group", "n": 5}),
+            ),
+        ),
+        test_conditions=(
+            ExperimentTestCondition(
+                test_key="t1",
+                test_type="tensile",
+                parameters=(ScientificAttribute(name="strain_rate", value="0.001 /s"),),
+                population_scope=dict({"kind": "group", "n": 5}),
+                method="uniaxial tensile",
+                standard="ASTM E8",
+                outcome_scope=("elongation",),
+            ),
+        ),
+        measurements=(
+            ExperimentMeasurementResult(
+                measurement_key="a-elongation",
+                outcome="elongation",
+                variant_key="A",
+                test_key="t1",
+                value=72,
+                unit="%",
+            ),
+            ExperimentMeasurementResult(
+                measurement_key="b-elongation",
+                outcome="elongation",
+                variant_key="B",
+                test_key="t1",
+                value=82,
+                unit="%",
+            ),
+        ),
     )
 
 

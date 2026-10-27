@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -9,7 +10,15 @@ import pytest
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
 )
-from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.paper_experiment import (
+    SourceReference,
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    ExperimentComparison,
+    ReportedInterpretation,
+    PaperExperimentRevision,
+)
 from domain.source import Collection, Document
 from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.collection_repository import (
@@ -133,104 +142,100 @@ async def test_source_only_concurrent_saves_without_objective_are_idempotent(
 
 
 def _revision(version: int = 1) -> PaperExperimentRevision:
-    return PaperExperimentRevision.from_mapping(
-        {
-            "experiment_id": "experiment-1",
-            "document_id": "paper-experiment-doc",
-            "experiment_version": version,
-            "source_fingerprint": f"prepared-{version}",
-            "label": "Preheat tensile series",
-            "scope_description": "NP and P150 under one tensile method",
-            "design_type": "parallel",
-            "identity_status": "identified",
-            "binding_status": "bound",
-            "variants": [
-                {
-                    "variant_key": "np",
-                    "variant_label": "NP",
-                    "binding_status": "direct",
-                    "identity_specificity": "partial",
-                    "missing_dimensions": ["preheat temperature"],
-                    "identity_evidence": ["table-1", "methods-2"],
-                },
-                {
-                    "variant_key": "p150",
-                    "variant_label": "P150",
-                    "binding_status": "direct",
-                    "identity_specificity": "exact",
-                    "missing_dimensions": [],
-                    "identity_evidence": ["table-1"],
-                },
-            ],
-            "test_conditions": [
-                {
-                    "test_key": "tensile",
-                    "test_type": "tensile test",
-                    "binding_status": "direct",
-                    "protocol_specificity": "partial",
-                    "test_identity_status": "identified",
-                    "protocol_completeness": "partial",
-                    "missing_parameters": ["strain rate"],
-                    "method": "uniaxial tensile test",
-                    "standard": "ASTM E8",
-                    "outcome_scope": ["elongation", "yield_strength"],
-                    "binding_source_refs": [
-                        {
-                            "document_id": "paper-experiment-doc",
-                            "source_fingerprint": "prepared-1",
-                            "source_kind": "block",
-                            "source_ref": "methods-2",
-                            "quote": "Tensile tests were performed ...",
-                        }
-                    ],
-                    "protocol_evidence": ["methods-2"],
-                }
-            ],
-            "measurements": [
-                {
-                    "measurement_key": "np-elongation",
-                    "variant_key": "np",
-                    "test_key": "tensile",
-                    "outcome": "elongation",
-                    "value": 72,
-                    "unit": "%",
-                    "statistics": {"n": 5, "error": 2, "error_kind": "unknown"},
-                    "binding_status": "direct",
-                },
-                {
-                    "measurement_key": "p150-elongation",
-                    "variant_key": "p150",
-                    "test_key": "tensile",
-                    "outcome": "elongation",
-                    "value": 82,
-                    "unit": "%",
-                    "statistics": {"n": 5, "error": 1, "error_kind": "unknown"},
-                    "binding_status": "direct",
-                },
-            ],
-            "comparisons": [
-                {
-                    "comparison_key": "np-to-p150",
-                    "baseline_variant_key": "np",
-                    "target_variant_key": "p150",
-                    "outcome": "elongation",
-                    "baseline_measurement_keys": ["np-elongation"],
-                    "target_measurement_keys": ["p150-elongation"],
-                    "basis": "reported",
-                    "direction": "increase",
-                    "status": "ready",
-                    "relation_status": "direct",
-                }
-            ],
-            "reported_interpretations": [
-                {
-                    "statement": "Preheating increased elongation in this series.",
-                    "kind": "result_summary",
-                    "measurement_keys": ["np-elongation", "p150-elongation"],
-                    "comparison_keys": ["np-to-p150"],
-                }
-            ],
-        }
+    return PaperExperimentRevision(
+        experiment_id="experiment-1",
+        document_id="paper-experiment-doc",
+        experiment_version=int(version or 0),
+        source_fingerprint=f"prepared-{version}",
+        label="Preheat tensile series",
+        scope_description="NP and P150 under one tensile method",
+        design_type="parallel",
+        identity_status="identified",
+        binding_status="bound",
+        variants=(
+            ExperimentalVariant(
+                variant_key="np",
+                variant_label="NP",
+                binding_status="direct",
+                identity_specificity="partial",
+                missing_dimensions=("preheat temperature",),
+                identity_evidence=("table-1", "methods-2"),
+            ),
+            ExperimentalVariant(
+                variant_key="p150",
+                variant_label="P150",
+                binding_status="direct",
+                identity_specificity="exact",
+                identity_evidence=("table-1",),
+            ),
+        ),
+        test_conditions=(
+            ExperimentTestCondition(
+                test_key="tensile",
+                test_type="tensile test",
+                binding_status="direct",
+                protocol_specificity="partial",
+                test_identity_status="identified",
+                protocol_completeness="partial",
+                missing_parameters=("strain rate",),
+                method="uniaxial tensile test",
+                standard="ASTM E8",
+                outcome_scope=("elongation", "yield_strength"),
+                binding_source_refs=(
+                    SourceReference(
+                        document_id="paper-experiment-doc",
+                        source_fingerprint="prepared-1",
+                        source_kind="block",
+                        source_ref="methods-2",
+                        quote="Tensile tests were performed ...",
+                    ),
+                ),
+                protocol_evidence=("methods-2",),
+            ),
+        ),
+        measurements=(
+            ExperimentMeasurementResult(
+                measurement_key="np-elongation",
+                outcome="elongation",
+                variant_key="np",
+                test_key="tensile",
+                value=72,
+                unit="%",
+                statistics=dict({"n": 5, "error": 2, "error_kind": "unknown"}),
+                binding_status="direct",
+            ),
+            ExperimentMeasurementResult(
+                measurement_key="p150-elongation",
+                outcome="elongation",
+                variant_key="p150",
+                test_key="tensile",
+                value=82,
+                unit="%",
+                statistics=dict({"n": 5, "error": 1, "error_kind": "unknown"}),
+                binding_status="direct",
+            ),
+        ),
+        comparisons=(
+            ExperimentComparison(
+                comparison_key="np-to-p150",
+                baseline_variant_key="np",
+                target_variant_key="p150",
+                outcome="elongation",
+                baseline_measurement_keys=("np-elongation",),
+                target_measurement_keys=("p150-elongation",),
+                direction="increase",
+                status="ready",
+                relation_status="direct",
+            ),
+        ),
+        reported_interpretations=(
+            ReportedInterpretation(
+                statement="Preheating increased elongation in this series.",
+                kind="result_summary",
+                measurement_keys=("np-elongation", "p150-elongation"),
+                comparison_keys=("np-to-p150",),
+            ),
+        ),
     )
 
 
@@ -365,11 +370,16 @@ async def test_same_version_is_idempotent_but_conflicting_version_is_rejected(
 async def test_invalid_domain_revision_does_not_create_experiment_head(
     paper_experiment_repository,
 ) -> None:
-    payload = _revision().to_record()
-    payload["measurements"][0]["variant_key"] = "missing"
+    revision = _revision()
 
     with pytest.raises(ValueError, match="variant outside"):
-        invalid = PaperExperimentRevision.from_mapping(payload)
+        invalid = replace(
+            revision,
+            measurements=(
+                replace(revision.measurements[0], variant_key="missing"),
+                *revision.measurements[1:],
+            ),
+        )
         await paper_experiment_repository.add_revision(invalid, created_at=NOW)
 
     assert (

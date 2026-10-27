@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificVariable,
+)
+
 from application.core.objectives.analysis.experiment_finding_synthesis import (
     ExperimentFindingSynthesisService,
 )
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.paper_experiment import (
+    SourceReference,
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    ExperimentComparison,
+    PaperExperimentRevision,
+    _text,
+    _strings,
+)
 from domain.core.research_objective import ResearchObjective
 
 
@@ -36,110 +50,115 @@ def _revision(
     protocol_completeness: str = "complete",
     missing_parameters: tuple[str, ...] = (),
 ) -> PaperExperimentRevision:
-    source = {
-        "document_id": document_id,
-        "source_fingerprint": f"prepared-{document_id}",
-        "source_kind": "table",
-        "source_ref": "table-2",
-        "quote": "NP 72; P150 82",
-    }
+    source = SourceReference(
+        document_id=document_id,
+        source_fingerprint=f"prepared-{document_id}",
+        source_kind="table",
+        source_ref="table-2",
+        quote="NP 72; P150 82",
+    )
     variables = [
-        {
-            "name": name,
-            "baseline_value": 0,
-            "target_value": 150 if name == "preheat" else 1000,
-            "unit": "C" if name == "preheat" else "mm/s",
-        }
+        ScientificVariable(
+            name=name,
+            baseline_value=0,
+            target_value=150 if name == "preheat" else 1000,
+            unit="C" if name == "preheat" else "mm/s",
+        )
         for name in factors
     ]
     attribution = "isolated_effect" if len(factors) == 1 else "joint_effect"
-    return PaperExperimentRevision.from_mapping(
-        {
-            "experiment_id": experiment_id,
-            "document_id": document_id,
-            "experiment_version": 1,
-            "source_fingerprint": f"prepared-{document_id}",
-            "label": "Preheat tensile series",
-            "scope_description": "NP and P150 tensile results",
-            "design_type": "parallel",
-            "identity_status": "identified",
-            "binding_status": binding_status,
-            "variants": [
-                {
-                    "variant_key": "np",
-                    "variant_label": "NP",
-                    "subject_attributes": [{"name": "alloy", "value": alloy}],
-                    "intervention_attributes": [
-                        {"name": "preheat", "value": 0, "unit": "C"}
-                    ],
-                    "binding_status": "direct",
-                },
-                {
-                    "variant_key": "p150",
-                    "variant_label": "P150",
-                    "subject_attributes": [{"name": "alloy", "value": alloy}],
-                    "intervention_attributes": [
-                        {"name": "preheat", "value": 150, "unit": "C"}
-                    ],
-                    "binding_status": "direct",
-                },
-            ],
-            "test_conditions": [
-                {
-                    "test_key": "tensile",
-                    "test_type": test_type,
-                    "parameters": [
-                        {
-                            "name": "temperature",
-                            "value": test_temperature,
-                            "unit": "C",
-                        }
-                    ],
-                    "protocol_completeness": protocol_completeness,
-                    "missing_parameters": list(missing_parameters),
-                    "binding_status": "direct",
-                }
-            ],
-            "measurements": [
-                {
-                    "measurement_key": "m-np",
-                    "outcome": "elongation",
-                    "variant_key": "np",
-                    "test_key": "tensile",
-                    "value": 72,
-                    "unit": unit,
-                    "binding_status": "direct",
-                },
-                {
-                    "measurement_key": "m-p150",
-                    "outcome": "elongation",
-                    "variant_key": "p150",
-                    "test_key": "tensile",
-                    "value": 82,
-                    "unit": unit,
-                    "binding_status": "direct",
-                },
-            ],
-            "comparisons": [
-                {
-                    "comparison_key": "c-preheat",
-                    "baseline_variant_key": "np",
-                    "target_variant_key": "p150",
-                    "outcome": "elongation",
-                    "baseline_measurement_keys": ["m-np"],
-                    "target_measurement_keys": ["m-p150"],
-                    "changed_variables": variables,
-                    "basis": "reported",
-                    "direction": direction,
-                    "attribution_scope": attribution,
-                    "status": "ready",
-                    "relation_status": "direct",
-                    "source_refs": [source],
-                    "binding_source_refs": [source],
-                }
-            ],
-            "source_refs": [source],
-        }
+    return PaperExperimentRevision(
+        experiment_id=experiment_id,
+        document_id=document_id,
+        experiment_version=int(1),
+        source_fingerprint=f"prepared-{document_id}",
+        label="Preheat tensile series",
+        scope_description="NP and P150 tensile results",
+        design_type="parallel",
+        identity_status="identified",
+        binding_status=binding_status or "draft",
+        variants=(
+            ExperimentalVariant(
+                variant_key="np",
+                variant_label="NP",
+                subject_attributes=(
+                    ScientificAttribute(
+                        name="alloy", value=alloy if alloy is not None else ""
+                    ),
+                ),
+                intervention_attributes=(
+                    ScientificAttribute(name="preheat", value=0, unit="C"),
+                ),
+                binding_status="direct",
+            ),
+            ExperimentalVariant(
+                variant_key="p150",
+                variant_label="P150",
+                subject_attributes=(
+                    ScientificAttribute(
+                        name="alloy", value=alloy if alloy is not None else ""
+                    ),
+                ),
+                intervention_attributes=(
+                    ScientificAttribute(name="preheat", value=150, unit="C"),
+                ),
+                binding_status="direct",
+            ),
+        ),
+        test_conditions=(
+            ExperimentTestCondition(
+                test_key="tensile",
+                test_type=_text(test_type or None),
+                parameters=(
+                    ScientificAttribute(
+                        name="temperature",
+                        value=test_temperature if test_temperature is not None else "",
+                        unit="C",
+                    ),
+                ),
+                binding_status="direct",
+                protocol_completeness=protocol_completeness or "unknown",
+                missing_parameters=_strings(list(missing_parameters)),
+            ),
+        ),
+        measurements=(
+            ExperimentMeasurementResult(
+                measurement_key="m-np",
+                outcome="elongation",
+                variant_key="np",
+                test_key="tensile",
+                value=72,
+                unit=unit or None,
+                binding_status="direct",
+            ),
+            ExperimentMeasurementResult(
+                measurement_key="m-p150",
+                outcome="elongation",
+                variant_key="p150",
+                test_key="tensile",
+                value=82,
+                unit=unit or None,
+                binding_status="direct",
+            ),
+        ),
+        comparisons=(
+            ExperimentComparison(
+                comparison_key="c-preheat",
+                baseline_variant_key="np",
+                target_variant_key="p150",
+                outcome="elongation",
+                baseline_measurement_keys=("m-np",),
+                target_measurement_keys=("m-p150",),
+                changed_variables=tuple(variables),
+                direction=direction or "unknown",
+                attribution_scope=attribution or "undetermined",
+                status="ready",
+                source_refs=(source,),
+                binding_source_refs=(source,),
+                relation_status="direct",
+            ),
+        ),
+        source_refs=(source,),
     )
 
 

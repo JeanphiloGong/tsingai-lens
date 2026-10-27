@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+
 import pytest
 
 from domain.core import Finding
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.paper_experiment import PaperExperimentRevision
+from domain.core.paper_experiment import (
+    ExperimentalVariant,
+    ExperimentTestCondition,
+    ExperimentMeasurementResult,
+    PaperExperimentRevision,
+    _text,
+)
 from infra.persistence.postgres.experiment_analysis_transaction import (
     PostgresExperimentAnalysisTransactionFactory,
 )
@@ -42,43 +49,39 @@ def _revision(
     measurement_key: str,
     value: int,
 ) -> PaperExperimentRevision:
-    return PaperExperimentRevision.from_mapping(
-        {
-            "experiment_id": experiment_id,
-            "document_id": document_id,
-            "experiment_version": 1,
-            "source_fingerprint": f"fingerprint-{document_id}",
-            "label": f"{document_id} tensile series",
-            "scope_description": "One reported tensile-strength condition.",
-            "design_type": "observational",
-            "identity_status": "identified",
-            "binding_status": "bound",
-            "variants": [
-                {
-                    "variant_key": "reported-condition",
-                    "variant_label": "Reported condition",
-                    "binding_status": "direct",
-                }
-            ],
-            "test_conditions": [
-                {
-                    "test_key": "tensile",
-                    "test_type": "tensile test",
-                    "binding_status": "direct",
-                }
-            ],
-            "measurements": [
-                {
-                    "measurement_key": measurement_key,
-                    "variant_key": "reported-condition",
-                    "test_key": "tensile",
-                    "outcome": "tensile strength",
-                    "value": value,
-                    "unit": "MPa",
-                    "binding_status": "direct",
-                }
-            ],
-        }
+    return PaperExperimentRevision(
+        experiment_id=experiment_id,
+        document_id=document_id,
+        experiment_version=int(1),
+        source_fingerprint=f"fingerprint-{document_id}",
+        label=f"{document_id} tensile series",
+        scope_description="One reported tensile-strength condition.",
+        design_type="observational",
+        identity_status="identified",
+        binding_status="bound",
+        variants=(
+            ExperimentalVariant(
+                variant_key="reported-condition",
+                variant_label="Reported condition",
+                binding_status="direct",
+            ),
+        ),
+        test_conditions=(
+            ExperimentTestCondition(
+                test_key="tensile", test_type="tensile test", binding_status="direct"
+            ),
+        ),
+        measurements=(
+            ExperimentMeasurementResult(
+                measurement_key=_text(measurement_key or None),
+                outcome="tensile strength",
+                variant_key="reported-condition",
+                test_key="tensile",
+                value=value,
+                unit="MPa",
+                binding_status="direct",
+            ),
+        ),
     )
 
 

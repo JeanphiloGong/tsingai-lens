@@ -14,14 +14,9 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
     ScientificAttribute,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 
 PAPER_EXPERIMENT_DESIGN_TYPES = frozenset(
     {"parallel", "factorial", "dose_response", "observational", "unknown"}
@@ -54,10 +49,6 @@ def _strings(value: Any) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple, set)):
         return ()
     return tuple(item for item in (_text(item) for item in value) if item)
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def outcome_labels_compatible(left: Any, right: Any) -> bool:
@@ -122,43 +113,6 @@ def outcome_labels_compatible(left: Any, right: Any) -> bool:
     return bool(left_label and right_label and left_label == right_label)
 
 
-def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ScientificAttribute(
-            name=scientific_text(item.get("name")) or "",
-            value=(
-                scientific_scalar(item.get("value"))
-                if scientific_scalar(item.get("value")) is not None
-                else ""
-            ),
-            unit=scientific_text(item.get("unit")),
-            context_scope=scientific_choice(
-                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
-            ),
-            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
-        )
-        for item in value
-        if isinstance(item, Mapping)
-    )
-
-
-def _variables(value: Any) -> tuple[ScientificVariable, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ScientificVariable(
-            name=scientific_text(item.get("name")) or "",
-            baseline_value=scientific_scalar(item.get("baseline_value")),
-            target_value=scientific_scalar(item.get("target_value")),
-            unit=scientific_text(item.get("unit")),
-        )
-        for item in value
-        if isinstance(item, Mapping)
-    )
-
-
 @dataclass(frozen=True)
 class SourceReference:
     """Immutable pointer to a prepared Source; it does not assemble facts."""
@@ -181,25 +135,6 @@ class SourceReference:
             )
         ):
             raise ValueError("source reference requires document, fingerprint, ref, and quote")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "SourceReference":
-        return cls(
-            document_id=_text(payload.get("document_id")),
-            source_fingerprint=_text(payload.get("source_fingerprint")),
-            source_kind=_text(payload.get("source_kind")),
-            source_ref=_text(payload.get("source_ref")),
-            quote=_text(payload.get("quote")),
-        )
-
-    def to_record(self) -> dict[str, str]:
-        return {
-            "document_id": self.document_id,
-            "source_fingerprint": self.source_fingerprint,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "quote": self.quote,
-        }
 
 
 @dataclass(frozen=True)
@@ -241,61 +176,6 @@ class ExperimentalVariant:
         )
         object.__setattr__(self, "missing_dimensions", _strings(self.missing_dimensions))
         object.__setattr__(self, "identity_evidence", _strings(self.identity_evidence))
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentalVariant":
-        return cls(
-            variant_key=_text(payload.get("variant_key") or payload.get("variant_id")),
-            variant_label=_text(payload.get("variant_label")),
-            subject_attributes=_attributes(payload.get("subject_attributes")),
-            intervention_attributes=_attributes(payload.get("intervention_attributes")),
-            state=_attributes(payload.get("state")),
-            population_scope=(
-                _mapping(payload.get("population_scope"))
-                if payload.get("population_scope") is not None
-                else None
-            ),
-            source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            binding_source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("binding_source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            binding_status=_text(payload.get("binding_status")) or "uncertain",
-            notes=_strings(payload.get("notes")),
-            identity_specificity=(
-                _text(payload.get("identity_specificity")) or "unknown"
-            ),
-            missing_dimensions=_strings(payload.get("missing_dimensions")),
-            identity_evidence=_strings(payload.get("identity_evidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "variant_key": self.variant_key,
-            "variant_label": self.variant_label,
-            "subject_attributes": [item.to_record() for item in self.subject_attributes],
-            "intervention_attributes": [
-                item.to_record() for item in self.intervention_attributes
-            ],
-            "state": [item.to_record() for item in self.state],
-            "population_scope": (
-                dict(self.population_scope)
-                if self.population_scope is not None
-                else None
-            ),
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "binding_source_refs": [item.to_record() for item in self.binding_source_refs],
-            "binding_status": self.binding_status,
-            "notes": list(self.notes),
-            "identity_specificity": self.identity_specificity,
-            "missing_dimensions": list(self.missing_dimensions),
-            "identity_evidence": list(self.identity_evidence),
-        }
 
 
 @dataclass(frozen=True)
@@ -352,71 +232,6 @@ class ExperimentTestCondition:
         object.__setattr__(self, "outcome_scope", _strings(self.outcome_scope))
         object.__setattr__(self, "protocol_evidence", _strings(self.protocol_evidence))
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentTestCondition":
-        return cls(
-            test_key=_text(payload.get("test_key") or payload.get("test_condition_id")),
-            test_type=_text(payload.get("test_type") or payload.get("property_type")),
-            parameters=_attributes(payload.get("parameters")),
-            population_scope=(
-                _mapping(payload.get("population_scope"))
-                if payload.get("population_scope") is not None
-                else None
-            ),
-            source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            binding_status=_text(payload.get("binding_status")) or "uncertain",
-            notes=_strings(payload.get("notes")),
-            protocol_specificity=(
-                _text(payload.get("protocol_specificity")) or "unknown"
-            ),
-            test_identity_status=(
-                _text(payload.get("test_identity_status")) or "unknown"
-            ),
-            protocol_completeness=(
-                _text(payload.get("protocol_completeness")) or "unknown"
-            ),
-            missing_parameters=_strings(payload.get("missing_parameters")),
-            method=_text(payload.get("method")) or None,
-            standard=_text(payload.get("standard")) or None,
-            outcome_scope=_strings(payload.get("outcome_scope")),
-            binding_source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("binding_source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            protocol_evidence=_strings(payload.get("protocol_evidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "test_key": self.test_key,
-            "test_type": self.test_type,
-            "parameters": [item.to_record() for item in self.parameters],
-            "population_scope": (
-                dict(self.population_scope)
-                if self.population_scope is not None
-                else None
-            ),
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "binding_status": self.binding_status,
-            "notes": list(self.notes),
-            "protocol_specificity": self.protocol_specificity,
-            "test_identity_status": self.test_identity_status,
-            "protocol_completeness": self.protocol_completeness,
-            "missing_parameters": list(self.missing_parameters),
-            "method": self.method,
-            "standard": self.standard,
-            "outcome_scope": list(self.outcome_scope),
-            "binding_source_refs": [
-                item.to_record() for item in self.binding_source_refs
-            ],
-            "protocol_evidence": list(self.protocol_evidence),
-        }
-
 
 @dataclass(frozen=True)
 class ExperimentMeasurementResult:
@@ -447,53 +262,6 @@ class ExperimentMeasurementResult:
         if self.binding_status not in RELATION_STATUSES:
             raise ValueError(f"unsupported measurement binding status: {self.binding_status}")
         object.__setattr__(self, "notes", _strings(self.notes))
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentMeasurementResult":
-        return cls(
-            measurement_key=_text(
-                payload.get("measurement_key") or payload.get("measurement_id") or payload.get("result_id")
-            ),
-            outcome=_text(payload.get("outcome") or payload.get("property_normalized")),
-            variant_key=_text(payload.get("variant_key") or payload.get("variant_id")) or None,
-            test_key=_text(payload.get("test_key") or payload.get("test_condition_id")) or None,
-            value=payload.get("value", payload.get("value_numeric")),
-            unit=_text(payload.get("unit")) or None,
-            result_text=_text(payload.get("result_text") or payload.get("value_text")) or None,
-            statistics=_mapping(payload.get("statistics")),
-            measurement_scope=_mapping(payload.get("measurement_scope")),
-            result_kind=_text(payload.get("result_kind")) or "measured",
-            source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            binding_source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("binding_source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            binding_status=_text(payload.get("binding_status")) or "uncertain",
-            notes=_strings(payload.get("notes")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "measurement_key": self.measurement_key,
-            "outcome": self.outcome,
-            "variant_key": self.variant_key,
-            "test_key": self.test_key,
-            "value": self.value,
-            "unit": self.unit,
-            "result_text": self.result_text,
-            "statistics": dict(self.statistics),
-            "measurement_scope": dict(self.measurement_scope),
-            "result_kind": self.result_kind,
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "binding_source_refs": [item.to_record() for item in self.binding_source_refs],
-            "binding_status": self.binding_status,
-            "notes": list(self.notes),
-        }
 
 
 @dataclass(frozen=True)
@@ -541,61 +309,6 @@ class ExperimentComparison:
             raise ValueError("comparison requires measurements on both sides")
         object.__setattr__(self, "reasons", _strings(self.reasons))
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExperimentComparison":
-        return cls(
-            comparison_key=_text(payload.get("comparison_key") or payload.get("comparison_id")),
-            baseline_variant_key=_text(payload.get("baseline_variant_key") or payload.get("baseline_variant_id")),
-            target_variant_key=_text(payload.get("target_variant_key") or payload.get("target_variant_id")),
-            outcome=_text(payload.get("outcome")),
-            baseline_measurement_keys=_strings(
-                payload.get("baseline_measurement_keys") or payload.get("baseline_measurement_ids")
-            ),
-            target_measurement_keys=_strings(
-                payload.get("target_measurement_keys") or payload.get("target_measurement_ids")
-            ),
-            changed_variables=_variables(payload.get("changed_variables")),
-            matched_conditions=_attributes(payload.get("matched_conditions")),
-            basis=_text(payload.get("basis")) or "reported",
-            direction=_text(payload.get("direction")) or "unknown",
-            reported_statement=_text(payload.get("reported_statement")) or None,
-            attribution_scope=_text(payload.get("attribution_scope")) or "undetermined",
-            status=_text(payload.get("status")) or "insufficient_context",
-            reasons=_strings(payload.get("reasons")),
-            source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            binding_source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("binding_source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            relation_status=_text(payload.get("relation_status")) or "uncertain",
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "comparison_key": self.comparison_key,
-            "baseline_variant_key": self.baseline_variant_key,
-            "target_variant_key": self.target_variant_key,
-            "outcome": self.outcome,
-            "baseline_measurement_keys": list(self.baseline_measurement_keys),
-            "target_measurement_keys": list(self.target_measurement_keys),
-            "changed_variables": [item.to_record() for item in self.changed_variables],
-            "matched_conditions": [item.to_record() for item in self.matched_conditions],
-            "basis": self.basis,
-            "direction": self.direction,
-            "reported_statement": self.reported_statement,
-            "attribution_scope": self.attribution_scope,
-            "status": self.status,
-            "reasons": list(self.reasons),
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "binding_source_refs": [item.to_record() for item in self.binding_source_refs],
-            "relation_status": self.relation_status,
-        }
-
 
 @dataclass(frozen=True)
 class ReportedInterpretation:
@@ -608,29 +321,6 @@ class ReportedInterpretation:
     def __post_init__(self) -> None:
         if not _text(self.statement) or self.kind not in INTERPRETATION_KINDS:
             raise ValueError("reported interpretation requires statement and valid kind")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ReportedInterpretation":
-        return cls(
-            statement=_text(payload.get("statement")),
-            kind=_text(payload.get("kind")) or "result_summary",
-            measurement_keys=_strings(payload.get("measurement_keys") or payload.get("measurement_ids")),
-            comparison_keys=_strings(payload.get("comparison_keys") or payload.get("comparison_ids")),
-            source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "statement": self.statement,
-            "kind": self.kind,
-            "measurement_keys": list(self.measurement_keys),
-            "comparison_keys": list(self.comparison_keys),
-            "source_refs": [item.to_record() for item in self.source_refs],
-        }
 
 
 @dataclass(frozen=True)
@@ -727,77 +417,6 @@ class PaperExperimentRevision:
                 )
             ),
         )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperExperimentRevision":
-        return cls(
-            experiment_id=_text(payload.get("experiment_id")),
-            document_id=_text(payload.get("document_id")),
-            experiment_version=int(payload.get("experiment_version") or 0),
-            source_fingerprint=_text(payload.get("source_fingerprint")),
-            label=_text(payload.get("label")),
-            scope_description=_text(payload.get("scope_description")),
-            design_type=_text(payload.get("design_type")) or "unknown",
-            identity_status=_text(payload.get("identity_status")) or "unknown",
-            binding_status=_text(payload.get("binding_status")) or "draft",
-            variants=tuple(
-                ExperimentalVariant.from_mapping(item)
-                for item in payload.get("variants") or payload.get("experimental_variants") or ()
-                if isinstance(item, Mapping)
-            ),
-            test_conditions=tuple(
-                ExperimentTestCondition.from_mapping(item)
-                for item in payload.get("test_conditions") or ()
-                if isinstance(item, Mapping)
-            ),
-            measurements=tuple(
-                ExperimentMeasurementResult.from_mapping(item)
-                for item in payload.get("measurements") or ()
-                if isinstance(item, Mapping)
-            ),
-            comparisons=tuple(
-                ExperimentComparison.from_mapping(item)
-                for item in payload.get("comparisons") or ()
-                if isinstance(item, Mapping)
-            ),
-            reported_interpretations=tuple(
-                ReportedInterpretation.from_mapping(item)
-                for item in payload.get("reported_interpretations") or ()
-                if isinstance(item, Mapping)
-            ),
-            source_refs=tuple(
-                SourceReference.from_mapping(item)
-                for item in payload.get("source_refs") or ()
-                if isinstance(item, Mapping)
-            ),
-            unresolved_issues=tuple(
-                dict(item)
-                for item in payload.get("unresolved_issues") or ()
-                if isinstance(item, Mapping)
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "experiment_id": self.experiment_id,
-            "document_id": self.document_id,
-            "experiment_version": self.experiment_version,
-            "source_fingerprint": self.source_fingerprint,
-            "label": self.label,
-            "scope_description": self.scope_description,
-            "design_type": self.design_type,
-            "identity_status": self.identity_status,
-            "binding_status": self.binding_status,
-            "variants": [item.to_record() for item in self.variants],
-            "test_conditions": [item.to_record() for item in self.test_conditions],
-            "measurements": [item.to_record() for item in self.measurements],
-            "comparisons": [item.to_record() for item in self.comparisons],
-            "reported_interpretations": [
-                item.to_record() for item in self.reported_interpretations
-            ],
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "unresolved_issues": [dict(item) for item in self.unresolved_issues],
-        }
 
 
 __all__ = [

@@ -214,9 +214,14 @@ retain their domain checks.
 Controllers use response schemas to read attributes or compose stored metadata.
 Chat controllers construct typed domain objects directly from validated request
 fields. The PostgreSQL Chat repository reconstructs those objects from rows and
-nested JSON fields; Chat domain objects do not expose `from_mapping()`.
+nested JSON fields; Chat domain objects do not interpret generic mappings.
 Application and persistence boundaries explicitly project selected source
-contexts into their wire or storage records. The application-owned
+contexts into their wire or storage records. Core scientific records, Source
+artifacts and versioned Feedback sample content follow the same rule: external
+HTTP/model/document input is parsed at its owning entry point, PostgreSQL rows
+are reconstructed in the owning repository, and typed objects cross internal
+application boundaries without a
+dictionary round trip. The application-owned
 `chat/tool_result_projection.py` preserves the stable tool-result record used
 by model messages and failure digests; Chat domain objects no longer own that
 serialization. Evaluation record mappings and experiment-plan mappings likewise
@@ -225,9 +230,9 @@ live beside their concrete repositories in `repositories/evaluation_repository.p
 `repositories/experiment_plan_repository.py`. These moves preserve existing
 wire fields, persisted records and digest inputs; replacing the explicit
 projections with unqualified `asdict()` can change omitted fields or defaults.
-Core, Source and Feedback domain mapping cleanup is a separate migration and
-is not implied by these changes.
-They are not a reason to add encoders to new domain objects. Frozen dataclasses
+These values keep their business rules while the owning input, query and
+repository methods interpret concrete formats. Do not add generic mapping
+factories or storage/response encoders to new domain objects. Frozen dataclasses
 preserve revision identities, but nested dictionaries are still mutable; copied
 input and output payloads isolate the snapshots from caller-owned dictionaries.
 

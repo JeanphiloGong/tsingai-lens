@@ -102,8 +102,8 @@ service checks, not accepted status.
 The model must not generate formal experiment/result IDs, database IDs,
 collection or Objective ownership, revision numbers, formal SourceReference
 objects, binding/relation status, or final direction/basis/causal decisions.
-PaperExperimentModelOutput.from_model_mapping rejects those fields, and the
-service attaches request context and the Source catalog.
+`parse_paper_experiment_response` rejects those fields at the model-response
+boundary, and the service attaches request context and the Source catalog.
 
 ### Why broad facts are allowed
 

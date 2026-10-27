@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+
+from domain.core.research_objective import normalize_objective_terms
+
+
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -304,16 +308,20 @@ def _document_extraction_service(result: PaperExperimentExtractionResult):
 
 
 def _paper_frame() -> PaperAnalysisFrame:
-    return PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "objective-1",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["Alloy A"],
-            "changed_variables": ["temperature"],
-            "measured_property_scope": ["strength"],
-        }
+    return PaperAnalysisFrame(
+        objective_id='objective-1',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['Alloy A']),
+        changed_variables=normalize_objective_terms(['temperature']),
+        measured_property_scope=normalize_objective_terms(['strength']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
 
 
@@ -1727,7 +1735,21 @@ async def test_rejected_automatic_drafts_fail_analysis_instead_of_publishing_abs
     refs = tuple(bundle.source_catalog.values())
     contribution = _build_contribution_for_extraction(
         collection_id="collection-1", analysis=analysis, objective=objective,
-        frame=PaperAnalysisFrame.from_mapping({"document_id": "paper-1", "relevance": "high"}),
+        frame=PaperAnalysisFrame(
+            objective_id='',
+            document_id='paper-1',
+            relevance='high',
+            paper_role='uncertain',
+            screening_note=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            relevant_sections=(),
+            relevant_text_source_refs=(),
+            relevant_tables=(),
+            excluded_tables=(),
+        ),
         extraction=extraction, routed_source_refs=refs,
         inspected_source_refs=(), failed_source_refs=refs, omitted_source_refs=(),
     )

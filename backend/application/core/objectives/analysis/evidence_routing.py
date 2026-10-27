@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import logging
 import re
 from dataclasses import dataclass
@@ -74,41 +75,6 @@ class EvidenceCandidate:
     used_fallback: bool = False
     context_fields: tuple[str, ...] = ()
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceCandidate":
-        return cls(
-            objective_id=_text(payload.get("objective_id")),
-            document_id=_text(payload.get("document_id")),
-            source_kind=_text(payload.get("source_kind")) or "text_window",
-            source_ref=_text(payload.get("source_ref")),
-            role=_text(payload.get("role")) or "low_value_or_irrelevant",
-            extractable=bool(payload.get("extractable")),
-            reason=_optional_text(payload.get("reason")),
-            table_schema=_mapping(payload.get("table_schema")),
-            column_roles=_mapping(payload.get("column_roles")),
-            join_plan=_mapping(payload.get("join_plan")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            used_fallback=bool(payload.get("used_fallback")),
-            context_fields=normalize_objective_terms(payload.get("context_fields")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "objective_id": self.objective_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "role": self.role,
-            "extractable": self.extractable,
-            "reason": self.reason,
-            "table_schema": dict(self.table_schema),
-            "column_roles": dict(self.column_roles),
-            "join_plan": dict(self.join_plan),
-            "confidence": self.confidence,
-            "used_fallback": self.used_fallback,
-            "context_fields": list(self.context_fields),
-        }
-
 
 @dataclass(frozen=True)
 class SourceSelectionHint:
@@ -128,21 +94,6 @@ class SourceSelectionHint:
             raise ValueError("source selection hint requires table_id")
         if self.role not in {"result_table", "condition_context"}:
             raise ValueError(f"unsupported source selection hint role: {self.role}")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "SourceSelectionHint":
-        return cls(
-            table_id=_text(payload.get("table_id")),
-            document_id=_text(payload.get("document_id")),
-            caption_text=_optional_text(payload.get("caption_text")),
-            role=_text(payload.get("role")),
-            strength=_optional_text(payload.get("strength")),
-            matched_outcomes=normalize_objective_terms(payload.get("matched_outcomes")),
-            matched_variables=normalize_objective_terms(
-                payload.get("matched_variables")
-            ),
-            reason=_optional_text(payload.get("reason")),
-        )
 
 
 def _text(value: Any) -> str:
@@ -402,22 +353,18 @@ def route_sources(
                 if route_key not in seen:
                     seen.add(route_key)
                     routes.append(
-                        EvidenceCandidate.from_mapping(
-                            {
-                                "objective_id": frame.objective_id,
-                                "document_id": frame.document_id,
-                                "source_kind": candidate.get("source_kind"),
-                                "source_ref": candidate.get("source_ref"),
-                                "role": "low_value_or_irrelevant",
-                                "extractable": False,
-                                "reason": "Excluded by objective paper frame.",
-                                "table_schema": _route_table_schema_record(
-                                    candidate=candidate,
-                                ),
-                                "column_roles": {},
-                                "join_plan": {},
-                                "confidence": 0.7,
-                            }
+                        EvidenceCandidate(
+                            objective_id=frame.objective_id,
+                            document_id=frame.document_id,
+                            source_kind=str(candidate.get('source_kind') or '').strip() or 'text_window',
+                            source_ref=str(candidate.get('source_ref') or '').strip(),
+                            role='low_value_or_irrelevant',
+                            extractable=False,
+                            reason='Excluded by objective paper frame.',
+                            table_schema=dict(_route_table_schema_record(candidate=candidate) or {}),
+                            column_roles={},
+                            join_plan={},
+                            confidence=0.7,
                         )
                     )
                 continue
@@ -456,7 +403,21 @@ def route_sources(
                 if route_key in seen:
                     continue
                 seen.add(route_key)
-                routes.append(EvidenceCandidate.from_mapping(record))
+                routes.append(EvidenceCandidate(
+                    objective_id=str(record.get('objective_id') or '').strip(),
+                    document_id=str(record.get('document_id') or '').strip(),
+                    source_kind=str(record.get('source_kind') or '').strip() or 'text_window',
+                    source_ref=str(record.get('source_ref') or '').strip(),
+                    role=str(record.get('role') or '').strip() or 'low_value_or_irrelevant',
+                    extractable=bool(record.get('extractable')),
+                    reason=str(record.get('reason') or '').strip() or None,
+                    table_schema=dict(record.get('table_schema') or {}),
+                    column_roles=dict(record.get('column_roles') or {}),
+                    join_plan=dict(record.get('join_plan') or {}),
+                    confidence=normalize_objective_confidence(record.get('confidence')),
+                    used_fallback=bool(record.get('used_fallback')),
+                    context_fields=normalize_objective_terms(record.get('context_fields')),
+                ))
         _append_objective_context_hint_routes(
             routes=routes,
             seen=seen,
@@ -696,25 +657,18 @@ def _append_objective_context_hint_routes(
         seen.add(route_key)
         table_schema = _route_table_schema_record(candidate=candidate)
         routes.append(
-            EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": frame.objective_id,
-                    "document_id": frame.document_id,
-                    "source_kind": "table",
-                    "source_ref": table_id,
-                    "role": role,
-                    "extractable": True,
-                    "reason": hint.reason
-                    or "Selected from objective context routing hints.",
-                    "table_schema": table_schema,
-                    "column_roles": _objective_context_hint_column_roles(
-                        objective_context=objective_context,
-                        hint_role=hint.role,
-                        table_schema=table_schema,
-                    ),
-                    "join_plan": {},
-                    "confidence": objective_context.confidence,
-                }
+            EvidenceCandidate(
+                objective_id=frame.objective_id,
+                document_id=frame.document_id,
+                source_kind='table',
+                source_ref=str(table_id or '').strip(),
+                role=str(role or '').strip() or 'low_value_or_irrelevant',
+                extractable=True,
+                reason=str((hint.reason or 'Selected from objective context routing hints.') or '').strip() or None,
+                table_schema=dict(table_schema or {}),
+                column_roles=dict(_objective_context_hint_column_roles(objective_context=objective_context, hint_role=hint.role, table_schema=table_schema) or {}),
+                join_plan={},
+                confidence=normalize_objective_confidence(objective_context.confidence),
             )
         )
 
@@ -895,23 +849,18 @@ def _append_ranked_text_hint_routes(
             continue
         seen.add(route_key)
         routes.append(
-            EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": frame.objective_id,
-                    "document_id": frame.document_id,
-                    "source_kind": "text_window",
-                    "source_ref": source_ref,
-                    "role": role,
-                    "extractable": extractable,
-                    "reason": (
-                        "High-scoring objective text candidate retained as "
-                        f"{evidence_role}."
-                    ),
-                    "join_plan": {"evidence_role": evidence_role},
-                    "table_schema": {},
-                    "column_roles": {},
-                    "confidence": 0.62,
-                }
+            EvidenceCandidate(
+                objective_id=frame.objective_id,
+                document_id=frame.document_id,
+                source_kind='text_window',
+                source_ref=str(source_ref or '').strip(),
+                role=str(role or '').strip() or 'low_value_or_irrelevant',
+                extractable=bool(extractable),
+                reason=str(f'High-scoring objective text candidate retained as {evidence_role}.' or '').strip() or None,
+                table_schema={},
+                column_roles={},
+                join_plan=dict({'evidence_role': evidence_role} or {}),
+                confidence=0.62,
             )
         )
         added += 1
@@ -2578,20 +2527,15 @@ def _build_objective_table_routing_hints(
         else:
             continue
         hints.append(
-            SourceSelectionHint.from_mapping(
-                {
-                    "table_id": str(getattr(table, "table_id", "") or ""),
-                    "document_id": document_id,
-                    "caption_text": getattr(table, "caption_text", None),
-                    "role": role,
-                    "strength": strength,
-                    "matched_outcomes": matched_outcomes,
-                    "matched_variables": matched_variable_axes,
-                    "reason": _build_objective_table_routing_reason(
-                        role,
-                        matched_variable_axes=matched_variable_axes,
-                    ),
-                }
+            SourceSelectionHint(
+                table_id=str(str(getattr(table, 'table_id', '') or '') or '').strip(),
+                document_id=document_id,
+                caption_text=str(getattr(table, 'caption_text', None) or '').strip() or None,
+                role=str(role or '').strip(),
+                strength=str(strength or '').strip() or None,
+                matched_outcomes=normalize_objective_terms(matched_outcomes),
+                matched_variables=normalize_objective_terms(matched_variable_axes),
+                reason=str(_build_objective_table_routing_reason(role, matched_variable_axes=matched_variable_axes) or '').strip() or None,
             )
         )
     return tuple(hints)

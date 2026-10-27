@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+
+from domain.core.research_objective import normalize_objective_terms
+
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -81,12 +85,21 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     service._build_objective_analysis_inputs = AsyncMock(return_value=inputs)
 
     def screen(**kwargs):
-        return tuple(PaperAnalysisFrame.from_mapping({
-            "objective_id": objective.objective_id, "document_id": item.document_id,
-            "relevance": "high", "paper_role": "primary_experiment",
-            "material_match": ["316L"], "changed_variables": ["preheat"],
-            "measured_property_scope": ["elongation"],
-        }) for item in kwargs["documents"])
+        return tuple(PaperAnalysisFrame(
+            objective_id=str(objective.objective_id or '').strip(),
+            document_id=str(item.document_id or '').strip(),
+            relevance='high',
+            paper_role='primary_experiment',
+            screening_note=None,
+            material_match=normalize_objective_terms(['316L']),
+            changed_variables=normalize_objective_terms(['preheat']),
+            measured_property_scope=normalize_objective_terms(['elongation']),
+            test_environment_scope=(),
+            relevant_sections=(),
+            relevant_text_source_refs=(),
+            relevant_tables=(),
+            excluded_tables=(),
+        ) for item in kwargs["documents"])
 
     def route(**kwargs):
         document_id = kwargs["objective_paper_frames"][0].document_id

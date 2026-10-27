@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import json
 import logging
 import os
@@ -563,29 +564,6 @@ class PaperFrameSourceDisposition:
     def is_relevant(self) -> bool:
         return self.disposition not in {"model_excluded", "repaired_excluded"}
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperFrameSourceDisposition":
-        return cls(
-            source_unit_id=_text(payload.get("source_unit_id")),
-            source_kind=_text(payload.get("source_kind")),
-            source_ref=_text(payload.get("source_ref")),
-            disposition=_text(payload.get("disposition")),
-            accounting_errors=tuple(
-                str(error).strip()
-                for error in payload.get("accounting_errors") or ()
-                if str(error).strip()
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "source_unit_id": self.source_unit_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "disposition": self.disposition,
-            "accounting_errors": list(self.accounting_errors),
-        }
-
 
 @dataclass(frozen=True)
 class PaperAnalysisFrame:
@@ -609,73 +587,6 @@ class PaperAnalysisFrame:
     # are a recall prior only; the Source must still be inspected and grounded
     # during Objective analysis.
     lineage_source_refs: tuple[tuple[str, str], ...] = ()
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperAnalysisFrame":
-        return cls(
-            objective_id=_text(payload.get("objective_id")),
-            document_id=_text(payload.get("document_id")),
-            relevance=_text(payload.get("relevance")) or "uncertain",
-            paper_role=_text(payload.get("paper_role")) or "uncertain",
-            screening_note=_optional_text(payload.get("screening_note")),
-            material_match=normalize_objective_terms(payload.get("material_match")),
-            changed_variables=normalize_objective_terms(
-                payload.get("changed_variables")
-            ),
-            measured_property_scope=normalize_objective_terms(
-                payload.get("measured_property_scope")
-            ),
-            test_environment_scope=normalize_objective_terms(
-                payload.get("test_environment_scope")
-            ),
-            relevant_sections=normalize_objective_terms(
-                payload.get("relevant_sections")
-            ),
-            relevant_text_source_refs=normalize_objective_terms(
-                payload.get("relevant_text_source_refs")
-            ),
-            relevant_tables=normalize_objective_terms(payload.get("relevant_tables")),
-            excluded_tables=normalize_objective_terms(payload.get("excluded_tables")),
-            source_dispositions=tuple(
-                PaperFrameSourceDisposition.from_mapping(item)
-                for item in payload.get("source_dispositions") or ()
-                if isinstance(item, Mapping)
-            ),
-            lineage_source_refs=tuple(
-                (
-                    _text(item.get("source_kind")),
-                    _text(item.get("source_ref")),
-                )
-                for item in payload.get("lineage_source_refs") or ()
-                if isinstance(item, Mapping)
-                and _text(item.get("source_kind"))
-                and _text(item.get("source_ref"))
-            ),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "objective_id": self.objective_id,
-            "document_id": self.document_id,
-            "relevance": self.relevance,
-            "paper_role": self.paper_role,
-            "screening_note": self.screening_note,
-            "material_match": list(self.material_match),
-            "changed_variables": list(self.changed_variables),
-            "measured_property_scope": list(self.measured_property_scope),
-            "test_environment_scope": list(self.test_environment_scope),
-            "relevant_sections": list(self.relevant_sections),
-            "relevant_text_source_refs": list(self.relevant_text_source_refs),
-            "relevant_tables": list(self.relevant_tables),
-            "excluded_tables": list(self.excluded_tables),
-            "source_dispositions": [
-                disposition.to_record() for disposition in self.source_dispositions
-            ],
-            "lineage_source_refs": [
-                {"source_kind": source_kind, "source_ref": source_ref}
-                for source_kind, source_ref in self.lineage_source_refs
-            ],
-        }
 
 
 @dataclass(frozen=True)
@@ -784,17 +695,20 @@ def screen_sources(
                         paper_map=maps_by_document_id.get(document_id),
                         payload=None,
                         batches=(),
-                        completed_frame=PaperAnalysisFrame.from_mapping(
-                            {
-                                "objective_id": objective.objective_id,
-                                "document_id": document_id,
-                                "relevance": "irrelevant",
-                                "paper_role": "irrelevant",
-                                "screening_note": (
-                                    "Paper was explicitly excluded from this research "
-                                    "objective."
-                                ),
-                            }
+                        completed_frame=PaperAnalysisFrame(
+                            objective_id=objective.objective_id,
+                            document_id=document_id,
+                            relevance='irrelevant',
+                            paper_role='irrelevant',
+                            screening_note='Paper was explicitly excluded from this research objective.',
+                            material_match=(),
+                            changed_variables=(),
+                            measured_property_scope=(),
+                            test_environment_scope=(),
+                            relevant_sections=(),
+                            relevant_text_source_refs=(),
+                            relevant_tables=(),
+                            excluded_tables=(),
                         ),
                     )
                 )
@@ -1439,10 +1353,10 @@ def _aggregate_objective_paper_frame_batches(
         )
 
     normalized_lineage_source_refs = tuple(
-        {
-            "source_kind": str(item.get("source_kind") or "").strip(),
-            "source_ref": str(item.get("source_ref") or "").strip(),
-        }
+        (
+            str(item.get("source_kind") or "").strip(),
+            str(item.get("source_ref") or "").strip(),
+        )
         for item in lineage_source_refs
         if isinstance(item, Mapping)
         and str(item.get("source_kind") or "").strip()
@@ -1451,26 +1365,22 @@ def _aggregate_objective_paper_frame_batches(
     if relevance != "irrelevant" and paper_role == "irrelevant":
         paper_role = deterministic_paper_role
 
-    return PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective_id,
-            "document_id": document_id,
-            "relevance": relevance,
-            "paper_role": paper_role,
-            "screening_note": screening_note_record.get("screening_note"),
-            "material_match": values("material_match"),
-            "changed_variables": values("changed_variables"),
-            "measured_property_scope": values("measured_property_scope"),
-            "test_environment_scope": values("test_environment_scope"),
-            "relevant_sections": relevant_sections,
-            "relevant_text_source_refs": relevant_text_source_refs,
-            "relevant_tables": relevant_tables,
-            "excluded_tables": excluded_tables,
-            "source_dispositions": [
-                disposition.to_record() for disposition in source_dispositions
-            ],
-            "lineage_source_refs": normalized_lineage_source_refs,
-        }
+    return PaperAnalysisFrame(
+        objective_id=objective_id,
+        document_id=document_id,
+        relevance=relevance,
+        paper_role=paper_role,
+        screening_note=str(screening_note_record.get('screening_note') or '').strip() or None,
+        material_match=normalize_objective_terms(values('material_match')),
+        changed_variables=normalize_objective_terms(values('changed_variables')),
+        measured_property_scope=normalize_objective_terms(values('measured_property_scope')),
+        test_environment_scope=normalize_objective_terms(values('test_environment_scope')),
+        relevant_sections=normalize_objective_terms(relevant_sections),
+        relevant_text_source_refs=normalize_objective_terms(relevant_text_source_refs),
+        relevant_tables=normalize_objective_terms(relevant_tables),
+        excluded_tables=normalize_objective_terms(excluded_tables),
+        source_dispositions=source_dispositions,
+        lineage_source_refs=normalized_lineage_source_refs,
     )
 
 

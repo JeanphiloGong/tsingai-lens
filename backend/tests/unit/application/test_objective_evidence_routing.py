@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import Mapping
+
+
+from domain.core.research_objective import normalize_objective_terms
+
 from repositories.paper_map_repository import paper_map_from_payload
 
 from types import SimpleNamespace
@@ -39,13 +44,20 @@ def test_route_without_confidence_gets_conservative_fallback() -> None:
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     finalized = evidence_routing._finalize_objective_route_record(
         record={
@@ -151,13 +163,20 @@ def test_irrelevant_primary_experiment_is_recalled_when_source_has_direct_result
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "irrelevant",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='irrelevant',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     blocks = [
         SimpleNamespace(
@@ -208,13 +227,20 @@ def test_irrelevant_primary_experiment_without_objective_signal_stays_skipped() 
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "irrelevant",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='irrelevant',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     blocks = [
         SimpleNamespace(
@@ -248,13 +274,20 @@ def test_primary_experiment_with_outcome_but_no_objective_variable_stays_visible
             "outcomes": ["microstructure"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-energy-density",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-energy-density',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     blocks = [
         SimpleNamespace(
@@ -302,13 +335,20 @@ def test_primary_experiment_is_eligible_when_methods_and_results_cover_axes() ->
             "outcomes": ["microstructure"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-preheating",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-preheating',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     blocks = [
         SimpleNamespace(
@@ -353,16 +393,21 @@ def test_explicit_relationship_lineage_preserves_abbreviated_result_scope() -> N
             "outcomes": ["microstructure"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-preheating",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "lineage_source_refs": [
-                {"source_kind": "block", "source_ref": "abbreviated-result"}
-            ],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-preheating',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
+        lineage_source_refs=tuple(((str(item.get('source_kind') or '').strip(), str(item.get('source_ref') or '').strip()) for item in [{'source_kind': 'block', 'source_ref': 'abbreviated-result'}] if isinstance(item, Mapping) and str(item.get('source_kind') or '').strip() and str(item.get('source_ref') or '').strip())),
     )
     blocks = [
         SimpleNamespace(
@@ -483,13 +528,20 @@ def test_direct_result_source_is_recalled_when_router_returns_empty_selection() 
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     result_blocks = [
         SimpleNamespace(
@@ -609,13 +661,20 @@ def test_primary_experiment_keeps_direct_text_result_when_tables_fill_route_budg
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     tables = [
         SimpleNamespace(
@@ -667,16 +726,21 @@ def test_objective_lineage_source_is_recalled_without_matching_objective_terms()
             "outcomes": ["yield strength"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "lineage_source_refs": [
-                {"source_kind": "block", "source_ref": "result-1"}
-            ],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
+        lineage_source_refs=tuple(((str(item.get('source_kind') or '').strip(), str(item.get('source_ref') or '').strip()) for item in [{'source_kind': 'block', 'source_ref': 'result-1'}] if isinstance(item, Mapping) and str(item.get('source_kind') or '').strip() and str(item.get('source_ref') or '').strip())),
     )
     blocks = [
         SimpleNamespace(
@@ -785,13 +849,20 @@ def test_primary_experiment_bounds_initial_context_bundle_but_keeps_all_direct_r
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     direct_blocks = [
         SimpleNamespace(
@@ -1028,18 +1099,20 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
             ("H-VED", "437", "560", "48.3"),
         ),
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-independent",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": list(objective.variables),
-            "measured_property_scope": list(objective.outcomes),
-            "relevant_tables": [],
-            "excluded_tables": ["table-conditions", "table-results"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-independent',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(list(objective.variables)),
+        measured_property_scope=normalize_objective_terms(list(objective.outcomes)),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=normalize_objective_terms([]),
+        excluded_tables=normalize_objective_terms(['table-conditions', 'table-results']),
     )
 
     routes = evidence_routing.route_sources(
@@ -1196,20 +1269,18 @@ def test_process_route_does_not_treat_result_columns_as_process_context():
             "outcomes": ["defect structure", "fatigue strength"],
         }
     )
-    misrouted_result_table = EvidenceCandidate.from_mapping(
-        {
-            "source_ref": "route-misclassified-results",
-            "objective_id": "obj-fatigue",
-            "document_id": "paper-ved",
-            "source_kind": "table",
-            "source_ref": "table-melt-pool-density",
-            "role": "process_or_treatment",
-            "extractable": True,
-            "column_roles": {
-                "Grain Size [um] > Eq. diam.": "statistical_measure",
-            },
-            "confidence": 0.84,
-        }
+    misrouted_result_table = EvidenceCandidate(
+        objective_id='obj-fatigue',
+        document_id='paper-ved',
+        source_kind='table',
+        source_ref='route-misclassified-results',
+        role='process_or_treatment',
+        extractable=True,
+        reason=None,
+        table_schema={},
+        column_roles={'Grain Size [um] > Eq. diam.': 'statistical_measure'},
+        join_plan={},
+        confidence=0.84,
     )
 
     records = source_extraction._objective_table_matrix_evidence_records(
@@ -1239,15 +1310,20 @@ def test_process_route_does_not_treat_result_columns_as_process_context():
 
 
 def test_research_objective_service_adds_context_hint_route_for_condition_table():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-mechanical",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "relevant_tables": ["table-2"],
-            "excluded_tables": ["table-1"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-mechanical',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=normalize_objective_terms(['table-2']),
+        excluded_tables=normalize_objective_terms(['table-1']),
     )
     objective_context = _research_objective(
         {
@@ -1270,13 +1346,15 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
         frame=frame,
         objective_context=objective_context,
         routing_hints=(
-            SourceSelectionHint.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "table_id": "table-1",
-                    "role": "condition_context",
-                    "reason": "Table contains process variables.",
-                }
+            SourceSelectionHint(
+                table_id='table-1',
+                document_id='paper-1',
+                caption_text=None,
+                role='condition_context',
+                strength=None,
+                matched_outcomes=(),
+                matched_variables=(),
+                reason='Table contains process variables.',
             ),
         ),
         candidate_by_key={
@@ -1313,17 +1391,20 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
 
 
 def test_research_objective_service_ranks_result_text_candidates():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-structure",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["scanning speed", "energy density"],
-            "measured_property_scope": ["microstructure", "densification"],
-            "relevant_sections": ["Paper title"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-structure',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['scanning speed', 'energy density']),
+        measured_property_scope=normalize_objective_terms(['microstructure', 'densification']),
+        test_environment_scope=(),
+        relevant_sections=normalize_objective_terms(['Paper title']),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective_context = _research_objective(
         {
@@ -1402,15 +1483,20 @@ def test_research_objective_service_ranks_result_text_candidates():
 
 
 def test_research_objective_text_hints_prefer_observed_result_over_scope_summary():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-preheat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "changed_variables": ["preheating build platform temperature"],
-            "measured_property_scope": ["microstructure"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-preheat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=normalize_objective_terms(['preheating build platform temperature']),
+        measured_property_scope=normalize_objective_terms(['microstructure']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective = _research_objective(
         {
@@ -1476,16 +1562,20 @@ def test_research_objective_text_hints_prefer_observed_result_over_scope_summary
 
 
 def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_support():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-corrosion",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["laser power"],
-            "measured_property_scope": ["pitting corrosion"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-corrosion',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['laser power']),
+        measured_property_scope=normalize_objective_terms(['pitting corrosion']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective_context = _research_objective(
         {
@@ -1548,16 +1638,20 @@ def test_research_objective_routing_uses_document_tree_order():
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     blocks = [
         SimpleNamespace(
@@ -1655,17 +1749,20 @@ def test_research_objective_routing_binds_current_source_to_model_decision():
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-            "relevant_tables": ["table-1"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=normalize_objective_terms(['table-1']),
+        excluded_tables=(),
     )
     table = SimpleNamespace(
         table_id="table-1",
@@ -1710,20 +1807,20 @@ def test_research_objective_routing_uses_compact_prompt_payload():
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "screening_note": "x" * 1000,
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-            "relevant_sections": ["Results"],
-            "relevant_tables": ["table-1"],
-            "excluded_tables": ["table-2"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=str('x' * 1000 or '').strip() or None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=normalize_objective_terms(['Results']),
+        relevant_text_source_refs=(),
+        relevant_tables=normalize_objective_terms(['table-1']),
+        excluded_tables=normalize_objective_terms(['table-2']),
     )
     table = SimpleNamespace(
         table_id="table-1",
@@ -1758,16 +1855,20 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     long_text = "Heat treatment changed yield strength. " + ("x" * 1000)
     document_tree = SourceDocumentTree(
@@ -1820,16 +1921,20 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree():
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
@@ -1941,17 +2046,20 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "low",
-            "paper_role": "supporting_background",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-            "relevant_sections": ["Results"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='low',
+        paper_role='supporting_background',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=normalize_objective_terms(['Results']),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     document_tree = SourceDocumentTree(
         document_id="paper-1",
@@ -2039,16 +2147,20 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text()
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "low",
-            "paper_role": "supporting_background",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='low',
+        paper_role='supporting_background',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     child_ids = tuple(f"node-{index}" for index in range(30))
     nodes: dict[str, SourceDocumentNode] = {
@@ -2110,16 +2222,20 @@ def test_research_objective_tree_routing_keeps_late_document_nodes():
             "confidence": 0.9,
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["yield strength"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-heat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['heat treatment']),
+        measured_property_scope=normalize_objective_terms(['yield strength']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     child_ids = tuple(f"node-{index}" for index in range(45))
     nodes: dict[str, SourceDocumentNode] = {
@@ -2186,15 +2302,20 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes():
             "confirmation_status": "confirmed",
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-preheat-cracking",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "changed_variables": ["laser power"],
-            "measured_property_scope": ["porosity"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-preheat-cracking',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=normalize_objective_terms(['laser power']),
+        measured_property_scope=normalize_objective_terms(['porosity']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     child_ids = tuple(f"node-{index}" for index in range(30))
     nodes: dict[str, SourceDocumentNode] = {
@@ -2253,16 +2374,20 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes():
 
 
 def test_research_objective_tree_routing_keeps_direct_result_among_scope_text():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-preheat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["preheating build platform temperature"],
-            "measured_property_scope": ["microstructure"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-preheat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['preheating build platform temperature']),
+        measured_property_scope=normalize_objective_terms(['microstructure']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective_context = _research_objective(
         {
@@ -2399,15 +2524,20 @@ def test_research_objective_tree_routing_recognizes_energy_input_ductility_resul
 
 
 def test_research_objective_tree_routing_excludes_non_block_caption_refs():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-density",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "changed_variables": ["energy density"],
-            "measured_property_scope": ["relative density"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-density',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=normalize_objective_terms(['energy density']),
+        measured_property_scope=normalize_objective_terms(['relative density']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective_context = _research_objective(
         {
@@ -2457,15 +2587,20 @@ def test_research_objective_tree_routing_excludes_non_block_caption_refs():
 
 
 def test_research_objective_tree_routing_keeps_multiple_comparative_results():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-preheat",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "changed_variables": ["preheating build platform temperature"],
-            "measured_property_scope": ["microstructure"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-preheat',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=normalize_objective_terms(['preheating build platform temperature']),
+        measured_property_scope=normalize_objective_terms(['microstructure']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective_context = _research_objective(
         {
@@ -2530,15 +2665,20 @@ def test_research_objective_tree_routing_keeps_multiple_comparative_results():
 
 
 def test_research_objective_tree_routing_does_not_cap_direct_result_recall():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-density",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "changed_variables": ["laser power"],
-            "measured_property_scope": ["relative density"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-density',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=normalize_objective_terms(['laser power']),
+        measured_property_scope=normalize_objective_terms(['relative density']),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective_context = _research_objective(
         {
@@ -2585,13 +2725,20 @@ def test_research_objective_routing_reads_late_result_in_complete_source_block()
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     source_ref = "late-result"
     source_text = (
@@ -2651,13 +2798,20 @@ def test_research_objective_routing_reads_target_result_in_late_table_row():
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     table = SimpleNamespace(
         document_id="paper-1",
@@ -2696,15 +2850,20 @@ def test_research_objective_primary_frame_keeps_unlisted_tables_for_recall():
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "relevant_tables": ["table-1"],
-            "excluded_tables": ["table-2"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=normalize_objective_terms(['table-1']),
+        excluded_tables=normalize_objective_terms(['table-2']),
     )
     tables = [
         SimpleNamespace(
@@ -2758,15 +2917,20 @@ def test_research_objective_medium_primary_frame_keeps_unlisted_tables_for_recal
             "outcomes": ["relative density"],
         }
     )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "medium",
-            "paper_role": "primary_experiment",
-            "relevant_tables": ["table-1"],
-            "excluded_tables": ["table-2"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id=str(objective.objective_id or '').strip(),
+        document_id='paper-1',
+        relevance='medium',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=normalize_objective_terms(['table-1']),
+        excluded_tables=normalize_objective_terms(['table-2']),
     )
     tables = [
         SimpleNamespace(
@@ -2813,14 +2977,20 @@ def test_research_objective_medium_primary_frame_keeps_unlisted_tables_for_recal
 
 
 def test_research_objective_medium_primary_frame_keeps_all_direct_result_text():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-density",
-            "document_id": "paper-1",
-            "relevance": "medium",
-            "paper_role": "primary_experiment",
-            "relevant_text_source_refs": ["result-0"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-density',
+        document_id='paper-1',
+        relevance='medium',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=normalize_objective_terms(['result-0']),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective = _research_objective(
         {
@@ -2856,23 +3026,20 @@ def test_research_objective_medium_primary_frame_keeps_all_direct_result_text():
 
 
 def test_research_objective_service_keeps_numeric_mechanism_text_candidates():
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-preheating",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["build platform temperature"],
-            "measured_property_scope": [
-                "yield strength",
-                "ultimate tensile strength",
-                "elongation",
-                "porosity",
-            ],
-            "test_environment_scope": ["preheating"],
-            "relevant_sections": ["Abstract"],
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-preheating',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=normalize_objective_terms(['316L stainless steel']),
+        changed_variables=normalize_objective_terms(['build platform temperature']),
+        measured_property_scope=normalize_objective_terms(['yield strength', 'ultimate tensile strength', 'elongation', 'porosity']),
+        test_environment_scope=normalize_objective_terms(['preheating']),
+        relevant_sections=normalize_objective_terms(['Abstract']),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective_context = _research_objective(
         {
@@ -2938,13 +3105,20 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates():
 
 
 def test_objective_routing_reserves_same_paper_methods_context() -> None:
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-porosity",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
+    frame = PaperAnalysisFrame(
+        objective_id='obj-porosity',
+        document_id='paper-1',
+        relevance='high',
+        paper_role='primary_experiment',
+        screening_note=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        relevant_sections=(),
+        relevant_text_source_refs=(),
+        relevant_tables=(),
+        excluded_tables=(),
     )
     objective = _research_objective(
         {

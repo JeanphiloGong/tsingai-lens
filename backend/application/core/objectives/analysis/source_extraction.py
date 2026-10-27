@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import json
 import logging
 import re
@@ -2855,27 +2856,19 @@ def _build_adaptive_context_routes(
                 ),
             )
             for scoped_route_fields in route_field_groups:
-                route = EvidenceCandidate.from_mapping(
-                    {
-                        "objective_id": objective_id,
-                        "document_id": document_id,
-                        "source_kind": candidate.source_kind,
-                        "source_ref": candidate.source_ref,
-                        "role": candidate.role,
-                        "extractable": True,
-                        "reason": (
-                            (
-                                "Same-paper structural neighbor selected for result "
-                                "Source(s): "
-                                if not scoped_route_fields
-                                else "Same-paper context expansion for result Source(s): "
-                            )
-                            + f"{', '.join(sorted(anchor_refs))}. Matched Source fields: "
-                            f"{', '.join(scoped_route_fields) or 'none; requires validation'}."
-                        ),
-                        "confidence": 0.8,
-                        "context_fields": scoped_route_fields,
-                    }
+                route = EvidenceCandidate(
+                    objective_id=objective_id,
+                    document_id=document_id,
+                    source_kind=candidate.source_kind,
+                    source_ref=candidate.source_ref,
+                    role=candidate.role,
+                    extractable=True,
+                    reason=str(('Same-paper structural neighbor selected for result Source(s): ' if not scoped_route_fields else 'Same-paper context expansion for result Source(s): ') + f"{', '.join(sorted(anchor_refs))}. Matched Source fields: {', '.join(scoped_route_fields) or 'none; requires validation'}." or '').strip() or None,
+                    table_schema={},
+                    column_roles={},
+                    join_plan={},
+                    confidence=0.8,
+                    context_fields=normalize_objective_terms(scoped_route_fields),
                 )
                 adaptive_routes.append(route)
                 source_key = (
@@ -3067,16 +3060,18 @@ def _collect_context_source_candidates(
                 or source_key in frame_candidate_keys
             ):
                 continue
-            frame_route = EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": objective_id,
-                    "document_id": document_id,
-                    "source_kind": route_source_kind,
-                    "source_ref": source_ref,
-                    "role": "process_or_treatment",
-                    "extractable": True,
-                    "confidence": 0.8,
-                }
+            frame_route = EvidenceCandidate(
+                objective_id=objective_id,
+                document_id=document_id,
+                source_kind=str(route_source_kind or '').strip() or 'text_window',
+                source_ref=str(source_ref or '').strip(),
+                role='process_or_treatment',
+                extractable=True,
+                reason=None,
+                table_schema={},
+                column_roles={},
+                join_plan={},
+                confidence=0.8,
             )
             frame_source = build_route_source_payload(
                 route=frame_route,
@@ -3550,8 +3545,6 @@ def _choose_context_reads(
             )
 
     return anchor_selected, anchor_uncovered
-
-
 
 
 _ADAPTIVE_CONTEXT_FIELD_MARKERS: dict[str, tuple[str, ...]] = {
@@ -4579,8 +4572,6 @@ def _objective_merge_table_repair_records(
     return deterministic_records or llm_records
 
 
-
-
 def build_route_source_payload(
     *,
     route: EvidenceCandidate,
@@ -5381,8 +5372,6 @@ def _objective_process_table_matrix_records(
     return tuple(records)
 
 
-
-
 def _objective_table_row_attributes(
     *,
     route: EvidenceCandidate,
@@ -6129,32 +6118,6 @@ def _objective_matrix_unit_id(
     return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _objective_route_result_columns(
     route: EvidenceCandidate,
     *,
@@ -6379,16 +6342,6 @@ def _objective_value_column_is_non_result(value: str) -> bool:
     if not text:
         return True
     return any(term in text for term in _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS)
-
-
-
-
-
-
-
-
-
-
 
 
 def _objective_evidence_has_payload(
@@ -6700,18 +6653,19 @@ def _objective_seed_context_routes(
                     (),
                 )
             routes.append(
-                EvidenceCandidate.from_mapping(
-                    {
-                        "objective_id": route.objective_id,
-                        "document_id": route.document_id,
-                        "source_kind": source_kind,
-                        "source_ref": source_ref,
-                        "role": seed_role,
-                        "extractable": True,
-                        "reason": "Previously inspected same-paper Source.",
-                        "confidence": 1.0,
-                        "context_fields": seed_context_fields,
-                    }
+                EvidenceCandidate(
+                    objective_id=str(route.objective_id or '').strip(),
+                    document_id=str(route.document_id or '').strip(),
+                    source_kind=str(source_kind or '').strip() or 'text_window',
+                    source_ref=str(source_ref or '').strip(),
+                    role=str(seed_role or '').strip() or 'low_value_or_irrelevant',
+                    extractable=True,
+                    reason='Previously inspected same-paper Source.',
+                    table_schema={},
+                    column_roles={},
+                    join_plan={},
+                    confidence=1,
+                    context_fields=normalize_objective_terms(seed_context_fields),
                 )
             )
     for audit in read_audits:
@@ -6726,19 +6680,19 @@ def _objective_seed_context_routes(
             continue
         seen.add(source_key)
         routes.append(
-            EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": route.objective_id,
-                    "document_id": route.document_id,
-                    "source_kind": audit.source_kind,
-                    "source_ref": audit.source_ref,
-                    "role": audit.role,
-                    "extractable": True,
-                    "reason": "Previously inspected same-paper Source.",
-                    "confidence": 1.0,
-                    "context_fields": audit.context_fields
-                    or _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS.get(audit.role, ()),
-                }
+            EvidenceCandidate(
+                objective_id=str(route.objective_id or '').strip(),
+                document_id=str(route.document_id or '').strip(),
+                source_kind=str(audit.source_kind or '').strip() or 'text_window',
+                source_ref=str(audit.source_ref or '').strip(),
+                role=str(audit.role or '').strip() or 'low_value_or_irrelevant',
+                extractable=True,
+                reason='Previously inspected same-paper Source.',
+                table_schema={},
+                column_roles={},
+                join_plan={},
+                confidence=1,
+                context_fields=normalize_objective_terms(audit.context_fields or _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS.get(audit.role, ())),
             )
         )
     return tuple(routes)
@@ -7156,17 +7110,18 @@ def _objective_document_grounding_sources(
             key = (source_kind, source_ref)
             if key == (route.source_kind, route.source_ref) or key in seen:
                 continue
-            context_route = EvidenceCandidate.from_mapping(
-                {
-                    "objective_id": route.objective_id,
-                    "document_id": route.document_id,
-                    "source_kind": source_kind,
-                    "source_ref": source_ref,
-                    "role": ref.get("role") or "same_paper_context",
-                    "extractable": True,
-                    "reason": "Previously read same-paper context Source.",
-                    "confidence": 1.0,
-                }
+            context_route = EvidenceCandidate(
+                objective_id=str(route.objective_id or '').strip(),
+                document_id=str(route.document_id or '').strip(),
+                source_kind=str(source_kind or '').strip() or 'text_window',
+                source_ref=str(source_ref or '').strip(),
+                role=str((ref.get('role') or 'same_paper_context') or '').strip() or 'low_value_or_irrelevant',
+                extractable=True,
+                reason='Previously read same-paper context Source.',
+                table_schema={},
+                column_roles={},
+                join_plan={},
+                confidence=1,
             )
             context_source = build_route_source_payload(
                 route=context_route,

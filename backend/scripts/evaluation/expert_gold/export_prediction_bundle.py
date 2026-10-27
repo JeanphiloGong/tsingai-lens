@@ -31,6 +31,10 @@ from repositories.objective_repository import (  # noqa: E402
 from repositories.source_artifact_repository import (  # noqa: E402
     SourceArtifactRepository,
 )
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
+)
 
 DEFAULT_OUTPUT_PATH = (
     DEFAULT_BACKEND_ROOT
@@ -192,8 +196,10 @@ async def _load_artifacts(
                 offset=0,
                 limit=10_000,
             )
-            evidence.extend(item.to_record() for item in objective_evidence)
-            findings.extend(item.to_record() for item in objective_findings)
+            evidence.extend(
+                objective_evidence_response(item) for item in objective_evidence
+            )
+            findings.extend(finding_response(item) for item in objective_findings)
     finally:
         await engine.dispose()
     records = {

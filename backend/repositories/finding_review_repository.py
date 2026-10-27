@@ -20,7 +20,6 @@ from domain.core.finding import (
 )
 from domain.core.finding import _certainty as finding_certainty
 from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _datetime_or_none as finding_datetime_or_none
 from domain.core.finding import _non_negative_int as finding_non_negative_int
 from domain.core.finding import _positive_int as finding_positive_int
 from domain.core.finding import _stable_id as finding_stable_id
@@ -136,7 +135,7 @@ class FindingReviewRepository:
             row.analysis_version = curation.analysis_version
             row.finding_id = curation.finding_id
             row.curated_status = curation.curated_status
-            row.curated_finding = curation.curated_finding.to_record()
+            row.curated_finding = _curated_finding_payload(curation.curated_finding)
             row.note = curation.note
             row.reviewer = curation.reviewer
             row.updated_at = _datetime(curation.updated_at)
@@ -490,7 +489,7 @@ def finding_curation_from_record(payload: Mapping[str, Any]) -> FindingCuration:
                     "created_by_tool_call_id"
                 )
             ),
-            created_at=finding_datetime_or_none(
+            created_at=_finding_creation_time(
                 _normalize_mapping(payload.get("curated_finding")).get("created_at")
             ),
             warnings=finding_strings(
@@ -512,11 +511,18 @@ def finding_curation_from_record(payload: Mapping[str, Any]) -> FindingCuration:
 
 
 def finding_curation_record(value: FindingCuration) -> dict[str, Any]:
-    return {"curation_id": value.curation_id, "collection_id": value.collection_id,
-            "objective_id": value.objective_id, "analysis_version": value.analysis_version,
-            "finding_id": value.finding_id, "curated_status": value.curated_status,
-            "curated_finding": value.curated_finding.to_record(), "note": value.note,
-            "reviewer": value.reviewer, "updated_at": value.updated_at}
+    return {
+        "curation_id": value.curation_id,
+        "collection_id": value.collection_id,
+        "objective_id": value.objective_id,
+        "analysis_version": value.analysis_version,
+        "finding_id": value.finding_id,
+        "curated_status": value.curated_status,
+        "curated_finding": _curated_finding_payload(value.curated_finding),
+        "note": value.note,
+        "reviewer": value.reviewer,
+        "updated_at": value.updated_at,
+    }
 
 
 def _context_attributes(records: Any) -> tuple[ScientificAttribute, ...]:
@@ -548,3 +554,109 @@ def _stored_scientific_context(value: Any) -> ScientificContext:
         process=_context_attributes(value.get("process")),
         test=_context_attributes(value.get("test")),
     )
+
+
+def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:
+    return {
+        "name": value.name,
+        "value": value.value,
+        "unit": value.unit,
+        **(
+            {"context_scope": value.context_scope}
+            if value.context_scope != "unknown"
+            else {}
+        ),
+        **(
+            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+            if value.applies_to_outcomes
+            else {}
+        ),
+    }
+
+
+def _curated_finding_payload(value: Finding) -> dict[str, Any]:
+    return {
+        "collection_id": value.collection_id,
+        "objective_id": value.objective_id,
+        "analysis_version": value.analysis_version,
+        "finding_id": value.finding_id,
+        "statement": value.statement,
+        "factors": list(value.factors),
+        "outcome": value.outcome,
+        "direction": value.direction,
+        "assertion_strength": value.assertion_strength,
+        "attribution_scope": value.attribution_scope,
+        "synthesis_status": value.synthesis_status,
+        "certainty": value.certainty,
+        "display_rank": value.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in value.mechanisms
+        ],
+        "scientific_context": {
+            "material": [
+                _scientific_attribute_payload(attribute)
+                for attribute in value.scientific_context.material
+            ],
+            "sample": [
+                _scientific_attribute_payload(attribute)
+                for attribute in value.scientific_context.sample
+            ],
+            "process": [
+                _scientific_attribute_payload(attribute)
+                for attribute in value.scientific_context.process
+            ],
+            "test": [
+                _scientific_attribute_payload(attribute)
+                for attribute in value.scientific_context.test
+            ],
+        },
+        "limitations": list(value.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in value.paper_contributions
+        ],
+        "origin": value.origin,
+        "source_analysis_version": value.source_analysis_version,
+        "parent_finding_id": value.parent_finding_id,
+        "created_by_user_id": value.created_by_user_id,
+        "created_by_tool_call_id": value.created_by_tool_call_id,
+        "created_at": value.created_at.isoformat() if value.created_at else None,
+        **({"selection_ids": list(value.selection_ids)} if value.selection_ids else {}),
+        **(
+            {"comparison_group_ids": list(value.comparison_group_ids)}
+            if value.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(value.warnings)} if value.warnings else {}),
+    }
+
+
+def _finding_creation_time(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = (str(value).strip() or None) if value is not None else None
+    if text is None:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid Finding creation time") from exc

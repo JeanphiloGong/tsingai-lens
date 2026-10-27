@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
+    paper_contribution_response,
+)
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from application.core.objectives.objective_analysis_service import (
     ObjectiveScopeNotReadyError,
@@ -383,7 +388,7 @@ class _Service:
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": 1,
-            "items": [_finding().to_record()],
+            "items": [finding_response(_finding())],
             "offset": kwargs["offset"],
             "limit": kwargs["limit"],
             "total": 1,
@@ -396,7 +401,7 @@ class _Service:
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": 1,
-            "finding": _finding().to_record(),
+            "finding": finding_response(_finding()),
         }
 
     async def list_evidence(self, collection_id, objective_id, **kwargs):
@@ -405,7 +410,7 @@ class _Service:
             "objective_id": objective_id,
             "analysis_version": 1,
             "finding_id": kwargs["finding_id"],
-            "items": [_evidence().to_record()],
+            "items": [objective_evidence_response(_evidence())],
             "offset": kwargs["offset"],
             "limit": kwargs["limit"],
             "total": 1,
@@ -810,7 +815,7 @@ def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
     assert "diagnostics" not in payload["published_analysis"]
     assert payload["paper_contributions"] == [
         {
-            **_paper_contribution().to_record(),
+            **paper_contribution_response(_paper_contribution()),
         }
     ]
     assert payload["active_analysis"]["stats"] == {
@@ -931,7 +936,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "collection_id": collection_id,
                 "objective_id": objective_id,
                 "analysis_version": 2,
-                "items": [finding.to_record()],
+                "items": [finding_response(finding)],
                 "offset": kwargs["offset"],
                 "limit": kwargs["limit"],
                 "total": 1,
@@ -952,7 +957,7 @@ def test_objective_result_apis_expose_agent_authoring_provenance() -> None:
                 "objective_id": objective_id,
                 "analysis_version": 2,
                 "finding_id": kwargs["finding_id"],
-                "items": [evidence.to_record()],
+                "items": [objective_evidence_response(evidence)],
                 "offset": kwargs["offset"],
                 "limit": kwargs["limit"],
                 "total": 1,

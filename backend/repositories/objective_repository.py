@@ -24,7 +24,6 @@ from domain.core.finding import (
 )
 from domain.core.finding import _certainty as finding_certainty
 from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _datetime_or_none as finding_datetime_or_none
 from domain.core.finding import _non_negative_int as finding_non_negative_int
 from domain.core.finding import _positive_int as finding_positive_int
 from domain.core.finding import _stable_id as finding_stable_id
@@ -49,7 +48,6 @@ from domain.core.research_objective import (
     PreparedDocumentInput,
     ResearchObjective,
     _choice,
-    _datetime_or_none,
 )
 from domain.core.research_objective import _non_negative_int_or_none
 from domain.core.research_objective import (
@@ -163,10 +161,6 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError(f"invalid datetime value: {text}") from exc
-
-
-def _datetime_record(value: datetime | None) -> str | None:
-    return value.isoformat() if value is not None else None
 
 
 @dataclass(frozen=True)
@@ -399,36 +393,6 @@ class ObjectiveAnalysis:
             )
         return replace(self, status=target, **changes)
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "document_inputs": [item.to_record() for item in self.document_inputs],
-            "pipeline_version": self.pipeline_version,
-            "model_name": self.model_name,
-            "prompt_versions": dict(self.prompt_versions),
-            "stats": execution_stats_record(self.stats),
-            "status": self.status,
-            "phase": self.phase,
-            "processed_document_count": self.processed_document_count,
-            "total_document_count": self.total_document_count,
-            "current_document_id": self.current_document_id,
-            "progress_message": self.progress_message,
-            "error_code": self.error_code,
-            "error_message": self.error_message,
-            "created_at": _datetime_record(self.created_at),
-            "started_at": _datetime_record(self.started_at),
-            "completed_at": _datetime_record(self.completed_at),
-            "origin": self.origin,
-            "scientific_record_source": self.scientific_record_source,
-            "source_analysis_version": self.source_analysis_version,
-            "created_by_user_id": self.created_by_user_id,
-            "created_by_tool_call_id": self.created_by_tool_call_id,
-            "abstention_reason": self.abstention_reason,
-            "abstention_note": self.abstention_note,
-        }
-
 
 @dataclass(frozen=True)
 class StoredObjective:
@@ -462,11 +426,23 @@ class ObjectiveRepository:
                 raise FileNotFoundError(f"collection not found: {collection_id}")
             collection.discovery_ready = facts.research_objectives_ready
             collection.discovery_document_inputs = [
-                item.to_record() for item in facts.document_inputs
+                {
+                    "document_id": item.document_id,
+                    "preparation_fingerprint": item.preparation_fingerprint,
+                }
+                for item in facts.document_inputs
             ]
             collection.discovery_objective_ids = objective_ids
             collection.discovery_study_dispositions = [
-                item.to_record() for item in facts.study_dispositions
+                {
+                    "document_id": item.document_id,
+                    "study_id": item.study_id,
+                    "relationship_id": item.relationship_id,
+                    "status": item.status.value,
+                    "objective_id": item.objective_id,
+                    "reason": item.reason,
+                }
+                for item in facts.study_dispositions
             ]
             collection.discovery_updated_at = now
 
@@ -1597,7 +1573,7 @@ class ObjectiveRepository:
                         created_by_tool_call_id=finding_text(
                             item.get("created_by_tool_call_id")
                         ),
-                        created_at=finding_datetime_or_none(item.get("created_at")),
+                        created_at=_finding_creation_time(item.get("created_at")),
                         authoring_note=finding_text(item.get("authoring_note")),
                         warnings=normalize_objective_terms(item.get("warnings")),
                     )
@@ -1783,7 +1759,7 @@ class ObjectiveRepository:
         *,
         now: datetime,
     ) -> ObjectiveAnalysisRecord:
-        payload = analysis.to_record()
+        payload = _analysis_payload(analysis)
         payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
         return ObjectiveAnalysisRecord(
             collection_id=analysis.collection_id,
@@ -1801,7 +1777,44 @@ class ObjectiveRepository:
         contributions: tuple[PaperContribution, ...],
     ) -> None:
         payload = dict(row.payload or {})
-        payload["paper_contributions"] = [item.to_record() for item in contributions]
+        payload["paper_contributions"] = [
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "document_id": item.document_id,
+                "analysis_status": item.analysis_status,
+                "relevance": item.relevance,
+                "paper_role": item.paper_role,
+                "contribution_summary": item.contribution_summary,
+                "material_match": list(item.material_match),
+                "changed_variables": list(item.changed_variables),
+                "measured_property_scope": list(item.measured_property_scope),
+                "test_environment_scope": list(item.test_environment_scope),
+                "exclusion_reason": item.exclusion_reason,
+                "warnings": list(item.warnings),
+                "confidence": item.confidence,
+                "evidence_disposition": item.evidence_disposition,
+                "routed_source_count": item.routed_source_count,
+                "extracted_source_count": item.extracted_source_count,
+                "comparable_evidence_count": item.comparable_evidence_count,
+                "failed_source_count": item.failed_source_count,
+                "uninspected_source_count": item.uninspected_source_count,
+                "evidence_disposition_reason": item.evidence_disposition_reason,
+                "evidence_status_counts": {
+                    status: count for status, count in item.evidence_status_counts
+                },
+                "inspected_source_refs": [
+                    {
+                        "source_kind": source_ref.source_kind,
+                        "source_ref": source_ref.source_ref,
+                        "source_digest": source_ref.source_digest,
+                    }
+                    for source_ref in item.inspected_source_refs
+                ],
+            }
+            for item in contributions
+        ]
         row.payload = payload
 
     @staticmethod
@@ -1811,8 +1824,187 @@ class ObjectiveRepository:
         findings: tuple[Finding, ...],
     ) -> None:
         payload = dict(row.payload or {})
-        payload["evidence_records"] = [item.to_record() for item in evidence_records]
-        payload["findings"] = [item.to_record() for item in findings]
+        payload["evidence_records"] = [
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "evidence_id": item.evidence_id,
+                "document_id": item.document_id,
+                "source_kind": item.source_kind,
+                "source_ref": item.source_ref,
+                "source_excerpt": item.source_excerpt,
+                "page_numbers": list(item.page_numbers),
+                "evidence_role": item.evidence_role,
+                "selection_status": item.selection_status,
+                "selection_reason": item.selection_reason,
+                "evidence_status": item.evidence_status,
+                "evidence_status_reason": item.evidence_status_reason,
+                "changed_variables": [
+                    {
+                        "name": variable.name,
+                        "baseline_value": variable.baseline_value,
+                        "target_value": variable.target_value,
+                        "unit": variable.unit,
+                    }
+                    for variable in item.changed_variables
+                ],
+                "comparison": (
+                    {
+                        "baseline_label": item.comparison.baseline_label,
+                        "target_label": item.comparison.target_label,
+                        "axis_names": list(item.comparison.axis_names),
+                        "comparable": item.comparison.comparable,
+                        "incomparability_reasons": list(
+                            item.comparison.incomparability_reasons
+                        ),
+                    }
+                    if item.comparison
+                    else None
+                ),
+                "reported_result": (
+                    {
+                        "outcome": item.reported_result.outcome,
+                        "value": item.reported_result.value,
+                        "baseline_value": item.reported_result.baseline_value,
+                        "target_value": item.reported_result.target_value,
+                        "unit": item.reported_result.unit,
+                        "direction": item.reported_result.direction,
+                        "result_text": item.reported_result.result_text,
+                        "result_kind": item.reported_result.result_kind,
+                    }
+                    if item.reported_result
+                    else None
+                ),
+                "attribution_scope": item.attribution_scope,
+                "scientific_context": {
+                    "material": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.material
+                    ],
+                    "sample": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.sample
+                    ],
+                    "process": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.process
+                    ],
+                    "test": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.test
+                    ],
+                },
+                "resolution_status": item.resolution_status,
+                "failure_reason": item.failure_reason,
+                "confidence": item.confidence,
+                "origin": item.origin,
+                "source_analysis_version": item.source_analysis_version,
+                "supersedes_evidence_id": item.supersedes_evidence_id,
+                "superseded_by_evidence_id": item.superseded_by_evidence_id,
+                "created_by_user_id": item.created_by_user_id,
+                "created_by_tool_call_id": item.created_by_tool_call_id,
+                "created_at": (
+                    item.created_at.isoformat() if item.created_at is not None else None
+                ),
+                "authoring_note": item.authoring_note,
+                **({"warnings": list(item.warnings)} if item.warnings else {}),
+                **(
+                    {
+                        "related_source_refs": [
+                            dict(item) for item in item.related_source_refs
+                        ]
+                    }
+                    if item.related_source_refs or item.related_source_refs_explicit
+                    else {}
+                ),
+            }
+            for item in evidence_records
+        ]
+        payload["findings"] = [
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "finding_id": item.finding_id,
+                "statement": item.statement,
+                "factors": list(item.factors),
+                "outcome": item.outcome,
+                "direction": item.direction,
+                "assertion_strength": item.assertion_strength,
+                "attribution_scope": item.attribution_scope,
+                "synthesis_status": item.synthesis_status,
+                "certainty": item.certainty,
+                "display_rank": item.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
+                    }
+                    for mechanism in item.mechanisms
+                ],
+                "scientific_context": {
+                    "material": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.material
+                    ],
+                    "sample": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.sample
+                    ],
+                    "process": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.process
+                    ],
+                    "test": [
+                        _scientific_attribute_payload(attribute)
+                        for attribute in item.scientific_context.test
+                    ],
+                },
+                "limitations": list(item.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in item.paper_contributions
+                ],
+                "origin": item.origin,
+                "source_analysis_version": item.source_analysis_version,
+                "parent_finding_id": item.parent_finding_id,
+                "created_by_user_id": item.created_by_user_id,
+                "created_by_tool_call_id": item.created_by_tool_call_id,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                **(
+                    {"selection_ids": list(item.selection_ids)}
+                    if item.selection_ids
+                    else {}
+                ),
+                **(
+                    {"comparison_group_ids": list(item.comparison_group_ids)}
+                    if item.comparison_group_ids
+                    else {}
+                ),
+                **({"warnings": list(item.warnings)} if item.warnings else {}),
+            }
+            for item in findings
+        ]
         row.payload = payload
 
     @staticmethod
@@ -1822,7 +2014,7 @@ class ObjectiveRepository:
     ) -> None:
         row.status = analysis.status
         previous = dict(row.payload or {})
-        payload = analysis.to_record()
+        payload = _analysis_payload(analysis)
         payload["diagnostics"] = [dict(item) for item in analysis.diagnostics]
         for key in (
             "paper_contributions",
@@ -2059,7 +2251,7 @@ def _finding_from_snapshot(payload: Mapping[str, Any]) -> Finding:
         parent_finding_id=finding_text(payload.get("parent_finding_id")),
         created_by_user_id=finding_text(payload.get("created_by_user_id")),
         created_by_tool_call_id=finding_text(payload.get("created_by_tool_call_id")),
-        created_at=finding_datetime_or_none(payload.get("created_at")),
+        created_at=_finding_creation_time(payload.get("created_at")),
         warnings=finding_strings(payload.get("warnings")),
         selection_ids=finding_strings(payload.get("selection_ids")),
         comparison_group_ids=finding_strings(payload.get("comparison_group_ids")),
@@ -2095,3 +2287,76 @@ def _stored_scientific_context(value: Any) -> ScientificContext:
         process=_context_attributes(value.get("process")),
         test=_context_attributes(value.get("test")),
     )
+
+
+def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:
+    return {
+        "name": value.name,
+        "value": value.value,
+        "unit": value.unit,
+        **(
+            {"context_scope": value.context_scope}
+            if value.context_scope != "unknown"
+            else {}
+        ),
+        **(
+            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+            if value.applies_to_outcomes
+            else {}
+        ),
+    }
+
+
+def _analysis_payload(value: ObjectiveAnalysis) -> dict[str, Any]:
+    return {
+        "collection_id": value.collection_id,
+        "objective_id": value.objective_id,
+        "analysis_version": value.analysis_version,
+        "document_inputs": [
+            {
+                "document_id": document_input.document_id,
+                "preparation_fingerprint": document_input.preparation_fingerprint,
+            }
+            for document_input in value.document_inputs
+        ],
+        "pipeline_version": value.pipeline_version,
+        "model_name": value.model_name,
+        "prompt_versions": dict(value.prompt_versions),
+        "stats": execution_stats_record(value.stats),
+        "status": value.status,
+        "phase": value.phase,
+        "processed_document_count": value.processed_document_count,
+        "total_document_count": value.total_document_count,
+        "current_document_id": value.current_document_id,
+        "progress_message": value.progress_message,
+        "error_code": value.error_code,
+        "error_message": value.error_message,
+        "created_at": (
+            value.created_at.isoformat() if value.created_at is not None else None
+        ),
+        "started_at": (
+            value.started_at.isoformat() if value.started_at is not None else None
+        ),
+        "completed_at": (
+            value.completed_at.isoformat() if value.completed_at is not None else None
+        ),
+        "origin": value.origin,
+        "scientific_record_source": value.scientific_record_source,
+        "source_analysis_version": value.source_analysis_version,
+        "created_by_user_id": value.created_by_user_id,
+        "created_by_tool_call_id": value.created_by_tool_call_id,
+        "abstention_reason": value.abstention_reason,
+        "abstention_note": value.abstention_note,
+    }
+
+
+def _finding_creation_time(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = (str(value).strip() or None) if value is not None else None
+    if text is None:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid Finding creation time") from exc

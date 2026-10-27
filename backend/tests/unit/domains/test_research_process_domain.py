@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Mapping
-
 import domain.core as core_domain
 import pytest
 from application.core.objectives.analysis.source_extraction import (
@@ -10,36 +8,15 @@ from application.core.objectives.analysis.source_extraction import (
 from domain.core import (
     ObjectiveEvidence,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _datetime_or_none as finding_datetime_or_none
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
-    EVIDENCE_ORIGINS,
-    SOURCE_KIND_VALUES,
     ObjectiveEvidence,
 )
-from domain.core.research_objective import (
-    _positive_int_or_none as objective_positive_int_or_none,
-)
-from domain.core.research_objective import _positive_ints as objective_positive_ints
-from domain.core.research_objective import (
-    normalize_objective_confidence,
-    normalize_objective_terms,
-)
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    SCIENTIFIC_RESULT_DIRECTIONS,
-    SCIENTIFIC_RESULT_KINDS,
-    ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 
 
 def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None:
@@ -92,368 +69,27 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
         }
     )
     evidence = ObjectiveEvidence(
-        collection_id=finding_text(payload.get("collection_id", None)) or "",
-        objective_id=finding_text(payload.get("objective_id", None)) or "",
+        collection_id=observation.collection_id,
+        objective_id=observation.objective_id,
         analysis_version=1,
         evidence_id="evd-1",
-        document_id=finding_text(payload.get("document_id", None)) or "",
-        source_kind=finding_choice(
-            payload.get("source_kind", None), SOURCE_KIND_VALUES, "text_window"
-        ),
-        source_ref=finding_text(payload.get("source_ref", None)) or "",
-        source_excerpt=finding_text(payload.get("source_excerpt", None)) or "",
-        page_numbers=objective_positive_ints(payload.get("page_numbers", None)),
-        related_source_refs=tuple(
-            (
-                dict(item)
-                for item in (
-                    payload.get("related_source_refs", None)
-                    if isinstance(
-                        payload.get("related_source_refs", None), (list, tuple)
-                    )
-                    else ()
-                )
-                if isinstance(item, Mapping)
-            )
-        ),
+        document_id=observation.document_id,
+        source_kind=observation.source_kind,
+        source_ref=observation.source_ref,
+        source_excerpt=observation.source_excerpt,
+        page_numbers=(),
+        related_source_refs=(),
         evidence_role="direct_result",
         selection_status="extracted",
-        selection_reason=finding_text(payload.get("selection_reason", None)),
-        changed_variables=tuple(
-            (
-                ScientificVariable(
-                    name=scientific_text(item.get("name")) or "",
-                    baseline_value=scientific_scalar(item.get("baseline_value")),
-                    target_value=scientific_scalar(item.get("target_value")),
-                    unit=scientific_text(item.get("unit")),
-                )
-                for item in (
-                    payload.get("changed_variables", None)
-                    if isinstance(payload.get("changed_variables", None), (list, tuple))
-                    else ()
-                )
-                if isinstance(item, Mapping)
-            )
-        ),
-        comparison=(
-            ScientificComparison(
-                baseline_label=scientific_text(
-                    {
-                        **payload,
-                        "analysis_version": 1,
-                        "evidence_id": "evd-1",
-                        "evidence_role": "direct_result",
-                        "selection_status": "extracted",
-                        "attribution_scope": "isolated_effect",
-                        "resolution_status": "resolved",
-                    }["comparison"].get("baseline_label")
-                )
-                or "",
-                target_label=scientific_text(
-                    {
-                        **payload,
-                        "analysis_version": 1,
-                        "evidence_id": "evd-1",
-                        "evidence_role": "direct_result",
-                        "selection_status": "extracted",
-                        "attribution_scope": "isolated_effect",
-                        "resolution_status": "resolved",
-                    }["comparison"].get("target_label")
-                )
-                or "",
-                axis_names=scientific_terms(
-                    {
-                        **payload,
-                        "analysis_version": 1,
-                        "evidence_id": "evd-1",
-                        "evidence_role": "direct_result",
-                        "selection_status": "extracted",
-                        "attribution_scope": "isolated_effect",
-                        "resolution_status": "resolved",
-                    }["comparison"].get("axis_names")
-                ),
-                comparable={
-                    **payload,
-                    "analysis_version": 1,
-                    "evidence_id": "evd-1",
-                    "evidence_role": "direct_result",
-                    "selection_status": "extracted",
-                    "attribution_scope": "isolated_effect",
-                    "resolution_status": "resolved",
-                }["comparison"].get("comparable")
-                is True,
-                incomparability_reasons=scientific_terms(
-                    {
-                        **payload,
-                        "analysis_version": 1,
-                        "evidence_id": "evd-1",
-                        "evidence_role": "direct_result",
-                        "selection_status": "extracted",
-                        "attribution_scope": "isolated_effect",
-                        "resolution_status": "resolved",
-                    }["comparison"].get("incomparability_reasons")
-                ),
-            )
-            if isinstance(payload.get("comparison", None), Mapping)
-            else None
-        ),
-        reported_result=(
-            ScientificResult(
-                outcome=scientific_text(
-                    payload.get("reported_result", None).get("outcome")
-                )
-                or "",
-                value=scientific_scalar(
-                    payload.get("reported_result", None).get("value")
-                ),
-                unit=scientific_text(payload.get("reported_result", None).get("unit")),
-                direction=scientific_choice(
-                    payload.get("reported_result", None).get("direction"),
-                    SCIENTIFIC_RESULT_DIRECTIONS,
-                    "unknown",
-                ),
-                result_text=scientific_text(
-                    payload.get("reported_result", None).get("result_text")
-                )
-                or "",
-                baseline_value=scientific_scalar(
-                    payload.get("reported_result", None).get("baseline_value")
-                ),
-                target_value=scientific_scalar(
-                    payload.get("reported_result", None).get("target_value")
-                ),
-                result_kind=scientific_choice(
-                    payload.get("reported_result", None).get("result_kind"),
-                    SCIENTIFIC_RESULT_KINDS,
-                    "observed",
-                ),
-            )
-            if isinstance(payload.get("reported_result", None), Mapping)
-            else None
-        ),
+        selection_reason=None,
+        changed_variables=observation.changed_variables,
+        comparison=observation.comparison,
+        reported_result=observation.reported_result,
         attribution_scope="isolated_effect",
-        scientific_context=(
-            ScientificContext(
-                material=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            {
-                                **payload,
-                                "analysis_version": 1,
-                                "evidence_id": "evd-1",
-                                "evidence_role": "direct_result",
-                                "selection_status": "extracted",
-                                "attribution_scope": "isolated_effect",
-                                "resolution_status": "resolved",
-                            }["scientific_context"].get("material")
-                            if isinstance(
-                                {
-                                    **payload,
-                                    "analysis_version": 1,
-                                    "evidence_id": "evd-1",
-                                    "evidence_role": "direct_result",
-                                    "selection_status": "extracted",
-                                    "attribution_scope": "isolated_effect",
-                                    "resolution_status": "resolved",
-                                }["scientific_context"].get("material"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-                sample=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            {
-                                **payload,
-                                "analysis_version": 1,
-                                "evidence_id": "evd-1",
-                                "evidence_role": "direct_result",
-                                "selection_status": "extracted",
-                                "attribution_scope": "isolated_effect",
-                                "resolution_status": "resolved",
-                            }["scientific_context"].get("sample")
-                            if isinstance(
-                                {
-                                    **payload,
-                                    "analysis_version": 1,
-                                    "evidence_id": "evd-1",
-                                    "evidence_role": "direct_result",
-                                    "selection_status": "extracted",
-                                    "attribution_scope": "isolated_effect",
-                                    "resolution_status": "resolved",
-                                }["scientific_context"].get("sample"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-                process=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            {
-                                **payload,
-                                "analysis_version": 1,
-                                "evidence_id": "evd-1",
-                                "evidence_role": "direct_result",
-                                "selection_status": "extracted",
-                                "attribution_scope": "isolated_effect",
-                                "resolution_status": "resolved",
-                            }["scientific_context"].get("process")
-                            if isinstance(
-                                {
-                                    **payload,
-                                    "analysis_version": 1,
-                                    "evidence_id": "evd-1",
-                                    "evidence_role": "direct_result",
-                                    "selection_status": "extracted",
-                                    "attribution_scope": "isolated_effect",
-                                    "resolution_status": "resolved",
-                                }["scientific_context"].get("process"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-                test=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            {
-                                **payload,
-                                "analysis_version": 1,
-                                "evidence_id": "evd-1",
-                                "evidence_role": "direct_result",
-                                "selection_status": "extracted",
-                                "attribution_scope": "isolated_effect",
-                                "resolution_status": "resolved",
-                            }["scientific_context"].get("test")
-                            if isinstance(
-                                {
-                                    **payload,
-                                    "analysis_version": 1,
-                                    "evidence_id": "evd-1",
-                                    "evidence_role": "direct_result",
-                                    "selection_status": "extracted",
-                                    "attribution_scope": "isolated_effect",
-                                    "resolution_status": "resolved",
-                                }["scientific_context"].get("test"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-            )
-            if isinstance(payload.get("scientific_context", None), Mapping)
-            else ScientificContext()
-        ),
+        scientific_context=observation.scientific_context,
         resolution_status="resolved",
-        failure_reason=finding_text(payload.get("failure_reason", None)),
-        confidence=normalize_objective_confidence(payload.get("confidence", None)),
-        related_source_refs_explicit="related_source_refs"
-        in {
-            **payload,
-            "analysis_version": 1,
-            "evidence_id": "evd-1",
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "attribution_scope": "isolated_effect",
-            "resolution_status": "resolved",
-        },
-        origin=finding_choice(
-            payload.get("origin", None), EVIDENCE_ORIGINS, "system_generated"
-        ),
-        source_analysis_version=objective_positive_int_or_none(
-            payload.get("source_analysis_version", None)
-        ),
-        supersedes_evidence_id=finding_text(
-            payload.get("supersedes_evidence_id", None)
-        ),
-        superseded_by_evidence_id=finding_text(
-            payload.get("superseded_by_evidence_id", None)
-        ),
-        created_by_user_id=finding_text(payload.get("created_by_user_id", None)),
-        created_by_tool_call_id=finding_text(
-            payload.get("created_by_tool_call_id", None)
-        ),
-        created_at=finding_datetime_or_none(payload.get("created_at", None)),
-        authoring_note=finding_text(payload.get("authoring_note", None)),
-        warnings=normalize_objective_terms(payload.get("warnings", None)),
+        failure_reason=None,
+        confidence=observation.confidence,
     )
 
     for scientific_record in (observation, evidence):

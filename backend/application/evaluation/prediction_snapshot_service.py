@@ -9,6 +9,10 @@ from application.core.objectives.analysis.analysis_record_source import (
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
+)
 from application.source.collection_service import CollectionService
 from domain.evaluation import (
     EvaluationPredictionItem,
@@ -134,9 +138,18 @@ class EvaluationPredictionSnapshotService:
                         f"{objective.objective_id}:v{analysis_version}:"
                         f"{finding_id}"
                     )
-                    payload = _record(finding)
+                    payload = (
+                        dict(finding)
+                        if isinstance(finding, Mapping)
+                        else finding_response(finding)
+                    )
                     payload["evidence"] = [
-                        _record(evidence) for evidence in evidence_records
+                        (
+                            dict(evidence)
+                            if isinstance(evidence, Mapping)
+                            else objective_evidence_response(evidence)
+                        )
+                        for evidence in evidence_records
                     ]
                     source_refs = tuple(
                         {
@@ -258,11 +271,6 @@ def _field(record: Any, name: str) -> Any:
         return record.get(name)
     return getattr(record, name, None)
 
-
-def _record(record: Any) -> dict[str, Any]:
-    if isinstance(record, Mapping):
-        return dict(record)
-    return dict(record.to_record())
 
 def _timestamp_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")

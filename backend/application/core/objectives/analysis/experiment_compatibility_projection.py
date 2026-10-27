@@ -17,6 +17,11 @@ from dataclasses import (
 from hashlib import sha1
 from typing import Any, Mapping
 
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    paper_contribution_response,
+    scientific_attribute_response,
+)
 from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.paper_experiment import (
     ExperimentalVariant,
@@ -197,7 +202,7 @@ class ExperimentCompatibilityProjection:
         records; the coverage rows remain available for the legacy response.
         """
         contribution_by_document = {
-            document_id: _reset_contribution_links(value.to_record())
+            document_id: _reset_contribution_links(paper_contribution_response(value))
             for document_id, value in state.contributions_by_document.items()
         }
         initialized_documents: set[str] = set()
@@ -669,7 +674,7 @@ class ExperimentCompatibilityProjection:
     def _finding_record(
         self, finding: Finding, state: _ProjectionState
     ) -> tuple[Finding, dict[str, Any]]:
-        record = finding.to_record()
+        record = finding_response(finding)
         # The legacy response contract predates the explicit single-study
         # state. Preserve its meaning through the existing "insufficient
         # confirmation" bucket rather than exposing a new enum to clients.
@@ -908,7 +913,13 @@ class ExperimentCompatibilityProjection:
                 or "The paper comparison lacks sufficient context."
             ),
             "changed_variables": [
-                item.to_record() for item in comparison.changed_variables
+                {
+                    "name": item.name,
+                    "baseline_value": item.baseline_value,
+                    "target_value": item.target_value,
+                    "unit": item.unit,
+                }
+                for item in comparison.changed_variables
             ],
             "comparison": {
                 "baseline_label": _variant_label(
@@ -1129,10 +1140,22 @@ def _context_record(
     test: ExperimentTestCondition | None,
 ) -> dict[str, list[dict[str, Any]]]:
     return {
-        "material": [item.to_record() for item in (variant.subject_attributes if variant else ())],
-        "sample": [item.to_record() for item in (variant.state if variant else ())],
-        "process": [item.to_record() for item in (variant.intervention_attributes if variant else ())],
-        "test": [item.to_record() for item in (test.parameters if test else ())],
+        "material": [
+            scientific_attribute_response(item)
+            for item in (variant.subject_attributes if variant else ())
+        ],
+        "sample": [
+            scientific_attribute_response(item)
+            for item in (variant.state if variant else ())
+        ],
+        "process": [
+            scientific_attribute_response(item)
+            for item in (variant.intervention_attributes if variant else ())
+        ],
+        "test": [
+            scientific_attribute_response(item)
+            for item in (test.parameters if test else ())
+        ],
     }
 
 

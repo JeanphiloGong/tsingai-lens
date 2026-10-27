@@ -895,6 +895,16 @@ async def _local_objective_bundle(
     objective_id: str,
 ) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
+        from application.core.objectives.analysis.experiment_query_service import (
+            finding_response,
+            objective_evidence_response,
+            paper_contribution_response,
+            objective_analysis_response,
+        )
+        from repositories.finding_review_repository import (
+            finding_feedback_record,
+            finding_curation_record,
+        )
         from application.evaluation import FindingFeedbackService  # noqa: PLC0415
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
@@ -952,16 +962,16 @@ async def _local_objective_bundle(
                     limit=1000,
                 )
                 evidence_by_finding[finding.finding_id] = [
-                    item.to_record() for item in finding_evidence
+                    objective_evidence_response(item) for item in finding_evidence
                 ]
                 feedback_by_finding[finding.finding_id] = [
-                    item.to_record()
+                    finding_feedback_record(item)
                     for item in await review_repository.list_feedback(
                         collection_id, objective_id, version, finding.finding_id
                     )
                 ]
                 curations_by_finding[finding.finding_id] = [
-                    item.to_record()
+                    finding_curation_record(item)
                     for item in await review_repository.list_curations(
                         collection_id, objective_id, version, finding.finding_id
                     )
@@ -977,10 +987,14 @@ async def _local_objective_bundle(
             key: list(value) if isinstance(value, tuple) else value
             for key, value in asdict(objective).items()
         },
-        "published_analysis": analysis.to_record() if analysis else None,
-        "paper_contributions": [item.to_record() for item in paper_contributions],
-        "findings": [item.to_record() for item in findings],
-        "evidence": [item.to_record() for item in published_evidence],
+        "published_analysis": (
+            objective_analysis_response(analysis) if analysis else None
+        ),
+        "paper_contributions": [
+            paper_contribution_response(item) for item in paper_contributions
+        ],
+        "findings": [finding_response(item) for item in findings],
+        "evidence": [objective_evidence_response(item) for item in published_evidence],
         "evidence_by_finding": evidence_by_finding,
         "feedback_by_finding": feedback_by_finding,
         "curations_by_finding": curations_by_finding,

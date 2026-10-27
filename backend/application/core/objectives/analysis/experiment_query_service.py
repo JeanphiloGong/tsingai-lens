@@ -2,16 +2,6 @@
 
 from __future__ import annotations
 
-from domain.core.paper_experiment import (
-    SourceReference,
-    ExperimentalVariant,
-    ExperimentTestCondition,
-    ExperimentMeasurementResult,
-    ExperimentComparison,
-    ReportedInterpretation,
-    PaperExperimentRevision,
-)
-
 import csv
 import io
 import json
@@ -21,6 +11,17 @@ from typing import Any
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
+from domain.core.paper_experiment import (
+    ExperimentalVariant,
+    ExperimentComparison,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
+    PaperExperimentRevision,
+    ReportedInterpretation,
+    SourceReference,
+)
+from domain.core.research_objective import ObjectiveEvidence, PaperContribution
+from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from repositories.comparison_group_repository import ComparisonGroupRepository
 from repositories.experiment_finding_repository import (
     ExperimentFindingRepository,
@@ -28,10 +29,12 @@ from repositories.experiment_finding_repository import (
 from repositories.objective_experiment_selection_repository import (
     ObjectiveExperimentSelectionRepository,
 )
+from repositories.objective_repository import ObjectiveAnalysis
 from repositories.paper_experiment_repository import (
     PaperExperimentRepository,
     StoredPaperExperimentRevision,
 )
+from repositories.pipeline_run_repository import execution_stats_record
 
 
 @dataclass(frozen=True)
@@ -83,9 +86,9 @@ class ExperimentAnalysisBundle:
                 }
                 for item in self.groups
             ],
-            "findings": [item.to_record() for item in self.findings],
+            "findings": [finding_response(item) for item in self.findings],
             "experiments": [
-                _paper_experiment_revision_response(item.revision)
+                paper_experiment_revision_response(item.revision)
                 for item in self.revisions
             ],
         }
@@ -282,7 +285,7 @@ class ExperimentQueryService:
                         "variant_subject_attributes": json.dumps(
                             (
                                 [
-                                    item.to_record()
+                                    scientific_attribute_response(item)
                                     for item in variant.subject_attributes
                                 ]
                                 if variant
@@ -294,7 +297,7 @@ class ExperimentQueryService:
                         "variant_intervention_attributes": json.dumps(
                             (
                                 [
-                                    item.to_record()
+                                    scientific_attribute_response(item)
                                     for item in variant.intervention_attributes
                                 ]
                                 if variant
@@ -305,7 +308,10 @@ class ExperimentQueryService:
                         ),
                         "variant_state": json.dumps(
                             (
-                                [item.to_record() for item in variant.state]
+                                [
+                                    scientific_attribute_response(item)
+                                    for item in variant.state
+                                ]
                                 if variant
                                 else []
                             ),
@@ -362,7 +368,10 @@ class ExperimentQueryService:
                         "test_type": test.test_type if test else "",
                         "test_parameters": json.dumps(
                             (
-                                [item.to_record() for item in test.parameters]
+                                [
+                                    scientific_attribute_response(item)
+                                    for item in test.parameters
+                                ]
                                 if test
                                 else []
                             ),
@@ -564,11 +573,14 @@ def _experimental_variant_response(value: ExperimentalVariant) -> dict[str, Any]
     return {
         "variant_key": value.variant_key,
         "variant_label": value.variant_label,
-        "subject_attributes": [item.to_record() for item in value.subject_attributes],
-        "intervention_attributes": [
-            item.to_record() for item in value.intervention_attributes
+        "subject_attributes": [
+            scientific_attribute_response(item) for item in value.subject_attributes
         ],
-        "state": [item.to_record() for item in value.state],
+        "intervention_attributes": [
+            scientific_attribute_response(item)
+            for item in value.intervention_attributes
+        ],
+        "state": [scientific_attribute_response(item) for item in value.state],
         "population_scope": (
             dict(value.population_scope) if value.population_scope is not None else None
         ),
@@ -590,7 +602,9 @@ def _experiment_test_condition_response(
     return {
         "test_key": value.test_key,
         "test_type": value.test_type,
-        "parameters": [item.to_record() for item in value.parameters],
+        "parameters": [
+            scientific_attribute_response(item) for item in value.parameters
+        ],
         "population_scope": (
             dict(value.population_scope) if value.population_scope is not None else None
         ),
@@ -642,8 +656,18 @@ def _experiment_comparison_response(value: ExperimentComparison) -> dict[str, An
         "outcome": value.outcome,
         "baseline_measurement_keys": list(value.baseline_measurement_keys),
         "target_measurement_keys": list(value.target_measurement_keys),
-        "changed_variables": [item.to_record() for item in value.changed_variables],
-        "matched_conditions": [item.to_record() for item in value.matched_conditions],
+        "changed_variables": [
+            {
+                "name": item.name,
+                "baseline_value": item.baseline_value,
+                "target_value": item.target_value,
+                "unit": item.unit,
+            }
+            for item in value.changed_variables
+        ],
+        "matched_conditions": [
+            scientific_attribute_response(item) for item in value.matched_conditions
+        ],
         "basis": value.basis,
         "direction": value.direction,
         "reported_statement": value.reported_statement,
@@ -668,7 +692,7 @@ def _reported_interpretation_response(value: ReportedInterpretation) -> dict[str
     }
 
 
-def _paper_experiment_revision_response(
+def paper_experiment_revision_response(
     value: PaperExperimentRevision,
 ) -> dict[str, Any]:
     return {
@@ -697,4 +721,253 @@ def _paper_experiment_revision_response(
         ],
         "source_refs": [_source_reference_response(item) for item in value.source_refs],
         "unresolved_issues": [dict(item) for item in value.unresolved_issues],
+    }
+
+
+def scientific_attribute_response(value: ScientificAttribute) -> dict[str, Any]:
+    return {
+        "name": value.name,
+        "value": value.value,
+        "unit": value.unit,
+        **(
+            {"context_scope": value.context_scope}
+            if value.context_scope != "unknown"
+            else {}
+        ),
+        **(
+            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+            if value.applies_to_outcomes
+            else {}
+        ),
+    }
+
+
+def _scientific_context_response(value: ScientificContext) -> dict[str, Any]:
+    return {
+        "material": [
+            scientific_attribute_response(attribute) for attribute in value.material
+        ],
+        "sample": [
+            scientific_attribute_response(attribute) for attribute in value.sample
+        ],
+        "process": [
+            scientific_attribute_response(attribute) for attribute in value.process
+        ],
+        "test": [scientific_attribute_response(attribute) for attribute in value.test],
+    }
+
+
+def finding_response(value: Finding) -> dict[str, Any]:
+    return {
+        "collection_id": value.collection_id,
+        "objective_id": value.objective_id,
+        "analysis_version": value.analysis_version,
+        "finding_id": value.finding_id,
+        "statement": value.statement,
+        "factors": list(value.factors),
+        "outcome": value.outcome,
+        "direction": value.direction,
+        "assertion_strength": value.assertion_strength,
+        "attribution_scope": value.attribution_scope,
+        "synthesis_status": value.synthesis_status,
+        "certainty": value.certainty,
+        "display_rank": value.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in value.mechanisms
+        ],
+        "scientific_context": _scientific_context_response(value.scientific_context),
+        "limitations": list(value.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in value.paper_contributions
+        ],
+        "origin": value.origin,
+        "source_analysis_version": value.source_analysis_version,
+        "parent_finding_id": value.parent_finding_id,
+        "created_by_user_id": value.created_by_user_id,
+        "created_by_tool_call_id": value.created_by_tool_call_id,
+        "created_at": value.created_at.isoformat() if value.created_at else None,
+        **({"selection_ids": list(value.selection_ids)} if value.selection_ids else {}),
+        **(
+            {"comparison_group_ids": list(value.comparison_group_ids)}
+            if value.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(value.warnings)} if value.warnings else {}),
+    }
+
+
+def objective_evidence_response(value: ObjectiveEvidence) -> dict[str, Any]:
+    return {
+        "collection_id": value.collection_id,
+        "objective_id": value.objective_id,
+        "analysis_version": value.analysis_version,
+        "evidence_id": value.evidence_id,
+        "document_id": value.document_id,
+        "source_kind": value.source_kind,
+        "source_ref": value.source_ref,
+        "source_excerpt": value.source_excerpt,
+        "page_numbers": list(value.page_numbers),
+        "evidence_role": value.evidence_role,
+        "selection_status": value.selection_status,
+        "selection_reason": value.selection_reason,
+        "evidence_status": value.evidence_status,
+        "evidence_status_reason": value.evidence_status_reason,
+        "changed_variables": [
+            {
+                "name": variable.name,
+                "baseline_value": variable.baseline_value,
+                "target_value": variable.target_value,
+                "unit": variable.unit,
+            }
+            for variable in value.changed_variables
+        ],
+        "comparison": (
+            {
+                "baseline_label": value.comparison.baseline_label,
+                "target_label": value.comparison.target_label,
+                "axis_names": list(value.comparison.axis_names),
+                "comparable": value.comparison.comparable,
+                "incomparability_reasons": list(
+                    value.comparison.incomparability_reasons
+                ),
+            }
+            if value.comparison
+            else None
+        ),
+        "reported_result": (
+            {
+                "outcome": value.reported_result.outcome,
+                "value": value.reported_result.value,
+                "baseline_value": value.reported_result.baseline_value,
+                "target_value": value.reported_result.target_value,
+                "unit": value.reported_result.unit,
+                "direction": value.reported_result.direction,
+                "result_text": value.reported_result.result_text,
+                "result_kind": value.reported_result.result_kind,
+            }
+            if value.reported_result
+            else None
+        ),
+        "attribution_scope": value.attribution_scope,
+        "scientific_context": _scientific_context_response(value.scientific_context),
+        "resolution_status": value.resolution_status,
+        "failure_reason": value.failure_reason,
+        "confidence": value.confidence,
+        "origin": value.origin,
+        "source_analysis_version": value.source_analysis_version,
+        "supersedes_evidence_id": value.supersedes_evidence_id,
+        "superseded_by_evidence_id": value.superseded_by_evidence_id,
+        "created_by_user_id": value.created_by_user_id,
+        "created_by_tool_call_id": value.created_by_tool_call_id,
+        "created_at": (
+            value.created_at.isoformat() if value.created_at is not None else None
+        ),
+        "authoring_note": value.authoring_note,
+        **({"warnings": list(value.warnings)} if value.warnings else {}),
+        **(
+            {"related_source_refs": [dict(item) for item in value.related_source_refs]}
+            if value.related_source_refs or value.related_source_refs_explicit
+            else {}
+        ),
+    }
+
+
+def paper_contribution_response(value: PaperContribution) -> dict[str, Any]:
+    return {
+        "collection_id": value.collection_id,
+        "objective_id": value.objective_id,
+        "analysis_version": value.analysis_version,
+        "document_id": value.document_id,
+        "analysis_status": value.analysis_status,
+        "relevance": value.relevance,
+        "paper_role": value.paper_role,
+        "contribution_summary": value.contribution_summary,
+        "material_match": list(value.material_match),
+        "changed_variables": list(value.changed_variables),
+        "measured_property_scope": list(value.measured_property_scope),
+        "test_environment_scope": list(value.test_environment_scope),
+        "exclusion_reason": value.exclusion_reason,
+        "warnings": list(value.warnings),
+        "confidence": value.confidence,
+        "evidence_disposition": value.evidence_disposition,
+        "routed_source_count": value.routed_source_count,
+        "extracted_source_count": value.extracted_source_count,
+        "comparable_evidence_count": value.comparable_evidence_count,
+        "failed_source_count": value.failed_source_count,
+        "uninspected_source_count": value.uninspected_source_count,
+        "evidence_disposition_reason": value.evidence_disposition_reason,
+        "evidence_status_counts": {
+            status: count for status, count in value.evidence_status_counts
+        },
+        "inspected_source_refs": [
+            {
+                "source_kind": source_ref.source_kind,
+                "source_ref": source_ref.source_ref,
+                "source_digest": source_ref.source_digest,
+            }
+            for source_ref in value.inspected_source_refs
+        ],
+    }
+
+
+def objective_analysis_response(value: ObjectiveAnalysis) -> dict[str, Any]:
+    return {
+        "collection_id": value.collection_id,
+        "objective_id": value.objective_id,
+        "analysis_version": value.analysis_version,
+        "document_inputs": [
+            {
+                "document_id": document_input.document_id,
+                "preparation_fingerprint": document_input.preparation_fingerprint,
+            }
+            for document_input in value.document_inputs
+        ],
+        "pipeline_version": value.pipeline_version,
+        "model_name": value.model_name,
+        "prompt_versions": dict(value.prompt_versions),
+        "stats": execution_stats_record(value.stats),
+        "status": value.status,
+        "phase": value.phase,
+        "processed_document_count": value.processed_document_count,
+        "total_document_count": value.total_document_count,
+        "current_document_id": value.current_document_id,
+        "progress_message": value.progress_message,
+        "error_code": value.error_code,
+        "error_message": value.error_message,
+        "created_at": (
+            value.created_at.isoformat() if value.created_at is not None else None
+        ),
+        "started_at": (
+            value.started_at.isoformat() if value.started_at is not None else None
+        ),
+        "completed_at": (
+            value.completed_at.isoformat() if value.completed_at is not None else None
+        ),
+        "origin": value.origin,
+        "scientific_record_source": value.scientific_record_source,
+        "source_analysis_version": value.source_analysis_version,
+        "created_by_user_id": value.created_by_user_id,
+        "created_by_tool_call_id": value.created_by_tool_call_id,
+        "abstention_reason": value.abstention_reason,
+        "abstention_note": value.abstention_note,
     }

@@ -17,8 +17,6 @@ from dataclasses import replace
 from time import perf_counter
 from typing import Any, Callable, Mapping
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
@@ -32,6 +30,10 @@ from application.core.objectives.analysis.experiment_analysis_writer import (
 )
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
+)
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
 )
 from application.core.objectives.analysis_errors import analysis_error_message
 from application.core.objectives.evidence_map import build_objective_evidence_map
@@ -54,6 +56,7 @@ from repositories.objective_repository import (
     ObjectiveAnalysis,
     ObjectiveRepository,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +157,6 @@ def _record_value(record: Any, name: str) -> Any:
     if isinstance(record, Mapping):
         return record.get(name)
     return getattr(record, name, None)
-
-
-def _record_dict(record: Any) -> dict[str, Any]:
-    if isinstance(record, Mapping):
-        return dict(record)
-    return record.to_record()
 
 
 def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
@@ -461,7 +458,14 @@ class ObjectiveAnalysisService:
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": version,
-            "items": [_record_dict(finding) for finding in findings],
+            "items": [
+                (
+                    dict(finding)
+                    if isinstance(finding, Mapping)
+                    else finding_response(finding)
+                )
+                for finding in findings
+            ],
             "evidence_reviews": await self._finding_evidence_reviews(
                 collection_id, objective_id, version, findings
             ),
@@ -507,10 +511,16 @@ class ObjectiveAnalysisService:
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": version,
-            "finding": _record_dict(finding),
-            "evidence_review": (await self._finding_evidence_reviews(
-                collection_id, objective_id, version, (finding,)
-            ))[_record_value(finding, "finding_id")],
+            "finding": (
+                dict(finding)
+                if isinstance(finding, Mapping)
+                else finding_response(finding)
+            ),
+            "evidence_review": (
+                await self._finding_evidence_reviews(
+                    collection_id, objective_id, version, (finding,)
+                )
+            )[_record_value(finding, "finding_id")],
         }
 
     async def _finding_evidence_reviews(
@@ -574,7 +584,14 @@ class ObjectiveAnalysisService:
         result = await to_thread(
             summarize_finding_evidence,
             finding=detail["finding"],
-            evidence=[_record_dict(item) for item in records],
+            evidence=[
+                (
+                    dict(item)
+                    if isinstance(item, Mapping)
+                    else objective_evidence_response(item)
+                )
+                for item in records
+            ],
             language=language,
         )
         await self._published_version(collection_id, objective_id, analysis_version)
@@ -622,7 +639,11 @@ class ObjectiveAnalysisService:
             "finding_id": finding_id,
             "items": [
                 {
-                    **_record_dict(item),
+                    **(
+                        dict(item)
+                        if isinstance(item, Mapping)
+                        else objective_evidence_response(item)
+                    ),
                     "supports_finding": (
                         item.get("supports_finding")
                         if isinstance(item, Mapping)

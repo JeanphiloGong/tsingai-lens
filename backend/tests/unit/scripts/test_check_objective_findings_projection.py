@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from domain.core.research_objective import ResearchObjective
 
 import importlib.util
 import json
@@ -11,6 +10,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from domain.core.finding import Finding, FindingPaperContribution
+from domain.core.scientific_fact import ScientificContext
+from repositories.objective_repository import ObjectiveAnalysis
+from domain.core.research_objective import (
+    ResearchObjective,
+    ObjectiveEvidence,
+    PreparedDocumentInput,
+)
 
 
 @pytest.fixture
@@ -150,18 +157,128 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
 ) -> None:
     checker = _load_module()
 
-    class Record:
-        def __init__(self, **payload):
-            self.__dict__.update(payload)
-
-        def to_record(self):
-            return dict(self.__dict__)
-
-    findings = [Record(finding_id="finding-1"), Record(finding_id="finding-2")]
+    findings = [
+        Finding(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            statement="The reported treatment changes strength.",
+            factors=("treatment",),
+            outcome="strength",
+            direction="unknown",
+            assertion_strength="descriptive",
+            attribution_scope="descriptive_only",
+            synthesis_status="insufficient_confirmation",
+            certainty=0.0,
+            display_rank=0,
+            mechanisms=(),
+            scientific_context=ScientificContext(),
+            limitations=(),
+            paper_contributions=(
+                FindingPaperContribution(
+                    document_id="paper-1",
+                    analysis_status="analyzed",
+                    supporting_evidence_ids=("ev-1",),
+                ),
+            ),
+        ),
+        Finding(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-2",
+            statement="The reported treatment changes strength.",
+            factors=("treatment",),
+            outcome="strength",
+            direction="unknown",
+            assertion_strength="descriptive",
+            attribution_scope="descriptive_only",
+            synthesis_status="insufficient_confirmation",
+            certainty=0.0,
+            display_rank=0,
+            mechanisms=(),
+            scientific_context=ScientificContext(),
+            limitations=(),
+            paper_contributions=(
+                FindingPaperContribution(
+                    document_id="paper-1",
+                    analysis_status="analyzed",
+                    supporting_evidence_ids=("ev-1",),
+                ),
+            ),
+        ),
+    ]
     published_evidence = [
-        Record(evidence_id="evidence-1"),
-        Record(evidence_id="evidence-2"),
-        Record(evidence_id="context-1"),
+        ObjectiveEvidence(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id="evidence-1",
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="results-1",
+            source_excerpt="The reported treatment changes strength.",
+            page_numbers=(),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="candidate",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
+            reported_result=None,
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="unknown",
+            failure_reason=None,
+            confidence=0.0,
+        ),
+        ObjectiveEvidence(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id="evidence-2",
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="results-1",
+            source_excerpt="The reported treatment changes strength.",
+            page_numbers=(),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="candidate",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
+            reported_result=None,
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="unknown",
+            failure_reason=None,
+            confidence=0.0,
+        ),
+        ObjectiveEvidence(
+            collection_id="col-test",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id="context-1",
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="results-1",
+            source_excerpt="The reported treatment changes strength.",
+            page_numbers=(),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="candidate",
+            selection_reason=None,
+            changed_variables=(),
+            comparison=None,
+            reported_result=None,
+            attribution_scope="descriptive_only",
+            scientific_context=ScientificContext(),
+            resolution_status="unknown",
+            failure_reason=None,
+            confidence=0.0,
+        ),
     ]
 
     class ObjectiveRepository:
@@ -188,7 +305,23 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
             )
 
         async def read_analysis(self, *_args):
-            return Record(analysis_version=2)
+            return ObjectiveAnalysis(
+                collection_id="col-1",
+                objective_id="objective-1",
+                analysis_version=2,
+                document_inputs=(
+                    PreparedDocumentInput(
+                        document_id="paper-1", preparation_fingerprint="prep-1"
+                    ),
+                ),
+                pipeline_version="test",
+                model_name=None,
+                prompt_versions={},
+                status="succeeded",
+                phase="completed",
+                processed_document_count=1,
+                total_document_count=1,
+            )
 
         async def list_contributions(self, *_args):
             return []

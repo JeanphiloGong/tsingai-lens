@@ -4,14 +4,24 @@ from hashlib import sha256
 
 import pytest
 
-from domain.source import Collection, Document
 from infra.persistence.file.object_store import FileObjectStore
 from repositories.collection_repository import (
     StoredCollection,
     StoredDocument,
 )
 from scripts import export_source_tables as export_script
-from tests.support.repositories import MemoryCollectionRepository
+from domain.source import (
+    Collection,
+    Document,
+    SourceDocument,
+    SourceTable,
+)
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from tests.support.repositories import (
+    MemoryCollectionRepository,
+    MemorySourceArtifactRepository,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -105,3 +115,47 @@ async def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_pa
             document_id=None,
             limit=None,
         )
+
+
+async def test_existing_source_table_export_keeps_table_rows(
+    monkeypatch, tmp_path
+) -> None:
+    document = SourceDocument(
+        document_id="paper-1",
+        document_order=1,
+        title="Tensile study",
+        text="Results",
+        tables=(
+            SourceTable(
+                table_id="table-1",
+                document_id="paper-1",
+                table_order=1,
+                caption_text="Tensile results",
+                caption_block_id=None,
+                page=5,
+                heading_path="Results",
+                column_headers=("Sample", "Strength (MPa)"),
+                table_matrix=(("Sample", "Strength (MPa)"), ("A", "560")),
+            ),
+        ),
+    )
+    repository = MemorySourceArtifactRepository()
+    await repository.replace_document("col_demo", document)
+    monkeypatch.setattr(
+        export_script,
+        "build_database_engine",
+        lambda _settings: SimpleNamespace(dispose=AsyncMock()),
+    )
+    monkeypatch.setattr(export_script, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(
+        export_script, "SourceArtifactRepository", lambda _sessions: repository
+    )
+
+    frames = await export_script._load_existing_artifacts(
+        backend_root=tmp_path, collection_dir=tmp_path / "col_demo"
+    )
+
+    assert frames["documents"].iloc[0]["id"] == "paper-1"
+    assert frames["tables"].iloc[0]["table_id"] == "table-1"
+    assert "560" in frames["tables"].iloc[0]["table_markdown"]
+    assert frames["table_rows"].empty

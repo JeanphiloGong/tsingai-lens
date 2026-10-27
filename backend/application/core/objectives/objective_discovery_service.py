@@ -4,15 +4,15 @@ import json
 import logging
 from asyncio import (
     CancelledError,
+)
+from asyncio import Task as AsyncTask
+from asyncio import (
     create_task,
     gather,
     get_running_loop,
     run_coroutine_threadsafe,
     to_thread,
     wrap_future,
-)
-from asyncio import (
-    Task as AsyncTask,
 )
 from collections.abc import Coroutine
 from hashlib import sha256
@@ -316,7 +316,13 @@ class ObjectiveDiscoveryService:
         return sha256(
             json.dumps(
                 {
-                    "document_inputs": [item.to_record() for item in document_inputs],
+                    "document_inputs": [
+                        {
+                            "document_id": item.document_id,
+                            "preparation_fingerprint": item.preparation_fingerprint,
+                        }
+                        for item in document_inputs
+                    ],
                     "paper_map_policy_version": PAPER_RESEARCH_MAP_POLICY_VERSION,
                 },
                 sort_keys=True,

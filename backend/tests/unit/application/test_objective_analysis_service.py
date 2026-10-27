@@ -7,6 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 from application.core.objectives.analysis.diagnostics import record_analysis_diagnostic
+from application.core.objectives.analysis.experiment_query_service import (
+    objective_analysis_response,
+)
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentDraft,
     PaperExperimentModelOutput,
@@ -1473,8 +1476,8 @@ async def test_objective_analysis_persists_internal_diagnostics_without_public_e
             "status": "verified",
         },
     )
-    assert "diagnostics" not in analysis.to_record()
-    assert "diagnostics" not in result["analysis"].to_record()
+    assert "diagnostics" not in objective_analysis_response(analysis)
+    assert "diagnostics" not in objective_analysis_response(result["analysis"])
 
 
 async def test_failed_objective_analysis_keeps_internal_diagnostics() -> None:
@@ -1861,7 +1864,7 @@ async def test_failure_keeps_safe_diagnostics_without_exposing_provider_text(
     failure = stored.diagnostics[-1]
     assert failure["error_type"] == exception_type.__name__
     assert failure["frames"][-1]["function"] == "generate_experiment_analysis_artifacts"
-    assert secret_marker not in str(stored.to_record())
+    assert secret_marker not in str(objective_analysis_response(stored))
     assert secret_marker not in str(stored.diagnostics)
     assert secret_marker not in caplog.text
 

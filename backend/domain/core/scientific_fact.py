@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 from typing import Any, Final, Mapping
-
 
 SCIENTIFIC_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
     {
@@ -55,17 +54,6 @@ class ScientificAttribute:
             )
 
 
-    def to_record(self) -> dict[str, Any]:
-        record = {"name": self.name, "value": self.value, "unit": self.unit}
-        # The default is omitted so persisted Evidence retains its established
-        # payload shape. Explicit scope changes how context may be compared.
-        if self.context_scope != "unknown":
-            record["context_scope"] = self.context_scope
-        if self.applies_to_outcomes:
-            record["applies_to_outcomes"] = list(self.applies_to_outcomes)
-        return record
-
-
 @dataclass(frozen=True)
 class ScientificVariable:
     """One factor label and its optional source-reported endpoints."""
@@ -78,15 +66,6 @@ class ScientificVariable:
     def __post_init__(self) -> None:
         if not _text(self.name):
             raise ValueError("scientific variable requires name")
-
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "baseline_value": self.baseline_value,
-            "target_value": self.target_value,
-            "unit": self.unit,
-        }
 
 
 @dataclass(frozen=True)
@@ -112,16 +91,6 @@ class ScientificComparison:
             )
 
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "baseline_label": self.baseline_label,
-            "target_label": self.target_label,
-            "axis_names": list(self.axis_names),
-            "comparable": self.comparable,
-            "incomparability_reasons": list(self.incomparability_reasons),
-        }
-
-
 @dataclass(frozen=True)
 class ScientificResult:
     """One source-reported outcome and its direction or scalar values."""
@@ -144,19 +113,6 @@ class ScientificResult:
             raise ValueError(f"unsupported scientific result kind: {self.result_kind}")
 
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "outcome": self.outcome,
-            "value": self.value,
-            "baseline_value": self.baseline_value,
-            "target_value": self.target_value,
-            "unit": self.unit,
-            "direction": self.direction,
-            "result_text": self.result_text,
-            "result_kind": self.result_kind,
-        }
-
-
 @dataclass(frozen=True)
 class ScientificContext:
     """Material, sample, process, and test context for one scientific fact."""
@@ -166,14 +122,6 @@ class ScientificContext:
     process: tuple[ScientificAttribute, ...] = ()
     test: tuple[ScientificAttribute, ...] = ()
 
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "material": [item.to_record() for item in self.material],
-            "sample": [item.to_record() for item in self.sample],
-            "process": [item.to_record() for item in self.process],
-            "test": [item.to_record() for item in self.test],
-        }
 
     @property
     def has_content(self) -> bool:

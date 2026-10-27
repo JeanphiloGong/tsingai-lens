@@ -93,17 +93,6 @@ class FindingMechanismRelation:
             raise ValueError("finding mechanism requires supporting evidence")
 
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "source_term": self.source_term,
-            "relation_type": self.relation_type,
-            "target_term": self.target_term,
-            "direction": self.direction,
-            "assertion_strength": self.assertion_strength,
-            "supporting_evidence_ids": list(self.supporting_evidence_ids),
-        }
-
-
 @dataclass(frozen=True)
 class FindingPaperContribution:
     document_id: str
@@ -140,18 +129,6 @@ class FindingPaperContribution:
     @property
     def has_direct_evidence(self) -> bool:
         return bool(self.supporting_evidence_ids or self.contradicting_evidence_ids)
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "analysis_status": self.analysis_status,
-            "supporting_evidence_ids": list(self.supporting_evidence_ids),
-            "contradicting_evidence_ids": list(self.contradicting_evidence_ids),
-            "context_evidence_ids": list(self.context_evidence_ids),
-            "condition_boundary_evidence_ids": list(
-                self.condition_boundary_evidence_ids
-            ),
-        }
 
 
 @dataclass(frozen=True)
@@ -638,42 +615,6 @@ class Finding:
         ):
             raise ValueError("finding outcome differs from direct evidence")
 
-    def to_record(self) -> dict[str, Any]:
-        record = {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "finding_id": self.finding_id,
-            "statement": self.statement,
-            "factors": list(self.factors),
-            "outcome": self.outcome,
-            "direction": self.direction,
-            "assertion_strength": self.assertion_strength,
-            "attribution_scope": self.attribution_scope,
-            "synthesis_status": self.synthesis_status,
-            "certainty": self.certainty,
-            "display_rank": self.display_rank,
-            "mechanisms": [item.to_record() for item in self.mechanisms],
-            "scientific_context": self.scientific_context.to_record(),
-            "limitations": list(self.limitations),
-            "paper_contributions": [
-                item.to_record() for item in self.paper_contributions
-            ],
-            "origin": self.origin,
-            "source_analysis_version": self.source_analysis_version,
-            "parent_finding_id": self.parent_finding_id,
-            "created_by_user_id": self.created_by_user_id,
-            "created_by_tool_call_id": self.created_by_tool_call_id,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-        }
-        if self.selection_ids:
-            record["selection_ids"] = list(self.selection_ids)
-        if self.comparison_group_ids:
-            record["comparison_group_ids"] = list(self.comparison_group_ids)
-        if self.warnings:
-            record["warnings"] = list(self.warnings)
-        return record
-
 
 def _common_attributes(
     evidence_records: tuple[ObjectiveEvidence, ...],
@@ -734,18 +675,6 @@ def _text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-
-
-def _datetime_or_none(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    text = _text(value)
-    if text is None:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("invalid Finding creation time") from exc
 
 
 def _certainty(value: Any) -> float:

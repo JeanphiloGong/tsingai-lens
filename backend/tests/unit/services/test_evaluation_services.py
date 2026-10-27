@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
+    paper_contribution_response,
+)
 from application.evaluation.core_evaluation_service import CoreEvaluationService
 from application.evaluation.finding_feedback_service import (
     FindingFeedbackService,
@@ -193,9 +198,9 @@ class _RecordedExperimentProjection:
         self.finding_value = finding
         self.evidence_value = evidence
         self.contribution_value = contribution
-        self.finding = finding.to_record()
-        self.evidence = evidence.to_record()
-        self.contribution = contribution.to_record()
+        self.finding = finding_response(finding)
+        self.evidence = objective_evidence_response(evidence)
+        self.contribution = paper_contribution_response(contribution)
 
     async def read_analysis_records(
         self, collection_id, objective_id, analysis_version
@@ -829,7 +834,7 @@ async def test_finding_review_rejects_unknown_status_values() -> None:
             analysis_version=1,
             finding_id="finding-1",
             curated_status="bogus",
-            curated_finding=published.to_record(),
+            curated_finding=finding_response(published),
         )
 
 
@@ -839,7 +844,7 @@ async def test_finding_curation_rejects_evidence_outside_published_finding() -> 
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
-    curated = published.to_record()
+    curated = finding_response(published)
     curated["paper_contributions"][0]["supporting_evidence_ids"] = ["evidence-outside"]
 
     with pytest.raises(ValueError, match="references missing evidence"):
@@ -877,7 +882,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
                 "curation_id": "curation-1",
                 **identity,
                 "curated_status": "limited",
-                "curated_finding": published.to_record(),
+                "curated_finding": finding_response(published),
                 "updated_at": "2026-08-02T10:00:00+00:00",
             }
         )
@@ -908,7 +913,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
                 "curation_id": "curation-1",
                 **identity,
                 "curated_status": "limited",
-                "curated_finding": published.to_record(),
+                "curated_finding": finding_response(published),
                 "updated_at": "2026-08-02T12:00:00+00:00",
             }
         )
@@ -919,7 +924,7 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
     )["items"][0]
     assert curated["label_status"] == "gold"
     assert curated["dataset_use_status"] == "training_ready"
-    assert curated["expert_target"] == published.to_record()
+    assert curated["expert_target"] == finding_response(published)
 
 
 async def test_finding_feedback_export_contains_exact_source_text() -> None:

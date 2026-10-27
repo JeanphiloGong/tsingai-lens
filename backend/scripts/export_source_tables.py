@@ -42,6 +42,15 @@ from repositories.collection_repository import CollectionRepository
 from repositories.source_artifact_repository import (
     SourceArtifactRepository,
 )
+from infra.source.artifact_bundle import (
+    source_document_payload,
+    source_text_unit_payload,
+    source_block_payload,
+    source_figure_payload,
+    source_table_payload,
+    source_table_row_payload,
+    source_table_cell_payload,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -163,30 +172,64 @@ async def _load_existing_artifacts(
     if not documents:
         raise SystemExit(f"source artifacts not found: {collection_id}")
     return {
-        "documents": _records_to_frame(documents),
-        "text_units": _records_to_frame(
-            tuple(item for document in documents for item in document.text_units)
+        "documents": _normalize_frame(
+            pd.DataFrame([source_document_payload(document) for document in documents])
         ),
-        "blocks": _records_to_frame(
-            tuple(item for document in documents for item in document.blocks)
+        "text_units": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_text_unit_payload(item)
+                    for document in documents
+                    for item in document.text_units
+                ]
+            )
         ),
-        "figures": _records_to_frame(
-            tuple(item for document in documents for item in document.figures)
+        "blocks": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_block_payload(item)
+                    for document in documents
+                    for item in document.blocks
+                ]
+            )
         ),
-        "tables": _records_to_frame(
-            tuple(item for document in documents for item in document.tables)
+        "figures": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_figure_payload(item)
+                    for document in documents
+                    for item in document.figures
+                ]
+            )
         ),
-        "table_rows": _records_to_frame(
-            tuple(item for document in documents for item in document.table_rows)
+        "tables": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_table_payload(item)
+                    for document in documents
+                    for item in document.tables
+                ]
+            )
         ),
-        "table_cells": _records_to_frame(
-            tuple(item for document in documents for item in document.table_cells)
+        "table_rows": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_table_row_payload(item)
+                    for document in documents
+                    for item in document.table_rows
+                ]
+            )
+        ),
+        "table_cells": _normalize_frame(
+            pd.DataFrame(
+                [
+                    source_table_cell_payload(item)
+                    for document in documents
+                    for item in document.table_cells
+                ]
+            )
         ),
     }
-
-
-def _records_to_frame(records: tuple[Any, ...]) -> pd.DataFrame:
-    return _normalize_frame(pd.DataFrame([record.to_record() for record in records]))
 
 
 async def _reparse_collection_inputs(

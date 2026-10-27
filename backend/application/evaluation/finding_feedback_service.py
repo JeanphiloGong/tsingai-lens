@@ -14,6 +14,10 @@ from application.core.objectives.analysis.analysis_record_source import (
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
+)
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     FINDING_ASSERTION_STRENGTHS,
@@ -26,7 +30,6 @@ from domain.core.finding import (
 )
 from domain.core.finding import _certainty as finding_certainty
 from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _datetime_or_none as finding_datetime_or_none
 from domain.core.finding import _non_negative_int as finding_non_negative_int
 from domain.core.finding import _positive_int as finding_positive_int
 from domain.core.finding import _stable_id as finding_stable_id
@@ -376,9 +379,9 @@ class FindingFeedbackService:
             if dataset_use_status is not None and use_status != dataset_use_status:
                 continue
 
-            system_prediction = finding.to_record()
+            system_prediction = finding_response(finding)
             expert_target = (
-                current_curation.curated_finding.to_record()
+                finding_response(current_curation.curated_finding)
                 if current_curation is not None
                 else None
             )
@@ -388,7 +391,7 @@ class FindingFeedbackService:
                 if current_curation is not None
                 else finding
             )
-            evidence_records = [item.to_record() for item in evidence]
+            evidence_records = [objective_evidence_response(item) for item in evidence]
             finding_fingerprint = _fingerprint("finding.v2", training_target)
             evidence_fingerprint = _fingerprint("evidence.v2", evidence_records)
             training_messages = (
@@ -702,7 +705,7 @@ def _training_messages(
 
 
 def _training_evidence_text(index: int, evidence: ObjectiveEvidence) -> str:
-    record = evidence.to_record()
+    record = objective_evidence_response(evidence)
     locator = (
         f"{evidence.source_kind}:{evidence.source_ref}; pages="
         f"{','.join(str(page) for page in evidence.page_numbers) or 'unknown'}"
@@ -873,12 +876,12 @@ def parse_curated_finding(payload: Mapping[str, Any]) -> Finding:
         parent_finding_id=finding_text(payload.get("parent_finding_id")),
         created_by_user_id=finding_text(payload.get("created_by_user_id")),
         created_by_tool_call_id=finding_text(payload.get("created_by_tool_call_id")),
-        created_at=finding_datetime_or_none(payload.get("created_at")),
+        created_at=_finding_creation_time(payload.get("created_at")),
         warnings=finding_strings(payload.get("warnings")),
         selection_ids=finding_strings(payload.get("selection_ids")),
         comparison_group_ids=finding_strings(payload.get("comparison_group_ids")),
     )
-    canonical = candidate.to_record()
+    canonical = finding_response(candidate)
     if canonical != dict(payload):
         missing = sorted(set(canonical) - set(payload))
         unexpected = sorted(set(payload) - set(canonical))
@@ -924,3 +927,15 @@ def _review_scientific_context(value: Any) -> ScientificContext:
         process=_context_attributes(value.get("process")),
         test=_context_attributes(value.get("test")),
     )
+
+
+def _finding_creation_time(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    text = (str(value).strip() or None) if value is not None else None
+    if text is None:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid Finding creation time") from exc

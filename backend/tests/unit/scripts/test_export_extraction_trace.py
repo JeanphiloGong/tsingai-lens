@@ -16,6 +16,9 @@ from tests.support.repositories import (
     MemoryPaperMapRepository,
     MemorySourceArtifactRepository,
 )
+from domain.core.finding import Finding, FindingPaperContribution
+from domain.core.research_objective import ObjectiveEvidence
+from domain.core.scientific_fact import ScientificContext
 
 
 @pytest.fixture
@@ -32,14 +35,6 @@ def _load_trace_module():
     return module
 
 
-class _Record:
-    def __init__(self, payload: dict) -> None:
-        self.payload = payload
-
-    def to_record(self) -> dict:
-        return dict(self.payload)
-
-
 class _ObjectiveRepository:
     async def list_objectives(self, collection_id: str):
         return (
@@ -51,25 +46,58 @@ class _ObjectiveRepository:
 
     async def list_evidence(self, *args, **kwargs):
         records = (
-            _Record(
-                {
-                    "evidence_id": "ev-1",
-                    "document_id": "paper-1",
-                    "source_kind": "table",
-                    "source_ref": "tbl-paper-1-1",
-                    "source_excerpt": "Sample A reached 560 MPa.",
-                }
+            ObjectiveEvidence(
+                collection_id="col-test",
+                objective_id="obj-1",
+                analysis_version=1,
+                evidence_id="ev-1",
+                document_id="paper-1",
+                source_kind="table",
+                source_ref="tbl-paper-1-1",
+                source_excerpt="Sample A reached 560 MPa.",
+                page_numbers=(),
+                related_source_refs=(),
+                evidence_role="direct_result",
+                selection_status="candidate",
+                selection_reason=None,
+                changed_variables=(),
+                comparison=None,
+                reported_result=None,
+                attribution_scope="descriptive_only",
+                scientific_context=ScientificContext(),
+                resolution_status="unknown",
+                failure_reason=None,
+                confidence=0.0,
             ),
         )
         return records, len(records)
 
     async def list_findings(self, *args, **kwargs):
         records = (
-            _Record(
-                {
-                    "finding_id": "finding-1",
-                    "statement": "Sample A reached 560 MPa in the reported test.",
-                }
+            Finding(
+                collection_id="col-test",
+                objective_id="obj-1",
+                analysis_version=1,
+                finding_id="finding-1",
+                statement="Sample A reached 560 MPa in the reported test.",
+                factors=("treatment",),
+                outcome="strength",
+                direction="unknown",
+                assertion_strength="descriptive",
+                attribution_scope="descriptive_only",
+                synthesis_status="insufficient_confirmation",
+                certainty=0.0,
+                display_rank=0,
+                mechanisms=(),
+                scientific_context=ScientificContext(),
+                limitations=(),
+                paper_contributions=(
+                    FindingPaperContribution(
+                        document_id="paper-1",
+                        analysis_status="analyzed",
+                        supporting_evidence_ids=("ev-1",),
+                    ),
+                ),
             ),
         )
         return records, len(records)

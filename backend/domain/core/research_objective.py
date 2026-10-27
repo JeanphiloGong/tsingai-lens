@@ -307,17 +307,6 @@ class PaperStudyDisposition:
             raise ValueError(f"unsupported paper study disposition status: {value}") from exc
 
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "study_id": self.study_id,
-            "relationship_id": self.relationship_id,
-            "status": self.status.value,
-            "objective_id": self.objective_id,
-            "reason": self.reason,
-        }
-
-
 @dataclass(frozen=True)
 class PaperResearchSignal:
     """One source-linked research axis awaiting a paper-scope link."""
@@ -492,13 +481,6 @@ class PreparedDocumentInput:
             )
 
 
-    def to_record(self) -> dict[str, str]:
-        return {
-            "document_id": self.document_id,
-            "preparation_fingerprint": self.preparation_fingerprint,
-        }
-
-
 @dataclass(frozen=True)
 class ResearchObjective:
     collection_id: str
@@ -671,14 +653,6 @@ class InspectedObjectiveSourceRef:
             r"[0-9a-fA-F]{64}", self.source_digest
         ):
             raise ValueError("inspected Source digest must be a SHA-256 hex digest")
-
-
-    def to_record(self) -> dict[str, str | None]:
-        return {
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "source_digest": self.source_digest,
-        }
 
 
 @dataclass(frozen=True)
@@ -866,38 +840,6 @@ class PaperContribution:
             self.analysis_version,
             self.document_id,
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "document_id": self.document_id,
-            "analysis_status": self.analysis_status,
-            "relevance": self.relevance,
-            "paper_role": self.paper_role,
-            "contribution_summary": self.contribution_summary,
-            "material_match": list(self.material_match),
-            "changed_variables": list(self.changed_variables),
-            "measured_property_scope": list(self.measured_property_scope),
-            "test_environment_scope": list(self.test_environment_scope),
-            "exclusion_reason": self.exclusion_reason,
-            "warnings": list(self.warnings),
-            "confidence": self.confidence,
-            "evidence_disposition": self.evidence_disposition,
-            "routed_source_count": self.routed_source_count,
-            "extracted_source_count": self.extracted_source_count,
-            "comparable_evidence_count": self.comparable_evidence_count,
-            "failed_source_count": self.failed_source_count,
-            "uninspected_source_count": self.uninspected_source_count,
-            "evidence_disposition_reason": self.evidence_disposition_reason,
-            "evidence_status_counts": {
-                status: count for status, count in self.evidence_status_counts
-            },
-            "inspected_source_refs": [
-                item.to_record() for item in self.inspected_source_refs
-            ],
-        }
 
 
 @dataclass(frozen=True)
@@ -1194,49 +1136,6 @@ class ObjectiveEvidence:
         if self.attribution_scope == "joint_effect" and len(variable_names) < 2:
             raise ValueError("joint effect requires at least two changed variables")
 
-    def to_record(self) -> dict[str, Any]:
-        record = {
-            "collection_id": self.collection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "evidence_id": self.evidence_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "source_excerpt": self.source_excerpt,
-            "page_numbers": list(self.page_numbers),
-            "evidence_role": self.evidence_role,
-            "selection_status": self.selection_status,
-            "selection_reason": self.selection_reason,
-            "evidence_status": self.evidence_status,
-            "evidence_status_reason": self.evidence_status_reason,
-            "changed_variables": [item.to_record() for item in self.changed_variables],
-            "comparison": self.comparison.to_record() if self.comparison else None,
-            "reported_result": (
-                self.reported_result.to_record() if self.reported_result else None
-            ),
-            "attribution_scope": self.attribution_scope,
-            "scientific_context": self.scientific_context.to_record(),
-            "resolution_status": self.resolution_status,
-            "failure_reason": self.failure_reason,
-            "confidence": self.confidence,
-            "origin": self.origin,
-            "source_analysis_version": self.source_analysis_version,
-            "supersedes_evidence_id": self.supersedes_evidence_id,
-            "superseded_by_evidence_id": self.superseded_by_evidence_id,
-            "created_by_user_id": self.created_by_user_id,
-            "created_by_tool_call_id": self.created_by_tool_call_id,
-            "created_at": _datetime_record(self.created_at),
-            "authoring_note": self.authoring_note,
-        }
-        if self.warnings:
-            record["warnings"] = list(self.warnings)
-        if self.related_source_refs or self.related_source_refs_explicit:
-            record["related_source_refs"] = [
-                dict(item) for item in self.related_source_refs
-            ]
-        return record
-
 
 @dataclass(frozen=True)
 class ObjectiveFactSet:
@@ -1507,22 +1406,6 @@ def _positive_ints(value: Any) -> tuple[int, ...]:
         if numeric is not None and numeric not in result:
             result.append(numeric)
     return tuple(result)
-
-
-def _datetime_or_none(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    text = _text(value)
-    if text is None:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError(f"invalid datetime value: {text}") from exc
-
-
-def _datetime_record(value: datetime | None) -> str | None:
-    return value.isoformat() if value is not None else None
 
 
 def _stable_text(value: Any) -> str:

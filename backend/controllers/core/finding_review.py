@@ -3,16 +3,19 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_analysis_response,
+)
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
     ObjectiveAnalysisStateResponse,
     ObjectiveEvidenceResponse,
 )
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 FindingReviewStatus = Literal["correct", "incorrect", "partial", "unclear"]
 FindingIssueType = Literal[
@@ -219,8 +222,10 @@ async def create_finding_version(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return FindingAuthoringResponse(
-        analysis=result.analysis.to_record(),
-        finding=(result.finding.to_record() if result.finding is not None else None),
+        analysis=objective_analysis_response(result.analysis),
+        finding=(
+            finding_response(result.finding) if result.finding is not None else None
+        ),
         abstention_reason=result.analysis.abstention_reason,
     )
 

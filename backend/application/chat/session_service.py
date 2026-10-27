@@ -42,6 +42,7 @@ from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackRe
 from domain.chat.permissions import permits_automatic
 from domain.feedback.correction_signal import CorrectionSignal, is_correction_challenge
 from domain.feedback.tool_failure import tool_result_digest
+from infra.source.artifact_bundle import source_table_payload
 from repositories.analysis_job_repository import (
     AnalysisJobRepository,
     correction_signal_idempotency_key,
@@ -95,7 +96,7 @@ def resolve_canonical_objective_source(
             (item for item in document.tables if item.table_id == source_ref), None
         )
         if source is not None:
-            record = source.to_record()
+            record = source_table_payload(source)
             return _CanonicalObjectiveSource(
                 str(record["table_markdown"] or "").strip(),
                 source.page,

@@ -2,37 +2,32 @@
 
 from __future__ import annotations
 
-from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    _text as scientific_text,
-    _terms as scientific_terms,
-    _scientific_scalar as scientific_scalar,
-    _choice as scientific_choice,
-    ScientificAttribute,
-    ScientificVariable,
-)
-
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import (
-    Mapping,
     Any,
+    Mapping,
 )
-
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.core.paper_experiment import (
-    SourceReference,
     ExperimentalVariant,
-    ExperimentTestCondition,
-    ExperimentMeasurementResult,
     ExperimentComparison,
-    ReportedInterpretation,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
     PaperExperimentRevision,
+    ReportedInterpretation,
+    SourceReference,
 )
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    ScientificAttribute,
+    ScientificVariable,
+)
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 from infra.persistence.postgres.models.paper_experiment import (
     ExperimentalVariantRow,
     ExperimentComparisonMeasurementRow,
@@ -43,6 +38,9 @@ from infra.persistence.postgres.models.paper_experiment import (
     ReportedInterpretationRow,
 )
 from infra.persistence.postgres.transaction import database_session_scope
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class PaperExperimentRevisionConflictError(ValueError):
@@ -285,12 +283,16 @@ async def _add_components(
                 variant_key=item.variant_key,
                 variant_label=item.variant_label,
                 subject_attributes_json=[
-                    value.to_record() for value in item.subject_attributes
+                    _scientific_attribute_payload(value)
+                    for value in item.subject_attributes
                 ],
                 intervention_attributes_json=[
-                    value.to_record() for value in item.intervention_attributes
+                    _scientific_attribute_payload(value)
+                    for value in item.intervention_attributes
                 ],
-                state_json=[value.to_record() for value in item.state],
+                state_json=[
+                    _scientific_attribute_payload(value) for value in item.state
+                ],
                 population_scope_json=(
                     dict(item.population_scope)
                     if item.population_scope is not None
@@ -332,7 +334,9 @@ async def _add_components(
                 position=position,
                 test_key=item.test_key,
                 test_type=item.test_type,
-                parameters_json=[value.to_record() for value in item.parameters],
+                parameters_json=[
+                    _scientific_attribute_payload(value) for value in item.parameters
+                ],
                 population_scope_json=(
                     dict(item.population_scope)
                     if item.population_scope is not None
@@ -427,10 +431,17 @@ async def _add_components(
             target_variant_key=item.target_variant_key,
             outcome=item.outcome,
             changed_variables_json=[
-                value.to_record() for value in item.changed_variables
+                {
+                    "name": value.name,
+                    "baseline_value": value.baseline_value,
+                    "target_value": value.target_value,
+                    "unit": value.unit,
+                }
+                for value in item.changed_variables
             ],
             matched_conditions_json=[
-                value.to_record() for value in item.matched_conditions
+                _scientific_attribute_payload(value)
+                for value in item.matched_conditions
             ],
             basis=item.basis,
             direction=item.direction,
@@ -947,3 +958,21 @@ def _variables(value: Any) -> tuple[ScientificVariable, ...]:
         for item in value
         if isinstance(item, Mapping)
     )
+
+
+def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:
+    return {
+        "name": value.name,
+        "value": value.value,
+        "unit": value.unit,
+        **(
+            {"context_scope": value.context_scope}
+            if value.context_scope != "unknown"
+            else {}
+        ),
+        **(
+            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+            if value.applies_to_outcomes
+            else {}
+        ),
+    }

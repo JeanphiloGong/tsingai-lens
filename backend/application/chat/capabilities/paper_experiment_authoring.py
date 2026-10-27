@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
+from application.core.objectives.analysis.experiment_query_service import (
+    paper_experiment_revision_response,
+)
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _ScientificAttributeToolField(BaseModel):
@@ -759,7 +761,10 @@ class CreatePaperExperimentRevisionCapability:
             )
             for item in result.revisions
         ]
-        revisions = [item.revision.to_record() for item in result.revisions]
+        revisions = [
+            paper_experiment_revision_response(item.revision)
+            for item in result.revisions
+        ]
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",

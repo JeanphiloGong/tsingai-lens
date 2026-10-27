@@ -43,6 +43,10 @@ from repositories.paper_map_repository import (  # noqa: E402
 from repositories.source_artifact_repository import (  # noqa: E402
     SourceArtifactRepository,
 )
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
+)
 
 ARTIFACT_NAMES = (
     "documents",
@@ -180,8 +184,10 @@ async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
                 offset=0,
                 limit=10_000,
             )
-            evidence.extend(item.to_record() for item in objective_evidence)
-            findings.extend(item.to_record() for item in objective_findings)
+            evidence.extend(
+                objective_evidence_response(item) for item in objective_evidence
+            )
+            findings.extend(finding_response(item) for item in objective_findings)
     finally:
         await engine.dispose()
 

@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from typing import Mapping
 
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_evidence_response,
+)
 from controllers.core.finding_review import router
 from domain.core import Finding, ObjectiveEvidence
 from domain.core.finding import (
@@ -521,76 +525,80 @@ def _dataset(collection_id: str, objective_id: str | None) -> dict:
 
 
 def _finding_record(statement: str = "Temperature affects strength.") -> dict:
-    return Finding(
-        collection_id="col-1",
-        objective_id="obj-1",
-        analysis_version=1,
-        finding_id="finding-1",
-        statement=finding_text(statement) or "",
-        factors=("temperature",),
-        outcome="strength",
-        direction="increase",
-        assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
-        synthesis_status="insufficient_confirmation",
-        certainty=0.5,
-        display_rank=0,
-        mechanisms=(),
-        scientific_context=ScientificContext(),
-        limitations=("Supported by one paper.",),
-        paper_contributions=(
-            FindingPaperContribution(
-                document_id="paper-1",
-                analysis_status="analyzed",
-                supporting_evidence_ids=("evidence-1",),
+    return finding_response(
+        Finding(
+            collection_id="col-1",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            statement=finding_text(statement) or "",
+            factors=("temperature",),
+            outcome="strength",
+            direction="increase",
+            assertion_strength="associative",
+            attribution_scope=finding_choice(
+                "isolated_effect",
+                EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+                "descriptive_only",
             ),
-        ),
-    ).to_record()
+            synthesis_status="insufficient_confirmation",
+            certainty=0.5,
+            display_rank=0,
+            mechanisms=(),
+            scientific_context=ScientificContext(),
+            limitations=("Supported by one paper.",),
+            paper_contributions=(
+                FindingPaperContribution(
+                    document_id="paper-1",
+                    analysis_status="analyzed",
+                    supporting_evidence_ids=("evidence-1",),
+                ),
+            ),
+        )
+    )
 
 
 def _evidence_record() -> dict:
-    return ObjectiveEvidence(
-        collection_id="col-1",
-        objective_id="obj-1",
-        analysis_version=1,
-        evidence_id="evidence-1",
-        document_id="paper-1",
-        source_kind="text_window",
-        source_ref="block-7",
-        source_excerpt="At 500 C, strength reached 620 MPa.",
-        page_numbers=(7,),
-        related_source_refs=(),
-        evidence_role="direct_result",
-        selection_status="extracted",
-        selection_reason=None,
-        changed_variables=(
-            ScientificVariable(
-                name="temperature", baseline_value=400, target_value=500, unit="C"
+    return objective_evidence_response(
+        ObjectiveEvidence(
+            collection_id="col-1",
+            objective_id="obj-1",
+            analysis_version=1,
+            evidence_id="evidence-1",
+            document_id="paper-1",
+            source_kind="text_window",
+            source_ref="block-7",
+            source_excerpt="At 500 C, strength reached 620 MPa.",
+            page_numbers=(7,),
+            related_source_refs=(),
+            evidence_role="direct_result",
+            selection_status="extracted",
+            selection_reason=None,
+            changed_variables=(
+                ScientificVariable(
+                    name="temperature", baseline_value=400, target_value=500, unit="C"
+                ),
             ),
-        ),
-        comparison=ScientificComparison(
-            baseline_label="400 C",
-            target_label="500 C",
-            axis_names=("temperature",),
-            comparable=True,
-        ),
-        reported_result=ScientificResult(
-            outcome="strength",
-            value=None,
-            unit=None,
-            direction="increase",
-            result_text="Strength reached 620 MPa.",
-        ),
-        attribution_scope="isolated_effect",
-        scientific_context=ScientificContext(),
-        resolution_status="resolved",
-        failure_reason=None,
-        confidence=0.9,
-    ).to_record()
+            comparison=ScientificComparison(
+                baseline_label="400 C",
+                target_label="500 C",
+                axis_names=("temperature",),
+                comparable=True,
+            ),
+            reported_result=ScientificResult(
+                outcome="strength",
+                value=None,
+                unit=None,
+                direction="increase",
+                result_text="Strength reached 620 MPa.",
+            ),
+            attribution_scope="isolated_effect",
+            scientific_context=ScientificContext(),
+            resolution_status="resolved",
+            failure_reason=None,
+            confidence=0.9,
+        )
+    )
 
 
 def _client(service: _Service | None = None) -> TestClient:

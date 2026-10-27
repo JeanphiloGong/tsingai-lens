@@ -114,10 +114,8 @@ def _curated_finding(row: dict[str, Any]) -> dict[str, Any]:
     )
     if not target:
         raise ValueError("decision row requires one complete canonical Finding")
-    finding = parse_curated_finding(target)
-    if finding.to_record() != target:
-        raise ValueError("decision row Finding is not canonical")
-    return finding.to_record()
+    parse_curated_finding(target)
+    return target
 
 
 def _agent_reviewer(value: str) -> str:

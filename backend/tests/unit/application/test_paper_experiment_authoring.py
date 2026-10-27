@@ -7,8 +7,6 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
-
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from application.chat.capabilities.paper_experiment_authoring import (
     CreatePaperExperimentRevisionCapability,
@@ -16,13 +14,15 @@ from application.chat.capabilities.paper_experiment_authoring import (
     PaperExperimentRevisionToolRequest,
     ProposePaperExperimentDraftCapability,
 )
-from application.core.objectives.paper_experiment_authoring_service import (
-    PaperExperimentAuthoringService,
-)
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentDraftValidationError,
 )
+from application.core.objectives.paper_experiment_authoring_service import (
+    PaperExperimentAuthoringService,
+)
 from domain.chat import ChatMessage, ChatToolRequest, ChatToolResult
+from domain.core.paper_experiment import PaperExperimentRevision
+from pydantic import ValidationError
 
 pytestmark = pytest.mark.anyio
 
@@ -523,11 +523,13 @@ class _AuthoringStub:
     async def write(self, **kwargs):
         self.write_calls.append(kwargs)
         revision = SimpleNamespace(
-            revision=SimpleNamespace(
+            revision=PaperExperimentRevision(
                 experiment_id="pexp-1",
                 experiment_version=1,
                 document_id="paper-1",
-                to_record=lambda: {"experiment_id": "pexp-1", "experiment_version": 1},
+                source_fingerprint="prep-1",
+                label="Reported experiment",
+                scope_description="Reported process and measurement conditions",
             )
         )
         return SimpleNamespace(revisions=(revision,), selections=(), findings=())

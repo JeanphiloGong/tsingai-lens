@@ -13,16 +13,6 @@ from functools import partial
 from hashlib import sha1
 from typing import Any, Callable, Iterable, Literal, Mapping, NamedTuple
 
-from openai import APIConnectionError, APIStatusError
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationInfo,
-    field_validator,
-    model_validator,
-)
-
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.diagnostics import (
     record_analysis_diagnostic,
@@ -32,6 +22,9 @@ from application.core.objectives.analysis.evidence_routing import (
     ROUTE_PROMPT_TEXT_LIMIT,
     EvidenceCandidate,
     order_routes_for_extraction,
+)
+from application.core.objectives.analysis.experiment_query_service import (
+    scientific_attribute_response,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.analysis.source_text import (
@@ -87,6 +80,15 @@ from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
 from domain.core.scientific_fact import _terms as scientific_terms
 from domain.core.scientific_fact import _text as scientific_text
 from domain.source import SourceDocumentTree, render_markdown_table
+from openai import APIConnectionError, APIStatusError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -7057,7 +7059,7 @@ def _objective_document_state_payload(
         )
         context = {
             group: [
-                item.to_record()
+                scientific_attribute_response(item)
                 for item in getattr(unit.scientific_context, group)[:4]
             ]
             for group in ("material", "sample", "process", "test")

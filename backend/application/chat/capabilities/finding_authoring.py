@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
+)
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+    objective_analysis_response,
 )
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class CreateFindingVersionToolRequest(BaseModel):
@@ -187,8 +190,8 @@ class CreateFindingVersionCapability:
             tool_call_id=context.tool_call_id,
             status="succeeded",
             data={
-                "analysis": result.analysis.to_record(),
-                "finding": finding.to_record() if finding is not None else None,
+                "analysis": objective_analysis_response(result.analysis),
+                "finding": finding_response(finding) if finding is not None else None,
                 "abstention_reason": result.analysis.abstention_reason,
             },
             resource_refs=tuple(refs),

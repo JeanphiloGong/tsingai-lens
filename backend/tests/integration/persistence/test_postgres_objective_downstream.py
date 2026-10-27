@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Mapping
 
 import pytest
+from application.core.objectives.analysis.experiment_query_service import (
+    finding_response,
+)
 from domain.core import Finding, ObjectiveEvidence
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
@@ -253,7 +256,7 @@ async def test_finding_review_round_trips_published_analysis_identity(
                 "finding_id": finding.finding_id,
                 "curated_status": "limited",
                 "curated_finding": {
-                    **finding.to_record(),
+                    **finding_response(finding),
                     "statement": (
                         "Higher laser power was associated with strength only "
                         "within the reported process windows."
@@ -299,8 +302,107 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
                 synthesis_status=finding.synthesis_status,
                 certainty=finding.certainty,
                 display_rank=finding.display_rank,
-                mechanisms_json=[item.to_record() for item in finding.mechanisms],
-                scientific_context_json=finding.scientific_context.to_record(),
+                mechanisms_json=[
+                    {
+                        "source_term": item.source_term,
+                        "relation_type": item.relation_type,
+                        "target_term": item.target_term,
+                        "direction": item.direction,
+                        "assertion_strength": item.assertion_strength,
+                        "supporting_evidence_ids": list(item.supporting_evidence_ids),
+                    }
+                    for item in finding.mechanisms
+                ],
+                scientific_context_json={
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in finding.scientific_context.test
+                    ],
+                },
                 limitations_json=list(finding.limitations),
                 origin="system_generated",
                 source_analysis_version=None,

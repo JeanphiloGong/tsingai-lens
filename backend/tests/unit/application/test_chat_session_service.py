@@ -7,8 +7,6 @@ from hashlib import sha256
 from typing import Any
 
 import pytest
-from pydantic import BaseModel, ConfigDict
-
 from application.chat import (
     AgentContext,
     AgentRunLimits,
@@ -20,15 +18,15 @@ from application.chat import (
     ResearchAgentRunner,
     ToolSpec,
 )
+from application.chat.capabilities.document_sources import ReadSourceCapability
 from application.chat.session_service import (
     ChatApprovalPendingError,
     ChatFeedbackAnalysisEnqueueError,
     ChatSessionNotFoundError,
     ChatSessionService,
     ChatSourceContextError,
+    resolve_canonical_objective_source,
 )
-from repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
-from application.chat.capabilities.document_sources import ReadSourceCapability
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -40,9 +38,15 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
-from domain.source import SourceBlock, SourceDocument
-from tests.unit.application.test_research_agent_runner import _Model
+from domain.source import (
+    SourceBlock,
+    SourceDocument,
+    SourceTable,
+)
+from pydantic import BaseModel, ConfigDict
+from repositories.chat_repository import ChatResponseSnapshot, ChatSessionBusyError
 from tests.support.chat_repository import MemoryChatRepository
+from tests.unit.application.test_research_agent_runner import _Model
 
 pytestmark = pytest.mark.anyio
 
@@ -1279,6 +1283,7 @@ async def test_rename_survives_continuation_and_rejects_non_owner() -> None:
 @pytest.mark.parametrize("decision", ["approved", "rejected"])
 async def test_approval_continuation_recovers_context_without_repeating_write(decision):
     from dataclasses import replace
+
     from application.chat import ChatContextBuilder
     from tests.unit.application.test_chat_context_builder import _tool_pair
 
@@ -1329,3 +1334,37 @@ async def test_approval_continuation_recovers_context_without_repeating_write(de
     assert snapshot.progress["retry_count"] == 1
     saved = repository.messages[session.session_id]
     assert all(message in saved for message in history)
+
+
+def test_canonical_objective_table_keeps_rendered_content_and_grounding() -> None:
+    table = SourceTable(
+        table_id="table-1",
+        document_id="paper-1",
+        table_order=1,
+        caption_text="Tensile results",
+        caption_block_id=None,
+        page=5,
+        heading_path="Results",
+        column_headers=("Sample", "Strength (MPa)"),
+        table_matrix=(("Sample", "Strength (MPa)"), ("A", "560")),
+    )
+    document = SourceDocument(
+        document_id="paper-1",
+        document_order=1,
+        title="Tensile study",
+        text="Results",
+        tables=(table,),
+    )
+
+    canonical = resolve_canonical_objective_source(
+        document, source_kind="table", source_ref="table-1"
+    )
+
+    assert "| A | 560 |" in canonical.content
+    assert canonical.page == 5
+    assert canonical.heading_path == "Results"
+    assert canonical.grounding_source["source_kind"] == "table"
+    assert canonical.grounding_source["table_matrix"] == [
+        ["Sample", "Strength (MPa)"],
+        ["A", "560"],
+    ]

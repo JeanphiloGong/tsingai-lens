@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from domain.core.research_objective import ResearchObjective
-
 from datetime import UTC, datetime
 
+from application.core.objectives.analysis.experiment_query_service import (
+    objective_analysis_response,
+)
 from domain.core import PreparedDocumentInput, ResearchObjective
+from domain.core.research_objective import ResearchObjective
 from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
@@ -110,7 +112,7 @@ def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> 
         now=datetime(2026, 9, 5, tzinfo=UTC),
     )
 
-    assert "diagnostics" not in analysis.to_record()
+    assert "diagnostics" not in objective_analysis_response(analysis)
     assert row.payload["diagnostics"] == [
         {
             "trace_type": "table_matrix_repair",

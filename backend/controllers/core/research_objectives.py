@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
-
+from application.core.objectives.analysis.experiment_query_service import (
+    objective_analysis_response,
+    paper_contribution_response,
+)
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
 )
@@ -25,6 +26,8 @@ from controllers.core.research_objective_schemas import (
     PaginatedObjectiveListResponse,
 )
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
 from repositories.objective_repository import StoredObjective
 
 
@@ -374,10 +377,14 @@ def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
     return ObjectiveAnalysisResponse(
         collection_id=payload["collection_id"],
         objective=_objective_response_record(objective),
-        active_analysis=active.to_record() if active is not None else None,
-        published_analysis=(published.to_record() if published is not None else None),
+        active_analysis=(
+            objective_analysis_response(active) if active is not None else None
+        ),
+        published_analysis=(
+            objective_analysis_response(published) if published is not None else None
+        ),
         paper_contributions=[
-            item if isinstance(item, dict) else item.to_record()
+            item if isinstance(item, dict) else paper_contribution_response(item)
             for item in payload.get("paper_contributions") or ()
         ],
         evidence_review=payload.get("evidence_review")

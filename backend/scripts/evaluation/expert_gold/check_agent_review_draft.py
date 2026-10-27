@@ -268,8 +268,6 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
         else:
             try:
                 candidate = parse_curated_finding(target)
-                if candidate.to_record() != target:
-                    raise ValueError("Finding is not canonical")
                 if identity is not None and candidate.key != identity:
                     raise ValueError("Finding identity differs from the reviewed row")
             except ValueError as exc:

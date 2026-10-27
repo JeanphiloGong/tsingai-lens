@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 _ACTIONS = frozenset({"accept", "reject", "correct", "skip"})
 _ISSUES = frozenset(
     {
@@ -144,7 +143,7 @@ class FindingReviewImportService:
         curated_finding = row.get("curated_finding")
         if not isinstance(curated_finding, dict):
             raise ValueError("correct requires one complete curated_finding")
-        candidate = await self.feedback_service.validate_curation(
+        await self.feedback_service.validate_curation(
             **identity,
             curated_finding=curated_finding,
         )
@@ -157,7 +156,7 @@ class FindingReviewImportService:
             "payload": {
                 **identity,
                 "curated_status": curated_status,
-                "curated_finding": candidate.to_record(),
+                "curated_finding": dict(curated_finding),
                 "note": _optional_text(row.get("note")),
             },
         }

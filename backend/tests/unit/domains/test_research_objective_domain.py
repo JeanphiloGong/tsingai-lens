@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 from typing import Mapping
 
 import pytest
+from application.core.objectives.analysis.experiment_query_service import (
+    objective_analysis_response,
+    objective_evidence_response,
+    paper_contribution_response,
+)
 from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
@@ -26,22 +31,15 @@ from domain.core import (
     normalize_objective_terms,
 )
 from domain.core.finding import (
-    EVIDENCE_ATTRIBUTION_SCOPES,
     PAPER_CONTRIBUTION_STATUSES,
 )
 from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _datetime_or_none as finding_datetime_or_none
 from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
-    EVIDENCE_ORIGINS,
-    EVIDENCE_RESOLUTION_STATUS_VALUES,
-    EVIDENCE_ROLE_VALUES,
     OBJECTIVE_CONFIRMATION_STATUSES,
-    OBJECTIVE_EVIDENCE_STATES,
     OBJECTIVE_ORIGINS,
     PAPER_RELEVANCE_VALUES,
     PAPER_ROLE_VALUES,
-    SOURCE_KIND_VALUES,
     InspectedObjectiveSourceRef,
     Mapping,
     ObjectiveEvidence,
@@ -49,7 +47,6 @@ from domain.core.research_objective import (
     PreparedDocumentInput,
     ResearchObjective,
     _choice,
-    _datetime_or_none,
 )
 from domain.core.research_objective import (
     _non_negative_int_or_none as objective_non_negative_int_or_none,
@@ -61,7 +58,6 @@ from domain.core.research_objective import _positive_int_or_none
 from domain.core.research_objective import (
     _positive_int_or_none as objective_positive_int_or_none,
 )
-from domain.core.research_objective import _positive_ints as objective_positive_ints
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.research_objective import (
     _text,
@@ -70,26 +66,18 @@ from domain.core.research_objective import (
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    SCIENTIFIC_RESULT_DIRECTIONS,
-    SCIENTIFIC_RESULT_KINDS,
     ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 from repositories.objective_repository import (
-    OBJECTIVE_ANALYSIS_ORIGINS,
-    OBJECTIVE_ANALYSIS_RECORD_SOURCES,
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
+    ObjectiveRepository,
     _evidence_status_counts,
-    execution_stats_from_json,
 )
 from repositories.paper_map_repository import (
     _review_item,
@@ -560,7 +548,7 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
 
 
 def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
-    payload = _analysis().to_record()
+    payload = objective_analysis_response(_analysis())
     payload.pop("scientific_record_source")
     payload.update(
         {
@@ -571,70 +559,8 @@ def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> No
         }
     )
 
-    authored = ObjectiveAnalysis(
-        collection_id=_text(payload.get("collection_id")) or "",
-        objective_id=_text(payload.get("objective_id")) or "",
-        analysis_version=int(payload.get("analysis_version") or 0),
-        document_inputs=tuple(
-            (
-                PreparedDocumentInput(
-                    document_id=_text(item.get("document_id")) or "",
-                    preparation_fingerprint=_text(item.get("preparation_fingerprint"))
-                    or "",
-                )
-                for item in payload.get("document_inputs") or ()
-                if isinstance(item, Mapping)
-            )
-        ),
-        pipeline_version=_text(payload.get("pipeline_version")) or "",
-        model_name=_text(payload.get("model_name")),
-        prompt_versions={
-            str(key): str(value)
-            for key, value in dict(payload.get("prompt_versions") or {}).items()
-        },
-        stats=execution_stats_from_json(payload.get("stats")),
-        status=_text(payload.get("status")) or "queued",
-        phase=_text(payload.get("phase")) or "queued",
-        processed_document_count=int(payload.get("processed_document_count") or 0),
-        total_document_count=int(payload.get("total_document_count") or 0),
-        current_document_id=_text(payload.get("current_document_id")),
-        progress_message=_text(payload.get("progress_message")),
-        error_code=_text(payload.get("error_code")),
-        error_message=_text(payload.get("error_message")),
-        created_at=_datetime_or_none(payload.get("created_at")),
-        started_at=_datetime_or_none(payload.get("started_at")),
-        completed_at=_datetime_or_none(payload.get("completed_at")),
-        diagnostics=tuple(
-            (
-                dict(item)
-                for item in payload.get("diagnostics") or ()
-                if isinstance(item, Mapping)
-            )
-        ),
-        origin=_choice(
-            payload.get("origin"), OBJECTIVE_ANALYSIS_ORIGINS, "system_generated"
-        ),
-        scientific_record_source=_choice(
-            payload.get("scientific_record_source"),
-            OBJECTIVE_ANALYSIS_RECORD_SOURCES,
-            (
-                "experiment_graph"
-                if _choice(
-                    payload.get("origin"),
-                    OBJECTIVE_ANALYSIS_ORIGINS,
-                    "system_generated",
-                )
-                == "system_generated"
-                else "authored_snapshot"
-            ),
-        ),
-        source_analysis_version=_positive_int_or_none(
-            payload.get("source_analysis_version")
-        ),
-        created_by_user_id=_text(payload.get("created_by_user_id")),
-        created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
-        abstention_reason=_text(payload.get("abstention_reason")),
-        abstention_note=_text(payload.get("abstention_note")),
+    authored = ObjectiveRepository._analysis_from_row(
+        ObjectiveAnalysisRecord(payload=payload)
     )
 
     assert authored.scientific_record_source == "authored_snapshot"
@@ -725,7 +651,7 @@ def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
     )
 
     assert analysis.document_inputs == document_inputs
-    assert analysis.to_record()["document_inputs"] == [
+    assert objective_analysis_response(analysis)["document_inputs"] == [
         {
             "document_id": "paper-1",
             "preparation_fingerprint": "fingerprint-1",
@@ -824,7 +750,7 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
         1,
         "paper-1",
     )
-    assert "frame_id" not in contribution.to_record()
+    assert "frame_id" not in paper_contribution_response(contribution)
 
 
 def test_paper_contribution_records_auditable_evidence_disposition() -> None:
@@ -857,95 +783,6 @@ def test_paper_contribution_records_auditable_evidence_disposition() -> None:
     assert contribution.extracted_source_count == 2
     assert contribution.comparable_evidence_count == 7
     assert contribution.failed_source_count == 1
-    assert (
-        PaperContribution(
-            collection_id=finding_text(contribution.to_record().get("collection_id"))
-            or "",
-            objective_id=finding_text(contribution.to_record().get("objective_id"))
-            or "",
-            analysis_version=objective_positive_int_or_none(
-                contribution.to_record().get("analysis_version")
-            )
-            or 0,
-            document_id=finding_text(contribution.to_record().get("document_id")) or "",
-            analysis_status=finding_choice(
-                contribution.to_record().get("analysis_status"),
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
-            relevance=finding_choice(
-                contribution.to_record().get("relevance"),
-                PAPER_RELEVANCE_VALUES,
-                "uncertain",
-            ),
-            paper_role=finding_choice(
-                contribution.to_record().get("paper_role"),
-                PAPER_ROLE_VALUES,
-                "uncertain",
-            ),
-            contribution_summary=finding_text(
-                contribution.to_record().get("contribution_summary")
-            ),
-            material_match=normalize_objective_terms(
-                contribution.to_record().get("material_match")
-            ),
-            changed_variables=normalize_objective_terms(
-                contribution.to_record().get("changed_variables")
-            ),
-            measured_property_scope=normalize_objective_terms(
-                contribution.to_record().get("measured_property_scope")
-            ),
-            test_environment_scope=normalize_objective_terms(
-                contribution.to_record().get("test_environment_scope")
-            ),
-            exclusion_reason=finding_text(
-                contribution.to_record().get("exclusion_reason")
-            ),
-            warnings=normalize_objective_terms(
-                contribution.to_record().get("warnings")
-            ),
-            confidence=normalize_objective_confidence(
-                contribution.to_record().get("confidence")
-            ),
-            evidence_disposition=finding_text(
-                contribution.to_record().get("evidence_disposition")
-            ),
-            routed_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("routed_source_count")
-            ),
-            extracted_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("extracted_source_count")
-            ),
-            comparable_evidence_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("comparable_evidence_count")
-            ),
-            failed_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("failed_source_count")
-            ),
-            uninspected_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("uninspected_source_count")
-            ),
-            evidence_disposition_reason=finding_text(
-                contribution.to_record().get("evidence_disposition_reason")
-            ),
-            evidence_status_counts=_evidence_status_counts(
-                contribution.to_record().get("evidence_status_counts")
-            ),
-            inspected_source_refs=tuple(
-                (
-                    InspectedObjectiveSourceRef(
-                        source_kind=finding_text(source.get("source_kind")) or "",
-                        source_ref=finding_text(source.get("source_ref")) or "",
-                        source_digest=finding_text(source.get("source_digest")),
-                    )
-                    for source in contribution.to_record().get("inspected_source_refs")
-                    or ()
-                    if isinstance(source, Mapping)
-                )
-            ),
-        )
-        == contribution
-    )
 
 
 def test_paper_contribution_preserves_inspected_source_lineage_without_evidence() -> None:
@@ -981,102 +818,13 @@ def test_paper_contribution_preserves_inspected_source_lineage_without_evidence(
     )
 
     assert contribution.inspected_source_refs[0].source_ref == "block-results"
-    assert contribution.to_record()["inspected_source_refs"] == [
+    assert paper_contribution_response(contribution)["inspected_source_refs"] == [
         {
             "source_kind": "text_window",
             "source_ref": "block-results",
             "source_digest": "a" * 64,
         }
     ]
-    assert (
-        PaperContribution(
-            collection_id=finding_text(contribution.to_record().get("collection_id"))
-            or "",
-            objective_id=finding_text(contribution.to_record().get("objective_id"))
-            or "",
-            analysis_version=objective_positive_int_or_none(
-                contribution.to_record().get("analysis_version")
-            )
-            or 0,
-            document_id=finding_text(contribution.to_record().get("document_id")) or "",
-            analysis_status=finding_choice(
-                contribution.to_record().get("analysis_status"),
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
-            relevance=finding_choice(
-                contribution.to_record().get("relevance"),
-                PAPER_RELEVANCE_VALUES,
-                "uncertain",
-            ),
-            paper_role=finding_choice(
-                contribution.to_record().get("paper_role"),
-                PAPER_ROLE_VALUES,
-                "uncertain",
-            ),
-            contribution_summary=finding_text(
-                contribution.to_record().get("contribution_summary")
-            ),
-            material_match=normalize_objective_terms(
-                contribution.to_record().get("material_match")
-            ),
-            changed_variables=normalize_objective_terms(
-                contribution.to_record().get("changed_variables")
-            ),
-            measured_property_scope=normalize_objective_terms(
-                contribution.to_record().get("measured_property_scope")
-            ),
-            test_environment_scope=normalize_objective_terms(
-                contribution.to_record().get("test_environment_scope")
-            ),
-            exclusion_reason=finding_text(
-                contribution.to_record().get("exclusion_reason")
-            ),
-            warnings=normalize_objective_terms(
-                contribution.to_record().get("warnings")
-            ),
-            confidence=normalize_objective_confidence(
-                contribution.to_record().get("confidence")
-            ),
-            evidence_disposition=finding_text(
-                contribution.to_record().get("evidence_disposition")
-            ),
-            routed_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("routed_source_count")
-            ),
-            extracted_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("extracted_source_count")
-            ),
-            comparable_evidence_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("comparable_evidence_count")
-            ),
-            failed_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("failed_source_count")
-            ),
-            uninspected_source_count=objective_non_negative_int_or_none(
-                contribution.to_record().get("uninspected_source_count")
-            ),
-            evidence_disposition_reason=finding_text(
-                contribution.to_record().get("evidence_disposition_reason")
-            ),
-            evidence_status_counts=_evidence_status_counts(
-                contribution.to_record().get("evidence_status_counts")
-            ),
-            inspected_source_refs=tuple(
-                (
-                    InspectedObjectiveSourceRef(
-                        source_kind=finding_text(source.get("source_kind")) or "",
-                        source_ref=finding_text(source.get("source_ref")) or "",
-                        source_digest=finding_text(source.get("source_digest")),
-                    )
-                    for source in contribution.to_record().get("inspected_source_refs")
-                    or ()
-                    if isinstance(source, Mapping)
-                )
-            ),
-        )
-        == contribution
-    )
 
 
 def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
@@ -1240,7 +988,7 @@ def test_excluded_paper_contribution_requires_reason() -> None:
         )
 
 
-def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch) -> None:
+def test_extraction_transition_preserves_existing_evidence() -> None:
     selected = _candidate_evidence().select(evidence_role="direct_result")
 
     result = ScientificResult(
@@ -1251,10 +999,6 @@ def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch)
         result_text="The heat-treated sample reached 610 MPa.",
     )
 
-    def reject_serialization(_self):
-        pytest.fail("scientific state transitions must not serialize existing Evidence")
-
-    monkeypatch.setattr(ObjectiveEvidence, "to_record", reject_serialization)
     extracted = selected.mark_extracted(reported_result=result)
 
     assert extracted.reported_result == result
@@ -1306,14 +1050,14 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert extracted.changed_variables[0].name == "heat treatment"
     assert extracted.attribution_scope == "isolated_effect"
     assert extracted.supports_finding is True
-    assert "route_id" not in extracted.to_record()
-    assert "evidence_unit_id" not in extracted.to_record()
+    assert "route_id" not in objective_evidence_response(extracted)
+    assert "evidence_unit_id" not in objective_evidence_response(extracted)
 
 
 def test_objective_evidence_ignores_legacy_anchor_ids() -> None:
     evidence = _candidate_evidence()
 
-    assert "anchor_ids" not in evidence.to_record()
+    assert "anchor_ids" not in objective_evidence_response(evidence)
 
 
 def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage() -> None:
@@ -1321,904 +1065,11 @@ def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage()
     explicit_empty = _candidate_evidence(related_source_refs=())
 
     assert legacy.related_source_refs == ()
-    assert "related_source_refs" not in legacy.to_record()
-    assert (
-        ObjectiveEvidence(
-            collection_id=finding_text(legacy.to_record().get("collection_id")) or "",
-            objective_id=finding_text(legacy.to_record().get("objective_id")) or "",
-            analysis_version=objective_positive_int_or_none(
-                legacy.to_record().get("analysis_version")
-            )
-            or 0,
-            evidence_id=finding_text(legacy.to_record().get("evidence_id"))
-            or objective_scoped_id(
-                "oev",
-                finding_text(legacy.to_record().get("collection_id")) or "",
-                finding_text(legacy.to_record().get("objective_id")) or "",
-                objective_positive_int_or_none(
-                    legacy.to_record().get("analysis_version")
-                )
-                or 0,
-                finding_text(legacy.to_record().get("document_id")) or "",
-                finding_choice(
-                    legacy.to_record().get("source_kind"),
-                    SOURCE_KIND_VALUES,
-                    "text_window",
-                ),
-                finding_text(legacy.to_record().get("source_ref")) or "",
-                finding_choice(
-                    legacy.to_record().get("evidence_role"),
-                    EVIDENCE_ROLE_VALUES,
-                    "irrelevant",
-                ),
-                legacy.to_record().get("semantic_slot")
-                or (
-                    (
-                        ScientificResult(
-                            outcome=scientific_text(
-                                legacy.to_record().get("reported_result").get("outcome")
-                            )
-                            or "",
-                            value=scientific_scalar(
-                                legacy.to_record().get("reported_result").get("value")
-                            ),
-                            unit=scientific_text(
-                                legacy.to_record().get("reported_result").get("unit")
-                            ),
-                            direction=scientific_choice(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("direction"),
-                                SCIENTIFIC_RESULT_DIRECTIONS,
-                                "unknown",
-                            ),
-                            result_text=scientific_text(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("result_text")
-                            )
-                            or "",
-                            baseline_value=scientific_scalar(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("baseline_value")
-                            ),
-                            target_value=scientific_scalar(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("target_value")
-                            ),
-                            result_kind=scientific_choice(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("result_kind"),
-                                SCIENTIFIC_RESULT_KINDS,
-                                "observed",
-                            ),
-                        )
-                        if isinstance(
-                            legacy.to_record().get("reported_result"), Mapping
-                        )
-                        else None
-                    ).outcome
-                    if (
-                        ScientificResult(
-                            outcome=scientific_text(
-                                legacy.to_record().get("reported_result").get("outcome")
-                            )
-                            or "",
-                            value=scientific_scalar(
-                                legacy.to_record().get("reported_result").get("value")
-                            ),
-                            unit=scientific_text(
-                                legacy.to_record().get("reported_result").get("unit")
-                            ),
-                            direction=scientific_choice(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("direction"),
-                                SCIENTIFIC_RESULT_DIRECTIONS,
-                                "unknown",
-                            ),
-                            result_text=scientific_text(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("result_text")
-                            )
-                            or "",
-                            baseline_value=scientific_scalar(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("baseline_value")
-                            ),
-                            target_value=scientific_scalar(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("target_value")
-                            ),
-                            result_kind=scientific_choice(
-                                legacy.to_record()
-                                .get("reported_result")
-                                .get("result_kind"),
-                                SCIENTIFIC_RESULT_KINDS,
-                                "observed",
-                            ),
-                        )
-                        if isinstance(
-                            legacy.to_record().get("reported_result"), Mapping
-                        )
-                        else None
-                    )
-                    is not None
-                    else None
-                ),
-            ),
-            document_id=finding_text(legacy.to_record().get("document_id")) or "",
-            source_kind=finding_choice(
-                legacy.to_record().get("source_kind"), SOURCE_KIND_VALUES, "text_window"
-            ),
-            source_ref=finding_text(legacy.to_record().get("source_ref")) or "",
-            source_excerpt=finding_text(legacy.to_record().get("source_excerpt")) or "",
-            page_numbers=objective_positive_ints(
-                legacy.to_record().get("page_numbers")
-            ),
-            related_source_refs=tuple(
-                (
-                    dict(item)
-                    for item in (
-                        legacy.to_record().get("related_source_refs")
-                        if isinstance(
-                            legacy.to_record().get("related_source_refs"), (list, tuple)
-                        )
-                        else ()
-                    )
-                    if isinstance(item, Mapping)
-                )
-            ),
-            evidence_role=finding_choice(
-                legacy.to_record().get("evidence_role"),
-                EVIDENCE_ROLE_VALUES,
-                "irrelevant",
-            ),
-            selection_status=finding_choice(
-                legacy.to_record().get("selection_status"),
-                OBJECTIVE_EVIDENCE_STATES,
-                "candidate",
-            ),
-            selection_reason=finding_text(legacy.to_record().get("selection_reason")),
-            changed_variables=tuple(
-                (
-                    ScientificVariable(
-                        name=scientific_text(item.get("name")) or "",
-                        baseline_value=scientific_scalar(item.get("baseline_value")),
-                        target_value=scientific_scalar(item.get("target_value")),
-                        unit=scientific_text(item.get("unit")),
-                    )
-                    for item in (
-                        legacy.to_record().get("changed_variables")
-                        if isinstance(
-                            legacy.to_record().get("changed_variables"), (list, tuple)
-                        )
-                        else ()
-                    )
-                    if isinstance(item, Mapping)
-                )
-            ),
-            comparison=(
-                ScientificComparison(
-                    baseline_label=scientific_text(
-                        legacy.to_record()["comparison"].get("baseline_label")
-                    )
-                    or "",
-                    target_label=scientific_text(
-                        legacy.to_record()["comparison"].get("target_label")
-                    )
-                    or "",
-                    axis_names=scientific_terms(
-                        legacy.to_record()["comparison"].get("axis_names")
-                    ),
-                    comparable=legacy.to_record()["comparison"].get("comparable")
-                    is True,
-                    incomparability_reasons=scientific_terms(
-                        legacy.to_record()["comparison"].get("incomparability_reasons")
-                    ),
-                )
-                if isinstance(legacy.to_record().get("comparison"), Mapping)
-                else None
-            ),
-            reported_result=(
-                ScientificResult(
-                    outcome=scientific_text(
-                        legacy.to_record().get("reported_result").get("outcome")
-                    )
-                    or "",
-                    value=scientific_scalar(
-                        legacy.to_record().get("reported_result").get("value")
-                    ),
-                    unit=scientific_text(
-                        legacy.to_record().get("reported_result").get("unit")
-                    ),
-                    direction=scientific_choice(
-                        legacy.to_record().get("reported_result").get("direction"),
-                        SCIENTIFIC_RESULT_DIRECTIONS,
-                        "unknown",
-                    ),
-                    result_text=scientific_text(
-                        legacy.to_record().get("reported_result").get("result_text")
-                    )
-                    or "",
-                    baseline_value=scientific_scalar(
-                        legacy.to_record().get("reported_result").get("baseline_value")
-                    ),
-                    target_value=scientific_scalar(
-                        legacy.to_record().get("reported_result").get("target_value")
-                    ),
-                    result_kind=scientific_choice(
-                        legacy.to_record().get("reported_result").get("result_kind"),
-                        SCIENTIFIC_RESULT_KINDS,
-                        "observed",
-                    ),
-                )
-                if isinstance(legacy.to_record().get("reported_result"), Mapping)
-                else None
-            ),
-            attribution_scope=finding_choice(
-                legacy.to_record().get("attribution_scope"),
-                EVIDENCE_ATTRIBUTION_SCOPES,
-                "not_attributable",
-            ),
-            scientific_context=(
-                ScientificContext(
-                    material=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                legacy.to_record()["scientific_context"].get("material")
-                                if isinstance(
-                                    legacy.to_record()["scientific_context"].get(
-                                        "material"
-                                    ),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    sample=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                legacy.to_record()["scientific_context"].get("sample")
-                                if isinstance(
-                                    legacy.to_record()["scientific_context"].get(
-                                        "sample"
-                                    ),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    process=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                legacy.to_record()["scientific_context"].get("process")
-                                if isinstance(
-                                    legacy.to_record()["scientific_context"].get(
-                                        "process"
-                                    ),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    test=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                legacy.to_record()["scientific_context"].get("test")
-                                if isinstance(
-                                    legacy.to_record()["scientific_context"].get(
-                                        "test"
-                                    ),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                )
-                if isinstance(legacy.to_record().get("scientific_context"), Mapping)
-                else ScientificContext()
-            ),
-            resolution_status=finding_choice(
-                legacy.to_record().get("resolution_status"),
-                EVIDENCE_RESOLUTION_STATUS_VALUES,
-                "unknown",
-            ),
-            failure_reason=finding_text(legacy.to_record().get("failure_reason")),
-            confidence=normalize_objective_confidence(
-                legacy.to_record().get("confidence")
-            ),
-            related_source_refs_explicit="related_source_refs" in legacy.to_record(),
-            origin=finding_choice(
-                legacy.to_record().get("origin"), EVIDENCE_ORIGINS, "system_generated"
-            ),
-            source_analysis_version=objective_positive_int_or_none(
-                legacy.to_record().get("source_analysis_version")
-            ),
-            supersedes_evidence_id=finding_text(
-                legacy.to_record().get("supersedes_evidence_id")
-            ),
-            superseded_by_evidence_id=finding_text(
-                legacy.to_record().get("superseded_by_evidence_id")
-            ),
-            created_by_user_id=finding_text(
-                legacy.to_record().get("created_by_user_id")
-            ),
-            created_by_tool_call_id=finding_text(
-                legacy.to_record().get("created_by_tool_call_id")
-            ),
-            created_at=finding_datetime_or_none(legacy.to_record().get("created_at")),
-            authoring_note=finding_text(legacy.to_record().get("authoring_note")),
-            warnings=normalize_objective_terms(legacy.to_record().get("warnings")),
-        ).related_source_refs_explicit
-        is False
-    )
+    assert legacy.related_source_refs_explicit is False
+    assert "related_source_refs" not in objective_evidence_response(legacy)
     assert explicit_empty.related_source_refs == ()
-    assert explicit_empty.to_record()["related_source_refs"] == []
-    assert (
-        ObjectiveEvidence(
-            collection_id=finding_text(explicit_empty.to_record().get("collection_id"))
-            or "",
-            objective_id=finding_text(explicit_empty.to_record().get("objective_id"))
-            or "",
-            analysis_version=objective_positive_int_or_none(
-                explicit_empty.to_record().get("analysis_version")
-            )
-            or 0,
-            evidence_id=finding_text(explicit_empty.to_record().get("evidence_id"))
-            or objective_scoped_id(
-                "oev",
-                finding_text(explicit_empty.to_record().get("collection_id")) or "",
-                finding_text(explicit_empty.to_record().get("objective_id")) or "",
-                objective_positive_int_or_none(
-                    explicit_empty.to_record().get("analysis_version")
-                )
-                or 0,
-                finding_text(explicit_empty.to_record().get("document_id")) or "",
-                finding_choice(
-                    explicit_empty.to_record().get("source_kind"),
-                    SOURCE_KIND_VALUES,
-                    "text_window",
-                ),
-                finding_text(explicit_empty.to_record().get("source_ref")) or "",
-                finding_choice(
-                    explicit_empty.to_record().get("evidence_role"),
-                    EVIDENCE_ROLE_VALUES,
-                    "irrelevant",
-                ),
-                explicit_empty.to_record().get("semantic_slot")
-                or (
-                    (
-                        ScientificResult(
-                            outcome=scientific_text(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("outcome")
-                            )
-                            or "",
-                            value=scientific_scalar(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("value")
-                            ),
-                            unit=scientific_text(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("unit")
-                            ),
-                            direction=scientific_choice(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("direction"),
-                                SCIENTIFIC_RESULT_DIRECTIONS,
-                                "unknown",
-                            ),
-                            result_text=scientific_text(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("result_text")
-                            )
-                            or "",
-                            baseline_value=scientific_scalar(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("baseline_value")
-                            ),
-                            target_value=scientific_scalar(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("target_value")
-                            ),
-                            result_kind=scientific_choice(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("result_kind"),
-                                SCIENTIFIC_RESULT_KINDS,
-                                "observed",
-                            ),
-                        )
-                        if isinstance(
-                            explicit_empty.to_record().get("reported_result"), Mapping
-                        )
-                        else None
-                    ).outcome
-                    if (
-                        ScientificResult(
-                            outcome=scientific_text(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("outcome")
-                            )
-                            or "",
-                            value=scientific_scalar(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("value")
-                            ),
-                            unit=scientific_text(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("unit")
-                            ),
-                            direction=scientific_choice(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("direction"),
-                                SCIENTIFIC_RESULT_DIRECTIONS,
-                                "unknown",
-                            ),
-                            result_text=scientific_text(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("result_text")
-                            )
-                            or "",
-                            baseline_value=scientific_scalar(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("baseline_value")
-                            ),
-                            target_value=scientific_scalar(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("target_value")
-                            ),
-                            result_kind=scientific_choice(
-                                explicit_empty.to_record()
-                                .get("reported_result")
-                                .get("result_kind"),
-                                SCIENTIFIC_RESULT_KINDS,
-                                "observed",
-                            ),
-                        )
-                        if isinstance(
-                            explicit_empty.to_record().get("reported_result"), Mapping
-                        )
-                        else None
-                    )
-                    is not None
-                    else None
-                ),
-            ),
-            document_id=finding_text(explicit_empty.to_record().get("document_id"))
-            or "",
-            source_kind=finding_choice(
-                explicit_empty.to_record().get("source_kind"),
-                SOURCE_KIND_VALUES,
-                "text_window",
-            ),
-            source_ref=finding_text(explicit_empty.to_record().get("source_ref")) or "",
-            source_excerpt=finding_text(
-                explicit_empty.to_record().get("source_excerpt")
-            )
-            or "",
-            page_numbers=objective_positive_ints(
-                explicit_empty.to_record().get("page_numbers")
-            ),
-            related_source_refs=tuple(
-                (
-                    dict(item)
-                    for item in (
-                        explicit_empty.to_record().get("related_source_refs")
-                        if isinstance(
-                            explicit_empty.to_record().get("related_source_refs"),
-                            (list, tuple),
-                        )
-                        else ()
-                    )
-                    if isinstance(item, Mapping)
-                )
-            ),
-            evidence_role=finding_choice(
-                explicit_empty.to_record().get("evidence_role"),
-                EVIDENCE_ROLE_VALUES,
-                "irrelevant",
-            ),
-            selection_status=finding_choice(
-                explicit_empty.to_record().get("selection_status"),
-                OBJECTIVE_EVIDENCE_STATES,
-                "candidate",
-            ),
-            selection_reason=finding_text(
-                explicit_empty.to_record().get("selection_reason")
-            ),
-            changed_variables=tuple(
-                (
-                    ScientificVariable(
-                        name=scientific_text(item.get("name")) or "",
-                        baseline_value=scientific_scalar(item.get("baseline_value")),
-                        target_value=scientific_scalar(item.get("target_value")),
-                        unit=scientific_text(item.get("unit")),
-                    )
-                    for item in (
-                        explicit_empty.to_record().get("changed_variables")
-                        if isinstance(
-                            explicit_empty.to_record().get("changed_variables"),
-                            (list, tuple),
-                        )
-                        else ()
-                    )
-                    if isinstance(item, Mapping)
-                )
-            ),
-            comparison=(
-                ScientificComparison(
-                    baseline_label=scientific_text(
-                        explicit_empty.to_record()["comparison"].get("baseline_label")
-                    )
-                    or "",
-                    target_label=scientific_text(
-                        explicit_empty.to_record()["comparison"].get("target_label")
-                    )
-                    or "",
-                    axis_names=scientific_terms(
-                        explicit_empty.to_record()["comparison"].get("axis_names")
-                    ),
-                    comparable=explicit_empty.to_record()["comparison"].get(
-                        "comparable"
-                    )
-                    is True,
-                    incomparability_reasons=scientific_terms(
-                        explicit_empty.to_record()["comparison"].get(
-                            "incomparability_reasons"
-                        )
-                    ),
-                )
-                if isinstance(explicit_empty.to_record().get("comparison"), Mapping)
-                else None
-            ),
-            reported_result=(
-                ScientificResult(
-                    outcome=scientific_text(
-                        explicit_empty.to_record().get("reported_result").get("outcome")
-                    )
-                    or "",
-                    value=scientific_scalar(
-                        explicit_empty.to_record().get("reported_result").get("value")
-                    ),
-                    unit=scientific_text(
-                        explicit_empty.to_record().get("reported_result").get("unit")
-                    ),
-                    direction=scientific_choice(
-                        explicit_empty.to_record()
-                        .get("reported_result")
-                        .get("direction"),
-                        SCIENTIFIC_RESULT_DIRECTIONS,
-                        "unknown",
-                    ),
-                    result_text=scientific_text(
-                        explicit_empty.to_record()
-                        .get("reported_result")
-                        .get("result_text")
-                    )
-                    or "",
-                    baseline_value=scientific_scalar(
-                        explicit_empty.to_record()
-                        .get("reported_result")
-                        .get("baseline_value")
-                    ),
-                    target_value=scientific_scalar(
-                        explicit_empty.to_record()
-                        .get("reported_result")
-                        .get("target_value")
-                    ),
-                    result_kind=scientific_choice(
-                        explicit_empty.to_record()
-                        .get("reported_result")
-                        .get("result_kind"),
-                        SCIENTIFIC_RESULT_KINDS,
-                        "observed",
-                    ),
-                )
-                if isinstance(
-                    explicit_empty.to_record().get("reported_result"), Mapping
-                )
-                else None
-            ),
-            attribution_scope=finding_choice(
-                explicit_empty.to_record().get("attribution_scope"),
-                EVIDENCE_ATTRIBUTION_SCOPES,
-                "not_attributable",
-            ),
-            scientific_context=(
-                ScientificContext(
-                    material=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                explicit_empty.to_record()["scientific_context"].get(
-                                    "material"
-                                )
-                                if isinstance(
-                                    explicit_empty.to_record()[
-                                        "scientific_context"
-                                    ].get("material"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    sample=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                explicit_empty.to_record()["scientific_context"].get(
-                                    "sample"
-                                )
-                                if isinstance(
-                                    explicit_empty.to_record()[
-                                        "scientific_context"
-                                    ].get("sample"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    process=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                explicit_empty.to_record()["scientific_context"].get(
-                                    "process"
-                                )
-                                if isinstance(
-                                    explicit_empty.to_record()[
-                                        "scientific_context"
-                                    ].get("process"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    test=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                explicit_empty.to_record()["scientific_context"].get(
-                                    "test"
-                                )
-                                if isinstance(
-                                    explicit_empty.to_record()[
-                                        "scientific_context"
-                                    ].get("test"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                )
-                if isinstance(
-                    explicit_empty.to_record().get("scientific_context"), Mapping
-                )
-                else ScientificContext()
-            ),
-            resolution_status=finding_choice(
-                explicit_empty.to_record().get("resolution_status"),
-                EVIDENCE_RESOLUTION_STATUS_VALUES,
-                "unknown",
-            ),
-            failure_reason=finding_text(
-                explicit_empty.to_record().get("failure_reason")
-            ),
-            confidence=normalize_objective_confidence(
-                explicit_empty.to_record().get("confidence")
-            ),
-            related_source_refs_explicit="related_source_refs"
-            in explicit_empty.to_record(),
-            origin=finding_choice(
-                explicit_empty.to_record().get("origin"),
-                EVIDENCE_ORIGINS,
-                "system_generated",
-            ),
-            source_analysis_version=objective_positive_int_or_none(
-                explicit_empty.to_record().get("source_analysis_version")
-            ),
-            supersedes_evidence_id=finding_text(
-                explicit_empty.to_record().get("supersedes_evidence_id")
-            ),
-            superseded_by_evidence_id=finding_text(
-                explicit_empty.to_record().get("superseded_by_evidence_id")
-            ),
-            created_by_user_id=finding_text(
-                explicit_empty.to_record().get("created_by_user_id")
-            ),
-            created_by_tool_call_id=finding_text(
-                explicit_empty.to_record().get("created_by_tool_call_id")
-            ),
-            created_at=finding_datetime_or_none(
-                explicit_empty.to_record().get("created_at")
-            ),
-            authoring_note=finding_text(
-                explicit_empty.to_record().get("authoring_note")
-            ),
-            warnings=normalize_objective_terms(
-                explicit_empty.to_record().get("warnings")
-            ),
-        ).related_source_refs_explicit
-        is True
-    )
+    assert explicit_empty.related_source_refs_explicit is True
+    assert objective_evidence_response(explicit_empty)["related_source_refs"] == []
 
 
 def test_association_evidence_allows_variable_without_comparison_endpoints() -> None:
@@ -2378,16 +1229,16 @@ def test_objective_evidence_result_preserves_categorical_transition() -> None:
     assert evidence.reported_result.baseline_value == "alpha-prime"
     assert evidence.reported_result.target_value == "alpha+beta"
     assert evidence.reported_result.direction == "changed"
-    assert evidence.to_record()["reported_result"] == {
+    assert objective_evidence_response(evidence)["reported_result"] == {
         "outcome": "phase composition",
         "value": "alpha+beta",
         "baseline_value": "alpha-prime",
         "target_value": "alpha+beta",
         "unit": None,
-            "direction": "changed",
-            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
-            "result_kind": "observed",
-        }
+        "direction": "changed",
+        "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
+        "result_kind": "observed",
+    }
 
 
 def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:

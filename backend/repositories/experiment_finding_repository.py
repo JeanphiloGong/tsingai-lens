@@ -17,7 +17,6 @@ from domain.core.finding import (
 )
 from domain.core.finding import _certainty as finding_certainty
 from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _datetime_or_none as finding_datetime_or_none
 from domain.core.finding import _non_negative_int as finding_non_negative_int
 from domain.core.finding import _positive_int as finding_positive_int
 from domain.core.finding import _stable_id as finding_stable_id
@@ -151,8 +150,35 @@ async def _add_finding(
         synthesis_status=finding.synthesis_status,
         certainty=finding.certainty,
         display_rank=finding.display_rank,
-        mechanisms_json=[item.to_record() for item in finding.mechanisms],
-        scientific_context_json=finding.scientific_context.to_record(),
+        mechanisms_json=[
+            {
+                "source_term": item.source_term,
+                "relation_type": item.relation_type,
+                "target_term": item.target_term,
+                "direction": item.direction,
+                "assertion_strength": item.assertion_strength,
+                "supporting_evidence_ids": list(item.supporting_evidence_ids),
+            }
+            for item in finding.mechanisms
+        ],
+        scientific_context_json={
+            "material": [
+                _scientific_attribute_payload(attribute)
+                for attribute in finding.scientific_context.material
+            ],
+            "sample": [
+                _scientific_attribute_payload(attribute)
+                for attribute in finding.scientific_context.sample
+            ],
+            "process": [
+                _scientific_attribute_payload(attribute)
+                for attribute in finding.scientific_context.process
+            ],
+            "test": [
+                _scientific_attribute_payload(attribute)
+                for attribute in finding.scientific_context.test
+            ],
+        },
         limitations_json=list(finding.limitations),
         origin=finding.origin,
         source_analysis_version=finding.source_analysis_version,
@@ -350,7 +376,7 @@ async def _finding_record(
         parent_finding_id=finding_text(row.parent_finding_id),
         created_by_user_id=finding_text(row.created_by_user_id),
         created_by_tool_call_id=finding_text(row.created_by_tool_call_id),
-        created_at=finding_datetime_or_none(row.created_at),
+        created_at=row.created_at,
         warnings=finding_strings(list(row.warnings_json)),
         selection_ids=finding_strings([item.selection_id for item in selection_rows]),
         comparison_group_ids=finding_strings([item.group_id for item in group_rows]),
@@ -389,3 +415,21 @@ def _stored_scientific_context(value: Any) -> ScientificContext:
         process=_context_attributes(value.get("process")),
         test=_context_attributes(value.get("test")),
     )
+
+
+def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:
+    return {
+        "name": value.name,
+        "value": value.value,
+        "unit": value.unit,
+        **(
+            {"context_scope": value.context_scope}
+            if value.context_scope != "unknown"
+            else {}
+        ),
+        **(
+            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+            if value.applies_to_outcomes
+            else {}
+        ),
+    }

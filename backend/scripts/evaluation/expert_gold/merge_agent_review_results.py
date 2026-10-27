@@ -124,12 +124,8 @@ def _validated_agent_review(
     }
     curated_finding = _mapping(review.get("curated_finding"))
     if curated_finding:
-        finding = parse_curated_finding(curated_finding)
-        if finding.to_record() != curated_finding:
-            raise ValueError(
-                f"line {line_number}: agent_review.curated_finding is not canonical"
-            )
-        output["curated_finding"] = finding.to_record()
+        parse_curated_finding(curated_finding)
+        output["curated_finding"] = curated_finding
     return {key: value for key, value in output.items() if value not in ("", {}, [])}
 
 

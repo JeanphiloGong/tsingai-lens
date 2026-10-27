@@ -1,27 +1,10 @@
 from __future__ import annotations
 
-
-from domain.core.research_objective import (
-    Mapping,
-    OBJECTIVE_CONFIRMATION_STATUSES,
-    OBJECTIVE_ORIGINS,
-    PreparedDocumentInput,
-    ResearchObjective,
-    _choice,
-    _datetime_or_none,
-    _objective_derivation_basis,
-    _positive_int_or_none,
-    _text,
-    build_research_objective_id,
-    normalize_objective_confidence,
-    normalize_objective_terms,
-)
-
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
+from typing import Mapping
 
 import pytest
-
 from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
@@ -42,19 +25,71 @@ from domain.core import (
     normalize_objective_confidence,
     normalize_objective_terms,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    PAPER_CONTRIBUTION_STATUSES,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _datetime_or_none as finding_datetime_or_none
+from domain.core.finding import _text as finding_text
+from domain.core.research_objective import (
+    EVIDENCE_ORIGINS,
+    EVIDENCE_RESOLUTION_STATUS_VALUES,
+    EVIDENCE_ROLE_VALUES,
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    OBJECTIVE_EVIDENCE_STATES,
+    OBJECTIVE_ORIGINS,
+    PAPER_RELEVANCE_VALUES,
+    PAPER_ROLE_VALUES,
+    SOURCE_KIND_VALUES,
+    InspectedObjectiveSourceRef,
+    Mapping,
+    ObjectiveEvidence,
+    PaperContribution,
+    PreparedDocumentInput,
+    ResearchObjective,
+    _choice,
+    _datetime_or_none,
+)
+from domain.core.research_objective import (
+    _non_negative_int_or_none as objective_non_negative_int_or_none,
+)
+from domain.core.research_objective import (
+    _objective_derivation_basis,
+)
+from domain.core.research_objective import _positive_int_or_none
+from domain.core.research_objective import (
+    _positive_int_or_none as objective_positive_int_or_none,
+)
+from domain.core.research_objective import _positive_ints as objective_positive_ints
+from domain.core.research_objective import _scoped_id as objective_scoped_id
+from domain.core.research_objective import (
+    _text,
+    build_research_objective_id,
+    normalize_objective_confidence,
+    normalize_objective_terms,
+)
 from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    SCIENTIFIC_RESULT_KINDS,
     ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
 )
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 from repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_ORIGINS,
     OBJECTIVE_ANALYSIS_RECORD_SOURCES,
-    ObjectiveAnalysis,
-    execution_stats_from_json,
     OBJECTIVE_ANALYSIS_STATUSES,
+    ObjectiveAnalysis,
+    _evidence_status_counts,
+    execution_stats_from_json,
 )
 from repositories.paper_map_repository import (
     _review_item,
@@ -344,7 +379,7 @@ def _analysis(**overrides) -> ObjectiveAnalysis:
 
 
 def _candidate_evidence(**overrides) -> ObjectiveEvidence:
-    payload = {
+    values = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
@@ -352,13 +387,38 @@ def _candidate_evidence(**overrides) -> ObjectiveEvidence:
         "source_kind": "text_window",
         "source_ref": "block-1",
         "source_excerpt": "The heat-treated sample reached 610 MPa.",
+        "page_numbers": (),
+        "related_source_refs": (),
         "evidence_role": "direct_result",
         "selection_status": "candidate",
+        "selection_reason": None,
+        "changed_variables": (),
+        "comparison": None,
+        "reported_result": None,
         "attribution_scope": "not_attributable",
+        "scientific_context": ScientificContext(),
         "resolution_status": "unknown",
+        "failure_reason": None,
+        "confidence": 0.0,
     }
-    payload.update(overrides)
-    return ObjectiveEvidence.from_mapping(payload)
+    values.update(overrides)
+    values["related_source_refs_explicit"] = "related_source_refs" in overrides
+    values["evidence_id"] = overrides.get("evidence_id") or objective_scoped_id(
+        "oev",
+        values["collection_id"],
+        values["objective_id"],
+        values["analysis_version"],
+        values["document_id"],
+        values["source_kind"],
+        values["source_ref"],
+        values["evidence_role"],
+        (
+            values["reported_result"].outcome
+            if values.get("reported_result") is not None
+            else None
+        ),
+    )
+    return ObjectiveEvidence(**values)
 
 
 def test_build_research_objective_id_covers_complete_scientific_intent() -> None:
@@ -740,20 +800,22 @@ def test_objective_analysis_statuses_do_not_include_objective_confirmation() -> 
 
 
 def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "contribution_summary": "Direct tensile comparison.",
-            "changed_variables": ["heat treatment"],
-            "measured_property_scope": ["strength"],
-            "confidence": 0.9,
-        }
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary="Direct tensile comparison.",
+        material_match=(),
+        changed_variables=("heat treatment",),
+        measured_property_scope=("strength",),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
     )
 
     assert contribution.key == (
@@ -766,25 +828,28 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
 
 
 def test_paper_contribution_records_auditable_evidence_disposition() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "evidence_disposition": "comparable_evidence",
-            "routed_source_count": 3,
-            "extracted_source_count": 2,
-            "comparable_evidence_count": 7,
-            "failed_source_count": 1,
-            "evidence_disposition_reason": (
-                "One selected source failed; comparable evidence survived."
-            ),
-            "confidence": 0.9,
-        }
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="comparable_evidence",
+        routed_source_count=3,
+        extracted_source_count=2,
+        comparable_evidence_count=7,
+        failed_source_count=1,
+        evidence_disposition_reason="One selected source failed; comparable evidence survived.",
     )
 
     assert contribution.evidence_disposition == "comparable_evidence"
@@ -792,36 +857,127 @@ def test_paper_contribution_records_auditable_evidence_disposition() -> None:
     assert contribution.extracted_source_count == 2
     assert contribution.comparable_evidence_count == 7
     assert contribution.failed_source_count == 1
-    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
+    assert (
+        PaperContribution(
+            collection_id=finding_text(contribution.to_record().get("collection_id"))
+            or "",
+            objective_id=finding_text(contribution.to_record().get("objective_id"))
+            or "",
+            analysis_version=objective_positive_int_or_none(
+                contribution.to_record().get("analysis_version")
+            )
+            or 0,
+            document_id=finding_text(contribution.to_record().get("document_id")) or "",
+            analysis_status=finding_choice(
+                contribution.to_record().get("analysis_status"),
+                PAPER_CONTRIBUTION_STATUSES,
+                "pending",
+            ),
+            relevance=finding_choice(
+                contribution.to_record().get("relevance"),
+                PAPER_RELEVANCE_VALUES,
+                "uncertain",
+            ),
+            paper_role=finding_choice(
+                contribution.to_record().get("paper_role"),
+                PAPER_ROLE_VALUES,
+                "uncertain",
+            ),
+            contribution_summary=finding_text(
+                contribution.to_record().get("contribution_summary")
+            ),
+            material_match=normalize_objective_terms(
+                contribution.to_record().get("material_match")
+            ),
+            changed_variables=normalize_objective_terms(
+                contribution.to_record().get("changed_variables")
+            ),
+            measured_property_scope=normalize_objective_terms(
+                contribution.to_record().get("measured_property_scope")
+            ),
+            test_environment_scope=normalize_objective_terms(
+                contribution.to_record().get("test_environment_scope")
+            ),
+            exclusion_reason=finding_text(
+                contribution.to_record().get("exclusion_reason")
+            ),
+            warnings=normalize_objective_terms(
+                contribution.to_record().get("warnings")
+            ),
+            confidence=normalize_objective_confidence(
+                contribution.to_record().get("confidence")
+            ),
+            evidence_disposition=finding_text(
+                contribution.to_record().get("evidence_disposition")
+            ),
+            routed_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("routed_source_count")
+            ),
+            extracted_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("extracted_source_count")
+            ),
+            comparable_evidence_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("comparable_evidence_count")
+            ),
+            failed_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("failed_source_count")
+            ),
+            uninspected_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("uninspected_source_count")
+            ),
+            evidence_disposition_reason=finding_text(
+                contribution.to_record().get("evidence_disposition_reason")
+            ),
+            evidence_status_counts=_evidence_status_counts(
+                contribution.to_record().get("evidence_status_counts")
+            ),
+            inspected_source_refs=tuple(
+                (
+                    InspectedObjectiveSourceRef(
+                        source_kind=finding_text(source.get("source_kind")) or "",
+                        source_ref=finding_text(source.get("source_ref")) or "",
+                        source_digest=finding_text(source.get("source_digest")),
+                    )
+                    for source in contribution.to_record().get("inspected_source_refs")
+                    or ()
+                    if isinstance(source, Mapping)
+                )
+            ),
+        )
+        == contribution
+    )
 
 
 def test_paper_contribution_preserves_inspected_source_lineage_without_evidence() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "evidence_disposition": "no_grounded_evidence",
-            "routed_source_count": 1,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 0,
-            "evidence_disposition_reason": (
-                "The inspected Results Source contains no target outcome."
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="no_grounded_evidence",
+        routed_source_count=1,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=0,
+        evidence_disposition_reason="The inspected Results Source contains no target outcome.",
+        inspected_source_refs=(
+            InspectedObjectiveSourceRef(
+                source_kind="text_window",
+                source_ref="block-results",
+                source_digest=finding_text("a" * 64),
             ),
-            "inspected_source_refs": [
-                {
-                    "source_kind": "text_window",
-                    "source_ref": "block-results",
-                    "source_digest": "a" * 64,
-                }
-            ],
-            "confidence": 0.9,
-        }
+        ),
     )
 
     assert contribution.inspected_source_refs[0].source_ref == "block-results"
@@ -832,7 +988,95 @@ def test_paper_contribution_preserves_inspected_source_lineage_without_evidence(
             "source_digest": "a" * 64,
         }
     ]
-    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
+    assert (
+        PaperContribution(
+            collection_id=finding_text(contribution.to_record().get("collection_id"))
+            or "",
+            objective_id=finding_text(contribution.to_record().get("objective_id"))
+            or "",
+            analysis_version=objective_positive_int_or_none(
+                contribution.to_record().get("analysis_version")
+            )
+            or 0,
+            document_id=finding_text(contribution.to_record().get("document_id")) or "",
+            analysis_status=finding_choice(
+                contribution.to_record().get("analysis_status"),
+                PAPER_CONTRIBUTION_STATUSES,
+                "pending",
+            ),
+            relevance=finding_choice(
+                contribution.to_record().get("relevance"),
+                PAPER_RELEVANCE_VALUES,
+                "uncertain",
+            ),
+            paper_role=finding_choice(
+                contribution.to_record().get("paper_role"),
+                PAPER_ROLE_VALUES,
+                "uncertain",
+            ),
+            contribution_summary=finding_text(
+                contribution.to_record().get("contribution_summary")
+            ),
+            material_match=normalize_objective_terms(
+                contribution.to_record().get("material_match")
+            ),
+            changed_variables=normalize_objective_terms(
+                contribution.to_record().get("changed_variables")
+            ),
+            measured_property_scope=normalize_objective_terms(
+                contribution.to_record().get("measured_property_scope")
+            ),
+            test_environment_scope=normalize_objective_terms(
+                contribution.to_record().get("test_environment_scope")
+            ),
+            exclusion_reason=finding_text(
+                contribution.to_record().get("exclusion_reason")
+            ),
+            warnings=normalize_objective_terms(
+                contribution.to_record().get("warnings")
+            ),
+            confidence=normalize_objective_confidence(
+                contribution.to_record().get("confidence")
+            ),
+            evidence_disposition=finding_text(
+                contribution.to_record().get("evidence_disposition")
+            ),
+            routed_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("routed_source_count")
+            ),
+            extracted_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("extracted_source_count")
+            ),
+            comparable_evidence_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("comparable_evidence_count")
+            ),
+            failed_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("failed_source_count")
+            ),
+            uninspected_source_count=objective_non_negative_int_or_none(
+                contribution.to_record().get("uninspected_source_count")
+            ),
+            evidence_disposition_reason=finding_text(
+                contribution.to_record().get("evidence_disposition_reason")
+            ),
+            evidence_status_counts=_evidence_status_counts(
+                contribution.to_record().get("evidence_status_counts")
+            ),
+            inspected_source_refs=tuple(
+                (
+                    InspectedObjectiveSourceRef(
+                        source_kind=finding_text(source.get("source_kind")) or "",
+                        source_ref=finding_text(source.get("source_ref")) or "",
+                        source_digest=finding_text(source.get("source_digest")),
+                    )
+                    for source in contribution.to_record().get("inspected_source_refs")
+                    or ()
+                    if isinstance(source, Mapping)
+                )
+            ),
+        )
+        == contribution
+    )
 
 
 def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
@@ -848,36 +1092,151 @@ def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting(
     }
 
     with pytest.raises(ValueError, match="all present or all absent"):
-        PaperContribution.from_mapping(
-            {
-                **base,
-                "evidence_disposition": "no_routable_evidence",
-                "routed_source_count": 0,
-            }
+        PaperContribution(
+            collection_id=finding_text(base.get("collection_id", None)) or "",
+            objective_id=finding_text(base.get("objective_id", None)) or "",
+            analysis_version=objective_positive_int_or_none(
+                base.get("analysis_version", None)
+            )
+            or 0,
+            document_id=finding_text(base.get("document_id", None)) or "",
+            analysis_status=finding_choice(
+                base.get("analysis_status", None),
+                PAPER_CONTRIBUTION_STATUSES,
+                "pending",
+            ),
+            relevance=finding_choice(
+                base.get("relevance", None), PAPER_RELEVANCE_VALUES, "uncertain"
+            ),
+            paper_role=finding_choice(
+                base.get("paper_role", None), PAPER_ROLE_VALUES, "uncertain"
+            ),
+            contribution_summary=finding_text(base.get("contribution_summary", None)),
+            material_match=normalize_objective_terms(base.get("material_match", None)),
+            changed_variables=normalize_objective_terms(
+                base.get("changed_variables", None)
+            ),
+            measured_property_scope=normalize_objective_terms(
+                base.get("measured_property_scope", None)
+            ),
+            test_environment_scope=normalize_objective_terms(
+                base.get("test_environment_scope", None)
+            ),
+            exclusion_reason=finding_text(base.get("exclusion_reason", None)),
+            warnings=normalize_objective_terms(base.get("warnings", None)),
+            confidence=normalize_objective_confidence(base.get("confidence", None)),
+            evidence_disposition="no_routable_evidence",
+            routed_source_count=0,
+            extracted_source_count=objective_non_negative_int_or_none(
+                base.get("extracted_source_count", None)
+            ),
+            comparable_evidence_count=objective_non_negative_int_or_none(
+                base.get("comparable_evidence_count", None)
+            ),
+            failed_source_count=objective_non_negative_int_or_none(
+                base.get("failed_source_count", None)
+            ),
+            uninspected_source_count=objective_non_negative_int_or_none(
+                base.get("uninspected_source_count", None)
+            ),
+            evidence_disposition_reason=finding_text(
+                base.get("evidence_disposition_reason", None)
+            ),
+            evidence_status_counts=_evidence_status_counts(
+                base.get("evidence_status_counts", None)
+            ),
+            inspected_source_refs=tuple(
+                (
+                    InspectedObjectiveSourceRef(
+                        source_kind=finding_text(source.get("source_kind")) or "",
+                        source_ref=finding_text(source.get("source_ref")) or "",
+                        source_digest=finding_text(source.get("source_digest")),
+                    )
+                    for source in base.get("inspected_source_refs", None) or ()
+                    if isinstance(source, Mapping)
+                )
+            ),
         )
     with pytest.raises(ValueError, match="requires comparable Evidence"):
-        PaperContribution.from_mapping(
-            {
-                **base,
-                "evidence_disposition": "comparable_evidence",
-                "routed_source_count": 1,
-                "extracted_source_count": 1,
-                "comparable_evidence_count": 0,
-                "failed_source_count": 0,
-            }
+        PaperContribution(
+            collection_id=finding_text(base.get("collection_id", None)) or "",
+            objective_id=finding_text(base.get("objective_id", None)) or "",
+            analysis_version=objective_positive_int_or_none(
+                base.get("analysis_version", None)
+            )
+            or 0,
+            document_id=finding_text(base.get("document_id", None)) or "",
+            analysis_status=finding_choice(
+                base.get("analysis_status", None),
+                PAPER_CONTRIBUTION_STATUSES,
+                "pending",
+            ),
+            relevance=finding_choice(
+                base.get("relevance", None), PAPER_RELEVANCE_VALUES, "uncertain"
+            ),
+            paper_role=finding_choice(
+                base.get("paper_role", None), PAPER_ROLE_VALUES, "uncertain"
+            ),
+            contribution_summary=finding_text(base.get("contribution_summary", None)),
+            material_match=normalize_objective_terms(base.get("material_match", None)),
+            changed_variables=normalize_objective_terms(
+                base.get("changed_variables", None)
+            ),
+            measured_property_scope=normalize_objective_terms(
+                base.get("measured_property_scope", None)
+            ),
+            test_environment_scope=normalize_objective_terms(
+                base.get("test_environment_scope", None)
+            ),
+            exclusion_reason=finding_text(base.get("exclusion_reason", None)),
+            warnings=normalize_objective_terms(base.get("warnings", None)),
+            confidence=normalize_objective_confidence(base.get("confidence", None)),
+            evidence_disposition="comparable_evidence",
+            routed_source_count=1,
+            extracted_source_count=1,
+            comparable_evidence_count=0,
+            failed_source_count=0,
+            uninspected_source_count=objective_non_negative_int_or_none(
+                base.get("uninspected_source_count", None)
+            ),
+            evidence_disposition_reason=finding_text(
+                base.get("evidence_disposition_reason", None)
+            ),
+            evidence_status_counts=_evidence_status_counts(
+                base.get("evidence_status_counts", None)
+            ),
+            inspected_source_refs=tuple(
+                (
+                    InspectedObjectiveSourceRef(
+                        source_kind=finding_text(source.get("source_kind")) or "",
+                        source_ref=finding_text(source.get("source_ref")) or "",
+                        source_digest=finding_text(source.get("source_digest")),
+                    )
+                    for source in base.get("inspected_source_refs", None) or ()
+                    if isinstance(source, Mapping)
+                )
+            ),
         )
 
 
 def test_excluded_paper_contribution_requires_reason() -> None:
     with pytest.raises(ValueError, match="requires a reason"):
-        PaperContribution.from_mapping(
-            {
-                "collection_id": "collection-1",
-                "objective_id": "objective-1",
-                "analysis_version": 1,
-                "document_id": "paper-1",
-                "analysis_status": "excluded",
-            }
+        PaperContribution(
+            collection_id="collection-1",
+            objective_id="objective-1",
+            analysis_version=1,
+            document_id="paper-1",
+            analysis_status="excluded",
+            relevance="uncertain",
+            paper_role="uncertain",
+            contribution_summary=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            exclusion_reason=None,
+            warnings=(),
+            confidence=0.0,
         )
 
 
@@ -890,9 +1249,6 @@ def test_extraction_transition_does_not_serialize_existing_evidence(monkeypatch)
         unit="MPa",
         direction="unknown",
         result_text="The heat-treated sample reached 610 MPa.",
-        baseline_value=None,
-        target_value=None,
-        result_kind="observed",
     )
 
     def reject_serialization(_self):
@@ -926,7 +1282,6 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
             target_label="heat-treated",
             axis_names=("heat treatment",),
             comparable=True,
-            incomparability_reasons=(),
         ),
         reported_result=ScientificResult(
             outcome="yield strength",
@@ -934,32 +1289,11 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
             unit="MPa",
             direction="increase",
             result_text="The heat-treated sample reached 610 MPa.",
-            baseline_value=None,
-            target_value=None,
-            result_kind="observed",
         ),
         attribution_scope="isolated_effect",
         scientific_context=ScientificContext(
-            material=(
-                ScientificAttribute(
-                    name="alloy",
-                    value="316L",
-                    unit=None,
-                    context_scope="unknown",
-                    applies_to_outcomes=(),
-                ),
-            ),
-            sample=(),
-            process=(),
-            test=(
-                ScientificAttribute(
-                    name="method",
-                    value="tensile test",
-                    unit=None,
-                    context_scope="unknown",
-                    applies_to_outcomes=(),
-                ),
-            ),
+            material=(ScientificAttribute(name="alloy", value="316L"),),
+            test=(ScientificAttribute(name="method", value="tensile test"),),
         ),
     )
 
@@ -977,44 +1311,931 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
 
 
 def test_objective_evidence_ignores_legacy_anchor_ids() -> None:
-    evidence = _candidate_evidence(anchor_ids=["legacy-anchor-1"])
+    evidence = _candidate_evidence()
 
     assert "anchor_ids" not in evidence.to_record()
 
 
 def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage() -> None:
     legacy = _candidate_evidence()
-    explicit_empty = _candidate_evidence(related_source_refs=[])
+    explicit_empty = _candidate_evidence(related_source_refs=())
 
     assert legacy.related_source_refs == ()
     assert "related_source_refs" not in legacy.to_record()
-    assert ObjectiveEvidence.from_mapping(
-        legacy.to_record()
-    ).related_source_refs_explicit is False
+    assert (
+        ObjectiveEvidence(
+            collection_id=finding_text(legacy.to_record().get("collection_id")) or "",
+            objective_id=finding_text(legacy.to_record().get("objective_id")) or "",
+            analysis_version=objective_positive_int_or_none(
+                legacy.to_record().get("analysis_version")
+            )
+            or 0,
+            evidence_id=finding_text(legacy.to_record().get("evidence_id"))
+            or objective_scoped_id(
+                "oev",
+                finding_text(legacy.to_record().get("collection_id")) or "",
+                finding_text(legacy.to_record().get("objective_id")) or "",
+                objective_positive_int_or_none(
+                    legacy.to_record().get("analysis_version")
+                )
+                or 0,
+                finding_text(legacy.to_record().get("document_id")) or "",
+                finding_choice(
+                    legacy.to_record().get("source_kind"),
+                    SOURCE_KIND_VALUES,
+                    "text_window",
+                ),
+                finding_text(legacy.to_record().get("source_ref")) or "",
+                finding_choice(
+                    legacy.to_record().get("evidence_role"),
+                    EVIDENCE_ROLE_VALUES,
+                    "irrelevant",
+                ),
+                legacy.to_record().get("semantic_slot")
+                or (
+                    (
+                        ScientificResult(
+                            outcome=scientific_text(
+                                legacy.to_record().get("reported_result").get("outcome")
+                            )
+                            or "",
+                            value=scientific_scalar(
+                                legacy.to_record().get("reported_result").get("value")
+                            ),
+                            unit=scientific_text(
+                                legacy.to_record().get("reported_result").get("unit")
+                            ),
+                            direction=scientific_choice(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("direction"),
+                                SCIENTIFIC_RESULT_DIRECTIONS,
+                                "unknown",
+                            ),
+                            result_text=scientific_text(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("result_text")
+                            )
+                            or "",
+                            baseline_value=scientific_scalar(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("baseline_value")
+                            ),
+                            target_value=scientific_scalar(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("target_value")
+                            ),
+                            result_kind=scientific_choice(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("result_kind"),
+                                SCIENTIFIC_RESULT_KINDS,
+                                "observed",
+                            ),
+                        )
+                        if isinstance(
+                            legacy.to_record().get("reported_result"), Mapping
+                        )
+                        else None
+                    ).outcome
+                    if (
+                        ScientificResult(
+                            outcome=scientific_text(
+                                legacy.to_record().get("reported_result").get("outcome")
+                            )
+                            or "",
+                            value=scientific_scalar(
+                                legacy.to_record().get("reported_result").get("value")
+                            ),
+                            unit=scientific_text(
+                                legacy.to_record().get("reported_result").get("unit")
+                            ),
+                            direction=scientific_choice(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("direction"),
+                                SCIENTIFIC_RESULT_DIRECTIONS,
+                                "unknown",
+                            ),
+                            result_text=scientific_text(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("result_text")
+                            )
+                            or "",
+                            baseline_value=scientific_scalar(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("baseline_value")
+                            ),
+                            target_value=scientific_scalar(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("target_value")
+                            ),
+                            result_kind=scientific_choice(
+                                legacy.to_record()
+                                .get("reported_result")
+                                .get("result_kind"),
+                                SCIENTIFIC_RESULT_KINDS,
+                                "observed",
+                            ),
+                        )
+                        if isinstance(
+                            legacy.to_record().get("reported_result"), Mapping
+                        )
+                        else None
+                    )
+                    is not None
+                    else None
+                ),
+            ),
+            document_id=finding_text(legacy.to_record().get("document_id")) or "",
+            source_kind=finding_choice(
+                legacy.to_record().get("source_kind"), SOURCE_KIND_VALUES, "text_window"
+            ),
+            source_ref=finding_text(legacy.to_record().get("source_ref")) or "",
+            source_excerpt=finding_text(legacy.to_record().get("source_excerpt")) or "",
+            page_numbers=objective_positive_ints(
+                legacy.to_record().get("page_numbers")
+            ),
+            related_source_refs=tuple(
+                (
+                    dict(item)
+                    for item in (
+                        legacy.to_record().get("related_source_refs")
+                        if isinstance(
+                            legacy.to_record().get("related_source_refs"), (list, tuple)
+                        )
+                        else ()
+                    )
+                    if isinstance(item, Mapping)
+                )
+            ),
+            evidence_role=finding_choice(
+                legacy.to_record().get("evidence_role"),
+                EVIDENCE_ROLE_VALUES,
+                "irrelevant",
+            ),
+            selection_status=finding_choice(
+                legacy.to_record().get("selection_status"),
+                OBJECTIVE_EVIDENCE_STATES,
+                "candidate",
+            ),
+            selection_reason=finding_text(legacy.to_record().get("selection_reason")),
+            changed_variables=tuple(
+                (
+                    ScientificVariable(
+                        name=scientific_text(item.get("name")) or "",
+                        baseline_value=scientific_scalar(item.get("baseline_value")),
+                        target_value=scientific_scalar(item.get("target_value")),
+                        unit=scientific_text(item.get("unit")),
+                    )
+                    for item in (
+                        legacy.to_record().get("changed_variables")
+                        if isinstance(
+                            legacy.to_record().get("changed_variables"), (list, tuple)
+                        )
+                        else ()
+                    )
+                    if isinstance(item, Mapping)
+                )
+            ),
+            comparison=(
+                ScientificComparison(
+                    baseline_label=scientific_text(
+                        legacy.to_record()["comparison"].get("baseline_label")
+                    )
+                    or "",
+                    target_label=scientific_text(
+                        legacy.to_record()["comparison"].get("target_label")
+                    )
+                    or "",
+                    axis_names=scientific_terms(
+                        legacy.to_record()["comparison"].get("axis_names")
+                    ),
+                    comparable=legacy.to_record()["comparison"].get("comparable")
+                    is True,
+                    incomparability_reasons=scientific_terms(
+                        legacy.to_record()["comparison"].get("incomparability_reasons")
+                    ),
+                )
+                if isinstance(legacy.to_record().get("comparison"), Mapping)
+                else None
+            ),
+            reported_result=(
+                ScientificResult(
+                    outcome=scientific_text(
+                        legacy.to_record().get("reported_result").get("outcome")
+                    )
+                    or "",
+                    value=scientific_scalar(
+                        legacy.to_record().get("reported_result").get("value")
+                    ),
+                    unit=scientific_text(
+                        legacy.to_record().get("reported_result").get("unit")
+                    ),
+                    direction=scientific_choice(
+                        legacy.to_record().get("reported_result").get("direction"),
+                        SCIENTIFIC_RESULT_DIRECTIONS,
+                        "unknown",
+                    ),
+                    result_text=scientific_text(
+                        legacy.to_record().get("reported_result").get("result_text")
+                    )
+                    or "",
+                    baseline_value=scientific_scalar(
+                        legacy.to_record().get("reported_result").get("baseline_value")
+                    ),
+                    target_value=scientific_scalar(
+                        legacy.to_record().get("reported_result").get("target_value")
+                    ),
+                    result_kind=scientific_choice(
+                        legacy.to_record().get("reported_result").get("result_kind"),
+                        SCIENTIFIC_RESULT_KINDS,
+                        "observed",
+                    ),
+                )
+                if isinstance(legacy.to_record().get("reported_result"), Mapping)
+                else None
+            ),
+            attribution_scope=finding_choice(
+                legacy.to_record().get("attribution_scope"),
+                EVIDENCE_ATTRIBUTION_SCOPES,
+                "not_attributable",
+            ),
+            scientific_context=(
+                ScientificContext(
+                    material=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                legacy.to_record()["scientific_context"].get("material")
+                                if isinstance(
+                                    legacy.to_record()["scientific_context"].get(
+                                        "material"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    sample=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                legacy.to_record()["scientific_context"].get("sample")
+                                if isinstance(
+                                    legacy.to_record()["scientific_context"].get(
+                                        "sample"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    process=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                legacy.to_record()["scientific_context"].get("process")
+                                if isinstance(
+                                    legacy.to_record()["scientific_context"].get(
+                                        "process"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    test=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                legacy.to_record()["scientific_context"].get("test")
+                                if isinstance(
+                                    legacy.to_record()["scientific_context"].get(
+                                        "test"
+                                    ),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                )
+                if isinstance(legacy.to_record().get("scientific_context"), Mapping)
+                else ScientificContext()
+            ),
+            resolution_status=finding_choice(
+                legacy.to_record().get("resolution_status"),
+                EVIDENCE_RESOLUTION_STATUS_VALUES,
+                "unknown",
+            ),
+            failure_reason=finding_text(legacy.to_record().get("failure_reason")),
+            confidence=normalize_objective_confidence(
+                legacy.to_record().get("confidence")
+            ),
+            related_source_refs_explicit="related_source_refs" in legacy.to_record(),
+            origin=finding_choice(
+                legacy.to_record().get("origin"), EVIDENCE_ORIGINS, "system_generated"
+            ),
+            source_analysis_version=objective_positive_int_or_none(
+                legacy.to_record().get("source_analysis_version")
+            ),
+            supersedes_evidence_id=finding_text(
+                legacy.to_record().get("supersedes_evidence_id")
+            ),
+            superseded_by_evidence_id=finding_text(
+                legacy.to_record().get("superseded_by_evidence_id")
+            ),
+            created_by_user_id=finding_text(
+                legacy.to_record().get("created_by_user_id")
+            ),
+            created_by_tool_call_id=finding_text(
+                legacy.to_record().get("created_by_tool_call_id")
+            ),
+            created_at=finding_datetime_or_none(legacy.to_record().get("created_at")),
+            authoring_note=finding_text(legacy.to_record().get("authoring_note")),
+            warnings=normalize_objective_terms(legacy.to_record().get("warnings")),
+        ).related_source_refs_explicit
+        is False
+    )
     assert explicit_empty.related_source_refs == ()
     assert explicit_empty.to_record()["related_source_refs"] == []
-    assert ObjectiveEvidence.from_mapping(
-        explicit_empty.to_record()
-    ).related_source_refs_explicit is True
+    assert (
+        ObjectiveEvidence(
+            collection_id=finding_text(explicit_empty.to_record().get("collection_id"))
+            or "",
+            objective_id=finding_text(explicit_empty.to_record().get("objective_id"))
+            or "",
+            analysis_version=objective_positive_int_or_none(
+                explicit_empty.to_record().get("analysis_version")
+            )
+            or 0,
+            evidence_id=finding_text(explicit_empty.to_record().get("evidence_id"))
+            or objective_scoped_id(
+                "oev",
+                finding_text(explicit_empty.to_record().get("collection_id")) or "",
+                finding_text(explicit_empty.to_record().get("objective_id")) or "",
+                objective_positive_int_or_none(
+                    explicit_empty.to_record().get("analysis_version")
+                )
+                or 0,
+                finding_text(explicit_empty.to_record().get("document_id")) or "",
+                finding_choice(
+                    explicit_empty.to_record().get("source_kind"),
+                    SOURCE_KIND_VALUES,
+                    "text_window",
+                ),
+                finding_text(explicit_empty.to_record().get("source_ref")) or "",
+                finding_choice(
+                    explicit_empty.to_record().get("evidence_role"),
+                    EVIDENCE_ROLE_VALUES,
+                    "irrelevant",
+                ),
+                explicit_empty.to_record().get("semantic_slot")
+                or (
+                    (
+                        ScientificResult(
+                            outcome=scientific_text(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("outcome")
+                            )
+                            or "",
+                            value=scientific_scalar(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("value")
+                            ),
+                            unit=scientific_text(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("unit")
+                            ),
+                            direction=scientific_choice(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("direction"),
+                                SCIENTIFIC_RESULT_DIRECTIONS,
+                                "unknown",
+                            ),
+                            result_text=scientific_text(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("result_text")
+                            )
+                            or "",
+                            baseline_value=scientific_scalar(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("baseline_value")
+                            ),
+                            target_value=scientific_scalar(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("target_value")
+                            ),
+                            result_kind=scientific_choice(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("result_kind"),
+                                SCIENTIFIC_RESULT_KINDS,
+                                "observed",
+                            ),
+                        )
+                        if isinstance(
+                            explicit_empty.to_record().get("reported_result"), Mapping
+                        )
+                        else None
+                    ).outcome
+                    if (
+                        ScientificResult(
+                            outcome=scientific_text(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("outcome")
+                            )
+                            or "",
+                            value=scientific_scalar(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("value")
+                            ),
+                            unit=scientific_text(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("unit")
+                            ),
+                            direction=scientific_choice(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("direction"),
+                                SCIENTIFIC_RESULT_DIRECTIONS,
+                                "unknown",
+                            ),
+                            result_text=scientific_text(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("result_text")
+                            )
+                            or "",
+                            baseline_value=scientific_scalar(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("baseline_value")
+                            ),
+                            target_value=scientific_scalar(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("target_value")
+                            ),
+                            result_kind=scientific_choice(
+                                explicit_empty.to_record()
+                                .get("reported_result")
+                                .get("result_kind"),
+                                SCIENTIFIC_RESULT_KINDS,
+                                "observed",
+                            ),
+                        )
+                        if isinstance(
+                            explicit_empty.to_record().get("reported_result"), Mapping
+                        )
+                        else None
+                    )
+                    is not None
+                    else None
+                ),
+            ),
+            document_id=finding_text(explicit_empty.to_record().get("document_id"))
+            or "",
+            source_kind=finding_choice(
+                explicit_empty.to_record().get("source_kind"),
+                SOURCE_KIND_VALUES,
+                "text_window",
+            ),
+            source_ref=finding_text(explicit_empty.to_record().get("source_ref")) or "",
+            source_excerpt=finding_text(
+                explicit_empty.to_record().get("source_excerpt")
+            )
+            or "",
+            page_numbers=objective_positive_ints(
+                explicit_empty.to_record().get("page_numbers")
+            ),
+            related_source_refs=tuple(
+                (
+                    dict(item)
+                    for item in (
+                        explicit_empty.to_record().get("related_source_refs")
+                        if isinstance(
+                            explicit_empty.to_record().get("related_source_refs"),
+                            (list, tuple),
+                        )
+                        else ()
+                    )
+                    if isinstance(item, Mapping)
+                )
+            ),
+            evidence_role=finding_choice(
+                explicit_empty.to_record().get("evidence_role"),
+                EVIDENCE_ROLE_VALUES,
+                "irrelevant",
+            ),
+            selection_status=finding_choice(
+                explicit_empty.to_record().get("selection_status"),
+                OBJECTIVE_EVIDENCE_STATES,
+                "candidate",
+            ),
+            selection_reason=finding_text(
+                explicit_empty.to_record().get("selection_reason")
+            ),
+            changed_variables=tuple(
+                (
+                    ScientificVariable(
+                        name=scientific_text(item.get("name")) or "",
+                        baseline_value=scientific_scalar(item.get("baseline_value")),
+                        target_value=scientific_scalar(item.get("target_value")),
+                        unit=scientific_text(item.get("unit")),
+                    )
+                    for item in (
+                        explicit_empty.to_record().get("changed_variables")
+                        if isinstance(
+                            explicit_empty.to_record().get("changed_variables"),
+                            (list, tuple),
+                        )
+                        else ()
+                    )
+                    if isinstance(item, Mapping)
+                )
+            ),
+            comparison=(
+                ScientificComparison(
+                    baseline_label=scientific_text(
+                        explicit_empty.to_record()["comparison"].get("baseline_label")
+                    )
+                    or "",
+                    target_label=scientific_text(
+                        explicit_empty.to_record()["comparison"].get("target_label")
+                    )
+                    or "",
+                    axis_names=scientific_terms(
+                        explicit_empty.to_record()["comparison"].get("axis_names")
+                    ),
+                    comparable=explicit_empty.to_record()["comparison"].get(
+                        "comparable"
+                    )
+                    is True,
+                    incomparability_reasons=scientific_terms(
+                        explicit_empty.to_record()["comparison"].get(
+                            "incomparability_reasons"
+                        )
+                    ),
+                )
+                if isinstance(explicit_empty.to_record().get("comparison"), Mapping)
+                else None
+            ),
+            reported_result=(
+                ScientificResult(
+                    outcome=scientific_text(
+                        explicit_empty.to_record().get("reported_result").get("outcome")
+                    )
+                    or "",
+                    value=scientific_scalar(
+                        explicit_empty.to_record().get("reported_result").get("value")
+                    ),
+                    unit=scientific_text(
+                        explicit_empty.to_record().get("reported_result").get("unit")
+                    ),
+                    direction=scientific_choice(
+                        explicit_empty.to_record()
+                        .get("reported_result")
+                        .get("direction"),
+                        SCIENTIFIC_RESULT_DIRECTIONS,
+                        "unknown",
+                    ),
+                    result_text=scientific_text(
+                        explicit_empty.to_record()
+                        .get("reported_result")
+                        .get("result_text")
+                    )
+                    or "",
+                    baseline_value=scientific_scalar(
+                        explicit_empty.to_record()
+                        .get("reported_result")
+                        .get("baseline_value")
+                    ),
+                    target_value=scientific_scalar(
+                        explicit_empty.to_record()
+                        .get("reported_result")
+                        .get("target_value")
+                    ),
+                    result_kind=scientific_choice(
+                        explicit_empty.to_record()
+                        .get("reported_result")
+                        .get("result_kind"),
+                        SCIENTIFIC_RESULT_KINDS,
+                        "observed",
+                    ),
+                )
+                if isinstance(
+                    explicit_empty.to_record().get("reported_result"), Mapping
+                )
+                else None
+            ),
+            attribution_scope=finding_choice(
+                explicit_empty.to_record().get("attribution_scope"),
+                EVIDENCE_ATTRIBUTION_SCOPES,
+                "not_attributable",
+            ),
+            scientific_context=(
+                ScientificContext(
+                    material=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                explicit_empty.to_record()["scientific_context"].get(
+                                    "material"
+                                )
+                                if isinstance(
+                                    explicit_empty.to_record()[
+                                        "scientific_context"
+                                    ].get("material"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    sample=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                explicit_empty.to_record()["scientific_context"].get(
+                                    "sample"
+                                )
+                                if isinstance(
+                                    explicit_empty.to_record()[
+                                        "scientific_context"
+                                    ].get("sample"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    process=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                explicit_empty.to_record()["scientific_context"].get(
+                                    "process"
+                                )
+                                if isinstance(
+                                    explicit_empty.to_record()[
+                                        "scientific_context"
+                                    ].get("process"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                    test=tuple(
+                        (
+                            ScientificAttribute(
+                                name=scientific_text(attribute.get("name")) or "",
+                                value=(
+                                    scientific_scalar(attribute.get("value"))
+                                    if scientific_scalar(attribute.get("value"))
+                                    is not None
+                                    else ""
+                                ),
+                                unit=scientific_text(attribute.get("unit")),
+                                context_scope=scientific_choice(
+                                    attribute.get("context_scope"),
+                                    SCIENTIFIC_CONTEXT_SCOPES,
+                                    "unknown",
+                                ),
+                                applies_to_outcomes=scientific_terms(
+                                    attribute.get("applies_to_outcomes")
+                                ),
+                            )
+                            for attribute in (
+                                explicit_empty.to_record()["scientific_context"].get(
+                                    "test"
+                                )
+                                if isinstance(
+                                    explicit_empty.to_record()[
+                                        "scientific_context"
+                                    ].get("test"),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(attribute, Mapping)
+                        )
+                    ),
+                )
+                if isinstance(
+                    explicit_empty.to_record().get("scientific_context"), Mapping
+                )
+                else ScientificContext()
+            ),
+            resolution_status=finding_choice(
+                explicit_empty.to_record().get("resolution_status"),
+                EVIDENCE_RESOLUTION_STATUS_VALUES,
+                "unknown",
+            ),
+            failure_reason=finding_text(
+                explicit_empty.to_record().get("failure_reason")
+            ),
+            confidence=normalize_objective_confidence(
+                explicit_empty.to_record().get("confidence")
+            ),
+            related_source_refs_explicit="related_source_refs"
+            in explicit_empty.to_record(),
+            origin=finding_choice(
+                explicit_empty.to_record().get("origin"),
+                EVIDENCE_ORIGINS,
+                "system_generated",
+            ),
+            source_analysis_version=objective_positive_int_or_none(
+                explicit_empty.to_record().get("source_analysis_version")
+            ),
+            supersedes_evidence_id=finding_text(
+                explicit_empty.to_record().get("supersedes_evidence_id")
+            ),
+            superseded_by_evidence_id=finding_text(
+                explicit_empty.to_record().get("superseded_by_evidence_id")
+            ),
+            created_by_user_id=finding_text(
+                explicit_empty.to_record().get("created_by_user_id")
+            ),
+            created_by_tool_call_id=finding_text(
+                explicit_empty.to_record().get("created_by_tool_call_id")
+            ),
+            created_at=finding_datetime_or_none(
+                explicit_empty.to_record().get("created_at")
+            ),
+            authoring_note=finding_text(
+                explicit_empty.to_record().get("authoring_note")
+            ),
+            warnings=normalize_objective_terms(
+                explicit_empty.to_record().get("warnings")
+            ),
+        ).related_source_refs_explicit
+        is True
+    )
 
 
 def test_association_evidence_allows_variable_without_comparison_endpoints() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {
-                "name": "laser exposure condition",
-                "baseline_value": None,
-                "target_value": None,
-            }
-        ],
-        reported_result={
-            "outcome": "residual stress",
-            "value": None,
-            "unit": None,
-            "direction": "decrease",
-            "result_text": "Scanning strategy was associated with lower residual stress.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="laser exposure condition", baseline_value=None, target_value=None
+            ),
+        ),
+        reported_result=ScientificResult(
+            outcome="residual stress",
+            value=None,
+            unit=None,
+            direction="decrease",
+            result_text="Scanning strategy was associated with lower residual stress.",
+        ),
         attribution_scope="association_only",
         resolution_status="partial",
     )
@@ -1027,83 +2248,87 @@ def test_association_evidence_allows_variable_without_comparison_endpoints() -> 
 def test_objective_evidence_exposes_research_state_without_promoting_incomplete_facts() -> None:
     comparable = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {
-                "name": "heat treatment",
-                "baseline_value": "as-built",
-                "target_value": "annealed",
-            }
-        ],
-        comparison={
-            "baseline_label": "as-built",
-            "target_label": "annealed",
-            "axis_names": ["heat treatment"],
-            "comparable": True,
-        },
-        reported_result={
-            "outcome": "yield strength",
-            "value": 610,
-            "unit": "MPa",
-            "direction": "increase",
-            "result_text": "Yield strength increased to 610 MPa.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="heat treatment",
+                baseline_value="as-built",
+                target_value="annealed",
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="annealed",
+            axis_names=("heat treatment",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="yield strength",
+            value=610,
+            unit="MPa",
+            direction="increase",
+            result_text="Yield strength increased to 610 MPa.",
+        ),
         attribution_scope="isolated_effect",
         resolution_status="resolved",
     )
     association = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[{"name": "laser power"}],
-        reported_result={
-            "outcome": "porosity",
-            "value": None,
-            "unit": None,
-            "direction": "decrease",
-            "result_text": "Higher laser power was associated with lower porosity.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="laser power", baseline_value=None, target_value=None
+            ),
+        ),
+        reported_result=ScientificResult(
+            outcome="porosity",
+            value=None,
+            unit=None,
+            direction="decrease",
+            result_text="Higher laser power was associated with lower porosity.",
+        ),
         attribution_scope="association_only",
         resolution_status="partial",
     )
     descriptive = _candidate_evidence(
         selection_status="extracted",
-        reported_result={
-            "outcome": "microstructure",
-            "value": None,
-            "unit": None,
-            "direction": "mixed",
-            "result_text": "The sample showed a cellular microstructure.",
-        },
+        reported_result=ScientificResult(
+            outcome="microstructure",
+            value=None,
+            unit=None,
+            direction="mixed",
+            result_text="The sample showed a cellular microstructure.",
+        ),
         attribution_scope="descriptive_only",
         resolution_status="partial",
     )
     needs_context = _candidate_evidence(
         selection_status="candidate",
-        reported_result={
-            "outcome": "microstructure",
-            "value": None,
-            "unit": None,
-            "direction": "mixed",
-            "result_text": "The sample showed a cellular microstructure.",
-        },
+        reported_result=ScientificResult(
+            outcome="microstructure",
+            value=None,
+            unit=None,
+            direction="mixed",
+            result_text="The sample showed a cellular microstructure.",
+        ),
         attribution_scope="descriptive_only",
         resolution_status="unresolved",
         selection_reason="The sample and test bindings remain unresolved.",
     )
     incomparable = _candidate_evidence(
         selection_status="extracted",
-        comparison={
-            "baseline_label": "as-built",
-            "target_label": "heat-treated",
-            "axis_names": ["heat treatment"],
-            "comparable": False,
-            "incomparability_reasons": ["Different test methods."],
-        },
-        reported_result={
-            "outcome": "yield strength",
-            "value": 610,
-            "unit": "MPa",
-            "direction": "increase",
-            "result_text": "Yield strength increased.",
-        },
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="heat-treated",
+            axis_names=("heat treatment",),
+            comparable=False,
+            incomparability_reasons=("Different test methods.",),
+        ),
+        reported_result=ScientificResult(
+            outcome="yield strength",
+            value=610,
+            unit="MPa",
+            direction="increase",
+            result_text="Yield strength increased.",
+        ),
         attribution_scope="not_attributable",
         resolution_status="partial",
     )
@@ -1123,28 +2348,28 @@ def test_objective_evidence_exposes_research_state_without_promoting_incomplete_
 def test_objective_evidence_result_preserves_categorical_transition() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {
-                "name": "heat treatment",
-                "baseline_value": "as-built",
-                "target_value": "annealed",
-            }
-        ],
-        comparison={
-            "baseline_label": "as-built",
-            "target_label": "annealed",
-            "axis_names": ["heat treatment"],
-            "comparable": True,
-        },
-        reported_result={
-            "outcome": "phase composition",
-            "value": "alpha+beta",
-            "baseline_value": "alpha-prime",
-            "target_value": "alpha+beta",
-            "unit": None,
-            "direction": "changed",
-            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="heat treatment",
+                baseline_value="as-built",
+                target_value="annealed",
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="as-built",
+            target_label="annealed",
+            axis_names=("heat treatment",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="phase composition",
+            value="alpha+beta",
+            unit=None,
+            direction="changed",
+            result_text="Phase composition changed from alpha-prime to alpha+beta.",
+            baseline_value="alpha-prime",
+            target_value="alpha+beta",
+        ),
         attribution_scope="isolated_effect",
         resolution_status="resolved",
     )
@@ -1171,18 +2396,7 @@ def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
     ).select(evidence_role="condition_context")
     extracted = evidence.mark_extracted(
         scientific_context=ScientificContext(
-            material=(),
-            sample=(),
-            process=(),
-            test=(
-                ScientificAttribute(
-                    name="temperature",
-                    value=25,
-                    unit="C",
-                    context_scope="unknown",
-                    applies_to_outcomes=(),
-                ),
-            ),
+            test=(ScientificAttribute(name="temperature", value=25, unit="C"),)
         )
     )
 
@@ -1196,18 +2410,7 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
     with pytest.raises(ValueError, match="rejected -> extracted"):
         rejected.mark_extracted(
             scientific_context=ScientificContext(
-                material=(),
-                sample=(),
-                process=(
-                    ScientificAttribute(
-                        name="state",
-                        value="invalid",
-                        unit=None,
-                        context_scope="unknown",
-                        applies_to_outcomes=(),
-                    ),
-                ),
-                test=(),
+                process=(ScientificAttribute(name="state", value="invalid"),)
             )
         )
     with pytest.raises(ValueError, match="identity and source"):
@@ -1217,24 +2420,33 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
 def test_objective_evidence_preserves_jointly_varied_factors() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {"name": "scan speed", "baseline_value": 750, "target_value": 1000, "unit": "mm/s"},
-            {"name": "hatch spacing", "baseline_value": 80, "target_value": 100, "unit": "um"},
-            {"name": "energy density", "baseline_value": 389, "target_value": 278, "unit": "J/mm3"},
-        ],
-        comparison={
-            "baseline_label": "condition A",
-            "target_label": "condition B",
-            "axis_names": ["scan speed", "hatch spacing", "energy density"],
-            "comparable": True,
-        },
-        reported_result={
-            "outcome": "elongation",
-            "value": 18.2,
-            "unit": "%",
-            "direction": "decrease",
-            "result_text": "Elongation was 18.2% for condition B.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="scan speed", baseline_value=750, target_value=1000, unit="mm/s"
+            ),
+            ScientificVariable(
+                name="hatch spacing", baseline_value=80, target_value=100, unit="um"
+            ),
+            ScientificVariable(
+                name="energy density",
+                baseline_value=389,
+                target_value=278,
+                unit="J/mm3",
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="condition A",
+            target_label="condition B",
+            axis_names=("scan speed", "hatch spacing", "energy density"),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="elongation",
+            value=18.2,
+            unit="%",
+            direction="decrease",
+            result_text="Elongation was 18.2% for condition B.",
+        ),
         attribution_scope="joint_effect",
         resolution_status="resolved",
     )
@@ -1251,23 +2463,27 @@ def test_objective_evidence_rejects_single_factor_attribution_for_joint_change()
     with pytest.raises(ValueError, match="isolated effect requires exactly one"):
         _candidate_evidence(
             selection_status="extracted",
-            changed_variables=[
-                {"name": "scan speed", "baseline_value": 750, "target_value": 1000},
-                {"name": "hatch spacing", "baseline_value": 80, "target_value": 100},
-            ],
-            comparison={
-                "baseline_label": "A",
-                "target_label": "B",
-                "axis_names": ["scan speed", "hatch spacing"],
-                "comparable": True,
-            },
-            reported_result={
-                "outcome": "density",
-                "value": 98.9,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Density increased to 98.9%.",
-            },
+            changed_variables=(
+                ScientificVariable(
+                    name="scan speed", baseline_value=750, target_value=1000
+                ),
+                ScientificVariable(
+                    name="hatch spacing", baseline_value=80, target_value=100
+                ),
+            ),
+            comparison=ScientificComparison(
+                baseline_label="A",
+                target_label="B",
+                axis_names=("scan speed", "hatch spacing"),
+                comparable=True,
+            ),
+            reported_result=ScientificResult(
+                outcome="density",
+                value=98.9,
+                unit="%",
+                direction="increase",
+                result_text="Density increased to 98.9%.",
+            ),
             attribution_scope="isolated_effect",
             resolution_status="resolved",
         )
@@ -1277,22 +2493,24 @@ def test_objective_evidence_rejects_effect_without_variable_change() -> None:
     with pytest.raises(ValueError, match="requires changed variable values"):
         _candidate_evidence(
             selection_status="extracted",
-            changed_variables=[
-                {"name": "laser power", "baseline_value": 200, "target_value": 200}
-            ],
-            comparison={
-                "baseline_label": "A",
-                "target_label": "B",
-                "axis_names": ["laser power"],
-                "comparable": True,
-            },
-            reported_result={
-                "outcome": "density",
-                "value": 98.9,
-                "unit": "%",
-                "direction": "no_change",
-                "result_text": "Density was 98.9% in condition B.",
-            },
+            changed_variables=(
+                ScientificVariable(
+                    name="laser power", baseline_value=200, target_value=200
+                ),
+            ),
+            comparison=ScientificComparison(
+                baseline_label="A",
+                target_label="B",
+                axis_names=("laser power",),
+                comparable=True,
+            ),
+            reported_result=ScientificResult(
+                outcome="density",
+                value=98.9,
+                unit="%",
+                direction="no_change",
+                result_text="Density was 98.9% in condition B.",
+            ),
             attribution_scope="isolated_effect",
             resolution_status="resolved",
         )
@@ -1301,23 +2519,25 @@ def test_objective_evidence_rejects_effect_without_variable_change() -> None:
 def test_objective_evidence_marks_incomparable_sample_states_unattributable() -> None:
     evidence = _candidate_evidence(
         selection_status="extracted",
-        changed_variables=[
-            {"name": "post treatment", "baseline_value": "as-SLM", "target_value": "HIP-SLM"}
-        ],
-        comparison={
-            "baseline_label": "as-SLM",
-            "target_label": "HIP-SLM",
-            "axis_names": ["post treatment"],
-            "comparable": False,
-            "incomparability_reasons": ["HIP changes porosity and residual stress state"],
-        },
-        reported_result={
-            "outcome": "fatigue life",
-            "value": None,
-            "unit": None,
-            "direction": "increase",
-            "result_text": "HIP-SLM showed longer fatigue life than as-SLM.",
-        },
+        changed_variables=(
+            ScientificVariable(
+                name="post treatment", baseline_value="as-SLM", target_value="HIP-SLM"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="as-SLM",
+            target_label="HIP-SLM",
+            axis_names=("post treatment",),
+            comparable=False,
+            incomparability_reasons=("HIP changes porosity and residual stress state",),
+        ),
+        reported_result=ScientificResult(
+            outcome="fatigue life",
+            value=None,
+            unit=None,
+            direction="increase",
+            result_text="HIP-SLM showed longer fatigue life than as-SLM.",
+        ),
         attribution_scope="not_attributable",
         resolution_status="resolved",
     )
@@ -1325,12 +2545,7 @@ def test_objective_evidence_marks_incomparable_sample_states_unattributable() ->
     assert evidence.comparison is not None
     assert evidence.comparison.comparable is False
     with pytest.raises(ValueError, match="incomparable evidence cannot be attributed"):
-        _candidate_evidence(
-            **{
-                **evidence.to_record(),
-                "attribution_scope": "isolated_effect",
-            }
-        )
+        replace(evidence, attribution_scope="isolated_effect")
 
 
 def test_normalizers_remain_stable() -> None:

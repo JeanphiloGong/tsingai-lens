@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
-
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.evaluation.finding_feedback_service import parse_curated_finding
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from domain.core import Finding
 from domain.core.scientific_fact import SCIENTIFIC_RESULT_DIRECTIONS
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from repositories.finding_review_repository import (
     finding_curation_record,
     finding_feedback_record,
@@ -98,22 +98,8 @@ class CurateFindingToolRequest(BaseModel):
                 "curated_finding.direction must be one of: "
                 + ", ".join(sorted(SCIENTIFIC_RESULT_DIRECTIONS))
             )
-        candidate = Finding.from_mapping(self.curated_finding)
+        candidate = parse_curated_finding(self.curated_finding)
         self._parsed_finding = candidate
-        if candidate.to_record() != self.curated_finding:
-            canonical = candidate.to_record()
-            missing = sorted(set(canonical) - set(self.curated_finding))
-            unexpected = sorted(set(self.curated_finding) - set(canonical))
-            details = []
-            if missing:
-                details.append("missing keys: " + ", ".join(missing[:8]))
-            if unexpected:
-                details.append("unexpected keys: " + ", ".join(unexpected[:8]))
-            details.append("preserve canonical value types and field names")
-            raise ValueError(
-                "curated_finding must use the complete canonical Finding contract; "
-                + "; ".join(details)
-            )
         if candidate.objective_id != self.objective_id:
             raise ValueError("curated Finding belongs to another Objective")
         if candidate.analysis_version != self.analysis_version:

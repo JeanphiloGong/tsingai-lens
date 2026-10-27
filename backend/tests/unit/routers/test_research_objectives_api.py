@@ -1,20 +1,7 @@
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    PaperStudyDisposition,
-    ResearchObjective,
-    _positive_int_or_none,
-    _text,
-    build_research_objective_id,
-    normalize_objective_confidence,
-    normalize_objective_terms,
-)
-
 from dataclasses import replace
 from datetime import UTC, datetime
-
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from application.core.objectives.objective_analysis_service import (
@@ -38,12 +25,40 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.research_objective import (
+    ObjectiveEvidence,
+    PaperContribution,
+    PaperStudyDisposition,
+    ResearchObjective,
+    _positive_int_or_none,
+    _text,
+    build_research_objective_id,
+    normalize_objective_confidence,
+    normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from repositories.objective_repository import (
     ObjectiveAnalysis,
     StoredObjective,
 )
 from repositories.pipeline_run_repository import (
     ExecutionStats,
+    ModelUsage,
+    TokenUsage,
 )
 
 
@@ -83,7 +98,11 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
         pipeline_version="test.v1",
         model_name="model-1",
         prompt_versions={"paper_framing": "paper_framing.v1"},
-        stats=ExecutionStats(duration_ms=None, model_usage=(), prompt_versions={}),
+        stats=ExecutionStats(
+            duration_ms=1250,
+            model_usage=(ModelUsage("model-1", 2, TokenUsage(300, 50, 350)),),
+            prompt_versions={"paper_framing": "paper_framing.v1"},
+        ),
         diagnostics=(
             {
                 "trace_type": "table_matrix_repair",
@@ -106,111 +125,106 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
 
 
 def _finding() -> Finding:
-    return Finding.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "finding_id": "finding-1",
-            "statement": "Higher temperature was associated with greater strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "insufficient_confirmation",
-            "certainty": 0.5,
-            "display_rank": 0,
-            "mechanisms": [],
-            "scientific_context": {
-                "material": [],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "limitations": ["Supported by one paper."],
-            "paper_contributions": [
-                {
-                    "document_id": "paper-1",
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": ["evidence-1"],
-                }
-            ],
-        }
+    return Finding(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        statement="Higher temperature was associated with greater strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope=finding_choice(
+            "isolated_effect",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="insufficient_confirmation",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=("Supported by one paper.",),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     )
 
 
 def _evidence() -> ObjectiveEvidence:
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "evidence_id": "evidence-1",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-7",
-            "source_excerpt": "At 500 C, tensile strength increased to 620 MPa.",
-            "page_numbers": [7],
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "temperature",
-                    "baseline_value": 400,
-                    "target_value": 500,
-                    "unit": "C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "400 C",
-                "target_label": "500 C",
-                "axis_names": ["temperature"],
-                "comparable": True,
-            },
-            "reported_result": {
-                "outcome": "strength",
-                "value": 620,
-                "unit": "MPa",
-                "direction": "increase",
-                "result_text": "Tensile strength increased to 620 MPa.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [],
-                "sample": [],
-                "process": [
-                    {
-                        "name": "solver",
-                        "value": "ANSYS",
-                        "context_scope": "simulation",
-                    }
-                ],
-                "test": [],
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+    return ObjectiveEvidence(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        evidence_id="evidence-1",
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-7",
+        source_excerpt="At 500 C, tensile strength increased to 620 MPa.",
+        page_numbers=(7,),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=400, target_value=500, unit="C"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="400 C",
+            target_label="500 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=620,
+            unit="MPa",
+            direction="increase",
+            result_text="Tensile strength increased to 620 MPa.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(
+            process=(
+                ScientificAttribute(
+                    name="solver", value="ANSYS", context_scope="simulation"
+                ),
+            )
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
 
 
 def _paper_contribution() -> PaperContribution:
-    return PaperContribution.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "confidence": 0.9,
-            "evidence_disposition": "comparable_evidence",
-            "routed_source_count": 3,
-            "extracted_source_count": 2,
-            "comparable_evidence_count": 1,
-            "failed_source_count": 1,
-        }
+    return PaperContribution(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="comparable_evidence",
+        routed_source_count=3,
+        extracted_source_count=2,
+        comparable_evidence_count=1,
+        failed_source_count=1,
     )
 
 

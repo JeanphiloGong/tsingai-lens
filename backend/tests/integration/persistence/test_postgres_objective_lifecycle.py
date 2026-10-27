@@ -1,18 +1,29 @@
 """Moved execution records preserve publication and failure history in PostgreSQL."""
 
-from domain.core.research_objective import (
-    ResearchObjective,
-    _text,
-    build_research_objective_id,
-)
 
 import pytest
-
 from domain.core import (
     ObjectiveFactSet,
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
+)
+from domain.core.finding import (
+    PAPER_CONTRIBUTION_STATUSES,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _text as finding_text
+from domain.core.research_objective import (
+    PaperContribution,
+    ResearchObjective,
+)
+from domain.core.research_objective import (
+    _positive_int_or_none as objective_positive_int_or_none,
+)
+from domain.core.research_objective import (
+    _text,
+    build_research_objective_id,
+    normalize_objective_terms,
 )
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 from repositories.pipeline_run_repository import (
@@ -90,25 +101,31 @@ async def _queue_and_claim(repository):
 
 
 def _contribution(version: int, document_id: str) -> PaperContribution:
-    return PaperContribution.from_mapping({
-        "collection_id": COLLECTION_ID, "objective_id": OBJECTIVE_ID,
-        "analysis_version": version, "document_id": document_id,
-        "analysis_status": "analyzed", "relevance": "high",
-        "paper_role": "primary_experiment",
-        "contribution_summary": "Reports a controlled laser-power comparison.",
-        "material_match": ["Ti-6Al-4V"], "changed_variables": ["laser power"],
-        "measured_property_scope": ["tensile strength"],
-        "test_environment_scope": ["room temperature"], "confidence": 0.9,
-        "evidence_disposition": "comparable_evidence",
-        "routed_source_count": 1, "extracted_source_count": 1,
-        "comparable_evidence_count": 1, "failed_source_count": 0,
-    })
+    return PaperContribution(
+        collection_id=finding_text(COLLECTION_ID) or "",
+        objective_id=finding_text(OBJECTIVE_ID) or "",
+        analysis_version=objective_positive_int_or_none(version) or 0,
+        document_id=finding_text(document_id) or "",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary="Reports a controlled laser-power comparison.",
+        material_match=("Ti-6Al-4V",),
+        changed_variables=("laser power",),
+        measured_property_scope=("tensile strength",),
+        test_environment_scope=("room temperature",),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="comparable_evidence",
+        routed_source_count=1,
+        extracted_source_count=1,
+        comparable_evidence_count=1,
+        failed_source_count=0,
+    )
 
 
 async def test_finding_http_revision_and_abstention_are_persisted(source_repository, tmp_path):
-    from fastapi import FastAPI
-    from httpx import ASGITransport, AsyncClient
-
     from application.core.objectives.analysis.experiment_analysis_writer import (
         ExperimentAnalysisWriter,
     )
@@ -121,6 +138,8 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     from application.source.collection_service import CollectionService
     from controllers.core.finding_review import router
     from domain.core import PaperContribution
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
     from infra.persistence.file.collection_workspace import FileCollectionWorkspace
     from infra.persistence.postgres.experiment_analysis_transaction import (
         PostgresExperimentAnalysisTransactionFactory,
@@ -191,17 +210,28 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         experiment_outputs=(_comparison_experiment("doc_a"),),
     )
     coverage = tuple(
-        PaperContribution.from_mapping(
-            {
-                "collection_id": COLLECTION_ID,
-                "objective_id": objective.objective_id,
-                "analysis_version": 1,
-                "document_id": doc,
-                "analysis_status": "analyzed" if doc == "doc_a" else "excluded",
-                "warnings": (
-                    [] if doc == "doc_a" else ["No comparable elongation measurement."]
-                ),
-            }
+        PaperContribution(
+            collection_id=finding_text(COLLECTION_ID) or "",
+            objective_id=finding_text(objective.objective_id) or "",
+            analysis_version=1,
+            document_id=finding_text(doc) or "",
+            analysis_status=finding_choice(
+                "analyzed" if doc == "doc_a" else "excluded",
+                PAPER_CONTRIBUTION_STATUSES,
+                "pending",
+            ),
+            relevance="uncertain",
+            paper_role="uncertain",
+            contribution_summary=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            exclusion_reason=None,
+            warnings=normalize_objective_terms(
+                [] if doc == "doc_a" else ["No comparable elongation measurement."]
+            ),
+            confidence=0.0,
         )
         for doc in ("doc_a", "doc_b")
     )

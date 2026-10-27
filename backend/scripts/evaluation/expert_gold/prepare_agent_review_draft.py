@@ -12,6 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from application.evaluation.finding_feedback_service import parse_curated_finding
 from domain.core import Finding  # noqa: E402
 
 
@@ -113,7 +114,7 @@ def _curated_finding(row: dict[str, Any]) -> dict[str, Any]:
     )
     if not target:
         raise ValueError("decision row requires one complete canonical Finding")
-    finding = Finding.from_mapping(target)
+    finding = parse_curated_finding(target)
     if finding.to_record() != target:
         raise ValueError("decision row Finding is not canonical")
     return finding.to_record()

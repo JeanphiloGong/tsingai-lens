@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-
 import pytest
-
 from domain.core import Finding
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _positive_int as finding_positive_int
+from domain.core.finding import _strings as finding_strings
+from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
     ExperimentalVariant,
-    ExperimentTestCondition,
     ExperimentMeasurementResult,
+    ExperimentTestCondition,
     PaperExperimentRevision,
     _text,
+)
+from domain.core.scientific_fact import (
+    ScientificContext,
 )
 from infra.persistence.postgres.experiment_analysis_transaction import (
     PostgresExperimentAnalysisTransactionFactory,
@@ -130,28 +139,32 @@ def _group(*, analysis_version: int) -> ComparisonGroup:
 
 
 def _finding(*, analysis_version: int, with_group: bool) -> Finding:
-    return Finding.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": OBJECTIVE_ID,
-            "analysis_version": analysis_version,
-            "finding_id": "finding-strength-across-papers",
-            "statement": "Both papers report higher tensile strength.",
-            "factors": ["laser power"],
-            "outcome": "tensile strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "association_only",
-            "synthesis_status": "agreement",
-            "certainty": 0.7,
-            "display_rank": 0,
-            "scientific_context": {},
-            "limitations": [],
-            "selection_ids": ["selection-a", "selection-b"],
-            "comparison_group_ids": (
-                ["strength-across-papers"] if with_group else []
-            ),
-        }
+    return Finding(
+        collection_id=finding_text(COLLECTION_ID) or "",
+        objective_id=finding_text(OBJECTIVE_ID) or "",
+        analysis_version=finding_positive_int(analysis_version),
+        finding_id="finding-strength-across-papers",
+        statement="Both papers report higher tensile strength.",
+        factors=("laser power",),
+        outcome="tensile strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope=finding_choice(
+            "association_only",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="agreement",
+        certainty=0.7,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=(),
+        paper_contributions=(),
+        selection_ids=("selection-a", "selection-b"),
+        comparison_group_ids=finding_strings(
+            ["strength-across-papers"] if with_group else []
+        ),
     )
 
 

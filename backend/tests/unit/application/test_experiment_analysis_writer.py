@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -9,7 +8,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriter,
     stable_draft_experiment_id,
@@ -23,12 +21,17 @@ from application.core.objectives.analysis.paper_experiment_contract import (
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
+from domain.core.finding import (
+    PAPER_CONTRIBUTION_STATUSES,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
+    ObjectiveFactSet,
+    PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
     normalize_objective_terms,
-    ObjectiveFactSet,
-    PaperContribution,
 )
 from repositories.experiment_analysis_repository import (
     ExperimentAnalysisWrite,
@@ -720,19 +723,28 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
         experiment_outputs=(_comparison_experiment("paper-a"),),
     )
     coverage = tuple(
-        PaperContribution.from_mapping(
-            {
-                "collection_id": collection_id,
-                "objective_id": objective.objective_id,
-                "analysis_version": 1,
-                "document_id": paper,
-                "analysis_status": "analyzed" if paper == "paper-a" else "excluded",
-                "warnings": (
-                    []
-                    if paper == "paper-a"
-                    else ["No comparable elongation measurement."]
-                ),
-            }
+        PaperContribution(
+            collection_id=finding_text(collection_id) or "",
+            objective_id=finding_text(objective.objective_id) or "",
+            analysis_version=1,
+            document_id=finding_text(paper) or "",
+            analysis_status=finding_choice(
+                "analyzed" if paper == "paper-a" else "excluded",
+                PAPER_CONTRIBUTION_STATUSES,
+                "pending",
+            ),
+            relevance="uncertain",
+            paper_role="uncertain",
+            contribution_summary=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            exclusion_reason=None,
+            warnings=normalize_objective_terms(
+                [] if paper == "paper-a" else ["No comparable elongation measurement."]
+            ),
+            confidence=0.0,
         )
         for paper in ("paper-a", "paper-b")
     )

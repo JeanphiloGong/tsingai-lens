@@ -1,22 +1,31 @@
 from __future__ import annotations
 
-
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-
 from application.core.objectives.finding_authoring_service import (
     FindingAuthoringService,
 )
+from domain.core.finding import (
+    PAPER_CONTRIBUTION_STATUSES,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.research_objective import (
-    PreparedDocumentInput,
-    ResearchObjective,
-    _text,
     ObjectiveFactSet,
     PaperContribution,
+    PreparedDocumentInput,
+    ResearchObjective,
+)
+from domain.core.research_objective import (
+    _positive_int_or_none as objective_positive_int_or_none,
+)
+from domain.core.research_objective import (
+    _text,
+    normalize_objective_terms,
 )
 from repositories.objective_repository import (
     ExecutionStats,
@@ -123,11 +132,25 @@ class _Repository:
         return _analysis(2, "running")
 
     async def list_contributions(self, *args, **kwargs):
-        return (PaperContribution.from_mapping({
-            "collection_id": "collection-1", "objective_id": "objective-1",
-            "analysis_version": args[-1], "document_id": "paper-1",
-            "analysis_status": "analyzed", "relevance": "relevant",
-        }),)
+        return (
+            PaperContribution(
+                collection_id="collection-1",
+                objective_id="objective-1",
+                analysis_version=objective_positive_int_or_none(args[-1]) or 0,
+                document_id="paper-1",
+                analysis_status="analyzed",
+                relevance="uncertain",
+                paper_role="uncertain",
+                contribution_summary=None,
+                material_match=(),
+                changed_variables=(),
+                measured_property_scope=(),
+                test_environment_scope=(),
+                exclusion_reason=None,
+                warnings=(),
+                confidence=0.0,
+            ),
+        )
 
     async def publish_experiment_analysis(self, *args, **kwargs):
         self.published = kwargs
@@ -302,12 +325,27 @@ async def test_authored_publication_preserves_coverage_with_real_repository():
     )
     await repository.claim_analysis("collection-1", "objective-1", 1)
     coverage = tuple(
-        PaperContribution.from_mapping({
-            "collection_id": "collection-1", "objective_id": "objective-1",
-            "analysis_version": 1, "document_id": paper,
-            "analysis_status": status,
-            "warnings": [] if status == "analyzed" else [reason],
-        })
+        PaperContribution(
+            collection_id="collection-1",
+            objective_id="objective-1",
+            analysis_version=1,
+            document_id=finding_text(paper) or "",
+            analysis_status=finding_choice(
+                status, PAPER_CONTRIBUTION_STATUSES, "pending"
+            ),
+            relevance="uncertain",
+            paper_role="uncertain",
+            contribution_summary=None,
+            material_match=(),
+            changed_variables=(),
+            measured_property_scope=(),
+            test_environment_scope=(),
+            exclusion_reason=None,
+            warnings=normalize_objective_terms(
+                [] if status == "analyzed" else [reason]
+            ),
+            confidence=0.0,
+        )
         for paper, status, reason in (
             ("paper-1", "analyzed", ""),
             ("paper-2", "excluded", "Outside the material scope"),

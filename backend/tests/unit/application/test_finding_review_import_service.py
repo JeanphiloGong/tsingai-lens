@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import (
+    Any,
+)
 
 import pytest
-
+from application.evaluation.finding_feedback_service import parse_curated_finding
 from application.evaluation.finding_review_import_service import (
     FindingReviewImportService,
 )
 from domain.core import Finding
+from domain.core.finding import (
+    Finding,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -50,11 +55,7 @@ class _FeedbackService:
 
     async def validate_curation(self, **payload: Any) -> Finding:
         self.validation_calls.append(payload)
-        candidate = Finding.from_mapping(payload["curated_finding"])
-        if candidate.to_record() != payload["curated_finding"]:
-            raise ValueError(
-                "curated_finding must use the complete canonical Finding contract"
-            )
+        candidate = parse_curated_finding(payload["curated_finding"])
         if candidate.key != (
             payload["collection_id"],
             payload["objective_id"],

@@ -1,21 +1,29 @@
 from __future__ import annotations
 
-
 from dataclasses import replace
 
 import pytest
-
 from application.core.objectives.analysis.experiment_finding_publisher import (
     ExperimentFindingPublisher,
 )
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
-from domain.core.finding import Finding
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _positive_int as finding_positive_int
+from domain.core.finding import _strings as finding_strings
+from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
     ExperimentalVariant,
-    ExperimentTestCondition,
     ExperimentMeasurementResult,
+    ExperimentTestCondition,
     PaperExperimentRevision,
+)
+from domain.core.scientific_fact import (
+    ScientificContext,
 )
 from infra.persistence.postgres.experiment_analysis_transaction import (
     PostgresExperimentAnalysisTransactionFactory,
@@ -120,28 +128,30 @@ def _cross_paper_finding(
     analysis_version: int,
     selection_ids: tuple[str, str],
 ) -> Finding:
-    return Finding.from_mapping(
-        {
-            "collection_id": COLLECTION_ID,
-            "objective_id": OBJECTIVE_ID,
-            "analysis_version": analysis_version,
-            "finding_id": "finding-transaction",
-            "statement": "The reported tensile strength was comparable across papers.",
-            "factors": ["process condition"],
-            "outcome": "tensile strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "association_only",
-            "synthesis_status": "agreement",
-            "certainty": 0.7,
-            "display_rank": 0,
-            "mechanisms": [],
-            "scientific_context": {},
-            "limitations": [],
-            "paper_contributions": [],
-            "selection_ids": list(selection_ids),
-            "comparison_group_ids": ["group-transaction"],
-        }
+    return Finding(
+        collection_id=finding_text(COLLECTION_ID) or "",
+        objective_id=finding_text(OBJECTIVE_ID) or "",
+        analysis_version=finding_positive_int(analysis_version),
+        finding_id="finding-transaction",
+        statement="The reported tensile strength was comparable across papers.",
+        factors=("process condition",),
+        outcome="tensile strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope=finding_choice(
+            "association_only",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="agreement",
+        certainty=0.7,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=(),
+        paper_contributions=(),
+        selection_ids=finding_strings(list(selection_ids)),
+        comparison_group_ids=("group-transaction",),
     )
 
 

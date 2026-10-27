@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import pytest
+from typing import Mapping
 
+import pytest
 from domain.core import (
     Finding,
     FindingMechanismRelation,
@@ -9,6 +10,44 @@ from domain.core import (
     ObjectiveEvidence,
     PaperContribution,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    FINDING_ASSERTION_STRENGTHS,
+    FINDING_ORIGINS,
+    FINDING_SYNTHESIS_STATUSES,
+    PAPER_CONTRIBUTION_STATUSES,
+    Finding,
+    FindingMechanismRelation,
+    FindingPaperContribution,
+)
+from domain.core.finding import _certainty as finding_certainty
+from domain.core.finding import _choice
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _datetime_or_none as finding_datetime_or_none
+from domain.core.finding import _non_negative_int as finding_non_negative_int
+from domain.core.finding import _positive_int as finding_positive_int
+from domain.core.finding import _stable_id as finding_stable_id
+from domain.core.finding import _strings as finding_strings
+from domain.core.finding import _text as finding_text
+from domain.core.research_objective import (
+    PAPER_RELEVANCE_VALUES,
+    PAPER_ROLE_VALUES,
+    ObjectiveEvidence,
+    PaperContribution,
+)
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 
 
 def _evidence(
@@ -24,56 +63,52 @@ def _evidence(
     direction: str = "increase",
 ) -> ObjectiveEvidence:
     result_role = role in {"direct_result", "contradictory_result"}
-    variables = [
-        {
-            "name": factor,
-            "baseline_value": f"baseline {factor}",
-            "target_value": f"target {factor}",
-        }
-        for factor in factors
-    ]
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": analysis_version,
-            "evidence_id": evidence_id,
-            "document_id": document_id,
-            "source_kind": "text_window",
-            "source_ref": f"{document_id}-block-1",
-            "source_excerpt": "Preheating was associated with higher ductility.",
-            "evidence_role": role,
-            "selection_status": "extracted",
-            "changed_variables": variables if result_role else [],
-            "comparison": (
-                {
-                    "baseline_label": "baseline",
-                    "target_label": "target",
-                    "axis_names": list(factors),
-                    "comparable": True,
-                }
-                if result_role
-                else None
-            ),
-            "reported_result": (
-                {
-                    "outcome": "ductility",
-                    "value": None,
-                    "unit": None,
-                    "direction": direction,
-                    "result_text": "Preheating was associated with higher ductility.",
-                }
-                if result_role
-                else None
-            ),
-            "attribution_scope": attribution_scope if result_role else "not_attributable",
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": material}],
-                "test": [{"name": "temperature", "value": 25, "unit": "C"}],
-            },
-            "resolution_status": "resolved",
-            "confidence": confidence,
-        }
+    return ObjectiveEvidence(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=analysis_version,
+        evidence_id=evidence_id,
+        document_id=document_id,
+        source_kind="text_window",
+        source_ref=f"{document_id}-block-1",
+        source_excerpt="Preheating was associated with higher ductility.",
+        page_numbers=(),
+        related_source_refs=(),
+        evidence_role=role,
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            tuple(
+                ScientificVariable(factor, f"baseline {factor}", f"target {factor}")
+                for factor in factors
+            )
+            if result_role
+            else ()
+        ),
+        comparison=(
+            ScientificComparison("baseline", "target", factors, True)
+            if result_role
+            else None
+        ),
+        reported_result=(
+            ScientificResult(
+                "ductility",
+                None,
+                None,
+                direction,
+                "Preheating was associated with higher ductility.",
+            )
+            if result_role
+            else None
+        ),
+        attribution_scope=attribution_scope if result_role else "not_attributable",
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute("alloy", material),),
+            test=(ScientificAttribute("temperature", 25, "C"),),
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=confidence,
     )
 
 
@@ -82,57 +117,72 @@ def _contribution(
     *,
     analysis_status: str = "analyzed",
 ) -> PaperContribution:
-    return PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": document_id,
-            "analysis_status": analysis_status,
-            "relevance": "high" if analysis_status == "analyzed" else "irrelevant",
-            "paper_role": (
-                "primary_experiment" if analysis_status == "analyzed" else "irrelevant"
-            ),
-            "contribution_summary": "Direct preheating experiment.",
-            "exclusion_reason": (
-                None if analysis_status == "analyzed" else "No relevant experiment."
-            ),
-            "confidence": 0.9,
-        }
+    return PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id=finding_text(document_id) or "",
+        analysis_status=finding_choice(
+            analysis_status, PAPER_CONTRIBUTION_STATUSES, "pending"
+        ),
+        relevance=finding_choice(
+            "high" if analysis_status == "analyzed" else "irrelevant",
+            PAPER_RELEVANCE_VALUES,
+            "uncertain",
+        ),
+        paper_role=finding_choice(
+            "primary_experiment" if analysis_status == "analyzed" else "irrelevant",
+            PAPER_ROLE_VALUES,
+            "uncertain",
+        ),
+        contribution_summary="Direct preheating experiment.",
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=finding_text(
+            None if analysis_status == "analyzed" else "No relevant experiment."
+        ),
+        warnings=(),
+        confidence=0.9,
     )
 
 
 def _finding(**overrides) -> Finding:
-    payload = {
+    values = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "finding_id": "finding-1",
         "statement": "Preheating was associated with higher ductility in paper 1.",
-        "factors": ["preheating"],
+        "factors": ("preheating",),
         "outcome": "ductility",
         "direction": "increase",
         "assertion_strength": "associative",
-        "attribution_scope": "isolated_effect",
+        "attribution_scope": _choice(
+            "isolated_effect",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
         "synthesis_status": "insufficient_confirmation",
         "certainty": 0.5,
         "display_rank": 0,
-        "mechanisms": [],
-        "scientific_context": {
-            "material": [{"name": "alloy", "value": "316L"}],
-            "test": [{"name": "temperature", "value": 25, "unit": "C"}],
-        },
-        "limitations": ["Cross-paper confirmation is absent."],
-        "paper_contributions": [
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            }
-        ],
+        "mechanisms": (),
+        "scientific_context": ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="316L"),),
+            test=(ScientificAttribute(name="temperature", value=25, unit="C"),),
+        ),
+        "limitations": ("Cross-paper confirmation is absent.",),
+        "paper_contributions": (
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     }
-    payload.update(overrides)
-    return Finding.from_mapping(payload)
+    values.update(overrides)
+    return Finding(**values)
 
 
 def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
@@ -162,32 +212,302 @@ def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
 
 
 def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> None:
-    finding = Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 2,
-            "finding_id": "finding-experiment-1",
-            "statement": "The reported outcome changes under the selected condition.",
-            "factors": ["preheating"],
-            "outcome": "elongation",
-            "direction": "mixed",
-            "assertion_strength": "descriptive",
-            "attribution_scope": "descriptive_only",
-            "synthesis_status": "single_study",
-            "certainty": 0.4,
-            "display_rank": 0,
-            "mechanisms": [],
-            "scientific_context": {},
-            "limitations": ["The selected record has no cross-paper confirmation."],
-            "paper_contributions": [],
-            "selection_ids": ["selection-1"],
-            "comparison_group_ids": [],
-        }
+    finding = Finding(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=2,
+        finding_id="finding-experiment-1",
+        statement="The reported outcome changes under the selected condition.",
+        factors=("preheating",),
+        outcome="elongation",
+        direction="mixed",
+        assertion_strength="descriptive",
+        attribution_scope=finding_choice(
+            "descriptive_only",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="single_study",
+        certainty=0.4,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=("The selected record has no cross-paper confirmation.",),
+        paper_contributions=(),
+        selection_ids=("selection-1",),
     )
 
     record = finding.to_record()
-    restored = Finding.from_mapping(record)
+    restored = Finding(
+        collection_id=finding_text(record.get("collection_id")) or "",
+        objective_id=finding_text(record.get("objective_id")) or "",
+        analysis_version=finding_positive_int(record.get("analysis_version")),
+        finding_id=finding_text(record.get("finding_id"))
+        or finding_stable_id(
+            "finding",
+            record.get("objective_id"),
+            record.get("analysis_version"),
+            finding_strings(record.get("factors")),
+            finding_text(record.get("outcome")) or "",
+            record.get("supporting_evidence_ids"),
+        ),
+        statement=finding_text(record.get("statement")) or "",
+        factors=finding_strings(record.get("factors")),
+        outcome=finding_text(record.get("outcome")) or "",
+        direction=finding_choice(
+            record.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
+        ),
+        assertion_strength=finding_choice(
+            record.get("assertion_strength"), FINDING_ASSERTION_STRENGTHS, "descriptive"
+        ),
+        attribution_scope=finding_choice(
+            record.get("attribution_scope"),
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status=finding_choice(
+            record.get("synthesis_status"),
+            FINDING_SYNTHESIS_STATUSES,
+            "insufficient_confirmation",
+        ),
+        certainty=finding_certainty(record.get("certainty")),
+        display_rank=finding_non_negative_int(record.get("display_rank")),
+        mechanisms=tuple(
+            (
+                FindingMechanismRelation(
+                    source_term=finding_text(item.get("source_term")) or "",
+                    relation_type=finding_text(item.get("relation_type")) or "",
+                    target_term=finding_text(item.get("target_term")) or "",
+                    direction=finding_text(item.get("direction")),
+                    assertion_strength=finding_choice(
+                        item.get("assertion_strength"),
+                        FINDING_ASSERTION_STRENGTHS,
+                        "descriptive",
+                    ),
+                    supporting_evidence_ids=finding_strings(
+                        item.get("supporting_evidence_ids")
+                    ),
+                )
+                for item in tuple(
+                    (
+                        dict(item)
+                        for item in (
+                            record.get("mechanisms")
+                            if isinstance(record.get("mechanisms"), (list, tuple))
+                            else ()
+                        )
+                        if isinstance(item, Mapping)
+                    )
+                )
+            )
+        ),
+        scientific_context=ScientificContext(
+            material=tuple(
+                (
+                    ScientificAttribute(
+                        name=scientific_text(attribute.get("name")) or "",
+                        value=(
+                            scientific_scalar(attribute.get("value"))
+                            if scientific_scalar(attribute.get("value")) is not None
+                            else ""
+                        ),
+                        unit=scientific_text(attribute.get("unit")),
+                        context_scope=scientific_choice(
+                            attribute.get("context_scope"),
+                            SCIENTIFIC_CONTEXT_SCOPES,
+                            "unknown",
+                        ),
+                        applies_to_outcomes=scientific_terms(
+                            attribute.get("applies_to_outcomes")
+                        ),
+                    )
+                    for attribute in (
+                        (
+                            dict(record.get("scientific_context"))
+                            if isinstance(record.get("scientific_context"), Mapping)
+                            else {}
+                        ).get("material")
+                        if isinstance(
+                            (
+                                dict(record.get("scientific_context"))
+                                if isinstance(record.get("scientific_context"), Mapping)
+                                else {}
+                            ).get("material"),
+                            (list, tuple),
+                        )
+                        else ()
+                    )
+                    if isinstance(attribute, Mapping)
+                )
+            ),
+            sample=tuple(
+                (
+                    ScientificAttribute(
+                        name=scientific_text(attribute.get("name")) or "",
+                        value=(
+                            scientific_scalar(attribute.get("value"))
+                            if scientific_scalar(attribute.get("value")) is not None
+                            else ""
+                        ),
+                        unit=scientific_text(attribute.get("unit")),
+                        context_scope=scientific_choice(
+                            attribute.get("context_scope"),
+                            SCIENTIFIC_CONTEXT_SCOPES,
+                            "unknown",
+                        ),
+                        applies_to_outcomes=scientific_terms(
+                            attribute.get("applies_to_outcomes")
+                        ),
+                    )
+                    for attribute in (
+                        (
+                            dict(record.get("scientific_context"))
+                            if isinstance(record.get("scientific_context"), Mapping)
+                            else {}
+                        ).get("sample")
+                        if isinstance(
+                            (
+                                dict(record.get("scientific_context"))
+                                if isinstance(record.get("scientific_context"), Mapping)
+                                else {}
+                            ).get("sample"),
+                            (list, tuple),
+                        )
+                        else ()
+                    )
+                    if isinstance(attribute, Mapping)
+                )
+            ),
+            process=tuple(
+                (
+                    ScientificAttribute(
+                        name=scientific_text(attribute.get("name")) or "",
+                        value=(
+                            scientific_scalar(attribute.get("value"))
+                            if scientific_scalar(attribute.get("value")) is not None
+                            else ""
+                        ),
+                        unit=scientific_text(attribute.get("unit")),
+                        context_scope=scientific_choice(
+                            attribute.get("context_scope"),
+                            SCIENTIFIC_CONTEXT_SCOPES,
+                            "unknown",
+                        ),
+                        applies_to_outcomes=scientific_terms(
+                            attribute.get("applies_to_outcomes")
+                        ),
+                    )
+                    for attribute in (
+                        (
+                            dict(record.get("scientific_context"))
+                            if isinstance(record.get("scientific_context"), Mapping)
+                            else {}
+                        ).get("process")
+                        if isinstance(
+                            (
+                                dict(record.get("scientific_context"))
+                                if isinstance(record.get("scientific_context"), Mapping)
+                                else {}
+                            ).get("process"),
+                            (list, tuple),
+                        )
+                        else ()
+                    )
+                    if isinstance(attribute, Mapping)
+                )
+            ),
+            test=tuple(
+                (
+                    ScientificAttribute(
+                        name=scientific_text(attribute.get("name")) or "",
+                        value=(
+                            scientific_scalar(attribute.get("value"))
+                            if scientific_scalar(attribute.get("value")) is not None
+                            else ""
+                        ),
+                        unit=scientific_text(attribute.get("unit")),
+                        context_scope=scientific_choice(
+                            attribute.get("context_scope"),
+                            SCIENTIFIC_CONTEXT_SCOPES,
+                            "unknown",
+                        ),
+                        applies_to_outcomes=scientific_terms(
+                            attribute.get("applies_to_outcomes")
+                        ),
+                    )
+                    for attribute in (
+                        (
+                            dict(record.get("scientific_context"))
+                            if isinstance(record.get("scientific_context"), Mapping)
+                            else {}
+                        ).get("test")
+                        if isinstance(
+                            (
+                                dict(record.get("scientific_context"))
+                                if isinstance(record.get("scientific_context"), Mapping)
+                                else {}
+                            ).get("test"),
+                            (list, tuple),
+                        )
+                        else ()
+                    )
+                    if isinstance(attribute, Mapping)
+                )
+            ),
+        ),
+        limitations=finding_strings(record.get("limitations")),
+        paper_contributions=tuple(
+            (
+                FindingPaperContribution(
+                    document_id=finding_text(item.get("document_id")) or "",
+                    analysis_status=finding_choice(
+                        item.get("analysis_status"),
+                        PAPER_CONTRIBUTION_STATUSES,
+                        "pending",
+                    ),
+                    supporting_evidence_ids=finding_strings(
+                        item.get("supporting_evidence_ids")
+                    ),
+                    contradicting_evidence_ids=finding_strings(
+                        item.get("contradicting_evidence_ids")
+                    ),
+                    context_evidence_ids=finding_strings(
+                        item.get("context_evidence_ids")
+                    ),
+                    condition_boundary_evidence_ids=finding_strings(
+                        item.get("condition_boundary_evidence_ids")
+                    ),
+                )
+                for item in tuple(
+                    (
+                        dict(item)
+                        for item in (
+                            record.get("paper_contributions")
+                            if isinstance(
+                                record.get("paper_contributions"), (list, tuple)
+                            )
+                            else ()
+                        )
+                        if isinstance(item, Mapping)
+                    )
+                )
+            )
+        ),
+        origin=finding_choice(
+            record.get("origin"), FINDING_ORIGINS, "system_generated"
+        ),
+        source_analysis_version=finding_positive_int(
+            record.get("source_analysis_version")
+        )
+        or None,
+        parent_finding_id=finding_text(record.get("parent_finding_id")),
+        created_by_user_id=finding_text(record.get("created_by_user_id")),
+        created_by_tool_call_id=finding_text(record.get("created_by_tool_call_id")),
+        created_at=finding_datetime_or_none(record.get("created_at")),
+        warnings=finding_strings(record.get("warnings")),
+        selection_ids=finding_strings(record.get("selection_ids")),
+        comparison_group_ids=finding_strings(record.get("comparison_group_ids")),
+    )
 
     assert restored.selection_ids == ("selection-1",)
     assert restored.comparison_group_ids == ()
@@ -196,14 +516,14 @@ def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> 
 
 def test_finding_validates_direct_evidence_and_complete_paper_coverage() -> None:
     finding = _finding(
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            },
-            {"document_id": "paper-2", "analysis_status": "excluded"},
-        ]
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+            FindingPaperContribution(document_id="paper-2", analysis_status="excluded"),
+        )
     )
 
     finding.validate_sources(
@@ -235,16 +555,16 @@ def test_finding_accepts_experiment_series_factor_subsets_with_exact_union() -> 
         direction="decrease",
     )
     finding = _finding(
-        factors=["energy input", "path strategy", "travel speed"],
+        factors=("energy input", "path strategy", "travel speed"),
         attribution_scope="joint_effect",
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-                "contradicting_evidence_ids": ["evidence-2"],
-            }
-        ],
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+                contradicting_evidence_ids=("evidence-2",),
+            ),
+        ),
     )
 
     finding.validate_sources(
@@ -263,7 +583,7 @@ def test_finding_accepts_semantically_equivalent_series_factor_labels() -> None:
         attribution_scope="joint_effect",
     )
     finding = _finding(
-        factors=["hatch spacing", "scanning speed"],
+        factors=("hatch spacing", "scanning speed"),
         attribution_scope="joint_effect",
     )
 
@@ -278,7 +598,7 @@ def test_finding_rejects_factor_not_covered_by_direct_evidence_union() -> None:
         attribution_scope="joint_effect",
     )
     finding = _finding(
-        factors=["atmosphere", "energy input", "travel speed"],
+        factors=("atmosphere", "energy input", "travel speed"),
         attribution_scope="joint_effect",
     )
 
@@ -313,18 +633,18 @@ def test_cross_paper_agreement_is_derived_from_independent_direct_results() -> N
     finding = _finding(
         synthesis_status="agreement",
         certainty=0.75,
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            },
-            {
-                "document_id": "paper-2",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-2"],
-            },
-        ],
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+            FindingPaperContribution(
+                document_id="paper-2",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-2",),
+            ),
+        ),
     )
     evidence = (
         _evidence("evidence-1", "paper-1"),
@@ -345,22 +665,22 @@ def test_finding_rejects_declared_status_that_differs_from_paper_evidence() -> N
 
 
 def test_joint_factor_finding_cannot_claim_isolated_or_causal_effect() -> None:
-    paper = [
-        {
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "supporting_evidence_ids": ["evidence-1"],
-        }
-    ]
+    paper = (
+        FindingPaperContribution(
+            document_id="paper-1",
+            analysis_status="analyzed",
+            supporting_evidence_ids=("evidence-1",),
+        ),
+    )
     with pytest.raises(ValueError, match="one factor"):
         _finding(
-            factors=["laser power", "scan speed"],
+            factors=("laser power", "scan speed"),
             attribution_scope="isolated_effect",
             paper_contributions=paper,
         )
     with pytest.raises(ValueError, match="causal Finding requires"):
         _finding(
-            factors=["laser power", "scan speed"],
+            factors=("laser power", "scan speed"),
             attribution_scope="joint_effect",
             assertion_strength="causal",
             paper_contributions=paper,
@@ -369,23 +689,24 @@ def test_joint_factor_finding_cannot_claim_isolated_or_causal_effect() -> None:
 
 def test_finding_mechanism_remains_subordinate_and_requires_mechanism_evidence() -> None:
     finding = _finding(
-        mechanisms=[
-            {
-                "source_term": "preheating",
-                "relation_type": "changes",
-                "target_term": "dislocation structure",
-                "assertion_strength": "associative",
-                "supporting_evidence_ids": ["mechanism-1"],
-            }
-        ],
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-                "context_evidence_ids": ["mechanism-1"],
-            }
-        ],
+        mechanisms=(
+            FindingMechanismRelation(
+                source_term="preheating",
+                relation_type="changes",
+                target_term="dislocation structure",
+                direction=None,
+                assertion_strength="associative",
+                supporting_evidence_ids=("mechanism-1",),
+            ),
+        ),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+                context_evidence_ids=("mechanism-1",),
+            ),
+        ),
     )
 
     finding.validate_sources(
@@ -411,15 +732,16 @@ def test_finding_mechanism_remains_subordinate_and_requires_mechanism_evidence()
 def test_finding_requires_mechanism_evidence_in_paper_context_binding() -> None:
     with pytest.raises(ValueError, match="must bind as paper context"):
         _finding(
-            mechanisms=[
-                {
-                    "source_term": "preheating",
-                    "relation_type": "changes",
-                    "target_term": "dislocation structure",
-                    "assertion_strength": "associative",
-                    "supporting_evidence_ids": ["mechanism-1"],
-                }
-            ]
+            mechanisms=(
+                FindingMechanismRelation(
+                    source_term="preheating",
+                    relation_type="changes",
+                    target_term="dislocation structure",
+                    direction=None,
+                    assertion_strength="associative",
+                    supporting_evidence_ids=("mechanism-1",),
+                ),
+            )
         )
 
 
@@ -434,18 +756,18 @@ def test_finding_rejects_support_or_contradiction_with_wrong_direction() -> None
     finding = _finding(
         synthesis_status="conflict",
         certainty=0.6,
-        paper_contributions=[
-            {
-                "document_id": "paper-1",
-                "analysis_status": "analyzed",
-                "supporting_evidence_ids": ["evidence-1"],
-            },
-            {
-                "document_id": "paper-2",
-                "analysis_status": "analyzed",
-                "contradicting_evidence_ids": ["evidence-2"],
-            },
-        ],
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+            FindingPaperContribution(
+                document_id="paper-2",
+                analysis_status="analyzed",
+                contradicting_evidence_ids=("evidence-2",),
+            ),
+        ),
     )
 
     with pytest.raises(ValueError, match="does not oppose"):
@@ -499,22 +821,18 @@ def test_certainty_is_capped_by_independent_document_support() -> None:
 
 
 def test_finding_subordinates_have_no_independent_business_ids() -> None:
-    mechanism = FindingMechanismRelation.from_mapping(
-        {
-            "source_term": "porosity",
-            "relation_type": "affects",
-            "target_term": "passive film stability",
-            "assertion_strength": "associative",
-            "supporting_evidence_ids": ["mechanism-1"],
-        }
+    mechanism = FindingMechanismRelation(
+        source_term="preheating",
+        relation_type="changes",
+        target_term="dislocation structure",
+        direction=None,
+        assertion_strength="associative",
+        supporting_evidence_ids=("mechanism-1",),
     )
-    paper = FindingPaperContribution.from_mapping(
-        {
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "supporting_evidence_ids": ["evidence-1"],
-        }
+    paper = FindingPaperContribution(
+        document_id="paper-1",
+        analysis_status="analyzed",
+        supporting_evidence_ids=("evidence-1",),
     )
-
-    assert "relation_id" not in mechanism.to_record()
-    assert "contribution_id" not in paper.to_record()
+    assert not hasattr(mechanism, "relation_id")
+    assert not hasattr(paper, "contribution_id")

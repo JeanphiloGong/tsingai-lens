@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-from domain.core.scientific_fact import (
-    ScientificAttribute,
-    ScientificVariable,
-)
-
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
@@ -17,15 +11,26 @@ from controllers.schemas.core.research_objectives import (
     FindingResponse,
     ObjectiveEvidenceResponse,
 )
-from domain.core.finding import Finding
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _positive_int as finding_positive_int
+from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
-    SourceReference,
     ExperimentalVariant,
-    ExperimentTestCondition,
-    ExperimentMeasurementResult,
     ExperimentComparison,
+    ExperimentMeasurementResult,
+    ExperimentTestCondition,
     PaperExperimentRevision,
+    SourceReference,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificContext,
+    ScientificVariable,
 )
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
@@ -166,27 +171,29 @@ class _Groups:
 class _Findings:
     async def list_findings(self, collection_id, objective_id, analysis_version):
         return (
-            Finding.from_mapping(
-                {
-                    "collection_id": collection_id,
-                    "objective_id": objective_id,
-                    "analysis_version": analysis_version,
-                    "finding_id": "finding-1",
-                    "statement": "Preheat was associated with higher elongation.",
-                    "factors": ["preheat"],
-                    "outcome": "elongation",
-                    "direction": "increase",
-                    "assertion_strength": "associative",
-                    "attribution_scope": "isolated_effect",
-                    "synthesis_status": "single_study",
-                    "certainty": 0.8,
-                    "display_rank": 0,
-                    "mechanisms": [],
-                    "scientific_context": {},
-                    "limitations": [],
-                    "paper_contributions": [],
-                    "selection_ids": ["selection-1"],
-                }
+            Finding(
+                collection_id=finding_text(collection_id) or "",
+                objective_id=finding_text(objective_id) or "",
+                analysis_version=finding_positive_int(analysis_version),
+                finding_id="finding-1",
+                statement="Preheat was associated with higher elongation.",
+                factors=("preheat",),
+                outcome="elongation",
+                direction="increase",
+                assertion_strength="associative",
+                attribution_scope=finding_choice(
+                    "isolated_effect",
+                    EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+                    "descriptive_only",
+                ),
+                synthesis_status="single_study",
+                certainty=0.8,
+                display_rank=0,
+                mechanisms=(),
+                scientific_context=ScientificContext(),
+                limitations=(),
+                paper_contributions=(),
+                selection_ids=("selection-1",),
             ),
         )
 
@@ -287,4 +294,34 @@ async def test_projection_builds_the_existing_evidence_map_contract() -> None:
     assert any(
         node["type"] == "document" and node["label"] == "Preheat paper"
         for node in payload["nodes"]
+    )
+
+
+async def test_projection_keeps_captured_response_and_typed_review_values() -> None:
+    import json
+    from pathlib import Path
+
+    service = _service()
+    identity = ("collection-1", "objective-1", 1)
+    payload = {
+        "findings": (await service.list_findings(*identity))[0],
+        "evidence": (await service.list_evidence(*identity))[0],
+        "contributions": await service.list_contributions(*identity),
+    }
+    baseline = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "fixtures"
+            / "experiment_projection_response.json"
+        ).read_text()
+    )
+    assert json.loads(json.dumps(payload)) == baseline
+    findings, evidence, contributions = await service.read_analysis_records(*identity)
+    assert findings[0].synthesis_status == "insufficient_confirmation"
+    assert findings[0].selection_ids == ()
+    assert set(findings[0].supporting_evidence_ids) == {
+        item.evidence_id for item in evidence
+    }
+    assert (
+        contributions[0].document_id == findings[0].paper_contributions[0].document_id
     )

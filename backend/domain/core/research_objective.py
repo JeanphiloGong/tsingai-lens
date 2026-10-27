@@ -11,18 +11,10 @@ from hashlib import sha1
 from typing import Any, Final, Mapping
 
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    SCIENTIFIC_RESULT_DIRECTIONS,
-    SCIENTIFIC_RESULT_KINDS,
-    ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
-    _choice as scientific_choice,
-    _scientific_scalar as scientific_scalar,
-    _terms as scientific_terms,
-    _text as scientific_text,
 )
 
 PAPER_RELEVANCE_VALUES: Final[frozenset[str]] = frozenset(
@@ -680,15 +672,6 @@ class InspectedObjectiveSourceRef:
         ):
             raise ValueError("inspected Source digest must be a SHA-256 hex digest")
 
-    @classmethod
-    def from_mapping(
-        cls, payload: Mapping[str, Any]
-    ) -> "InspectedObjectiveSourceRef":
-        return cls(
-            source_kind=_text(payload.get("source_kind")) or "",
-            source_ref=_text(payload.get("source_ref")) or "",
-            source_digest=_text(payload.get("source_digest")),
-        )
 
     def to_record(self) -> dict[str, str | None]:
         return {
@@ -696,29 +679,6 @@ class InspectedObjectiveSourceRef:
             "source_ref": self.source_ref,
             "source_digest": self.source_digest,
         }
-
-
-def _inspected_objective_source_refs(
-    value: Any,
-) -> tuple[InspectedObjectiveSourceRef, ...]:
-    records: list[InspectedObjectiveSourceRef] = []
-    seen: set[tuple[str, str]] = set()
-    for item in value or ():
-        record = (
-            item
-            if isinstance(item, InspectedObjectiveSourceRef)
-            else InspectedObjectiveSourceRef.from_mapping(item)
-            if isinstance(item, Mapping)
-            else None
-        )
-        if record is None:
-            continue
-        identity = (record.source_kind, record.source_ref)
-        if identity in seen:
-            raise ValueError(f"duplicate inspected Source: {record.source_kind}/{record.source_ref}")
-        seen.add(identity)
-        records.append(record)
-    return tuple(records)
 
 
 @dataclass(frozen=True)
@@ -774,11 +734,14 @@ class PaperContribution:
             raise ValueError(
                 "excluded or failed paper contribution requires a reason or warning"
             )
-        object.__setattr__(
-            self,
-            "inspected_source_refs",
-            _inspected_objective_source_refs(self.inspected_source_refs),
-        )
+        seen_sources: set[tuple[str, str]] = set()
+        for source in self.inspected_source_refs:
+            identity = (source.source_kind, source.source_ref)
+            if identity in seen_sources:
+                raise ValueError(
+                    f"duplicate inspected Source: {source.source_kind}/{source.source_ref}"
+                )
+            seen_sources.add(identity)
         self._validate_evidence_accounting()
         if self.uninspected_source_count is not None and self.uninspected_source_count < 0:
             raise ValueError("uninspected source count cannot be negative")
@@ -904,66 +867,6 @@ class PaperContribution:
             self.document_id,
         )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperContribution":
-        return cls(
-            collection_id=_text(payload.get("collection_id")) or "",
-            objective_id=_text(payload.get("objective_id")) or "",
-            analysis_version=_positive_int_or_none(payload.get("analysis_version"))
-            or 0,
-            document_id=_text(payload.get("document_id")) or "",
-            analysis_status=_choice(
-                payload.get("analysis_status"),
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
-            relevance=_choice(
-                payload.get("relevance"), PAPER_RELEVANCE_VALUES, "uncertain"
-            ),
-            paper_role=_choice(
-                payload.get("paper_role"), PAPER_ROLE_VALUES, "uncertain"
-            ),
-            contribution_summary=_text(payload.get("contribution_summary")),
-            material_match=normalize_objective_terms(payload.get("material_match")),
-            changed_variables=normalize_objective_terms(
-                payload.get("changed_variables")
-            ),
-            measured_property_scope=normalize_objective_terms(
-                payload.get("measured_property_scope")
-            ),
-            test_environment_scope=normalize_objective_terms(
-                payload.get("test_environment_scope")
-            ),
-            exclusion_reason=_text(payload.get("exclusion_reason")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            evidence_disposition=_text(payload.get("evidence_disposition")),
-            routed_source_count=_non_negative_int_or_none(
-                payload.get("routed_source_count")
-            ),
-            extracted_source_count=_non_negative_int_or_none(
-                payload.get("extracted_source_count")
-            ),
-            comparable_evidence_count=_non_negative_int_or_none(
-                payload.get("comparable_evidence_count")
-            ),
-            failed_source_count=_non_negative_int_or_none(
-                payload.get("failed_source_count")
-            ),
-            uninspected_source_count=_non_negative_int_or_none(
-                payload.get("uninspected_source_count")
-            ),
-            evidence_disposition_reason=_text(
-                payload.get("evidence_disposition_reason")
-            ),
-            evidence_status_counts=_evidence_status_counts(
-                payload.get("evidence_status_counts")
-            ),
-            inspected_source_refs=_inspected_objective_source_refs(
-                payload.get("inspected_source_refs")
-            ),
-        )
-
     def to_record(self) -> dict[str, Any]:
         return {
             "collection_id": self.collection_id,
@@ -1039,6 +942,9 @@ class ObjectiveEvidence:
     warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        variable_names = [item.name.casefold() for item in self.changed_variables]
+        if len(variable_names) != len(set(variable_names)):
+            raise ValueError("objective evidence changed variables must be unique")
         if not all(
             _text(value)
             for value in (
@@ -1201,256 +1107,6 @@ class ObjectiveEvidence:
                 return "The Source reports a model or predicted result, not an experimental measurement."
             return "The Source reports an outcome without a source-local comparison."
         return self.selection_reason or "Relevant Source retained while same-paper context is needed."
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveEvidence":
-        collection_id = _text(payload.get("collection_id")) or ""
-        objective_id = _text(payload.get("objective_id")) or ""
-        analysis_version = _positive_int_or_none(payload.get("analysis_version")) or 0
-        document_id = _text(payload.get("document_id")) or ""
-        source_kind = _choice(
-            payload.get("source_kind"), SOURCE_KIND_VALUES, "text_window"
-        )
-        source_ref = _text(payload.get("source_ref")) or ""
-        evidence_role = _choice(
-            payload.get("evidence_role"), EVIDENCE_ROLE_VALUES, "irrelevant"
-        )
-        reported_result_payload = payload.get("reported_result")
-        reported_result = (
-            ScientificResult(
-                outcome=scientific_text(reported_result_payload.get("outcome")) or "",
-                value=scientific_scalar(reported_result_payload.get("value")),
-                unit=scientific_text(reported_result_payload.get("unit")),
-                direction=scientific_choice(
-                    reported_result_payload.get("direction"),
-                    SCIENTIFIC_RESULT_DIRECTIONS,
-                    "unknown",
-                ),
-                result_text=scientific_text(reported_result_payload.get("result_text"))
-                or "",
-                baseline_value=scientific_scalar(
-                    reported_result_payload.get("baseline_value")
-                ),
-                target_value=scientific_scalar(
-                    reported_result_payload.get("target_value")
-                ),
-                result_kind=scientific_choice(
-                    reported_result_payload.get("result_kind"),
-                    SCIENTIFIC_RESULT_KINDS,
-                    "observed",
-                ),
-            )
-            if isinstance(reported_result_payload, Mapping)
-            else None
-        )
-        evidence_id = _text(payload.get("evidence_id")) or _scoped_id(
-            "oev",
-            collection_id,
-            objective_id,
-            analysis_version,
-            document_id,
-            source_kind,
-            source_ref,
-            evidence_role,
-            payload.get("semantic_slot")
-            or (reported_result.outcome if reported_result is not None else None),
-        )
-        return cls(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-            evidence_id=evidence_id,
-            document_id=document_id,
-            source_kind=source_kind,
-            source_ref=source_ref,
-            source_excerpt=_text(payload.get("source_excerpt")) or "",
-            page_numbers=_positive_ints(payload.get("page_numbers")),
-            related_source_refs=_mapping_tuple(payload.get("related_source_refs")),
-            evidence_role=evidence_role,
-            selection_status=_choice(
-                payload.get("selection_status"),
-                OBJECTIVE_EVIDENCE_STATES,
-                "candidate",
-            ),
-            selection_reason=_text(payload.get("selection_reason")),
-            changed_variables=_scientific_variables(payload.get("changed_variables")),
-            comparison=(
-                ScientificComparison(
-                    baseline_label=scientific_text(
-                        payload["comparison"].get("baseline_label")
-                    )
-                    or "",
-                    target_label=scientific_text(
-                        payload["comparison"].get("target_label")
-                    )
-                    or "",
-                    axis_names=scientific_terms(
-                        payload["comparison"].get("axis_names")
-                    ),
-                    comparable=payload["comparison"].get("comparable") is True,
-                    incomparability_reasons=scientific_terms(
-                        payload["comparison"].get("incomparability_reasons")
-                    ),
-                )
-                if isinstance(payload.get("comparison"), Mapping)
-                else None
-            ),
-            reported_result=reported_result,
-            attribution_scope=_choice(
-                payload.get("attribution_scope"),
-                EVIDENCE_ATTRIBUTION_SCOPES,
-                "not_attributable",
-            ),
-            scientific_context=(
-                ScientificContext(
-                    material=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                payload["scientific_context"].get("material")
-                                if isinstance(
-                                    payload["scientific_context"].get("material"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    sample=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                payload["scientific_context"].get("sample")
-                                if isinstance(
-                                    payload["scientific_context"].get("sample"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    process=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                payload["scientific_context"].get("process")
-                                if isinstance(
-                                    payload["scientific_context"].get("process"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                    test=tuple(
-                        (
-                            ScientificAttribute(
-                                name=scientific_text(attribute.get("name")) or "",
-                                value=(
-                                    scientific_scalar(attribute.get("value"))
-                                    if scientific_scalar(attribute.get("value"))
-                                    is not None
-                                    else ""
-                                ),
-                                unit=scientific_text(attribute.get("unit")),
-                                context_scope=scientific_choice(
-                                    attribute.get("context_scope"),
-                                    SCIENTIFIC_CONTEXT_SCOPES,
-                                    "unknown",
-                                ),
-                                applies_to_outcomes=scientific_terms(
-                                    attribute.get("applies_to_outcomes")
-                                ),
-                            )
-                            for attribute in (
-                                payload["scientific_context"].get("test")
-                                if isinstance(
-                                    payload["scientific_context"].get("test"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(attribute, Mapping)
-                        )
-                    ),
-                )
-                if isinstance(payload.get("scientific_context"), Mapping)
-                else ScientificContext()
-            ),
-            resolution_status=_choice(
-                payload.get("resolution_status"),
-                EVIDENCE_RESOLUTION_STATUS_VALUES,
-                "unknown",
-            ),
-            failure_reason=_text(payload.get("failure_reason")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            related_source_refs_explicit="related_source_refs" in payload,
-            origin=_choice(payload.get("origin"), EVIDENCE_ORIGINS, "system_generated"),
-            source_analysis_version=_positive_int_or_none(
-                payload.get("source_analysis_version")
-            ),
-            supersedes_evidence_id=_text(payload.get("supersedes_evidence_id")),
-            superseded_by_evidence_id=_text(payload.get("superseded_by_evidence_id")),
-            created_by_user_id=_text(payload.get("created_by_user_id")),
-            created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
-            created_at=_datetime_or_none(payload.get("created_at")),
-            authoring_note=_text(payload.get("authoring_note")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-        )
 
     def select(
         self,
@@ -1785,16 +1441,6 @@ def _required_text(value: Any, message: str) -> str:
     return text
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(dict(item) for item in value if isinstance(item, Mapping))
-
-
 def _objective_derivation_basis(value: Any) -> tuple[dict[str, Any], ...]:
     """Normalize scientific provenance attached to a derived Objective."""
 
@@ -1828,25 +1474,6 @@ def _objective_derivation_basis(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(records)
 
 
-def _scientific_variables(value: Any) -> tuple[ScientificVariable, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    variables = tuple(
-        ScientificVariable(
-            name=scientific_text(item.get("name")) or "",
-            baseline_value=scientific_scalar(item.get("baseline_value")),
-            target_value=scientific_scalar(item.get("target_value")),
-            unit=scientific_text(item.get("unit")),
-        )
-        for item in value
-        if isinstance(item, Mapping)
-    )
-    names = [item.name.casefold() for item in variables]
-    if len(names) != len(set(names)):
-        raise ValueError("objective evidence changed variables must be unique")
-    return variables
-
-
 def _positive_int_or_none(value: Any) -> int | None:
     if isinstance(value, bool) or value is None:
         return None
@@ -1869,21 +1496,6 @@ def _non_negative_int_or_none(value: Any) -> int | None:
     if numeric < 0:
         raise ValueError("paper evidence count cannot be negative")
     return numeric
-
-
-def _evidence_status_counts(value: Any) -> tuple[tuple[str, int], ...]:
-    if not isinstance(value, Mapping):
-        return ()
-    counts: list[tuple[str, int]] = []
-    for status, count in sorted(value.items(), key=lambda item: str(item[0])):
-        normalized_status = str(status or "").strip()
-        if not normalized_status:
-            continue
-        normalized_count = _non_negative_int_or_none(count)
-        if normalized_count is None:
-            raise ValueError("evidence status count must be a non-negative integer")
-        counts.append((normalized_status, normalized_count))
-    return tuple(counts)
 
 
 def _positive_ints(value: Any) -> tuple[int, ...]:

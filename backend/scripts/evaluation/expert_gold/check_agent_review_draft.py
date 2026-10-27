@@ -12,6 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from application.evaluation.finding_feedback_service import parse_curated_finding
 from domain.core import Finding  # noqa: E402
 
 
@@ -266,7 +267,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
             )
         else:
             try:
-                candidate = Finding.from_mapping(target)
+                candidate = parse_curated_finding(target)
                 if candidate.to_record() != target:
                     raise ValueError("Finding is not canonical")
                 if identity is not None and candidate.key != identity:

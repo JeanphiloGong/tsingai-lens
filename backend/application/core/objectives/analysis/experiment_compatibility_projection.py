@@ -10,10 +10,14 @@ query ownership while keeping the HTTP contract stable.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+    replace,
+)
 from hashlib import sha1
 from typing import Any, Mapping
 
+from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.paper_experiment import (
     ExperimentalVariant,
     ExperimentComparison,
@@ -22,7 +26,18 @@ from domain.core.paper_experiment import (
     PaperExperimentRevision,
     SourceReference,
 )
-from domain.core.scientific_fact import ScientificAttribute, ScientificVariable
+from domain.core.research_objective import (
+    SOURCE_KIND_VALUES,
+    ObjectiveEvidence,
+    PaperContribution,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
 from repositories.comparison_group_repository import ComparisonGroupRepository
 from repositories.experiment_finding_repository import (
     ExperimentFindingRepository,
@@ -49,7 +64,8 @@ class _ProjectionState:
     selections_by_id: Mapping[str, Any]
     evidence_by_id: Mapping[str, dict[str, Any]]
     evidence_ids_by_selection: Mapping[str, tuple[str, ...]]
-    contributions_by_document: Mapping[str, dict[str, Any]]
+    contributions_by_document: Mapping[str, PaperContribution]
+    evidence_values_by_id: Mapping[str, ObjectiveEvidence]
 
 
 class ExperimentCompatibilityProjection:
@@ -84,8 +100,7 @@ class ExperimentCompatibilityProjection:
     ) -> tuple[tuple[dict[str, Any], ...], int]:
         state = await self._state(collection_id, objective_id, analysis_version)
         records = tuple(
-            self._finding_record(finding, state)
-            for finding in state.bundle.findings
+            self._finding_record(finding, state)[1] for finding in state.bundle.findings
         )
         records = tuple(
             sorted(
@@ -116,7 +131,7 @@ class ExperimentCompatibilityProjection:
             ),
             None,
         )
-        return self._finding_record(finding, state) if finding is not None else None
+        return self._finding_record(finding, state)[1] if finding is not None else None
 
     async def list_evidence(
         self,
@@ -162,7 +177,10 @@ class ExperimentCompatibilityProjection:
         analysis_version: int,
     ) -> tuple[dict[str, Any], ...]:
         state = await self._state(collection_id, objective_id, analysis_version)
-        return self._project_contributions(state, state.bundle.selections)
+        return tuple(
+            record
+            for _, record in self._project_contributions(state, state.bundle.selections)
+        )
 
     def _project_contributions(
         self,
@@ -170,7 +188,7 @@ class ExperimentCompatibilityProjection:
         selections: Any,
         *,
         include_links: bool = False,
-    ) -> tuple[dict[str, Any], ...]:
+    ) -> tuple[tuple[PaperContribution, dict[str, Any]], ...]:
         """Keep coverage metadata while replacing legacy Evidence ids.
 
         PaperContribution describes which papers were inspected, including
@@ -179,8 +197,8 @@ class ExperimentCompatibilityProjection:
         records; the coverage rows remain available for the legacy response.
         """
         contribution_by_document = {
-            document_id: _reset_contribution_links(record)
-            for document_id, record in state.contributions_by_document.items()
+            document_id: _reset_contribution_links(value.to_record())
+            for document_id, value in state.contributions_by_document.items()
         }
         initialized_documents: set[str] = set()
         for selection in selections:
@@ -236,34 +254,84 @@ class ExperimentCompatibilityProjection:
             contribution_by_document[key]
             for key in sorted(contribution_by_document)
         )
-        if include_links:
-            return records
-        return tuple(
-            {
-                key: value
-                for key, value in record.items()
-                if key not in _CONTRIBUTION_LINK_FIELDS
-            }
-            for record in records
-        )
+        projected = []
+        for record in records:
+            document_id = record["document_id"]
+            original = state.contributions_by_document.get(document_id)
+            if document_id not in initialized_documents:
+                value = original
+            else:
+                accounting = {
+                    "analysis_status": "analyzed",
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "exclusion_reason": None,
+                    "contribution_summary": record["contribution_summary"],
+                    "measured_property_scope": tuple(record["measured_property_scope"]),
+                    "evidence_disposition": record["evidence_disposition"],
+                    "routed_source_count": record["routed_source_count"],
+                    "extracted_source_count": record["extracted_source_count"],
+                    "comparable_evidence_count": record["comparable_evidence_count"],
+                    "failed_source_count": 0,
+                    "evidence_disposition_reason": record[
+                        "evidence_disposition_reason"
+                    ],
+                    "evidence_status_counts": tuple(
+                        sorted(record["evidence_status_counts"].items())
+                    ),
+                }
+                if original is not None:
+                    value = replace(original, **accounting)
+                else:
+                    value = PaperContribution(
+                        collection_id=state.collection_id,
+                        objective_id=state.objective_id,
+                        analysis_version=state.analysis_version,
+                        document_id=document_id,
+                        material_match=(),
+                        changed_variables=(),
+                        test_environment_scope=(),
+                        warnings=(),
+                        confidence=1.0,
+                        uninspected_source_count=0,
+                        **accounting,
+                    )
+            response = (
+                record
+                if include_links
+                else {
+                    key: field
+                    for key, field in record.items()
+                    if key not in _CONTRIBUTION_LINK_FIELDS
+                }
+            )
+            projected.append((value, response))
+        return tuple(projected)
 
     async def read_analysis_records(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
-    ) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
-        """Return all projected findings and evidence for map/read callers."""
+    ) -> tuple[
+        tuple[Finding, ...],
+        tuple[ObjectiveEvidence, ...],
+        tuple[PaperContribution, ...],
+    ]:
+        """Return typed findings, evidence and paper coverage for internal readers."""
 
         state = await self._state(collection_id, objective_id, analysis_version)
         findings = tuple(
-            self._finding_record(finding, state)
-            for finding in state.bundle.findings
+            self._finding_record(finding, state)[0] for finding in state.bundle.findings
         )
         evidence = tuple(
-            item for _, item in sorted(state.evidence_by_id.items())
+            item for _, item in sorted(state.evidence_values_by_id.items())
         )
-        return findings, evidence
+        contributions = tuple(
+            value
+            for value, _ in self._project_contributions(state, state.bundle.selections)
+        )
+        return findings, evidence, contributions
 
     async def build_evidence_map(
         self,
@@ -277,15 +345,16 @@ class ExperimentCompatibilityProjection:
         version = objective.published_analysis_version
         if version is None or analysis.analysis_version != version:
             raise ValueError("analysis is not the Objective published analysis version")
-        findings, evidence = await self.read_analysis_records(
-            objective.collection_id,
-            objective.objective_id,
-            version,
+        state = await self._state(
+            objective.collection_id, objective.objective_id, version
         )
-        contributions = await self.list_contributions(
-            objective.collection_id,
-            objective.objective_id,
-            version,
+        findings = tuple(
+            self._finding_record(finding, state)[1] for finding in state.bundle.findings
+        )
+        evidence = tuple(item for _, item in sorted(state.evidence_by_id.items()))
+        contributions = tuple(
+            record
+            for _, record in self._project_contributions(state, state.bundle.selections)
         )
         objective_node_id = f"objective:{objective.objective_id}"
         nodes: list[dict[str, Any]] = [
@@ -522,6 +591,7 @@ class ExperimentCompatibilityProjection:
         }
         selections_by_id = {item.selection_id: item for item in bundle.selections}
         evidence_by_id: dict[str, dict[str, Any]] = {}
+        evidence_values_by_id: dict[str, ObjectiveEvidence] = {}
         evidence_ids_by_selection: dict[str, tuple[str, ...]] = {}
         for selection in bundle.selections:
             revision = revisions_by_identity.get(
@@ -537,7 +607,7 @@ class ExperimentCompatibilityProjection:
                 measurement = _by_key(revision.measurements, "measurement_key", key)
                 if measurement is None:
                     raise ValueError(f"selection references missing measurement: {key}")
-                record = self._measurement_record(
+                value, record = self._measurement_record(
                     collection_id,
                     objective_id,
                     analysis_version,
@@ -546,12 +616,13 @@ class ExperimentCompatibilityProjection:
                     measurement,
                 )
                 evidence_by_id[record["evidence_id"]] = record
+                evidence_values_by_id[value.evidence_id] = value
                 evidence_ids.append(record["evidence_id"])
             for key in selection.comparison_keys:
                 comparison = _by_key(revision.comparisons, "comparison_key", key)
                 if comparison is None:
                     raise ValueError(f"selection references missing comparison: {key}")
-                record = self._comparison_record(
+                value, record = self._comparison_record(
                     collection_id,
                     objective_id,
                     analysis_version,
@@ -560,6 +631,7 @@ class ExperimentCompatibilityProjection:
                     comparison,
                 )
                 evidence_by_id[record["evidence_id"]] = record
+                evidence_values_by_id[value.evidence_id] = value
                 evidence_ids.append(record["evidence_id"])
             evidence_ids_by_selection[selection.selection_id] = tuple(
                 dict.fromkeys(evidence_ids)
@@ -572,6 +644,7 @@ class ExperimentCompatibilityProjection:
             revisions_by_identity=revisions_by_identity,
             selections_by_id=selections_by_id,
             evidence_by_id=evidence_by_id,
+            evidence_values_by_id=evidence_values_by_id,
             evidence_ids_by_selection=evidence_ids_by_selection,
             contributions_by_document=await self._load_contributions(
                 collection_id,
@@ -585,23 +658,17 @@ class ExperimentCompatibilityProjection:
         collection_id: str,
         objective_id: str,
         analysis_version: int,
-    ) -> dict[str, dict[str, Any]]:
+    ) -> dict[str, PaperContribution]:
         if self._objective_repository is None:
             return {}
         records = await self._objective_repository.list_contributions(
-            collection_id,
-            objective_id,
-            analysis_version,
+            collection_id, objective_id, analysis_version
         )
-        result: dict[str, dict[str, Any]] = {}
-        for item in records:
-            record = item.to_record() if hasattr(item, "to_record") else dict(item)
-            document_id = str(record.get("document_id") or "")
-            if document_id:
-                result[document_id] = record
-        return result
+        return {item.document_id: item for item in records}
 
-    def _finding_record(self, finding: Any, state: _ProjectionState) -> dict[str, Any]:
+    def _finding_record(
+        self, finding: Finding, state: _ProjectionState
+    ) -> tuple[Finding, dict[str, Any]]:
         record = finding.to_record()
         # The legacy response contract predates the explicit single-study
         # state. Preserve its meaning through the existing "insufficient
@@ -623,14 +690,33 @@ class ExperimentCompatibilityProjection:
             if revision is None:
                 raise ValueError(f"finding selection has no revision: {selection_id}")
             selected.append(selection)
-        contributions = [
-            _finding_contribution_view(item)
-            for item in self._project_contributions(state, selected, include_links=True)
-        ]
+        contributions = self._project_contributions(state, selected, include_links=True)
         if not contributions:
             raise ValueError(f"finding has no projectable selections: {finding.finding_id}")
-        record["paper_contributions"] = contributions
-        return record
+        papers = tuple(
+            FindingPaperContribution(
+                document_id=value.document_id,
+                analysis_status=value.analysis_status,
+                supporting_evidence_ids=tuple(view["supporting_evidence_ids"]),
+                contradicting_evidence_ids=tuple(view["contradicting_evidence_ids"]),
+                context_evidence_ids=tuple(view["context_evidence_ids"]),
+                condition_boundary_evidence_ids=tuple(
+                    view["condition_boundary_evidence_ids"]
+                ),
+            )
+            for value, view in contributions
+        )
+        projected = replace(
+            finding,
+            synthesis_status=record["synthesis_status"],
+            selection_ids=(),
+            comparison_group_ids=(),
+            paper_contributions=papers,
+        )
+        record["paper_contributions"] = [
+            _finding_contribution_view(view) for _, view in contributions
+        ]
+        return projected, record
 
     @classmethod
     def _measurement_record(
@@ -641,7 +727,7 @@ class ExperimentCompatibilityProjection:
         selection: Any,
         revision: PaperExperimentRevision,
         measurement: ExperimentMeasurementResult,
-    ) -> dict[str, Any]:
+    ) -> tuple[ObjectiveEvidence, dict[str, Any]]:
         source_refs = _source_refs(
             measurement.source_refs,
             measurement.binding_source_refs,
@@ -656,7 +742,7 @@ class ExperimentCompatibilityProjection:
         )
         evidence_id = _evidence_id(selection.selection_id, "measurement", measurement.measurement_key)
         status = "descriptive" if measurement.binding_status in {"direct", "derived"} else "needs_context"
-        return {
+        record = {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": analysis_version,
@@ -714,6 +800,42 @@ class ExperimentCompatibilityProjection:
             "created_at": None,
             "authoring_note": None,
         }
+        evidence = ObjectiveEvidence(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            evidence_id=evidence_id,
+            document_id=revision.document_id,
+            source_kind=(
+                source_refs[0].source_kind
+                if source_refs[0].source_kind in SOURCE_KIND_VALUES
+                else "text_window"
+            ),
+            source_ref=source_refs[0].source_ref,
+            source_excerpt=source_refs[0].quote,
+            page_numbers=(),
+            related_source_refs=tuple(record["related_source_refs"]),
+            related_source_refs_explicit=True,
+            evidence_role="direct_result",
+            selection_status="extracted",
+            selection_reason=record["selection_reason"],
+            changed_variables=(),
+            comparison=None,
+            reported_result=ScientificResult(
+                outcome=measurement.outcome,
+                value=value,
+                unit=measurement.unit,
+                direction="unknown",
+                result_text=result_text,
+                result_kind=measurement.result_kind,
+            ),
+            attribution_scope="descriptive_only",
+            scientific_context=_scientific_context(variant, test),
+            resolution_status="resolved" if status == "descriptive" else "partial",
+            failure_reason=None,
+            confidence=_confidence(measurement.binding_status),
+        )
+        return evidence, record
 
     @classmethod
     def _comparison_record(
@@ -724,7 +846,7 @@ class ExperimentCompatibilityProjection:
         selection: Any,
         revision: PaperExperimentRevision,
         comparison: ExperimentComparison,
-    ) -> dict[str, Any]:
+    ) -> tuple[ObjectiveEvidence, dict[str, Any]]:
         source_refs = _source_refs(
             comparison.source_refs,
             comparison.binding_source_refs,
@@ -755,7 +877,7 @@ class ExperimentCompatibilityProjection:
             f"{baseline.result_text or baseline_value} -> "
             f"{target.result_text or target_value}"
         )
-        return {
+        record = {
             "collection_id": collection_id,
             "objective_id": objective_id,
             "analysis_version": analysis_version,
@@ -835,6 +957,57 @@ class ExperimentCompatibilityProjection:
             "created_at": None,
             "authoring_note": None,
         }
+        evidence = ObjectiveEvidence(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            evidence_id=evidence_id,
+            document_id=revision.document_id,
+            source_kind=(
+                source_refs[0].source_kind
+                if source_refs[0].source_kind in SOURCE_KIND_VALUES
+                else "text_window"
+            ),
+            source_ref=source_refs[0].source_ref,
+            source_excerpt=source_refs[0].quote,
+            page_numbers=(),
+            related_source_refs=tuple(record["related_source_refs"]),
+            related_source_refs_explicit=True,
+            evidence_role="direct_result",
+            selection_status="extracted",
+            selection_reason=record["selection_reason"],
+            changed_variables=comparison.changed_variables,
+            comparison=ScientificComparison(
+                baseline_label=_variant_label(
+                    revision, comparison.baseline_variant_key
+                ),
+                target_label=_variant_label(revision, comparison.target_variant_key),
+                axis_names=tuple(item.name for item in comparison.changed_variables),
+                comparable=comparable,
+                incomparability_reasons=comparison.reasons if not comparable else (),
+            ),
+            reported_result=ScientificResult(
+                outcome=comparison.outcome,
+                value=target_value,
+                unit=target.unit or baseline.unit,
+                direction=comparison.direction,
+                result_text=result_text,
+                result_kind="observed",
+                baseline_value=baseline_value,
+                target_value=target_value,
+            ),
+            attribution_scope=attribution,
+            scientific_context=_scientific_context(
+                _by_key(
+                    revision.variants, "variant_key", comparison.target_variant_key
+                ),
+                _by_key(revision.test_conditions, "test_key", target.test_key),
+            ),
+            resolution_status="resolved" if comparable else "partial",
+            failure_reason=None,
+            confidence=_confidence(comparison.relation_status),
+        )
+        return evidence, record
 
 
 def _by_key(items: Any, field_name: str, key: str | None) -> Any | None:
@@ -1018,3 +1191,14 @@ def _edge(
 
 
 __all__ = ["ExperimentCompatibilityProjection"]
+
+
+def _scientific_context(
+    variant: ExperimentalVariant | None, test: ExperimentTestCondition | None
+) -> ScientificContext:
+    return ScientificContext(
+        material=variant.subject_attributes if variant else (),
+        sample=variant.state if variant else (),
+        process=variant.intervention_attributes if variant else (),
+        test=test.parameters if test else (),
+    )

@@ -1,0 +1,303 @@
+{
+  "contributions": [
+    {
+      "analysis_status": "analyzed",
+      "analysis_version": 1,
+      "changed_variables": [],
+      "collection_id": "collection-1",
+      "comparable_evidence_count": 1,
+      "confidence": 1.0,
+      "contribution_summary": "NP and P150 tensile results",
+      "document_id": "paper-1",
+      "evidence_disposition": "comparable_evidence",
+      "evidence_disposition_reason": null,
+      "evidence_status_counts": {
+        "comparable": 1,
+        "descriptive": 2
+      },
+      "exclusion_reason": null,
+      "extracted_source_count": 3,
+      "failed_source_count": 0,
+      "inspected_source_refs": [],
+      "material_match": [],
+      "measured_property_scope": [
+        "elongation"
+      ],
+      "objective_id": "objective-1",
+      "paper_role": "primary_experiment",
+      "relevance": "high",
+      "routed_source_count": 3,
+      "test_environment_scope": [],
+      "uninspected_source_count": 0,
+      "warnings": []
+    }
+  ],
+  "evidence": [
+    {
+      "analysis_version": 1,
+      "attribution_scope": "isolated_effect",
+      "authoring_note": null,
+      "changed_variables": [
+        {
+          "baseline_value": 0,
+          "name": "preheat",
+          "target_value": 150,
+          "unit": "C"
+        }
+      ],
+      "collection_id": "collection-1",
+      "comparison": {
+        "axis_names": [
+          "preheat"
+        ],
+        "baseline_label": "NP",
+        "comparable": true,
+        "incomparability_reasons": [],
+        "target_label": "P150"
+      },
+      "confidence": 1.0,
+      "created_at": null,
+      "created_by_tool_call_id": null,
+      "created_by_user_id": null,
+      "document_id": "paper-1",
+      "eligible_for_finding_authoring": true,
+      "evidence_id": "experiment-evidence-3e9afb113da50f52a191b0c7",
+      "evidence_role": "direct_result",
+      "evidence_status": "comparable",
+      "evidence_status_reason": "The paper reports a source-grounded comparison.",
+      "failure_reason": null,
+      "objective_id": "objective-1",
+      "origin": "system_generated",
+      "page_numbers": [],
+      "related_source_refs": [],
+      "reported_result": {
+        "baseline_value": 72,
+        "direction": "increase",
+        "outcome": "elongation",
+        "result_kind": "observed",
+        "result_text": "NP elongation 72% -> P150 elongation 82%",
+        "target_value": 82,
+        "unit": "%",
+        "value": 82
+      },
+      "resolution_status": "resolved",
+      "scientific_context": {
+        "material": [
+          {
+            "name": "alloy",
+            "unit": null,
+            "value": "316L"
+          }
+        ],
+        "process": [
+          {
+            "name": "preheat",
+            "unit": "C",
+            "value": 150
+          }
+        ],
+        "sample": [],
+        "test": [
+          {
+            "name": "temperature",
+            "unit": "C",
+            "value": 25
+          }
+        ]
+      },
+      "selection_reason": null,
+      "selection_status": "extracted",
+      "source_analysis_version": null,
+      "source_excerpt": "NP 72%; P150 82% elongation",
+      "source_kind": "table",
+      "source_ref": "table-2",
+      "superseded_by_evidence_id": null,
+      "supersedes_evidence_id": null,
+      "supports_finding": true,
+      "warnings": []
+    },
+    {
+      "analysis_version": 1,
+      "attribution_scope": "descriptive_only",
+      "authoring_note": null,
+      "changed_variables": [],
+      "collection_id": "collection-1",
+      "comparison": null,
+      "confidence": 1.0,
+      "created_at": null,
+      "created_by_tool_call_id": null,
+      "created_by_user_id": null,
+      "document_id": "paper-1",
+      "eligible_for_finding_authoring": true,
+      "evidence_id": "experiment-evidence-b67f435d6920861b0ce1573e",
+      "evidence_role": "direct_result",
+      "evidence_status": "descriptive",
+      "evidence_status_reason": "The selected experiment reports this outcome without a paper-internal comparison.",
+      "failure_reason": null,
+      "objective_id": "objective-1",
+      "origin": "system_generated",
+      "page_numbers": [],
+      "related_source_refs": [],
+      "reported_result": {
+        "baseline_value": null,
+        "direction": "unknown",
+        "outcome": "elongation",
+        "result_kind": "measured",
+        "result_text": "P150 elongation 82%",
+        "target_value": null,
+        "unit": "%",
+        "value": 82
+      },
+      "resolution_status": "resolved",
+      "scientific_context": {
+        "material": [
+          {
+            "name": "alloy",
+            "unit": null,
+            "value": "316L"
+          }
+        ],
+        "process": [
+          {
+            "name": "preheat",
+            "unit": "C",
+            "value": 150
+          }
+        ],
+        "sample": [],
+        "test": [
+          {
+            "name": "temperature",
+            "unit": "C",
+            "value": 25
+          }
+        ]
+      },
+      "selection_reason": null,
+      "selection_status": "extracted",
+      "source_analysis_version": null,
+      "source_excerpt": "NP 72%; P150 82% elongation",
+      "source_kind": "table",
+      "source_ref": "table-2",
+      "superseded_by_evidence_id": null,
+      "supersedes_evidence_id": null,
+      "supports_finding": true,
+      "warnings": []
+    },
+    {
+      "analysis_version": 1,
+      "attribution_scope": "descriptive_only",
+      "authoring_note": null,
+      "changed_variables": [],
+      "collection_id": "collection-1",
+      "comparison": null,
+      "confidence": 1.0,
+      "created_at": null,
+      "created_by_tool_call_id": null,
+      "created_by_user_id": null,
+      "document_id": "paper-1",
+      "eligible_for_finding_authoring": true,
+      "evidence_id": "experiment-evidence-c3645015c9293246a5ff72e1",
+      "evidence_role": "direct_result",
+      "evidence_status": "descriptive",
+      "evidence_status_reason": "The selected experiment reports this outcome without a paper-internal comparison.",
+      "failure_reason": null,
+      "objective_id": "objective-1",
+      "origin": "system_generated",
+      "page_numbers": [],
+      "related_source_refs": [],
+      "reported_result": {
+        "baseline_value": null,
+        "direction": "unknown",
+        "outcome": "elongation",
+        "result_kind": "measured",
+        "result_text": "NP elongation 72%",
+        "target_value": null,
+        "unit": "%",
+        "value": 72
+      },
+      "resolution_status": "resolved",
+      "scientific_context": {
+        "material": [
+          {
+            "name": "alloy",
+            "unit": null,
+            "value": "316L"
+          }
+        ],
+        "process": [
+          {
+            "name": "preheat",
+            "unit": "C",
+            "value": 0
+          }
+        ],
+        "sample": [],
+        "test": [
+          {
+            "name": "temperature",
+            "unit": "C",
+            "value": 25
+          }
+        ]
+      },
+      "selection_reason": null,
+      "selection_status": "extracted",
+      "source_analysis_version": null,
+      "source_excerpt": "NP 72%; P150 82% elongation",
+      "source_kind": "table",
+      "source_ref": "table-2",
+      "superseded_by_evidence_id": null,
+      "supersedes_evidence_id": null,
+      "supports_finding": true,
+      "warnings": []
+    }
+  ],
+  "findings": [
+    {
+      "analysis_version": 1,
+      "assertion_strength": "associative",
+      "attribution_scope": "isolated_effect",
+      "certainty": 0.8,
+      "collection_id": "collection-1",
+      "created_at": null,
+      "created_by_tool_call_id": null,
+      "created_by_user_id": null,
+      "direction": "increase",
+      "display_rank": 0,
+      "factors": [
+        "preheat"
+      ],
+      "finding_id": "finding-1",
+      "limitations": [],
+      "mechanisms": [],
+      "objective_id": "objective-1",
+      "origin": "system_generated",
+      "outcome": "elongation",
+      "paper_contributions": [
+        {
+          "analysis_status": "analyzed",
+          "condition_boundary_evidence_ids": [],
+          "context_evidence_ids": [],
+          "contradicting_evidence_ids": [],
+          "document_id": "paper-1",
+          "supporting_evidence_ids": [
+            "experiment-evidence-c3645015c9293246a5ff72e1",
+            "experiment-evidence-b67f435d6920861b0ce1573e",
+            "experiment-evidence-3e9afb113da50f52a191b0c7"
+          ]
+        }
+      ],
+      "parent_finding_id": null,
+      "scientific_context": {
+        "material": [],
+        "process": [],
+        "sample": [],
+        "test": []
+      },
+      "source_analysis_version": null,
+      "statement": "Preheat was associated with higher elongation.",
+      "synthesis_status": "insufficient_confirmation"
+    }
+  ]
+}

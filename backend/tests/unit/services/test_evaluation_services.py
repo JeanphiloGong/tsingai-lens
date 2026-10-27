@@ -1,18 +1,8 @@
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    PaperStudyDisposition,
-    ResearchObjective,
-    _text,
-    normalize_objective_terms,
-)
-
-from repositories.paper_map_repository import paper_map_from_payload
-
 from dataclasses import replace
 
 import pytest
-
 from application.evaluation.core_evaluation_service import CoreEvaluationService
 from application.evaluation.finding_feedback_service import (
     FindingFeedbackService,
@@ -32,11 +22,33 @@ from domain.core import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.research_objective import (
+    ObjectiveEvidence,
+    PaperContribution,
+    PaperStudyDisposition,
+    ResearchObjective,
+    _text,
+    normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
 from domain.evaluation import FindingCuration, FindingFeedback
 from repositories.finding_review_repository import (
     finding_curation_from_record,
     finding_feedback_from_record,
 )
+from repositories.paper_map_repository import paper_map_from_payload
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
@@ -178,9 +190,22 @@ class FakeEvaluationRepository:
 
 class _RecordedExperimentProjection:
     def __init__(self, *, finding, evidence, contribution) -> None:
+        self.finding_value = finding
+        self.evidence_value = evidence
+        self.contribution_value = contribution
         self.finding = finding.to_record()
         self.evidence = evidence.to_record()
         self.contribution = contribution.to_record()
+
+    async def read_analysis_records(
+        self, collection_id, objective_id, analysis_version
+    ):
+        assert (collection_id, objective_id, analysis_version) == (
+            "col-gold",
+            "obj-1",
+            1,
+        )
+        return (self.finding_value,), (self.evidence_value,), (self.contribution_value,)
 
     async def list_findings(
         self, collection_id, objective_id, analysis_version, *, offset=0, limit=50
@@ -407,99 +432,100 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
         analysis.analysis_version,
     )
     assert running is not None
-    evidence = ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "evidence_id": "evidence-1",
-            "document_id": "doc-1",
-            "source_kind": "text_window",
-            "source_ref": "block-7",
-            "source_excerpt": "At 500 C, tensile strength increased to 620 MPa.",
-            "page_numbers": [7],
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "temperature",
-                    "baseline_value": 400,
-                    "target_value": 500,
-                    "unit": "C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "400 C",
-                "target_label": "500 C",
-                "axis_names": ["temperature"],
-                "comparable": True,
-                "incomparability_reasons": [],
-            },
-            "reported_result": {
-                "outcome": "strength",
-                "value": 620,
-                "unit": "MPa",
-                "direction": "increase",
-                "result_text": "At 500 C, tensile strength increased to 620 MPa.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [{"name": "test", "value": "tensile"}],
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+    evidence = ObjectiveEvidence(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        analysis_version=1,
+        evidence_id="evidence-1",
+        document_id="doc-1",
+        source_kind="text_window",
+        source_ref="block-7",
+        source_excerpt="At 500 C, tensile strength increased to 620 MPa.",
+        page_numbers=(7,),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=400, target_value=500, unit="C"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="400 C",
+            target_label="500 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=620,
+            unit="MPa",
+            direction="increase",
+            result_text="At 500 C, tensile strength increased to 620 MPa.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),),
+            test=(ScientificAttribute(name="test", value="tensile"),),
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
-    finding = Finding.from_mapping(
-        {
-            "collection_id": "col-gold",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "finding_id": "finding-1",
-            "statement": "Higher temperature was associated with greater strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "insufficient_confirmation",
-            "certainty": 0.5,
-            "display_rank": 0,
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [{"name": "test", "value": "tensile"}],
-            },
-            "limitations": ["Only one paper directly supports this Finding."],
-            "paper_contributions": [
-                {
-                    "document_id": "doc-1",
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": ["evidence-1"],
-                }
-            ],
-        }
+    finding = Finding(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        statement="Higher temperature was associated with greater strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope=finding_choice(
+            "isolated_effect",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="insufficient_confirmation",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),),
+            test=(ScientificAttribute(name="test", value="tensile"),),
+        ),
+        limitations=("Only one paper directly supports this Finding.",),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="doc-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     )
     await repository.publish_analysis(
         "col-gold",
         "obj-1",
         1,
         contributions=(
-            PaperContribution.from_mapping(
-                {
-                    "collection_id": "col-gold",
-                    "objective_id": "obj-1",
-                    "analysis_version": 1,
-                    "document_id": "doc-1",
-                    "analysis_status": "analyzed",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "confidence": 0.9,
-                }
+            PaperContribution(
+                collection_id="col-gold",
+                objective_id="obj-1",
+                analysis_version=1,
+                document_id="doc-1",
+                analysis_status="analyzed",
+                relevance="high",
+                paper_role="primary_experiment",
+                contribution_summary=None,
+                material_match=(),
+                changed_variables=(),
+                measured_property_scope=(),
+                test_environment_scope=(),
+                exclusion_reason=None,
+                warnings=(),
+                confidence=0.9,
             ),
         ),
         evidence_records=(evidence,),

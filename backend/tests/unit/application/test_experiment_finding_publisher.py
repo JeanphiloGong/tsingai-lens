@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import pytest
-
 from application.core.objectives.analysis.experiment_finding_publisher import (
     ExperimentFindingPublisher,
 )
 from domain.core import ComparisonGroup, ComparisonGroupMember, Finding
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+    _choice,
+)
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-
+from domain.core.scientific_fact import (
+    ScientificContext,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -55,28 +61,32 @@ def _selection(selection_id: str, experiment_id: str) -> ObjectiveExperimentSele
 
 
 def _finding(**overrides) -> Finding:
-    payload = {
+    values = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "finding_id": "finding-1",
         "statement": "The selected experiment reports a change.",
-        "factors": ["preheating"],
+        "factors": ("preheating",),
         "outcome": "elongation",
         "direction": "increase",
         "assertion_strength": "descriptive",
-        "attribution_scope": "descriptive_only",
+        "attribution_scope": _choice(
+            "descriptive_only",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
         "synthesis_status": "single_study",
         "certainty": 0.4,
         "display_rank": 0,
-        "mechanisms": [],
-        "scientific_context": {},
-        "limitations": [],
-        "paper_contributions": [],
-        "selection_ids": ["selection-1"],
+        "mechanisms": (),
+        "scientific_context": ScientificContext(),
+        "limitations": (),
+        "paper_contributions": (),
+        "selection_ids": ("selection-1",),
     }
-    payload.update(overrides)
-    return Finding.from_mapping(payload)
+    values.update(overrides)
+    return Finding(**values)
 
 
 async def test_publisher_requires_group_for_cross_paper_finding() -> None:
@@ -94,7 +104,7 @@ async def test_publisher_requires_group_for_cross_paper_finding() -> None:
     with pytest.raises(ValueError, match="ComparisonGroup"):
         await publisher.publish(
             _finding(
-                selection_ids=["selection-1", "selection-2"],
+                selection_ids=("selection-1", "selection-2"),
                 synthesis_status="agreement",
             )
         )

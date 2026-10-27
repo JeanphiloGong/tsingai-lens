@@ -1,22 +1,11 @@
 from __future__ import annotations
 
-
-from domain.core.research_objective import (
-    OBJECTIVE_CONFIRMATION_STATUSES,
-    ResearchObjective,
-    _choice,
-    _positive_int_or_none,
-    normalize_objective_terms,
-)
-
-
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-
 from application.core.objectives.analysis.diagnostics import record_analysis_diagnostic
 from application.core.objectives.analysis.paper_experiment_contract import (
     PaperExperimentDraft,
@@ -45,6 +34,34 @@ from domain.core import (
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
+)
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    Finding,
+    FindingPaperContribution,
+)
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _positive_int as finding_positive_int
+from domain.core.research_objective import (
+    OBJECTIVE_CONFIRMATION_STATUSES,
+    ObjectiveEvidence,
+    PaperContribution,
+    ResearchObjective,
+    _choice,
+)
+from domain.core.research_objective import _positive_int_or_none
+from domain.core.research_objective import (
+    _positive_int_or_none as objective_positive_int_or_none,
+)
+from domain.core.research_objective import (
+    normalize_objective_terms,
+)
+from domain.core.scientific_fact import (
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
 )
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 from repositories.objective_repository import (
@@ -126,135 +143,137 @@ def _analysis(
 
 
 def _evidence(version: int) -> ObjectiveEvidence:
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": version,
-            "evidence_id": "evidence-1",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-1",
-            "source_excerpt": "Temperature changed strength.",
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "temperature",
-                    "baseline_value": 500,
-                    "target_value": 600,
-                    "unit": "C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "500 C",
-                "target_label": "600 C",
-                "axis_names": ["temperature"],
-                "comparable": True,
-                "incomparability_reasons": [],
-            },
-            "reported_result": {
-                "outcome": "strength",
-                "value": 620,
-                "unit": "MPa",
-                "direction": "increase",
-                "result_text": "Strength increased at 600 C.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+    return ObjectiveEvidence(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=objective_positive_int_or_none(version) or 0,
+        evidence_id="evidence-1",
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-1",
+        source_excerpt="Temperature changed strength.",
+        page_numbers=(),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=500, target_value=600, unit="C"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="500 C",
+            target_label="600 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=620,
+            unit="MPa",
+            direction="increase",
+            result_text="Strength increased at 600 C.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
 
 
 def _finding(version: int) -> Finding:
-    return Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": version,
-            "finding_id": "finding-1",
-            "statement": "Temperature was associated with strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "insufficient_confirmation",
-            "certainty": 0.5,
-            "mechanisms": [],
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "paper_contributions": [
-                {
-                    "document_id": "paper-1",
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": ["evidence-1"],
-                }
-            ],
-        }
+    return Finding(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=finding_positive_int(version),
+        finding_id="finding-1",
+        statement="Temperature was associated with strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope=finding_choice(
+            "isolated_effect",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="insufficient_confirmation",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        limitations=(),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     )
 
 
 def _native_finding(version: int) -> Finding:
     """A Finding whose provenance is the experiment selection graph."""
 
-    return Finding.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": version,
-            "finding_id": "experiment-finding-1",
-            "statement": "Temperature was associated with strength.",
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "single_study",
-            "certainty": 0.5,
-            "mechanisms": [],
-            "scientific_context": {
-                "material": [{"name": "alloy", "value": "Alloy A"}],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "paper_contributions": [],
-            "selection_ids": ["selection-1"],
-        }
+    return Finding(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=finding_positive_int(version),
+        finding_id="experiment-finding-1",
+        statement="Temperature was associated with strength.",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope=finding_choice(
+            "isolated_effect",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="single_study",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(
+            material=(ScientificAttribute(name="alloy", value="Alloy A"),)
+        ),
+        limitations=(),
+        paper_contributions=(),
+        selection_ids=("selection-1",),
     )
 
 
 def _artifacts(version: int) -> ObjectiveExperimentAnalysisArtifacts:
     return ObjectiveExperimentAnalysisArtifacts(
         contributions=(
-            PaperContribution.from_mapping(
-                {
-                    "collection_id": "collection-1",
-                    "objective_id": "objective-1",
-                    "analysis_version": version,
-                    "document_id": "paper-1",
-                    "analysis_status": "analyzed",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "confidence": 0.9,
-                    "evidence_disposition": "comparable_evidence",
-                    "routed_source_count": 1,
-                    "extracted_source_count": 1,
-                    "comparable_evidence_count": 1,
-                    "failed_source_count": 0,
-                }
+            PaperContribution(
+                collection_id="collection-1",
+                objective_id="objective-1",
+                analysis_version=objective_positive_int_or_none(version) or 0,
+                document_id="paper-1",
+                analysis_status="analyzed",
+                relevance="high",
+                paper_role="primary_experiment",
+                contribution_summary=None,
+                material_match=(),
+                changed_variables=(),
+                measured_property_scope=(),
+                test_environment_scope=(),
+                exclusion_reason=None,
+                warnings=(),
+                confidence=0.9,
+                evidence_disposition="comparable_evidence",
+                routed_source_count=1,
+                extracted_source_count=1,
+                comparable_evidence_count=1,
+                failed_source_count=0,
             ),
         ),
         experiment_outputs=(),
@@ -1592,25 +1611,28 @@ async def test_empty_finding_output_publishes_scientific_abstention() -> None:
 
 
 async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
-    contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "analyzed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "confidence": 0.9,
-            "evidence_disposition": "no_routable_evidence",
-            "routed_source_count": 0,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 0,
-            "evidence_disposition_reason": (
-                "No source in this paper was selected for Objective extraction."
-            ),
-        }
+    contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="analyzed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=(),
+        confidence=0.9,
+        evidence_disposition="no_routable_evidence",
+        routed_source_count=0,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=0,
+        evidence_disposition_reason="No source in this paper was selected for Objective extraction.",
     )
     artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(contribution,),
@@ -1661,26 +1683,28 @@ async def test_missing_paper_contributions_still_fails_without_publication() -> 
 
 
 async def test_all_relevant_paper_extractions_failed_without_publication() -> None:
-    failed_contribution = PaperContribution.from_mapping(
-        {
-            "collection_id": "collection-1",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "document_id": "paper-1",
-            "analysis_status": "failed",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "warnings": ["1 selected source(s) failed extraction."],
-            "confidence": 0.9,
-            "evidence_disposition": "extraction_failed",
-            "routed_source_count": 1,
-            "extracted_source_count": 0,
-            "comparable_evidence_count": 0,
-            "failed_source_count": 1,
-            "evidence_disposition_reason": (
-                "1 selected source(s) failed extraction."
-            ),
-        }
+    failed_contribution = PaperContribution(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        document_id="paper-1",
+        analysis_status="failed",
+        relevance="high",
+        paper_role="primary_experiment",
+        contribution_summary=None,
+        material_match=(),
+        changed_variables=(),
+        measured_property_scope=(),
+        test_environment_scope=(),
+        exclusion_reason=None,
+        warnings=("1 selected source(s) failed extraction.",),
+        confidence=0.9,
+        evidence_disposition="extraction_failed",
+        routed_source_count=1,
+        extracted_source_count=0,
+        comparable_evidence_count=0,
+        failed_source_count=1,
+        evidence_disposition_reason="1 selected source(s) failed extraction.",
     )
     artifacts = ObjectiveExperimentAnalysisArtifacts(
         contributions=(failed_contribution,),

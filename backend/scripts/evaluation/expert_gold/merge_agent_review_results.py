@@ -12,6 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from application.evaluation.finding_feedback_service import parse_curated_finding
 from domain.core import Finding  # noqa: E402
 
 
@@ -123,7 +124,7 @@ def _validated_agent_review(
     }
     curated_finding = _mapping(review.get("curated_finding"))
     if curated_finding:
-        finding = Finding.from_mapping(curated_finding)
+        finding = parse_curated_finding(curated_finding)
         if finding.to_record() != curated_finding:
             raise ValueError(
                 f"line {line_number}: agent_review.curated_finding is not canonical"

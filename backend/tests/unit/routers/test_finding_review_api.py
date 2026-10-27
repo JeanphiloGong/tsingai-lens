@@ -1,16 +1,49 @@
 from __future__ import annotations
 
-
-from domain.core.research_objective import PreparedDocumentInput, _text
-
 import json
-
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from typing import Mapping
 
 from controllers.core.finding_review import router
 from domain.core import Finding, ObjectiveEvidence
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    FINDING_ASSERTION_STRENGTHS,
+    FINDING_ORIGINS,
+    FINDING_SYNTHESIS_STATUSES,
+    PAPER_CONTRIBUTION_STATUSES,
+    Finding,
+    FindingMechanismRelation,
+    FindingPaperContribution,
+)
+from domain.core.finding import _certainty as finding_certainty
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _non_negative_int as finding_non_negative_int
+from domain.core.finding import _strings as finding_strings
+from domain.core.finding import _text as finding_text
+from domain.core.finding import (
+    datetime,
+)
+from domain.core.research_objective import (
+    ObjectiveEvidence,
+    PreparedDocumentInput,
+    _text,
+)
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    ScientificAttribute,
+    ScientificComparison,
+    ScientificContext,
+    ScientificResult,
+    ScientificVariable,
+)
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 from domain.evaluation import FindingCuration, FindingFeedback
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from repositories.finding_review_repository import (
     finding_curation_from_record,
     finding_feedback_from_record,
@@ -59,21 +92,332 @@ class _Service:
                 else None
             ),
         )
-        finding = Finding.from_mapping(
-            {
-                **_finding_record(),
-                "analysis_version": 2,
-                "finding_id": "finding-manual-1",
-                "origin": (
-                    "hybrid" if kwargs.get("parent_finding_id") else "human_authored"
+        finding = Finding(
+            collection_id=finding_text(_finding_record().get("collection_id", None))
+            or "",
+            objective_id=finding_text(_finding_record().get("objective_id", None))
+            or "",
+            analysis_version=2,
+            finding_id="finding-manual-1",
+            statement=finding_text(_finding_record().get("statement", None)) or "",
+            factors=finding_strings(_finding_record().get("factors", None)),
+            outcome=finding_text(_finding_record().get("outcome", None)) or "",
+            direction=finding_choice(
+                _finding_record().get("direction", None),
+                SCIENTIFIC_RESULT_DIRECTIONS,
+                "unknown",
+            ),
+            assertion_strength=finding_choice(
+                _finding_record().get("assertion_strength", None),
+                FINDING_ASSERTION_STRENGTHS,
+                "descriptive",
+            ),
+            attribution_scope=finding_choice(
+                _finding_record().get("attribution_scope", None),
+                EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+                "descriptive_only",
+            ),
+            synthesis_status=finding_choice(
+                _finding_record().get("synthesis_status", None),
+                FINDING_SYNTHESIS_STATUSES,
+                "insufficient_confirmation",
+            ),
+            certainty=finding_certainty(_finding_record().get("certainty", None)),
+            display_rank=finding_non_negative_int(
+                _finding_record().get("display_rank", None)
+            ),
+            mechanisms=tuple(
+                (
+                    FindingMechanismRelation(
+                        source_term=finding_text(item.get("source_term")) or "",
+                        relation_type=finding_text(item.get("relation_type")) or "",
+                        target_term=finding_text(item.get("target_term")) or "",
+                        direction=finding_text(item.get("direction")),
+                        assertion_strength=finding_choice(
+                            item.get("assertion_strength"),
+                            FINDING_ASSERTION_STRENGTHS,
+                            "descriptive",
+                        ),
+                        supporting_evidence_ids=finding_strings(
+                            item.get("supporting_evidence_ids")
+                        ),
+                    )
+                    for item in tuple(
+                        (
+                            dict(item)
+                            for item in (
+                                _finding_record().get("mechanisms", None)
+                                if isinstance(
+                                    _finding_record().get("mechanisms", None),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(item, Mapping)
+                        )
+                    )
+                )
+            ),
+            scientific_context=ScientificContext(
+                material=tuple(
+                    (
+                        ScientificAttribute(
+                            name=scientific_text(attribute.get("name")) or "",
+                            value=(
+                                scientific_scalar(attribute.get("value"))
+                                if scientific_scalar(attribute.get("value")) is not None
+                                else ""
+                            ),
+                            unit=scientific_text(attribute.get("unit")),
+                            context_scope=scientific_choice(
+                                attribute.get("context_scope"),
+                                SCIENTIFIC_CONTEXT_SCOPES,
+                                "unknown",
+                            ),
+                            applies_to_outcomes=scientific_terms(
+                                attribute.get("applies_to_outcomes")
+                            ),
+                        )
+                        for attribute in (
+                            (
+                                dict(_finding_record().get("scientific_context", None))
+                                if isinstance(
+                                    _finding_record().get("scientific_context", None),
+                                    Mapping,
+                                )
+                                else {}
+                            ).get("material")
+                            if isinstance(
+                                (
+                                    dict(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        )
+                                    )
+                                    if isinstance(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        ),
+                                        Mapping,
+                                    )
+                                    else {}
+                                ).get("material"),
+                                (list, tuple),
+                            )
+                            else ()
+                        )
+                        if isinstance(attribute, Mapping)
+                    )
                 ),
-                "source_analysis_version": 1,
-                "created_by_user_id": kwargs["created_by_user_id"],
-                "created_at": "2026-09-01T00:00:00+00:00",
-                "parent_finding_id": kwargs.get("parent_finding_id"),
-                "limitations": list(kwargs.get("limitations", ()))
-                or ["Supported by one paper."],
-            }
+                sample=tuple(
+                    (
+                        ScientificAttribute(
+                            name=scientific_text(attribute.get("name")) or "",
+                            value=(
+                                scientific_scalar(attribute.get("value"))
+                                if scientific_scalar(attribute.get("value")) is not None
+                                else ""
+                            ),
+                            unit=scientific_text(attribute.get("unit")),
+                            context_scope=scientific_choice(
+                                attribute.get("context_scope"),
+                                SCIENTIFIC_CONTEXT_SCOPES,
+                                "unknown",
+                            ),
+                            applies_to_outcomes=scientific_terms(
+                                attribute.get("applies_to_outcomes")
+                            ),
+                        )
+                        for attribute in (
+                            (
+                                dict(_finding_record().get("scientific_context", None))
+                                if isinstance(
+                                    _finding_record().get("scientific_context", None),
+                                    Mapping,
+                                )
+                                else {}
+                            ).get("sample")
+                            if isinstance(
+                                (
+                                    dict(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        )
+                                    )
+                                    if isinstance(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        ),
+                                        Mapping,
+                                    )
+                                    else {}
+                                ).get("sample"),
+                                (list, tuple),
+                            )
+                            else ()
+                        )
+                        if isinstance(attribute, Mapping)
+                    )
+                ),
+                process=tuple(
+                    (
+                        ScientificAttribute(
+                            name=scientific_text(attribute.get("name")) or "",
+                            value=(
+                                scientific_scalar(attribute.get("value"))
+                                if scientific_scalar(attribute.get("value")) is not None
+                                else ""
+                            ),
+                            unit=scientific_text(attribute.get("unit")),
+                            context_scope=scientific_choice(
+                                attribute.get("context_scope"),
+                                SCIENTIFIC_CONTEXT_SCOPES,
+                                "unknown",
+                            ),
+                            applies_to_outcomes=scientific_terms(
+                                attribute.get("applies_to_outcomes")
+                            ),
+                        )
+                        for attribute in (
+                            (
+                                dict(_finding_record().get("scientific_context", None))
+                                if isinstance(
+                                    _finding_record().get("scientific_context", None),
+                                    Mapping,
+                                )
+                                else {}
+                            ).get("process")
+                            if isinstance(
+                                (
+                                    dict(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        )
+                                    )
+                                    if isinstance(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        ),
+                                        Mapping,
+                                    )
+                                    else {}
+                                ).get("process"),
+                                (list, tuple),
+                            )
+                            else ()
+                        )
+                        if isinstance(attribute, Mapping)
+                    )
+                ),
+                test=tuple(
+                    (
+                        ScientificAttribute(
+                            name=scientific_text(attribute.get("name")) or "",
+                            value=(
+                                scientific_scalar(attribute.get("value"))
+                                if scientific_scalar(attribute.get("value")) is not None
+                                else ""
+                            ),
+                            unit=scientific_text(attribute.get("unit")),
+                            context_scope=scientific_choice(
+                                attribute.get("context_scope"),
+                                SCIENTIFIC_CONTEXT_SCOPES,
+                                "unknown",
+                            ),
+                            applies_to_outcomes=scientific_terms(
+                                attribute.get("applies_to_outcomes")
+                            ),
+                        )
+                        for attribute in (
+                            (
+                                dict(_finding_record().get("scientific_context", None))
+                                if isinstance(
+                                    _finding_record().get("scientific_context", None),
+                                    Mapping,
+                                )
+                                else {}
+                            ).get("test")
+                            if isinstance(
+                                (
+                                    dict(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        )
+                                    )
+                                    if isinstance(
+                                        _finding_record().get(
+                                            "scientific_context", None
+                                        ),
+                                        Mapping,
+                                    )
+                                    else {}
+                                ).get("test"),
+                                (list, tuple),
+                            )
+                            else ()
+                        )
+                        if isinstance(attribute, Mapping)
+                    )
+                ),
+            ),
+            limitations=finding_strings(
+                list(kwargs.get("limitations", ())) or ["Supported by one paper."]
+            ),
+            paper_contributions=tuple(
+                (
+                    FindingPaperContribution(
+                        document_id=finding_text(item.get("document_id")) or "",
+                        analysis_status=finding_choice(
+                            item.get("analysis_status"),
+                            PAPER_CONTRIBUTION_STATUSES,
+                            "pending",
+                        ),
+                        supporting_evidence_ids=finding_strings(
+                            item.get("supporting_evidence_ids")
+                        ),
+                        contradicting_evidence_ids=finding_strings(
+                            item.get("contradicting_evidence_ids")
+                        ),
+                        context_evidence_ids=finding_strings(
+                            item.get("context_evidence_ids")
+                        ),
+                        condition_boundary_evidence_ids=finding_strings(
+                            item.get("condition_boundary_evidence_ids")
+                        ),
+                    )
+                    for item in tuple(
+                        (
+                            dict(item)
+                            for item in (
+                                _finding_record().get("paper_contributions", None)
+                                if isinstance(
+                                    _finding_record().get("paper_contributions", None),
+                                    (list, tuple),
+                                )
+                                else ()
+                            )
+                            if isinstance(item, Mapping)
+                        )
+                    )
+                )
+            ),
+            origin=finding_choice(
+                "hybrid" if kwargs.get("parent_finding_id") else "human_authored",
+                FINDING_ORIGINS,
+                "system_generated",
+            ),
+            source_analysis_version=1,
+            parent_finding_id=finding_text(kwargs.get("parent_finding_id")),
+            created_by_user_id=finding_text(kwargs["created_by_user_id"]),
+            created_by_tool_call_id=finding_text(
+                _finding_record().get("created_by_tool_call_id", None)
+            ),
+            created_at=datetime.fromisoformat("2026-09-01T00:00:00+00:00"),
+            warnings=finding_strings(_finding_record().get("warnings", None)),
+            selection_ids=finding_strings(_finding_record().get("selection_ids", None)),
+            comparison_group_ids=finding_strings(
+                _finding_record().get("comparison_group_ids", None)
+            ),
         )
         return FindingAuthoringResult(
             analysis=analysis,
@@ -177,76 +521,75 @@ def _dataset(collection_id: str, objective_id: str | None) -> dict:
 
 
 def _finding_record(statement: str = "Temperature affects strength.") -> dict:
-    return Finding.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "finding_id": "finding-1",
-            "statement": statement,
-            "factors": ["temperature"],
-            "outcome": "strength",
-            "direction": "increase",
-            "assertion_strength": "associative",
-            "attribution_scope": "isolated_effect",
-            "synthesis_status": "insufficient_confirmation",
-            "certainty": 0.5,
-            "display_rank": 0,
-            "scientific_context": {
-                "material": [],
-                "sample": [],
-                "process": [],
-                "test": [],
-            },
-            "limitations": ["Supported by one paper."],
-            "paper_contributions": [
-                {
-                    "document_id": "paper-1",
-                    "analysis_status": "analyzed",
-                    "supporting_evidence_ids": ["evidence-1"],
-                }
-            ],
-        }
+    return Finding(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        statement=finding_text(statement) or "",
+        factors=("temperature",),
+        outcome="strength",
+        direction="increase",
+        assertion_strength="associative",
+        attribution_scope=finding_choice(
+            "isolated_effect",
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status="insufficient_confirmation",
+        certainty=0.5,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=("Supported by one paper.",),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-1",),
+            ),
+        ),
     ).to_record()
 
 
 def _evidence_record() -> dict:
-    return ObjectiveEvidence.from_mapping(
-        {
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "analysis_version": 1,
-            "evidence_id": "evidence-1",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-7",
-            "source_excerpt": "At 500 C, strength reached 620 MPa.",
-            "page_numbers": [7],
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "changed_variables": [
-                {
-                    "name": "temperature",
-                    "baseline_value": 400,
-                    "target_value": 500,
-                    "unit": "C",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "400 C",
-                "target_label": "500 C",
-                "axis_names": ["temperature"],
-                "comparable": True,
-            },
-            "reported_result": {
-                "outcome": "strength",
-                "direction": "increase",
-                "result_text": "Strength reached 620 MPa.",
-            },
-            "attribution_scope": "isolated_effect",
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
+    return ObjectiveEvidence(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        evidence_id="evidence-1",
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-7",
+        source_excerpt="At 500 C, strength reached 620 MPa.",
+        page_numbers=(7,),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=400, target_value=500, unit="C"
+            ),
+        ),
+        comparison=ScientificComparison(
+            baseline_label="400 C",
+            target_label="500 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=None,
+            unit=None,
+            direction="increase",
+            result_text="Strength reached 620 MPa.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     ).to_record()
 
 

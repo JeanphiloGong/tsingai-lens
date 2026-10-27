@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from hashlib import sha1, sha256
-from typing import Any, Mapping
+from typing import (
+    Any,
+    Mapping,
+)
 
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
@@ -11,11 +14,38 @@ from application.core.objectives.analysis.analysis_record_source import (
 from application.core.objectives.analysis.experiment_compatibility_projection import (
     ExperimentCompatibilityProjection,
 )
-from domain.core import Finding, ObjectiveEvidence, PaperContribution
+from domain.core.finding import (
+    EVIDENCE_ATTRIBUTION_SCOPES,
+    FINDING_ASSERTION_STRENGTHS,
+    FINDING_ORIGINS,
+    FINDING_SYNTHESIS_STATUSES,
+    PAPER_CONTRIBUTION_STATUSES,
+    Finding,
+    FindingMechanismRelation,
+    FindingPaperContribution,
+)
+from domain.core.finding import _certainty as finding_certainty
+from domain.core.finding import _choice as finding_choice
+from domain.core.finding import _datetime_or_none as finding_datetime_or_none
+from domain.core.finding import _non_negative_int as finding_non_negative_int
+from domain.core.finding import _positive_int as finding_positive_int
+from domain.core.finding import _stable_id as finding_stable_id
+from domain.core.finding import _strings as finding_strings
+from domain.core.finding import _text as finding_text
+from domain.core.research_objective import ObjectiveEvidence, PaperContribution
+from domain.core.scientific_fact import (
+    SCIENTIFIC_CONTEXT_SCOPES,
+    SCIENTIFIC_RESULT_DIRECTIONS,
+    ScientificAttribute,
+    ScientificContext,
+)
+from domain.core.scientific_fact import _choice as scientific_choice
+from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
+from domain.core.scientific_fact import _terms as scientific_terms
+from domain.core.scientific_fact import _text as scientific_text
 from domain.evaluation import FindingCuration, FindingFeedback
 from repositories.finding_review_repository import (
     FindingReviewRepository,
-    finding_curation_from_record,
     finding_curation_record,
     finding_feedback_from_record,
 )
@@ -129,25 +159,23 @@ class FindingFeedbackService:
             curated_finding=curated_finding,
         )
         updated_at = _now_iso()
-        curation = finding_curation_from_record(
-            {
-                "curation_id": _stable_id(
-                    "curation",
-                    collection_id,
-                    objective_id,
-                    str(analysis_version),
-                    finding_id,
-                ),
-                "collection_id": collection_id,
-                "objective_id": objective_id,
-                "analysis_version": analysis_version,
-                "finding_id": finding_id,
-                "curated_status": curated_status,
-                "curated_finding": candidate.to_record(),
-                "note": note,
-                "reviewer": reviewer,
-                "updated_at": updated_at,
-            }
+        curation = FindingCuration(
+            curation_id=_stable_id(
+                "curation",
+                collection_id,
+                objective_id,
+                str(analysis_version),
+                finding_id,
+            ),
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            finding_id=finding_id,
+            curated_status=curated_status,
+            curated_finding=candidate,
+            note=note,
+            reviewer=reviewer,
+            updated_at=updated_at,
         )
         return await self.review_repository.upsert_curation(curation)
 
@@ -166,11 +194,7 @@ class FindingFeedbackService:
             analysis_version,
             finding_id,
         )
-        candidate = Finding.from_mapping(curated_finding)
-        if candidate.to_record() != dict(curated_finding):
-            raise ValueError(
-                "curated_finding must use the complete canonical Finding contract"
-            )
+        candidate = parse_curated_finding(curated_finding)
         if candidate.key != published.key:
             raise ValueError("curation cannot change the published Finding identity")
         if tuple(
@@ -359,7 +383,11 @@ class FindingFeedbackService:
                 else None
             )
             training_target = expert_target or system_prediction
-            target_finding = Finding.from_mapping(training_target)
+            target_finding = (
+                current_curation.curated_finding
+                if current_curation is not None
+                else finding
+            )
             evidence_records = [item.to_record() for item in evidence]
             finding_fingerprint = _fingerprint("finding.v2", training_target)
             evidence_fingerprint = _fingerprint("evidence.v2", evidence_records)
@@ -420,28 +448,23 @@ class FindingFeedbackService:
         objective_id: str,
         analysis_version: int,
     ) -> tuple[Finding, ...]:
+        if await self._should_use_experiment_projection(
+            collection_id, objective_id, analysis_version
+        ):
+            findings, _, _ = await self.experiment_projection.read_analysis_records(
+                collection_id, objective_id, analysis_version
+            )
+            return findings
         result: list[Finding] = []
         offset = 0
         while True:
-            if await self._should_use_experiment_projection(
-                collection_id, objective_id, analysis_version
-            ):
-                records, total = await self.experiment_projection.list_findings(
-                    collection_id,
-                    objective_id,
-                    analysis_version,
-                    offset=offset,
-                    limit=_FINDING_PAGE_SIZE,
-                )
-                page = tuple(Finding.from_mapping(item) for item in records)
-            else:
-                page, total = await self.objective_repository.list_findings(
-                    collection_id,
-                    objective_id,
-                    analysis_version,
-                    offset=offset,
-                    limit=_FINDING_PAGE_SIZE,
-                )
+            page, total = await self.objective_repository.list_findings(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=offset,
+                limit=_FINDING_PAGE_SIZE,
+            )
             result.extend(page)
             offset += len(page)
             if offset >= total:
@@ -452,32 +475,29 @@ class FindingFeedbackService:
     async def _finding_evidence(
         self, finding: Finding
     ) -> tuple[ObjectiveEvidence, ...]:
+        if await self._should_use_experiment_projection(
+            finding.collection_id, finding.objective_id, finding.analysis_version
+        ):
+            _, evidence, _ = await self.experiment_projection.read_analysis_records(
+                finding.collection_id, finding.objective_id, finding.analysis_version
+            )
+            linked = {
+                *finding.supporting_evidence_ids,
+                *finding.contradicting_evidence_ids,
+                *finding.context_evidence_ids,
+            }
+            return tuple(item for item in evidence if item.evidence_id in linked)
         result: list[ObjectiveEvidence] = []
         offset = 0
         while True:
-            if await self._should_use_experiment_projection(
+            page, total = await self.objective_repository.list_evidence(
                 finding.collection_id,
                 finding.objective_id,
                 finding.analysis_version,
-            ):
-                records, total = await self.experiment_projection.list_evidence(
-                    finding.collection_id,
-                    finding.objective_id,
-                    finding.analysis_version,
-                    finding_id=finding.finding_id,
-                    offset=offset,
-                    limit=_EVIDENCE_PAGE_SIZE,
-                )
-                page = tuple(ObjectiveEvidence.from_mapping(item) for item in records)
-            else:
-                page, total = await self.objective_repository.list_evidence(
-                    finding.collection_id,
-                    finding.objective_id,
-                    finding.analysis_version,
-                    finding_id=finding.finding_id,
-                    offset=offset,
-                    limit=_EVIDENCE_PAGE_SIZE,
-                )
+                finding_id=finding.finding_id,
+                offset=offset,
+                limit=_EVIDENCE_PAGE_SIZE,
+            )
             result.extend(page)
             offset += len(page)
             if offset >= total:
@@ -504,13 +524,12 @@ class FindingFeedbackService:
         if await self._should_use_experiment_projection(
             collection_id, objective_id, analysis_version
         ):
-            record = await self.experiment_projection.read_finding(
-                collection_id,
-                objective_id,
-                analysis_version,
-                finding_id,
+            findings, _, _ = await self.experiment_projection.read_analysis_records(
+                collection_id, objective_id, analysis_version
             )
-            finding = Finding.from_mapping(record) if record is not None else None
+            finding = next(
+                (item for item in findings if item.finding_id == finding_id), None
+            )
         else:
             finding = await self.objective_repository.read_finding(
                 collection_id,
@@ -531,12 +550,12 @@ class FindingFeedbackService:
         if await self._should_use_experiment_projection(
             collection_id, objective_id, analysis_version
         ):
-            records = await self.experiment_projection.list_contributions(
-                collection_id,
-                objective_id,
-                analysis_version,
+            _, _, contributions = (
+                await self.experiment_projection.read_analysis_records(
+                    collection_id, objective_id, analysis_version
+                )
             )
-            return tuple(PaperContribution.from_mapping(item) for item in records)
+            return contributions
         return await self.objective_repository.list_contributions(
             collection_id,
             objective_id,
@@ -734,3 +753,174 @@ __all__ = [
     "TRAINING_PROMPT_VERSION",
     "TRAINING_SCHEMA_VERSION",
 ]
+
+
+def parse_curated_finding(payload: Mapping[str, Any]) -> Finding:
+    """Parse the complete canonical Finding submitted for expert review."""
+    candidate = Finding(
+        collection_id=finding_text(payload.get("collection_id")) or "",
+        objective_id=finding_text(payload.get("objective_id")) or "",
+        analysis_version=finding_positive_int(payload.get("analysis_version")),
+        finding_id=finding_text(payload.get("finding_id"))
+        or finding_stable_id(
+            "finding",
+            payload.get("objective_id"),
+            payload.get("analysis_version"),
+            finding_strings(payload.get("factors")),
+            finding_text(payload.get("outcome")) or "",
+            payload.get("supporting_evidence_ids"),
+        ),
+        statement=finding_text(payload.get("statement")) or "",
+        factors=finding_strings(payload.get("factors")),
+        outcome=finding_text(payload.get("outcome")) or "",
+        direction=finding_choice(
+            payload.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
+        ),
+        assertion_strength=finding_choice(
+            payload.get("assertion_strength"),
+            FINDING_ASSERTION_STRENGTHS,
+            "descriptive",
+        ),
+        attribution_scope=finding_choice(
+            payload.get("attribution_scope"),
+            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
+            "descriptive_only",
+        ),
+        synthesis_status=finding_choice(
+            payload.get("synthesis_status"),
+            FINDING_SYNTHESIS_STATUSES,
+            "insufficient_confirmation",
+        ),
+        certainty=finding_certainty(payload.get("certainty")),
+        display_rank=finding_non_negative_int(payload.get("display_rank")),
+        mechanisms=tuple(
+            (
+                FindingMechanismRelation(
+                    source_term=finding_text(item.get("source_term")) or "",
+                    relation_type=finding_text(item.get("relation_type")) or "",
+                    target_term=finding_text(item.get("target_term")) or "",
+                    direction=finding_text(item.get("direction")),
+                    assertion_strength=finding_choice(
+                        item.get("assertion_strength"),
+                        FINDING_ASSERTION_STRENGTHS,
+                        "descriptive",
+                    ),
+                    supporting_evidence_ids=finding_strings(
+                        item.get("supporting_evidence_ids")
+                    ),
+                )
+                for item in tuple(
+                    (
+                        dict(item)
+                        for item in (
+                            payload.get("mechanisms")
+                            if isinstance(payload.get("mechanisms"), (list, tuple))
+                            else ()
+                        )
+                        if isinstance(item, Mapping)
+                    )
+                )
+            )
+        ),
+        scientific_context=_review_scientific_context(
+            payload.get("scientific_context")
+        ),
+        limitations=finding_strings(payload.get("limitations")),
+        paper_contributions=tuple(
+            (
+                FindingPaperContribution(
+                    document_id=finding_text(item.get("document_id")) or "",
+                    analysis_status=finding_choice(
+                        item.get("analysis_status"),
+                        PAPER_CONTRIBUTION_STATUSES,
+                        "pending",
+                    ),
+                    supporting_evidence_ids=finding_strings(
+                        item.get("supporting_evidence_ids")
+                    ),
+                    contradicting_evidence_ids=finding_strings(
+                        item.get("contradicting_evidence_ids")
+                    ),
+                    context_evidence_ids=finding_strings(
+                        item.get("context_evidence_ids")
+                    ),
+                    condition_boundary_evidence_ids=finding_strings(
+                        item.get("condition_boundary_evidence_ids")
+                    ),
+                )
+                for item in tuple(
+                    (
+                        dict(item)
+                        for item in (
+                            payload.get("paper_contributions")
+                            if isinstance(
+                                payload.get("paper_contributions"), (list, tuple)
+                            )
+                            else ()
+                        )
+                        if isinstance(item, Mapping)
+                    )
+                )
+            )
+        ),
+        origin=finding_choice(
+            payload.get("origin"), FINDING_ORIGINS, "system_generated"
+        ),
+        source_analysis_version=finding_positive_int(
+            payload.get("source_analysis_version")
+        )
+        or None,
+        parent_finding_id=finding_text(payload.get("parent_finding_id")),
+        created_by_user_id=finding_text(payload.get("created_by_user_id")),
+        created_by_tool_call_id=finding_text(payload.get("created_by_tool_call_id")),
+        created_at=finding_datetime_or_none(payload.get("created_at")),
+        warnings=finding_strings(payload.get("warnings")),
+        selection_ids=finding_strings(payload.get("selection_ids")),
+        comparison_group_ids=finding_strings(payload.get("comparison_group_ids")),
+    )
+    canonical = candidate.to_record()
+    if canonical != dict(payload):
+        missing = sorted(set(canonical) - set(payload))
+        unexpected = sorted(set(payload) - set(canonical))
+        details = []
+        if missing:
+            details.append("missing keys: " + ", ".join(missing[:8]))
+        if unexpected:
+            details.append("unexpected keys: " + ", ".join(unexpected[:8]))
+        details.append("preserve canonical value types and field names")
+        raise ValueError(
+            "curated_finding must use the complete canonical Finding contract; "
+            + "; ".join(details)
+        )
+    return candidate
+
+
+def _context_attributes(records: Any) -> tuple[ScientificAttribute, ...]:
+    return tuple(
+        ScientificAttribute(
+            name=scientific_text(item.get("name")) or "",
+            value=(
+                scientific_scalar(item.get("value"))
+                if scientific_scalar(item.get("value")) is not None
+                else ""
+            ),
+            unit=scientific_text(item.get("unit")),
+            context_scope=scientific_choice(
+                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
+            ),
+            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
+        )
+        for item in (records if isinstance(records, (list, tuple)) else ())
+        if isinstance(item, Mapping)
+    )
+
+
+def _review_scientific_context(value: Any) -> ScientificContext:
+    if not isinstance(value, Mapping):
+        return ScientificContext()
+    return ScientificContext(
+        material=_context_attributes(value.get("material")),
+        sample=_context_attributes(value.get("sample")),
+        process=_context_attributes(value.get("process")),
+        test=_context_attributes(value.get("test")),
+    )

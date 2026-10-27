@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import (
+    paper_map_payload,
+)
+
+
+from repositories.paper_map_repository import paper_map_from_payload
+
 from copy import deepcopy
 import json
 from types import SimpleNamespace
@@ -20,7 +27,7 @@ from domain.core import PaperResearchMap
 def reading():
     factors = (("laser power",), ("scan speed",), ("laser power", "scan speed"))
     maps = tuple(
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": name,
                 "doc_role": "experimental",
@@ -133,7 +140,7 @@ def form(reading, client, **kwargs):
 def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     reading, proposal
 ):
-    before = deepcopy([m.to_record() for m in reading[0]])
+    before = deepcopy([paper_map_payload(m) for m in reading[0]])
     client, requests = model_client(proposal)
     result = form(reading, client)
     assert len(result.candidates) == 1
@@ -143,7 +150,7 @@ def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     assert candidate.objective.outcomes == ("porosity",)
     assert candidate.objective.confirmation_status == "candidate"
     assert candidate.objective.active_analysis_version is None
-    assert [m.to_record() for m in reading[0]] == before
+    assert [paper_map_payload(m) for m in reading[0]] == before
     for selection, original in zip(candidate.papers, reading[0]):
         assert selection.paper_map is original
         assert selection.source_texts == (
@@ -169,7 +176,7 @@ def test_background_selection_survives_without_becoming_an_experimental_seed(
 
 def test_excerpts_can_justify_inspection_without_a_complete_map(reading, proposal):
     maps = tuple(
-        PaperResearchMap.from_mapping({"document_id": m.document_id})
+        paper_map_from_payload({"document_id": m.document_id})
         for m in reading[0]
     )
     client, _ = model_client(proposal)
@@ -300,7 +307,7 @@ def test_invalid_input_never_reaches_the_model(reading, proposal, invalid):
         del texts["A", "abstract"]
     else:
         maps = tuple(
-            PaperResearchMap.from_mapping({"document_id": str(i)}) for i in range(13)
+            paper_map_from_payload({"document_id": str(i)}) for i in range(13)
         )
         texts = {(m.document_id, "abstract"): "Original abstract." for m in maps}
     client, requests = model_client(proposal)

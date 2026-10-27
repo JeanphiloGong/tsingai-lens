@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import paper_map_from_payload
+
 from types import SimpleNamespace
 
 import pytest
@@ -84,7 +86,7 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
             "stainless steel."
         ),
     }
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "paper-scanning-review",
             "doc_role": "review",
@@ -715,7 +717,7 @@ def test_paper_map_relationship_lineage_is_attached_to_objective_frame() -> None
             "source_relationship_ids": ["relationship-scan-strength"],
         }
     )
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "paper-1",
             "doc_role": "experimental",
@@ -847,7 +849,7 @@ def test_experimental_paper_role_is_not_downgraded_by_frame_judgment():
             "outcomes": ["relative density"],
         }
     )
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "paper-experimental",
             "doc_role": "experimental",
@@ -1642,7 +1644,6 @@ def test_research_objective_routing_uses_document_tree_order():
     )
 
 
-
 def test_research_objective_routing_binds_current_source_to_model_decision():
     objective = _research_objective(
         {
@@ -1746,7 +1747,6 @@ def test_research_objective_routing_uses_compact_prompt_payload():
     )
 
 
-
 def test_research_objective_routing_uses_text_hint_not_source_text():
     objective = _research_objective(
         {
@@ -1807,7 +1807,6 @@ def test_research_objective_routing_uses_text_hint_not_source_text():
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={"paper-1": document_tree},
     )
-
 
 
 def test_research_objective_routing_builds_text_candidates_from_document_tree():

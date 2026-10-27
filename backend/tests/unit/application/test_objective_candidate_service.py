@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import paper_map_payload, research_scope_payload
+
+from repositories.paper_map_repository import paper_map_from_payload
+
 from itertools import permutations
 from typing import Any
 
@@ -92,7 +96,7 @@ def test_relationship_groups_preserve_complete_study_relationship_records():
     ]
 
 
-def test_grouping_uses_existing_domain_objects_without_reparsing(monkeypatch):
+def test_grouping_uses_existing_domain_objects_without_reparsing():
     maps = tuple(
         _paper_map(
             document_id=f"paper-{index}",
@@ -101,12 +105,6 @@ def test_grouping_uses_existing_domain_objects_without_reparsing(monkeypatch):
         )
         for index in range(6)
     )
-
-    def reject_reparse(*_args, **_kwargs):
-        raise AssertionError("Grouping must use the existing typed research objects")
-
-    monkeypatch.setattr(PaperResearchScope, "from_mapping", reject_reparse)
-    monkeypatch.setattr(PaperResearchRelationship, "from_mapping", reject_reparse)
 
     groups = ObjectiveCandidateService()._build_relationship_groups(maps)
 
@@ -962,18 +960,18 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
         factors=("laser power",),
         outcome="relative density",
     )
-    background_study = _paper_map(
+    background_study = research_scope_payload(_paper_map(
         document_id="paper-accounting",
         relationship_id="relationship-rejected",
         factors=("scan speed",),
         outcome="surface roughness",
         claim_scope="background",
-    ).studies[0].to_record()
-    skim = PaperResearchMap.from_mapping(
+    ).studies[0])
+    skim = paper_map_from_payload(
         {
-            **current_work_skim.to_record(),
+            **paper_map_payload(current_work_skim),
             "studies": [
-                current_work_skim.studies[0].to_record(),
+                research_scope_payload(current_work_skim.studies[0]),
                 {
                     **background_study,
                     "study_id": "study-paper-accounting-background",
@@ -2556,7 +2554,7 @@ def _paper_map(
     relationship_confidence: float = 0.9,
     extra_relationships: tuple[dict[str, Any], ...] = (),
 ) -> PaperResearchMap:
-    return PaperResearchMap.from_mapping(
+    return paper_map_from_payload(
         {
             "document_id": document_id,
             "doc_role": "experimental",

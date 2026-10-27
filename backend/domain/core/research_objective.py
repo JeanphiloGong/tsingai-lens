@@ -149,34 +149,6 @@ class PaperResearchSourceRef:
                 f"unsupported paper research Source kind: {self.source_kind}"
             )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchSourceRef":
-        return cls(
-            source_kind=_text(payload.get("source_kind")) or "",
-            source_ref=_text(payload.get("source_ref")) or "",
-        )
-
-    def to_record(self) -> dict[str, str]:
-        return {
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-        }
-
-
-def _paper_research_source_refs(value: Any) -> tuple[PaperResearchSourceRef, ...]:
-    refs: list[PaperResearchSourceRef] = []
-    seen: set[tuple[str, str]] = set()
-    for item in value or ():
-        if not isinstance(item, Mapping):
-            continue
-        source_ref = PaperResearchSourceRef.from_mapping(item)
-        key = (source_ref.source_kind, source_ref.source_ref)
-        if key in seen:
-            continue
-        seen.add(key)
-        refs.append(source_ref)
-    return tuple(refs)
-
 
 @dataclass(frozen=True)
 class ReviewKnowledgeItem:
@@ -196,29 +168,6 @@ class ReviewKnowledgeItem:
         if not self.source_refs:
             raise ValueError("review knowledge requires a source reference")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ReviewKnowledgeItem":
-        return cls(
-            content=_text(payload.get("content")) or "",
-            material_scope=normalize_objective_terms(payload.get("material_scope")),
-            variables=normalize_objective_terms(payload.get("variables")),
-            outcomes=normalize_objective_terms(payload.get("outcomes")),
-            conditions=normalize_objective_terms(payload.get("conditions")),
-            source_refs=_paper_research_source_refs(payload.get("source_refs")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "content": self.content,
-            "material_scope": list(self.material_scope),
-            "variables": list(self.variables),
-            "outcomes": list(self.outcomes),
-            "conditions": list(self.conditions),
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "confidence": self.confidence,
-        }
-
 
 @dataclass(frozen=True)
 class ReviewSynthesisMap:
@@ -229,14 +178,6 @@ class ReviewSynthesisMap:
     evidence_gaps: tuple[ReviewKnowledgeItem, ...] = ()
     citation_leads: tuple[ReviewKnowledgeItem, ...] = ()
 
-    def __post_init__(self) -> None:
-        for field_name in (
-            "synthesis_claims",
-            "disputes",
-            "evidence_gaps",
-            "citation_leads",
-        ):
-            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
 
     @property
     def is_empty(self) -> bool:
@@ -248,35 +189,6 @@ class ReviewSynthesisMap:
                 self.citation_leads,
             )
         )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any] | None) -> "ReviewSynthesisMap":
-        source = payload or {}
-
-        def items(field_name: str) -> tuple[ReviewKnowledgeItem, ...]:
-            return tuple(
-                ReviewKnowledgeItem.from_mapping(item)
-                for item in source.get(field_name) or ()
-                if isinstance(item, Mapping)
-            )
-
-        return cls(
-            synthesis_claims=items("synthesis_claims"),
-            disputes=items("disputes"),
-            evidence_gaps=items("evidence_gaps"),
-            citation_leads=items("citation_leads"),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            field_name: [item.to_record() for item in getattr(self, field_name)]
-            for field_name in (
-                "synthesis_claims",
-                "disputes",
-                "evidence_gaps",
-                "citation_leads",
-            )
-        }
 
 
 @dataclass(frozen=True)
@@ -300,54 +212,6 @@ class PaperResearchRelationship:
             raise ValueError(
                 "paper research relationship requires a source reference"
             )
-
-    @classmethod
-    def from_mapping(
-        cls,
-        payload: Mapping[str, Any],
-        *,
-        parent_study_boundary: str | None = None,
-    ) -> "PaperResearchRelationship":
-        varied_factors = normalize_objective_terms(payload.get("varied_factors"))
-        outcome = _text(payload.get("outcome")) or ""
-        source_refs = _paper_research_source_refs(payload.get("source_refs"))
-        relationship_id = _text(payload.get("relationship_id"))
-        if relationship_id is None:
-            identity = json.dumps(
-                {
-                    "document_id": (_text(payload.get("document_id")) or "").casefold(),
-                    "parent_study_boundary": parent_study_boundary,
-                    "varied_factors": sorted(
-                        value.casefold() for value in varied_factors
-                    ),
-                    "outcome": outcome.casefold(),
-                    "source_refs": sorted(
-                        (item.source_kind, item.source_ref) for item in source_refs
-                    ),
-                },
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            relationship_id = (
-                f"relationship_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-            )
-        return cls(
-            relationship_id=relationship_id,
-            varied_factors=varied_factors,
-            outcome=outcome,
-            source_refs=source_refs,
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "relationship_id": self.relationship_id,
-            "varied_factors": list(self.varied_factors),
-            "outcome": self.outcome,
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "confidence": self.confidence,
-        }
 
 
 _PAPER_RESEARCH_DESIGN_TYPES = frozenset(
@@ -392,89 +256,6 @@ class PaperResearchScope:
         relationship_ids = [item.relationship_id for item in self.relationships]
         if len(relationship_ids) != len(set(relationship_ids)):
             raise ValueError("paper research relationship ids must be unique")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchScope":
-        document_id = _text(payload.get("document_id")) or ""
-        design_type = _text(payload.get("design_type")) or "uncertain"
-        claim_scope = _text(payload.get("claim_scope")) or "uncertain"
-        experiment_label = _text(payload.get("experiment_label"))
-        material_scope = normalize_objective_terms(payload.get("material_scope"))
-        process_context = normalize_objective_terms(payload.get("process_context"))
-        parent_study_boundary = json.dumps(
-            {
-                "document_id": document_id.casefold(),
-                "design_type": design_type,
-                "claim_scope": claim_scope,
-                "experiment_label": (
-                    experiment_label.casefold() if experiment_label else None
-                ),
-                "material_scope": sorted(value.casefold() for value in material_scope),
-                "process_context": sorted(
-                    value.casefold() for value in process_context
-                ),
-            },
-            ensure_ascii=True,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        relationships = tuple(
-            PaperResearchRelationship.from_mapping(
-                {**dict(item), "document_id": document_id},
-                parent_study_boundary=parent_study_boundary,
-            )
-            for item in payload.get("relationships") or ()
-            if isinstance(item, Mapping)
-        )
-        study_id = _text(payload.get("study_id"))
-        if study_id is None:
-            identity = json.dumps(
-                {
-                    "document_id": document_id.casefold(),
-                    "design_type": design_type,
-                    "claim_scope": claim_scope,
-                    "experiment_label": (
-                        experiment_label.casefold() if experiment_label else None
-                    ),
-                    "material_scope": sorted(
-                        value.casefold() for value in material_scope
-                    ),
-                    "process_context": sorted(
-                        value.casefold() for value in process_context
-                    ),
-                    "relationship_ids": sorted(
-                        item.relationship_id for item in relationships
-                    ),
-                },
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            study_id = f"study_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-        return cls(
-            study_id=study_id,
-            document_id=document_id,
-            design_type=design_type,
-            claim_scope=claim_scope,
-            experiment_label=experiment_label,
-            material_scope=material_scope,
-            process_context=process_context,
-            relationships=relationships,
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "study_id": self.study_id,
-            "document_id": self.document_id,
-            "design_type": self.design_type,
-            "claim_scope": self.claim_scope,
-            "experiment_label": self.experiment_label,
-            "material_scope": list(self.material_scope),
-            "process_context": list(self.process_context),
-            "relationships": [item.to_record() for item in self.relationships],
-            "confidence": self.confidence,
-        }
 
 
 class PaperStudyDispositionStatus(StrEnum):
@@ -589,80 +370,6 @@ class PaperResearchSignal:
         if not self.source_refs:
             raise ValueError("paper research signal requires at least one source")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchSignal":
-        signal_type = _text(payload.get("signal_type")) or ""
-        label = _text(payload.get("label")) or ""
-        variable_role = _text(payload.get("variable_role")) or (
-            "not_applicable" if signal_type == "outcome" else "uncertain"
-        )
-        design_type = _text(payload.get("design_type")) or "uncertain"
-        claim_scope = _text(payload.get("claim_scope")) or "uncertain"
-        experiment_label = _text(payload.get("experiment_label"))
-        material_scope = normalize_objective_terms(payload.get("material_scope"))
-        process_context = normalize_objective_terms(payload.get("process_context"))
-        source_refs = _paper_research_source_refs(payload.get("source_refs"))
-        signal_id = _text(payload.get("signal_id"))
-        if signal_id is None:
-            identity = json.dumps(
-                {
-                    "document_id": (
-                        _text(payload.get("document_id")) or ""
-                    ).casefold(),
-                    "signal_type": signal_type,
-                    "label": label.casefold(),
-                    "variable_role": variable_role,
-                    "design_type": design_type,
-                    "claim_scope": claim_scope,
-                    "experiment_label": (
-                        experiment_label.casefold() if experiment_label else None
-                    ),
-                    "material_scope": sorted(
-                        value.casefold() for value in material_scope
-                    ),
-                    "process_context": sorted(
-                        value.casefold() for value in process_context
-                    ),
-                    "source_refs": sorted(
-                        (item.source_kind, item.source_ref) for item in source_refs
-                    ),
-                },
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            signal_id = f"signal_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-        return cls(
-            signal_id=signal_id,
-            signal_type=signal_type,
-            label=label,
-            variable_role=variable_role,
-            design_type=design_type,
-            claim_scope=claim_scope,
-            experiment_label=experiment_label,
-            material_scope=material_scope,
-            process_context=process_context,
-            source_refs=source_refs,
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            reason=_text(payload.get("reason")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "signal_id": self.signal_id,
-            "signal_type": self.signal_type,
-            "label": self.label,
-            "variable_role": self.variable_role,
-            "design_type": self.design_type,
-            "claim_scope": self.claim_scope,
-            "experiment_label": self.experiment_label,
-            "material_scope": list(self.material_scope),
-            "process_context": list(self.process_context),
-            "source_refs": [item.to_record() for item in self.source_refs],
-            "confidence": self.confidence,
-            "reason": self.reason,
-        }
-
 
 class PaperSourceUnitCoverageStatus(StrEnum):
     RELATIONSHIP_EMITTED = "relationship_emitted"
@@ -722,27 +429,6 @@ class PaperSourceUnitCoverage:
                 f"unsupported paper Source-unit coverage status: {value}"
             ) from exc
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperSourceUnitCoverage":
-        return cls(
-            source_unit_id=_text(payload.get("source_unit_id")) or "",
-            window_id=_text(payload.get("window_id")) or "",
-            source_kind=_text(payload.get("source_kind")) or "",
-            source_ref=_text(payload.get("source_ref")) or "",
-            status=cls._status(payload.get("status")),
-            reason=_text(payload.get("reason")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "source_unit_id": self.source_unit_id,
-            "window_id": self.window_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "status": self.status.value,
-            "reason": self.reason,
-        }
-
 
 @dataclass(frozen=True)
 class PaperResearchMap:
@@ -780,10 +466,6 @@ class PaperResearchMap:
             "map_limitations",
             normalize_objective_terms(self.map_limitations),
         )
-        if not isinstance(self.review_synthesis, ReviewSynthesisMap):
-            raise TypeError(
-                "paper research map review_synthesis must be a ReviewSynthesisMap"
-            )
         if self.doc_role != "review" and not self.review_synthesis.is_empty:
             raise ValueError("review synthesis requires a review paper")
         if any(study.document_id != self.document_id for study in self.studies):
@@ -805,70 +487,6 @@ class PaperResearchMap:
             item.status is PaperSourceUnitCoverageStatus.EXTRACTION_FAILED
             for item in self.source_unit_coverage
         )
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperResearchMap":
-        document_id = _text(payload.get("document_id") or payload.get("paper_id")) or ""
-        return cls(
-            document_id=document_id,
-            doc_role=_text(payload.get("doc_role")) or "uncertain",
-            studies=tuple(
-                PaperResearchScope.from_mapping(
-                    {**dict(item), "document_id": item.get("document_id", document_id)}
-                )
-                for item in payload.get("studies") or ()
-                if isinstance(item, Mapping)
-            ),
-            evidence_density=_text(payload.get("evidence_density")) or "unknown",
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-            warnings=normalize_objective_terms(payload.get("warnings")),
-            unresolved_signals=tuple(
-                PaperResearchSignal.from_mapping(
-                    {**dict(item), "document_id": document_id}
-                )
-                for item in payload.get("unresolved_signals") or ()
-                if isinstance(item, Mapping)
-            ),
-            source_unit_coverage=tuple(
-                PaperSourceUnitCoverage.from_mapping(item)
-                for item in payload.get("source_unit_coverage") or ()
-                if isinstance(item, Mapping)
-            ),
-            map_status=_text(payload.get("map_status")) or "unknown",
-            map_limitations=normalize_objective_terms(
-                payload.get("map_limitations")
-            ),
-            review_synthesis=ReviewSynthesisMap.from_mapping(
-                payload.get("review_synthesis")
-                if isinstance(payload.get("review_synthesis"), Mapping)
-                else None
-            ),
-            input_fingerprint=_text(payload.get("input_fingerprint")) or None,
-            map_version=_text(payload.get("map_version")) or None,
-            generated_at=_text(payload.get("generated_at")) or None,
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "doc_role": self.doc_role,
-            "studies": [study.to_record() for study in self.studies],
-            "evidence_density": self.evidence_density,
-            "confidence": self.confidence,
-            "warnings": list(self.warnings),
-            "unresolved_signals": [
-                signal.to_record() for signal in self.unresolved_signals
-            ],
-            "source_unit_coverage": [
-                item.to_record() for item in self.source_unit_coverage
-            ],
-            "map_status": self.map_status,
-            "map_limitations": list(self.map_limitations),
-            "review_synthesis": self.review_synthesis.to_record(),
-            "input_fingerprint": self.input_fingerprint,
-            "map_version": self.map_version,
-            "generated_at": self.generated_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -2228,3 +1846,165 @@ def _scoped_id(prefix: str, *parts: Any) -> str:
     payload = "|".join(_stable_text(part) for part in parts if part is not None)
     digest = sha1((payload or prefix).encode("utf-8")).hexdigest()[:20]
     return f"{prefix}_{digest}"
+
+
+def build_paper_research_relationship(
+    *,
+    document_id: str,
+    varied_factors: tuple[str, ...],
+    outcome: str,
+    source_refs: tuple[PaperResearchSourceRef, ...],
+    confidence: float,
+    parent_study_boundary: str | None = None,
+) -> PaperResearchRelationship:
+    identity = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'parent_study_boundary': parent_study_boundary,
+            'varied_factors': sorted((value.casefold() for value in varied_factors)),
+            'outcome': outcome.casefold(),
+            'source_refs': sorted(((item.source_kind, item.source_ref) for item in source_refs)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    relationship_id = f"relationship_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+    return PaperResearchRelationship(
+        relationship_id=relationship_id,
+        varied_factors=varied_factors,
+        outcome=outcome,
+        source_refs=source_refs,
+        confidence=confidence,
+    )
+
+
+def build_paper_research_scope(
+    *,
+    document_id: str,
+    design_type: str,
+    claim_scope: str,
+    experiment_label: str | None,
+    material_scope: tuple[str, ...],
+    process_context: tuple[str, ...],
+    relationships: tuple[PaperResearchRelationship, ...],
+    confidence: float,
+) -> PaperResearchScope:
+    parent_study_boundary = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'design_type': design_type,
+            'claim_scope': claim_scope,
+            'experiment_label': experiment_label.casefold() if experiment_label else None,
+            'material_scope': sorted((value.casefold() for value in material_scope)),
+            'process_context': sorted((value.casefold() for value in process_context)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    relationships = tuple(build_paper_research_relationship(
+        document_id=document_id,
+        varied_factors=item.varied_factors,
+        outcome=item.outcome,
+        source_refs=item.source_refs,
+        confidence=item.confidence,
+        parent_study_boundary=parent_study_boundary,
+    ) for item in relationships)
+    study_id = build_paper_research_scope_id(
+        document_id=document_id,
+        design_type=design_type,
+        claim_scope=claim_scope,
+        experiment_label=experiment_label,
+        material_scope=material_scope,
+        process_context=process_context,
+        relationships=relationships,
+    )
+    return PaperResearchScope(
+        study_id=study_id,
+        document_id=document_id,
+        design_type=design_type,
+        claim_scope=claim_scope,
+        experiment_label=experiment_label,
+        material_scope=material_scope,
+        process_context=process_context,
+        relationships=relationships,
+        confidence=confidence,
+    )
+
+
+def build_paper_research_signal(
+    *,
+    document_id: str,
+    signal_type: str,
+    label: str,
+    variable_role: str,
+    design_type: str,
+    claim_scope: str,
+    experiment_label: str | None,
+    material_scope: tuple[str, ...],
+    process_context: tuple[str, ...],
+    source_refs: tuple[PaperResearchSourceRef, ...],
+    confidence: float,
+    reason: str | None = None,
+) -> PaperResearchSignal:
+    identity = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'signal_type': signal_type,
+            'label': label.casefold(),
+            'variable_role': variable_role,
+            'design_type': design_type,
+            'claim_scope': claim_scope,
+            'experiment_label': experiment_label.casefold() if experiment_label else None,
+            'material_scope': sorted((value.casefold() for value in material_scope)),
+            'process_context': sorted((value.casefold() for value in process_context)),
+            'source_refs': sorted(((item.source_kind, item.source_ref) for item in source_refs)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    signal_id = f"signal_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+    return PaperResearchSignal(
+        signal_id=signal_id,
+        signal_type=signal_type,
+        label=label,
+        variable_role=variable_role,
+        design_type=design_type,
+        claim_scope=claim_scope,
+        experiment_label=experiment_label,
+        material_scope=material_scope,
+        process_context=process_context,
+        source_refs=source_refs,
+        confidence=confidence,
+        reason=reason,
+    )
+
+
+def build_paper_research_scope_id(
+    *,
+    document_id: str,
+    design_type: str,
+    claim_scope: str,
+    experiment_label: str | None,
+    material_scope: tuple[str, ...],
+    process_context: tuple[str, ...],
+    relationships: tuple[PaperResearchRelationship, ...],
+) -> str:
+    identity = json.dumps(
+        {
+            'document_id': document_id.casefold(),
+            'design_type': design_type,
+            'claim_scope': claim_scope,
+            'experiment_label': experiment_label.casefold() if experiment_label else None,
+            'material_scope': sorted((value.casefold() for value in material_scope)),
+            'process_context': sorted((value.casefold() for value in process_context)),
+            'relationship_ids': sorted((item.relationship_id for item in relationships)),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    study_id = f"study_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+    return study_id

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from domain.core.research_objective import build_paper_research_scope
+
+
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 import logging
@@ -171,18 +174,11 @@ class PaperMapAggregator:
 
     @staticmethod
     def _study_with_claim_scope(study: PaperResearchScope, claim_scope: str) -> PaperResearchScope:
-        record = study.to_record()
-        record.pop("study_id", None)
-        record["claim_scope"] = claim_scope
-        record["relationships"] = [
-            {
-                key: value
-                for key, value in relationship.items()
-                if key != "relationship_id"
-            }
-            for relationship in record["relationships"]
-        ]
-        return PaperResearchScope.from_mapping(record)
+        return build_paper_research_scope(
+            document_id=study.document_id, design_type=study.design_type, claim_scope=claim_scope,
+            experiment_label=study.experiment_label, material_scope=study.material_scope,
+            process_context=study.process_context, relationships=study.relationships, confidence=study.confidence,
+        )
 
     @classmethod
     def consolidate_studies(
@@ -354,51 +350,17 @@ class PaperMapAggregator:
                 relationships.append(relationship)
                 continue
             current = relationships[duplicate_position]
-            relationships[duplicate_position] = PaperResearchRelationship.from_mapping(
-                {
-                    "document_id": document_id,
-                    "varied_factors": current.varied_factors,
-                    "outcome": current.outcome,
-                    "source_refs": [
-                        source_ref.to_record()
-                        for source_ref in unique_source_refs(
-                            (*current.source_refs, *relationship.source_refs)
-                        )
-                    ],
-                    "confidence": max(current.confidence, relationship.confidence),
-                }
+            relationships[duplicate_position] = replace(
+                current, source_refs=unique_source_refs((*current.source_refs, *relationship.source_refs)),
+                confidence=max(current.confidence, relationship.confidence),
             )
-        return PaperResearchScope.from_mapping(
-            {
-                "document_id": document_id,
-                "experiment_label": existing.experiment_label
-                or duplicate.experiment_label,
-                "design_type": (
-                    existing.design_type
-                    if existing.design_type != "uncertain"
-                    else duplicate.design_type
-                ),
-                "claim_scope": (
-                    existing.claim_scope
-                    if existing.claim_scope != "uncertain"
-                    else duplicate.claim_scope
-                ),
-                "material_scope": cls._unique_text_values(
-                    (*existing.material_scope, *duplicate.material_scope)
-                ),
-                "process_context": cls._unique_text_values(
-                    (*existing.process_context, *duplicate.process_context)
-                ),
-                "relationships": [
-                    {
-                        key: value
-                        for key, value in item.to_record().items()
-                        if key != "relationship_id"
-                    }
-                    for item in relationships
-                ],
-                "confidence": max(existing.confidence, duplicate.confidence),
-            },
+        return build_paper_research_scope(
+            document_id=document_id, experiment_label=existing.experiment_label or duplicate.experiment_label,
+            design_type=existing.design_type if existing.design_type != "uncertain" else duplicate.design_type,
+            claim_scope=existing.claim_scope if existing.claim_scope != "uncertain" else duplicate.claim_scope,
+            material_scope=cls._unique_text_values((*existing.material_scope, *duplicate.material_scope)),
+            process_context=cls._unique_text_values((*existing.process_context, *duplicate.process_context)),
+            relationships=tuple(relationships), confidence=max(existing.confidence, duplicate.confidence),
         )
 
     @staticmethod

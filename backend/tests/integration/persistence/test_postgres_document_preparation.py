@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import paper_map_from_payload
+
 from dataclasses import replace
 
 import pytest
@@ -49,7 +51,7 @@ def _profile(document_id: str, title: str) -> DocumentProfile:
 
 
 def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
-    return PaperResearchMap.from_mapping(
+    return paper_map_from_payload(
         {
             "document_id": document_id,
             "doc_role": "primary_experiment",

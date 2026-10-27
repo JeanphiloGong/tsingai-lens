@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import paper_map_from_payload
+
 import json
 from pathlib import Path
 from typing import Any
@@ -413,7 +415,7 @@ def test_tc4_concrete_result_resolves_cross_source_broad_scope_and_stops_reading
 
 
 def test_tc4_specific_unlinked_signal_remains_visible_without_blocking_discovery():
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "tc4-paper",
             "doc_role": "experimental",
@@ -464,7 +466,7 @@ def test_tc4_specific_unlinked_signal_remains_visible_without_blocking_discovery
 
 
 def test_tc4_broad_family_signal_matches_expanded_specific_relationship():
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "tc4-paper",
             "doc_role": "experimental",
@@ -505,7 +507,7 @@ def test_tc4_broad_family_signal_matches_expanded_specific_relationship():
 
 
 def test_tc4_microstructure_family_signal_matches_observed_martensite_axis():
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "tc4-paper",
             "doc_role": "experimental",
@@ -594,7 +596,7 @@ def test_tc4_later_expansion_reads_methods_after_finding_a_specific_outcome():
 
 
 def test_tc4_background_relationship_is_not_unclear_ownership():
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "tc4-paper",
             "doc_role": "experimental",

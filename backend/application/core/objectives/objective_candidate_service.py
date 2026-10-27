@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import json
 import logging
 import re
@@ -187,7 +188,60 @@ class ObjectiveCandidateService:
             papers.append(
                 {
                     "document_id": document_id,
-                    "paper_map": paper_map.to_record(),
+                    "paper_map": {
+                        'document_id': paper_map.document_id,
+                        'doc_role': paper_map.doc_role,
+                        'studies': [{
+                            'study_id': study.study_id,
+                            'document_id': study.document_id,
+                            'design_type': study.design_type,
+                            'claim_scope': study.claim_scope,
+                            'experiment_label': study.experiment_label,
+                            'material_scope': list(study.material_scope),
+                            'process_context': list(study.process_context),
+                            'relationships': [{'relationship_id': item.relationship_id, 'varied_factors': list(item.varied_factors), 'outcome': item.outcome, 'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs], 'confidence': item.confidence} for item in study.relationships],
+                            'confidence': study.confidence,
+                        } for study in paper_map.studies],
+                        'evidence_density': paper_map.evidence_density,
+                        'confidence': paper_map.confidence,
+                        'warnings': list(paper_map.warnings),
+                        'unresolved_signals': [{
+                            'signal_id': signal.signal_id,
+                            'signal_type': signal.signal_type,
+                            'label': signal.label,
+                            'variable_role': signal.variable_role,
+                            'design_type': signal.design_type,
+                            'claim_scope': signal.claim_scope,
+                            'experiment_label': signal.experiment_label,
+                            'material_scope': list(signal.material_scope),
+                            'process_context': list(signal.process_context),
+                            'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in signal.source_refs],
+                            'confidence': signal.confidence,
+                            'reason': signal.reason,
+                        } for signal in paper_map.unresolved_signals],
+                        'source_unit_coverage': [{
+                            'source_unit_id': item.source_unit_id,
+                            'window_id': item.window_id,
+                            'source_kind': item.source_kind,
+                            'source_ref': item.source_ref,
+                            'status': item.status.value,
+                            'reason': item.reason,
+                        } for item in paper_map.source_unit_coverage],
+                        'map_status': paper_map.map_status,
+                        'map_limitations': list(paper_map.map_limitations),
+                        'review_synthesis': {field_name: [{
+                            'content': item.content,
+                            'material_scope': list(item.material_scope),
+                            'variables': list(item.variables),
+                            'outcomes': list(item.outcomes),
+                            'conditions': list(item.conditions),
+                            'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs],
+                            'confidence': item.confidence,
+                        } for item in getattr(paper_map.review_synthesis, field_name)] for field_name in ('synthesis_claims', 'disputes', 'evidence_gaps', 'citation_leads')},
+                        'input_fingerprint': paper_map.input_fingerprint,
+                        'map_version': paper_map.map_version,
+                        'generated_at': paper_map.generated_at,
+                    },
                     "excerpts": excerpts,
                 }
             )
@@ -588,13 +642,35 @@ class ObjectiveCandidateService:
         study: PaperResearchScope,
         relationship: PaperResearchRelationship,
     ) -> dict[str, Any]:
-        study_record = study.to_record()
+        study_record = {
+            'study_id': study.study_id,
+            'document_id': study.document_id,
+            'design_type': study.design_type,
+            'claim_scope': study.claim_scope,
+            'experiment_label': study.experiment_label,
+            'material_scope': list(study.material_scope),
+            'process_context': list(study.process_context),
+            'relationships': [{
+                'relationship_id': item.relationship_id,
+                'varied_factors': list(item.varied_factors),
+                'outcome': item.outcome,
+                'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs],
+                'confidence': item.confidence,
+            } for item in study.relationships],
+            'confidence': study.confidence,
+        }
         study_record.pop("relationships", None)
         return {
             "document_id": paper_map.document_id,
             "doc_role": paper_map.doc_role,
             "study": study_record,
-            "relationship": relationship.to_record(),
+            "relationship": {
+                'relationship_id': relationship.relationship_id,
+                'varied_factors': list(relationship.varied_factors),
+                'outcome': relationship.outcome,
+                'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in relationship.source_refs],
+                'confidence': relationship.confidence,
+            },
             "evidence_density": paper_map.evidence_density,
             "paper_confidence": paper_map.confidence,
             "warnings": list(paper_map.warnings),

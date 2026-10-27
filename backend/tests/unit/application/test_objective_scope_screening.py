@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import paper_map_from_payload
+
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -64,7 +66,7 @@ def _experimental_map(
                 ],
             }
         ]
-    return PaperResearchMap.from_mapping(
+    return paper_map_from_payload(
         {
             "document_id": document_id,
             "doc_role": "experimental",
@@ -158,7 +160,7 @@ def test_scope_preview_does_not_truncate_a_131_paper_collection() -> None:
 
 
 def test_review_citation_lead_is_navigation_for_inspection_not_recommended_scope() -> None:
-    review = PaperResearchMap.from_mapping(
+    review = paper_map_from_payload(
         {
             "document_id": "review-1",
             "doc_role": "review",

@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import (
+    coverage_payload,
+    paper_map_payload,
+    research_scope_payload,
+    research_signal_payload,
+    review_synthesis_payload,
+)
+
+
+from repositories.paper_map_repository import _review_item
+from repositories.paper_map_repository import research_scope_from_payload
+from repositories.paper_map_repository import research_signal_from_payload
+from repositories.paper_map_repository import coverage_from_payload
+from repositories.paper_map_repository import paper_map_from_payload
+
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
@@ -44,7 +59,7 @@ from repositories.objective_repository import (
 def test_paper_research_variable_signal_round_trips_scientific_role(
     variable_role: str,
 ) -> None:
-    signal = PaperResearchSignal.from_mapping(
+    signal = research_signal_from_payload(
         {
             "document_id": "paper-1",
             "signal_type": "variable",
@@ -59,11 +74,11 @@ def test_paper_research_variable_signal_round_trips_scientific_role(
     )
 
     assert signal.variable_role == variable_role
-    assert PaperResearchSignal.from_mapping(signal.to_record()) == signal
+    assert research_signal_from_payload(research_signal_payload(signal)) == signal
 
 
 def test_paper_research_outcome_signal_has_no_factor_role() -> None:
-    signal = PaperResearchSignal.from_mapping(
+    signal = research_signal_from_payload(
         {
             "document_id": "paper-1",
             "signal_type": "outcome",
@@ -89,7 +104,7 @@ def test_paper_research_signal_rejects_role_type_mismatch(
     variable_role: str,
 ) -> None:
     with pytest.raises(ValueError, match="variable role"):
-        PaperResearchSignal.from_mapping(
+        research_signal_from_payload(
             {
                 "document_id": "paper-1",
                 "signal_type": signal_type,
@@ -103,7 +118,7 @@ def test_paper_research_signal_rejects_role_type_mismatch(
 
 
 def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> None:
-    item = ReviewKnowledgeItem.from_mapping(
+    item = _review_item(
         {
             "content": "Reported porosity trends disagree across scan strategies.",
             "material_scope": ["Ti-6Al-4V"],
@@ -116,18 +131,18 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
             "confidence": 0.82,
         }
     )
-    skim = PaperResearchMap.from_mapping(
+    skim = paper_map_from_payload(
         {
             "document_id": "review-paper",
             "doc_role": "review",
-            "review_synthesis": ReviewSynthesisMap(disputes=(item,)).to_record(),
+            "review_synthesis": review_synthesis_payload(ReviewSynthesisMap(disputes=(item,))),
             "input_fingerprint": "map-input-v1",
             "map_version": "paper-map.v1",
             "generated_at": "2026-09-08T09:00:00+00:00",
         }
     )
 
-    restored = PaperResearchMap.from_mapping(skim.to_record())
+    restored = paper_map_from_payload(paper_map_payload(skim))
 
     assert restored == skim
     assert restored.review_synthesis.disputes == (item,)
@@ -139,7 +154,7 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
 
 def test_non_review_paper_rejects_review_synthesis_map() -> None:
     with pytest.raises(ValueError, match="review synthesis requires a review paper"):
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "experimental-paper",
                 "doc_role": "experimental",
@@ -158,7 +173,7 @@ def test_non_review_paper_rejects_review_synthesis_map() -> None:
 
 
 def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
-    no_signal = PaperSourceUnitCoverage.from_mapping(
+    no_signal = coverage_from_payload(
         {
             "source_unit_id": "results-1-source-1",
             "window_id": "results-1",
@@ -170,27 +185,27 @@ def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
     )
 
     assert no_signal.status is PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
-    assert PaperSourceUnitCoverage.from_mapping(no_signal.to_record()) == no_signal
+    assert coverage_from_payload(coverage_payload(no_signal)) == no_signal
 
     with pytest.raises(ValueError, match="requires a reason"):
-        PaperSourceUnitCoverage.from_mapping(
+        coverage_from_payload(
             {
-                **no_signal.to_record(),
+                **coverage_payload(no_signal),
                 "reason": None,
             }
         )
 
     with pytest.raises(ValueError, match="cannot have a reason"):
-        PaperSourceUnitCoverage.from_mapping(
+        coverage_from_payload(
             {
-                **no_signal.to_record(),
+                **coverage_payload(no_signal),
                 "status": "relationship_emitted",
             }
         )
 
 
 def test_paper_map_retains_unique_source_unit_coverage() -> None:
-    coverage = PaperSourceUnitCoverage.from_mapping(
+    coverage = coverage_from_payload(
         {
             "source_unit_id": "methods-1-source-1",
             "window_id": "methods-1",
@@ -200,22 +215,22 @@ def test_paper_map_retains_unique_source_unit_coverage() -> None:
             "reason": "The window extraction failed validation.",
         }
     )
-    skim = PaperResearchMap.from_mapping(
+    skim = paper_map_from_payload(
         {
             "document_id": "paper-1",
-            "source_unit_coverage": [coverage.to_record()],
+            "source_unit_coverage": [coverage_payload(coverage)],
         }
     )
 
     assert skim.source_unit_coverage == (coverage,)
     assert skim.coverage_complete is False
-    assert PaperResearchMap.from_mapping(skim.to_record()) == skim
+    assert paper_map_from_payload(paper_map_payload(skim)) == skim
 
     with pytest.raises(ValueError, match="coverage ids must be unique"):
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
-                "source_unit_coverage": [coverage.to_record(), coverage.to_record()],
+                "source_unit_coverage": [coverage_payload(coverage), coverage_payload(coverage)],
             }
         )
 
@@ -1123,7 +1138,7 @@ def test_normalizers_remain_stable() -> None:
 
 
 def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
-    skim = PaperResearchMap.from_mapping(
+    skim = paper_map_from_payload(
         {
             "document_id": "paper-1",
             "studies": [
@@ -1176,7 +1191,7 @@ def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
         }
     )
 
-    record = skim.to_record()
+    record = paper_map_payload(skim)
 
     study = skim.studies[0]
     assert len(study.relationships) == 2
@@ -1195,11 +1210,11 @@ def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
     assert record["unresolved_signals"][0]["design_type"] == "experimental"
     assert record["unresolved_signals"][0]["claim_scope"] == "current_work"
     assert record["unresolved_signals"][0]["experiment_label"] == "surface study"
-    assert PaperResearchMap.from_mapping(record) == skim
+    assert paper_map_from_payload(record) == skim
 
 
 def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None:
-    paper_map = PaperResearchMap.from_mapping(
+    paper_map = paper_map_from_payload(
         {
             "document_id": "paper-1",
             "studies": [
@@ -1229,7 +1244,7 @@ def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None
     assert not hasattr(scope, "test_context")
     assert not hasattr(scope, "comparator")
     assert not hasattr(scope, "fixed_conditions")
-    assert set(paper_map.to_record()["studies"][0]) == {
+    assert set(paper_map_payload(paper_map)["studies"][0]) == {
         "study_id",
         "document_id",
         "design_type",
@@ -1259,10 +1274,10 @@ def test_paper_research_signal_identity_uses_only_preliminary_scope() -> None:
         "confidence": 0.8,
     }
 
-    base = PaperResearchMap.from_mapping(
+    base = paper_map_from_payload(
         {"document_id": "paper-1", "unresolved_signals": [payload]}
     ).unresolved_signals[0]
-    other_test = PaperResearchMap.from_mapping(
+    other_test = paper_map_from_payload(
         {
             "document_id": "paper-1",
             "unresolved_signals": [{**payload, "test_context": ["nanoindentation"]}],
@@ -1271,14 +1286,14 @@ def test_paper_research_signal_identity_uses_only_preliminary_scope() -> None:
 
     assert base.signal_id == other_test.signal_id
     with pytest.raises(ValueError, match="design type"):
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "unresolved_signals": [{**payload, "design_type": "invalid"}],
             }
         )
     with pytest.raises(ValueError, match="claim scope"):
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "unresolved_signals": [{**payload, "claim_scope": "invalid"}],
@@ -1293,10 +1308,10 @@ def test_paper_study_signal_identity_is_scoped_to_its_document() -> None:
         "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
     }
 
-    first = PaperResearchMap.from_mapping(
+    first = paper_map_from_payload(
         {"document_id": "paper-1", "unresolved_signals": [signal]}
     ).unresolved_signals[0]
-    second = PaperResearchMap.from_mapping(
+    second = paper_map_from_payload(
         {"document_id": "paper-2", "unresolved_signals": [signal]}
     ).unresolved_signals[0]
 
@@ -1325,9 +1340,9 @@ def test_paper_study_and_relationship_ids_are_backend_derived_and_stable() -> No
         "confidence": 0.88,
     }
 
-    study = PaperResearchScope.from_mapping(payload)
-    same_study = PaperResearchScope.from_mapping(payload)
-    different_source = PaperResearchScope.from_mapping(
+    study = research_scope_from_payload(payload)
+    same_study = research_scope_from_payload(payload)
+    different_source = research_scope_from_payload(
         {
             **payload,
             "relationships": [
@@ -1346,7 +1361,7 @@ def test_paper_study_and_relationship_ids_are_backend_derived_and_stable() -> No
     assert study.relationships[0].relationship_id.startswith("relationship_")
     assert same_study.study_id == study.study_id
     assert different_source.study_id != study.study_id
-    assert PaperResearchScope.from_mapping(study.to_record()) == study
+    assert research_scope_from_payload(research_scope_payload(study)) == study
 
 
 def test_relationship_identity_includes_its_parent_study_boundary() -> None:
@@ -1355,7 +1370,7 @@ def test_relationship_identity_includes_its_parent_study_boundary() -> None:
         "outcome": "yield strength",
         "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
     }
-    tensile_study = PaperResearchScope.from_mapping(
+    tensile_study = research_scope_from_payload(
         {
             "document_id": "paper-1",
             "design_type": "experimental",
@@ -1365,7 +1380,7 @@ def test_relationship_identity_includes_its_parent_study_boundary() -> None:
             "relationships": [shared_relationship],
         }
     )
-    hardness_study = PaperResearchScope.from_mapping(
+    hardness_study = research_scope_from_payload(
         {
             "document_id": "paper-1",
             "design_type": "experimental",
@@ -1380,12 +1395,12 @@ def test_relationship_identity_includes_its_parent_study_boundary() -> None:
         tensile_study.relationships[0].relationship_id
         != hardness_study.relationships[0].relationship_id
     )
-    PaperResearchMap.from_mapping(
+    paper_map_from_payload(
         {
             "document_id": "paper-1",
             "studies": [
-                tensile_study.to_record(),
-                hardness_study.to_record(),
+                research_scope_payload(tensile_study),
+                research_scope_payload(hardness_study),
             ],
         }
     )
@@ -1398,10 +1413,10 @@ def test_paper_study_owns_nested_relationship_identity() -> None:
         "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
     }
 
-    expected = PaperResearchScope.from_mapping(
+    expected = research_scope_from_payload(
         {"document_id": "paper-1", "relationships": [relationship]}
     )
-    attempted_override = PaperResearchScope.from_mapping(
+    attempted_override = research_scope_from_payload(
         {
             "document_id": "paper-1",
             "relationships": [{**relationship, "document_id": "paper-2"}],
@@ -1412,7 +1427,7 @@ def test_paper_study_owns_nested_relationship_identity() -> None:
 
 
 def test_paper_map_rejects_study_owned_by_another_document() -> None:
-    study = PaperResearchScope.from_mapping(
+    study = research_scope_from_payload(
         {
             "document_id": "paper-2",
             "relationships": [
@@ -1443,7 +1458,7 @@ def _accounted_study_skim(
     *,
     relationships: list[tuple[list[str], str]],
 ) -> PaperResearchMap:
-    return PaperResearchMap.from_mapping(
+    return paper_map_from_payload(
         {
             "document_id": document_id,
             "studies": [

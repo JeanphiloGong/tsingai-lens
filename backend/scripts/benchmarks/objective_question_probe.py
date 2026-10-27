@@ -10,6 +10,11 @@ Mechanical checks are NOT expert scientific acceptance or full Agent E2E.
 
 from __future__ import annotations
 
+from repositories.paper_map_repository import paper_map_payload
+
+
+from repositories.paper_map_repository import paper_map_from_payload
+
 import argparse
 import json
 import subprocess
@@ -131,7 +136,7 @@ def load_scenarios(path: Path) -> list[dict]:
                 if not excerpt["text"].strip():
                     raise ValueError("empty excerpt")
                 excerpt["text_sha256"] = payload_hash(excerpt["text"])
-            paper_map = PaperResearchMap.from_mapping(paper["paper_map"])
+            paper_map = paper_map_from_payload(paper["paper_map"])
             if any(
                 ref.source_ref not in refs
                 for study in paper_map.studies
@@ -146,7 +151,7 @@ def run_baseline(scenario: dict, runtime, client) -> dict:
     response_client = StructuredResponseClient(client=client, model=runtime.model)
     response_client.reasoning_effort = runtime.reasoning_effort
     maps = tuple(
-        PaperResearchMap.from_mapping(p["paper_map"]) for p in scenario["papers"]
+        paper_map_from_payload(p["paper_map"]) for p in scenario["papers"]
     )
     started = perf_counter()
     with capture_llm_usage() as usage:
@@ -154,7 +159,7 @@ def run_baseline(scenario: dict, runtime, client) -> dict:
             "probe",
             paper_maps=maps,
             document_inputs=tuple(
-                PreparedDocumentInput(m.document_id, payload_hash(m.to_record()))
+                PreparedDocumentInput(m.document_id, payload_hash(paper_map_payload(m)))
                 for m in maps
             ),
             axis_equivalence_classifier=ResearchAxisEquivalenceClassifier(
@@ -187,7 +192,7 @@ def run_proposal(scenario: dict, runtime, client) -> dict:
             result = ObjectiveCandidateService().propose_candidate_questions(
                 "probe",
                 paper_maps=tuple(
-                    PaperResearchMap.from_mapping(p["paper_map"])
+                    paper_map_from_payload(p["paper_map"])
                     for p in scenario["papers"]
                 ),
                 source_texts={
@@ -212,7 +217,60 @@ def run_proposal(scenario: dict, runtime, client) -> dict:
                         "papers": [
                             {
                                 "document_id": paper.paper_map.document_id,
-                                "paper_map": paper.paper_map.to_record(),
+                                "paper_map": {
+                                    'document_id': paper.paper_map.document_id,
+                                    'doc_role': paper.paper_map.doc_role,
+                                    'studies': [{
+                                        'study_id': study.study_id,
+                                        'document_id': study.document_id,
+                                        'design_type': study.design_type,
+                                        'claim_scope': study.claim_scope,
+                                        'experiment_label': study.experiment_label,
+                                        'material_scope': list(study.material_scope),
+                                        'process_context': list(study.process_context),
+                                        'relationships': [{'relationship_id': item.relationship_id, 'varied_factors': list(item.varied_factors), 'outcome': item.outcome, 'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs], 'confidence': item.confidence} for item in study.relationships],
+                                        'confidence': study.confidence,
+                                    } for study in paper.paper_map.studies],
+                                    'evidence_density': paper.paper_map.evidence_density,
+                                    'confidence': paper.paper_map.confidence,
+                                    'warnings': list(paper.paper_map.warnings),
+                                    'unresolved_signals': [{
+                                        'signal_id': signal.signal_id,
+                                        'signal_type': signal.signal_type,
+                                        'label': signal.label,
+                                        'variable_role': signal.variable_role,
+                                        'design_type': signal.design_type,
+                                        'claim_scope': signal.claim_scope,
+                                        'experiment_label': signal.experiment_label,
+                                        'material_scope': list(signal.material_scope),
+                                        'process_context': list(signal.process_context),
+                                        'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in signal.source_refs],
+                                        'confidence': signal.confidence,
+                                        'reason': signal.reason,
+                                    } for signal in paper.paper_map.unresolved_signals],
+                                    'source_unit_coverage': [{
+                                        'source_unit_id': item.source_unit_id,
+                                        'window_id': item.window_id,
+                                        'source_kind': item.source_kind,
+                                        'source_ref': item.source_ref,
+                                        'status': item.status.value,
+                                        'reason': item.reason,
+                                    } for item in paper.paper_map.source_unit_coverage],
+                                    'map_status': paper.paper_map.map_status,
+                                    'map_limitations': list(paper.paper_map.map_limitations),
+                                    'review_synthesis': {field_name: [{
+                                        'content': item.content,
+                                        'material_scope': list(item.material_scope),
+                                        'variables': list(item.variables),
+                                        'outcomes': list(item.outcomes),
+                                        'conditions': list(item.conditions),
+                                        'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs],
+                                        'confidence': item.confidence,
+                                    } for item in getattr(paper.paper_map.review_synthesis, field_name)] for field_name in ('synthesis_claims', 'disputes', 'evidence_gaps', 'citation_leads')},
+                                    'input_fingerprint': paper.paper_map.input_fingerprint,
+                                    'map_version': paper.paper_map.map_version,
+                                    'generated_at': paper.paper_map.generated_at,
+                                },
                                 "excerpts": [
                                     {"source_ref": ref, "text": text}
                                     for ref, text in paper.source_texts

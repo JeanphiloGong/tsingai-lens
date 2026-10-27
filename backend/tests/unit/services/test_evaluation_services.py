@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import paper_map_from_payload
+
 from dataclasses import replace
 
 import pytest
@@ -329,7 +331,7 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
             "rank": 1,
         }
     )
-    skim = PaperResearchMap.from_mapping(
+    skim = paper_map_from_payload(
         {
             "document_id": "doc-1",
             "doc_role": "experimental",
@@ -667,7 +669,7 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
             "rank": 1,
         }
     )
-    skim = PaperResearchMap.from_mapping(
+    skim = paper_map_from_payload(
         {
             "document_id": "doc-1",
             "doc_role": "experimental",

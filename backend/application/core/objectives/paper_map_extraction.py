@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchRelationship, PaperResearchSourceRef, ReviewKnowledgeItem,
+    build_paper_research_relationship, build_paper_research_scope, build_paper_research_signal,
+    normalize_objective_terms, normalize_objective_confidence,
+)
+
+
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -569,20 +576,16 @@ class PaperMapExtractionService:
             else ReviewSynthesisMap()
         )
         return (
-            PaperResearchMap.from_mapping(
-                {
-                    "document_id": document_id,
-                    "doc_role": parsed.doc_role,
-                    "studies": [item.to_record() for item in studies],
-                    "unresolved_signals": [item.to_record() for item in signals],
-                    "evidence_density": parsed.evidence_density,
-                    "confidence": parsed.confidence,
-                    "warnings": parsed.warnings,
-                    "source_unit_coverage": [
-                        item.to_record() for item in source_unit_coverage
-                    ],
-                    "review_synthesis": review_synthesis.to_record(),
-                }
+            PaperResearchMap(
+                document_id=document_id,
+                doc_role=parsed.doc_role,
+                studies=tuple(studies),
+                unresolved_signals=tuple(signals),
+                evidence_density=parsed.evidence_density,
+                confidence=normalize_objective_confidence(parsed.confidence),
+                warnings=normalize_objective_terms(parsed.warnings),
+                source_unit_coverage=source_unit_coverage,
+                review_synthesis=review_synthesis,
             ),
             tuple(signals),
         )
@@ -626,21 +629,16 @@ class PaperMapExtractionService:
             )
             source_unit = source_units[source_unit_id]
             coverage.append(
-                PaperSourceUnitCoverage.from_mapping(
-                    {
-                        "source_unit_id": source_unit_id,
-                        "window_id": payload.get("window_id"),
-                        "source_kind": source_unit.get("source_kind"),
-                        "source_ref": source_unit.get("source_ref"),
-                        "status": expected_status.value,
-                        "reason": (
-                            "No study relationship or unresolved signal was emitted "
-                            "for this Source unit."
-                            if expected_status
-                            == PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
-                            else None
-                        ),
-                    }
+                PaperSourceUnitCoverage(
+                    source_unit_id=source_unit_id,
+                    window_id=str(payload.get("window_id") or "").strip(),
+                    source_kind=str(source_unit.get("source_kind") or "").strip(),
+                    source_ref=str(source_unit.get("source_ref") or "").strip(),
+                    status=expected_status,
+                    reason=(
+                        "No study relationship or unresolved signal was emitted for this Source unit."
+                        if expected_status == PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL else None
+                    ),
                 )
             )
         return tuple(coverage)
@@ -655,23 +653,19 @@ class PaperMapExtractionService:
         reason = "Paper map Source-unit extraction failed after bounded retries."
         if failure_kind:
             reason = f"{reason} Failure type: {failure_kind}."
-        return PaperResearchMap.from_mapping(
-            {
-                "document_id": document_id,
-                "source_unit_coverage": [
-                    {
-                        "source_unit_id": unit.get("source_unit_id"),
-                        "window_id": payload.get("window_id"),
-                        "source_kind": unit.get("source_kind"),
-                        "source_ref": unit.get("source_ref"),
-                        "status": "extraction_failed",
-                        "reason": reason,
-                    }
-                    for unit in payload.get("source_units") or ()
-                    if isinstance(unit, Mapping)
-                ],
-                "warnings": [reason],
-            }
+        return PaperResearchMap(
+            document_id=document_id, doc_role="uncertain", studies=(),
+            evidence_density="unknown", confidence=0.0, warnings=(reason,),
+            source_unit_coverage=tuple(
+                PaperSourceUnitCoverage(
+                    source_unit_id=str(unit.get("source_unit_id") or "").strip(),
+                    window_id=str(payload.get("window_id") or "").strip(),
+                    source_kind=str(unit.get("source_kind") or "").strip(),
+                    source_ref=str(unit.get("source_ref") or "").strip(),
+                    status=PaperSourceUnitCoverageStatus.EXTRACTION_FAILED, reason=reason,
+                )
+                for unit in payload.get("source_units") or ()
+            ),
         )
 
     @staticmethod
@@ -694,31 +688,22 @@ class PaperMapExtractionService:
         source_units: Mapping[str, Mapping[str, Any]],
         relationships: Iterable[StructuredPaperResearchRelationship] | None = None,
     ) -> PaperResearchScope:
-        relationship_records: list[dict[str, Any]] = []
-        source_relationships = (
-            study.relationships if relationships is None else relationships
-        )
+        bound_relationships: list[PaperResearchRelationship] = []
+        source_relationships = study.relationships if relationships is None else relationships
         for relationship in source_relationships:
-            resolved = cls._resolved_source_units(
-                relationship.source_unit_ids,
-                source_units=source_units,
-            )
+            resolved = cls._resolved_source_units(relationship.source_unit_ids, source_units=source_units)
             if resolved is None:
-                raise ValueError(
-                    "paper research relationship contains an unknown Source-unit id"
-                )
-            relationship_records.append(
-                {
-                    **relationship.model_dump(exclude={"source_unit_ids"}),
-                    "source_refs": cls._source_refs_from_units(resolved),
-                }
-            )
-        return PaperResearchScope.from_mapping(
-            {
-                **study.model_dump(exclude={"relationships"}),
-                "document_id": document_id,
-                "relationships": relationship_records,
-            }
+                raise ValueError("paper research relationship contains an unknown Source-unit id")
+            bound_relationships.append(build_paper_research_relationship(
+                document_id=document_id, varied_factors=normalize_objective_terms(relationship.varied_factors),
+                outcome=relationship.outcome.strip(), source_refs=cls._source_refs_from_units(resolved),
+                confidence=normalize_objective_confidence(relationship.confidence),
+            ))
+        return build_paper_research_scope(
+            document_id=document_id, design_type=study.design_type, claim_scope=study.claim_scope,
+            experiment_label=study.experiment_label, material_scope=normalize_objective_terms(study.material_scope),
+            process_context=normalize_objective_terms(study.process_context), relationships=tuple(bound_relationships),
+            confidence=normalize_objective_confidence(study.confidence),
         )
 
     @staticmethod
@@ -780,31 +765,21 @@ class PaperMapExtractionService:
         *,
         source_units: Mapping[str, Mapping[str, Any]],
     ) -> ReviewSynthesisMap:
-        record: dict[str, list[dict[str, Any]]] = {}
-        for field_name in (
-            "synthesis_claims",
-            "disputes",
-            "evidence_gaps",
-            "citation_leads",
-        ):
-            items: list[dict[str, Any]] = []
+        groups: dict[str, tuple[ReviewKnowledgeItem, ...]] = {}
+        for field_name in ("synthesis_claims", "disputes", "evidence_gaps", "citation_leads"):
+            items: list[ReviewKnowledgeItem] = []
             for item in getattr(review_map, field_name):
-                resolved = cls._resolved_source_units(
-                    item.source_unit_ids,
-                    source_units=source_units,
-                )
+                resolved = cls._resolved_source_units(item.source_unit_ids, source_units=source_units)
                 if resolved is None:
-                    raise ValueError(
-                        "review knowledge contains an unknown Source-unit id"
-                    )
-                items.append(
-                    {
-                        **item.model_dump(exclude={"source_unit_ids"}),
-                        "source_refs": cls._source_refs_from_units(resolved),
-                    }
-                )
-            record[field_name] = items
-        return ReviewSynthesisMap.from_mapping(record)
+                    raise ValueError("review knowledge contains an unknown Source-unit id")
+                items.append(ReviewKnowledgeItem(
+                    content=item.content.strip(), material_scope=normalize_objective_terms(item.material_scope),
+                    variables=normalize_objective_terms(item.variables), outcomes=normalize_objective_terms(item.outcomes),
+                    conditions=normalize_objective_terms(item.conditions), source_refs=cls._source_refs_from_units(resolved),
+                    confidence=normalize_objective_confidence(item.confidence),
+                ))
+            groups[field_name] = tuple(items)
+        return ReviewSynthesisMap(**groups)
 
     @classmethod
     def _signal_from_window_result(
@@ -825,19 +800,21 @@ class PaperMapExtractionService:
             raise ValueError(
                 "paper research signal contains an unknown Source-unit id"
             )
-        return PaperResearchSignal.from_mapping(
-            {
-                **dict(signal),
-                "document_id": document_id,
-                "source_refs": cls._source_refs_from_units(resolved),
-            }
+        signal_type = str(signal.get("signal_type") or "").strip()
+        return build_paper_research_signal(
+            document_id=document_id, signal_type=signal_type, label=str(signal.get("label") or "").strip(),
+            variable_role=str(signal.get("variable_role") or ("not_applicable" if signal_type == "outcome" else "uncertain")),
+            design_type=str(signal.get("design_type") or "uncertain"), claim_scope=str(signal.get("claim_scope") or "uncertain"),
+            experiment_label=signal.get("experiment_label"), material_scope=normalize_objective_terms(signal.get("material_scope")),
+            process_context=normalize_objective_terms(signal.get("process_context")), source_refs=cls._source_refs_from_units(resolved),
+            confidence=normalize_objective_confidence(signal.get("confidence")), reason=signal.get("reason"),
         )
 
     @staticmethod
     def _source_refs_from_units(
         source_units: tuple[Mapping[str, Any], ...],
-    ) -> list[dict[str, str]]:
-        refs: list[dict[str, str]] = []
+    ) -> tuple[PaperResearchSourceRef, ...]:
+        refs: list[PaperResearchSourceRef] = []
         seen: set[tuple[str, str]] = set()
         for unit in source_units:
             source_kind = str(unit.get("source_kind") or "").strip()
@@ -846,8 +823,8 @@ class PaperMapExtractionService:
             if not source_kind or not source_ref or key in seen:
                 continue
             seen.add(key)
-            refs.append({"source_kind": source_kind, "source_ref": source_ref})
-        return refs
+            refs.append(PaperResearchSourceRef(source_kind=source_kind, source_ref=source_ref))
+        return tuple(refs)
 
     @staticmethod
     def _source_content_text(content: Any) -> str:

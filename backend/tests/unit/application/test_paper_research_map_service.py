@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from repositories.paper_map_repository import (
+    paper_map_payload,
+    research_scope_payload,
+    source_ref_payload,
+)
+
+
+from repositories.paper_map_repository import research_scope_from_payload
+from repositories.paper_map_repository import paper_map_from_payload
+
 import json
 from threading import Lock
 from time import sleep
@@ -300,9 +310,9 @@ def _build_skims(
 
 
 def test_paper_map_record_keeps_only_the_stable_source_link():
-    skim = PaperResearchMap.from_mapping({"document_id": "paper-1"})
+    skim = paper_map_from_payload({"document_id": "paper-1"})
 
-    record = skim.to_record()
+    record = paper_map_payload(skim)
 
     assert record["document_id"] == "paper-1"
     assert "title" not in record
@@ -310,7 +320,7 @@ def test_paper_map_record_keeps_only_the_stable_source_link():
 
 
 def test_paper_map_record_preserves_explicit_map_insufficiency():
-    skim = PaperResearchMap.from_mapping(
+    skim = paper_map_from_payload(
         {
             "document_id": "paper-1",
             "map_status": "insufficient_map",
@@ -318,7 +328,7 @@ def test_paper_map_record_preserves_explicit_map_insufficiency():
         }
     )
 
-    restored = PaperResearchMap.from_mapping(skim.to_record())
+    restored = paper_map_from_payload(paper_map_payload(skim))
 
     assert restored.map_status == "insufficient_map"
     assert restored.map_limitations == ("missing_outcome",)
@@ -1296,7 +1306,7 @@ def test_complete_window_candidate_keeps_its_stable_source_reference():
     skim = _build_skims(artifacts, tree, _WindowExtractor())[0]
 
     relationship = skim.studies[0].relationships[0]
-    assert [ref.to_record() for ref in relationship.source_refs] == [
+    assert [source_ref_payload(ref) for ref in relationship.source_refs] == [
         {"source_kind": "block", "source_ref": "result-candidate"}
     ]
 
@@ -1708,7 +1718,7 @@ def test_equivalent_candidates_from_multiple_windows_are_consolidated_once():
 def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -1737,7 +1747,7 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
                 ],
             }
         ),
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -1783,7 +1793,7 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
 def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -1812,7 +1822,7 @@ def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
                 ],
             }
         ),
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -1861,7 +1871,7 @@ def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
 def test_different_experiment_labels_keep_equal_relationship_axes_separate():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -1893,7 +1903,7 @@ def test_different_experiment_labels_keep_equal_relationship_axes_separate():
 def test_merged_relationship_identity_keeps_its_final_study_boundary():
     def merge_for_experiment(experiment_kind: str) -> PaperResearchScope:
         studies = tuple(
-            PaperResearchScope.from_mapping(
+            research_scope_from_payload(
                 {
                     "document_id": "paper-1",
                     "design_type": "experimental",
@@ -1930,7 +1940,7 @@ def test_merged_relationship_identity_keeps_its_final_study_boundary():
 def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids():
     """Repeated model aliases for one Source fact must not invalidate the paper map."""
 
-    existing = PaperResearchScope.from_mapping(
+    existing = research_scope_from_payload(
         {
             "document_id": "paper-1",
             "design_type": "experimental",
@@ -1958,7 +1968,7 @@ def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids
             ],
         }
     )
-    duplicate = PaperResearchScope.from_mapping(
+    duplicate = research_scope_from_payload(
         {
             "document_id": "paper-1",
             "design_type": "experimental",
@@ -2021,7 +2031,7 @@ def test_candidates_with_different_variable_outcome_links_are_not_merged():
 def test_same_axes_with_incompatible_process_context_are_not_merged():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -2034,7 +2044,7 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
                 ],
             }
         ),
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -2061,7 +2071,7 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
 def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -2074,7 +2084,7 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
                 ],
             }
         ),
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -2101,7 +2111,7 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
 def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -2131,7 +2141,7 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
                 ],
             }
         ),
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "studies": [
@@ -2175,7 +2185,7 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
 def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload(
             {
                 "document_id": "paper-1",
                 "warnings": [f"warning-{position}"],
@@ -2196,8 +2206,8 @@ def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
 def test_document_profile_owns_the_paper_role_across_windows():
     service = PaperResearchMapService()
     window_skims = [
-        PaperResearchMap.from_mapping({"document_id": "paper-1", "doc_role": "review"}),
-        PaperResearchMap.from_mapping(
+        paper_map_from_payload({"document_id": "paper-1", "doc_role": "review"}),
+        paper_map_from_payload(
             {"document_id": "paper-1", "doc_role": "experimental"}
         ),
     ]
@@ -2224,7 +2234,7 @@ def test_document_profile_bounds_study_claim_scope(
     input_scope: str,
     expected_scope: str,
 ):
-    study = PaperResearchScope.from_mapping(
+    study = research_scope_from_payload(
         {
             **_study(
                 varied_factors=["reheating condition"],
@@ -2239,11 +2249,11 @@ def test_document_profile_bounds_study_claim_scope(
     skim = PaperMapAggregator().consolidate_window_maps(
         "paper-1",
         [
-            PaperResearchMap.from_mapping(
+            paper_map_from_payload(
                 {
                     "document_id": "paper-1",
                     "doc_role": profile_doc_type,
-                    "studies": [study.to_record()],
+                    "studies": [research_scope_payload(study)],
                 }
             )
         ],

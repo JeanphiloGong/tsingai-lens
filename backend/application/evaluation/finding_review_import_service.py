@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from application.evaluation.finding_feedback_service import parse_curated_finding
+
 _ACTIONS = frozenset({"accept", "reject", "correct", "skip"})
 _ISSUES = frozenset(
     {
@@ -143,9 +145,10 @@ class FindingReviewImportService:
         curated_finding = row.get("curated_finding")
         if not isinstance(curated_finding, dict):
             raise ValueError("correct requires one complete curated_finding")
+        candidate = parse_curated_finding(curated_finding)
         await self.feedback_service.validate_curation(
             **identity,
-            curated_finding=curated_finding,
+            curated_finding=candidate,
         )
         curated_status = _text(row.get("curated_status")) or "limited"
         if curated_status not in {"supported", "limited", "conflicted", "unsupported"}:
@@ -156,7 +159,7 @@ class FindingReviewImportService:
             "payload": {
                 **identity,
                 "curated_status": curated_status,
-                "curated_finding": dict(curated_finding),
+                "curated_finding": candidate,
                 "note": _optional_text(row.get("note")),
             },
         }

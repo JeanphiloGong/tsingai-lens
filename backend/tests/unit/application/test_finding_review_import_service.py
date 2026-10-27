@@ -55,7 +55,7 @@ class _FeedbackService:
 
     async def validate_curation(self, **payload: Any) -> Finding:
         self.validation_calls.append(payload)
-        candidate = parse_curated_finding(payload["curated_finding"])
+        candidate = payload["curated_finding"]
         if candidate.key != (
             payload["collection_id"],
             payload["objective_id"],
@@ -193,7 +193,7 @@ async def test_import_applies_curation_with_version_local_evidence() -> None:
             "analysis_version": 3,
             "finding_id": "finding-density",
             "curated_status": "limited",
-            "curated_finding": _finding(),
+            "curated_finding": parse_curated_finding(_finding()),
             "note": None,
             "reviewer": "expert-1",
         }
@@ -204,7 +204,7 @@ async def test_import_applies_curation_with_version_local_evidence() -> None:
             "objective_id": "objective-1",
             "analysis_version": 3,
             "finding_id": "finding-density",
-            "curated_finding": _finding(),
+            "curated_finding": parse_curated_finding(_finding()),
         }
     ]
 

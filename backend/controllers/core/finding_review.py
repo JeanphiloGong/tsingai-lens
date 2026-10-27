@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, Literal
 
 from application.core.objectives.analysis.experiment_query_service import (
@@ -11,8 +12,15 @@ from controllers.dependencies.auth import current_user_id
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
     ObjectiveAnalysisStateResponse,
+    ObjectiveEvidenceAttributeResponse,
     ObjectiveEvidenceResponse,
 )
+from domain.core.finding import (
+    Finding,
+    FindingMechanismRelation,
+    FindingPaperContribution,
+)
+from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -308,13 +316,73 @@ async def record_finding_curation(
     request: Request,
 ) -> FindingCurationResponse:
     try:
+        value = payload.curated_finding
+        candidate = Finding(
+            collection_id=value.collection_id,
+            objective_id=value.objective_id,
+            analysis_version=value.analysis_version,
+            finding_id=value.finding_id,
+            statement=value.statement,
+            factors=tuple(value.factors),
+            outcome=value.outcome,
+            direction=value.direction,
+            assertion_strength=value.assertion_strength,
+            attribution_scope=value.attribution_scope,
+            synthesis_status=value.synthesis_status,
+            certainty=value.certainty,
+            display_rank=value.display_rank,
+            mechanisms=tuple(
+                FindingMechanismRelation(
+                    source_term=item.source_term,
+                    relation_type=item.relation_type,
+                    target_term=item.target_term,
+                    direction=item.direction,
+                    assertion_strength=item.assertion_strength,
+                    supporting_evidence_ids=tuple(item.supporting_evidence_ids),
+                )
+                for item in value.mechanisms
+            ),
+            scientific_context=ScientificContext(
+                material=_review_context_attributes(value.scientific_context.material),
+                sample=_review_context_attributes(value.scientific_context.sample),
+                process=_review_context_attributes(value.scientific_context.process),
+                test=_review_context_attributes(value.scientific_context.test),
+            ),
+            limitations=tuple(value.limitations),
+            paper_contributions=tuple(
+                FindingPaperContribution(
+                    document_id=item.document_id,
+                    analysis_status=item.analysis_status,
+                    supporting_evidence_ids=tuple(item.supporting_evidence_ids),
+                    contradicting_evidence_ids=tuple(item.contradicting_evidence_ids),
+                    context_evidence_ids=tuple(item.context_evidence_ids),
+                    condition_boundary_evidence_ids=tuple(
+                        item.condition_boundary_evidence_ids
+                    ),
+                )
+                for item in value.paper_contributions
+            ),
+            selection_ids=tuple(value.selection_ids),
+            comparison_group_ids=tuple(value.comparison_group_ids),
+            origin=value.origin,
+            source_analysis_version=value.source_analysis_version,
+            parent_finding_id=value.parent_finding_id,
+            created_by_user_id=value.created_by_user_id,
+            created_by_tool_call_id=value.created_by_tool_call_id,
+            created_at=(
+                datetime.fromisoformat(value.created_at.replace("Z", "+00:00"))
+                if value.created_at
+                else None
+            ),
+            warnings=tuple(value.warnings),
+        )
         curation = await request.app.state.finding_feedback_service.record_curation(
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=payload.analysis_version,
             finding_id=finding_id,
             curated_status=payload.curated_status,
-            curated_finding=payload.curated_finding.model_dump(),
+            curated_finding=candidate,
             note=payload.note,
             reviewer=payload.reviewer,
         )
@@ -484,3 +552,18 @@ def _llamafactory_alpaca_rows(payload: dict):
             "output": output,
             "metadata": item["metadata"],
         }
+
+
+def _review_context_attributes(
+    values: list[ObjectiveEvidenceAttributeResponse],
+) -> tuple[ScientificAttribute, ...]:
+    return tuple(
+        ScientificAttribute(
+            name=item.name,
+            value=item.value,
+            unit=item.unit,
+            context_scope=item.context_scope,
+            applies_to_outcomes=tuple(item.applies_to_outcomes),
+        )
+        for item in values
+    )

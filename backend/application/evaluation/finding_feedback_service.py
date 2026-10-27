@@ -150,7 +150,7 @@ class FindingFeedbackService:
         analysis_version: int,
         finding_id: str,
         curated_status: str,
-        curated_finding: Mapping[str, Any],
+        curated_finding: Finding,
         note: str | None = None,
         reviewer: str | None = None,
     ) -> FindingCuration:
@@ -189,7 +189,7 @@ class FindingFeedbackService:
         objective_id: str,
         analysis_version: int,
         finding_id: str,
-        curated_finding: Mapping[str, Any],
+        curated_finding: Finding,
     ) -> Finding:
         published = await self._require_published_finding(
             collection_id,
@@ -197,7 +197,7 @@ class FindingFeedbackService:
             analysis_version,
             finding_id,
         )
-        candidate = parse_curated_finding(curated_finding)
+        candidate = curated_finding
         if candidate.key != published.key:
             raise ValueError("curation cannot change the published Finding identity")
         if tuple(

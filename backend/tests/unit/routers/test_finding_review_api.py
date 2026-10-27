@@ -7,6 +7,7 @@ from application.core.objectives.analysis.experiment_query_service import (
     finding_response,
     objective_evidence_response,
 )
+from application.evaluation.finding_feedback_service import parse_curated_finding
 from controllers.core.finding_review import router
 from domain.core import Finding, ObjectiveEvidence
 from domain.core.finding import (
@@ -45,11 +46,13 @@ from domain.core.scientific_fact import _choice as scientific_choice
 from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
 from domain.core.scientific_fact import _terms as scientific_terms
 from domain.core.scientific_fact import _text as scientific_text
-from domain.evaluation import FindingCuration, FindingFeedback
+from domain.evaluation import (
+    FindingCuration,
+    FindingFeedback,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from repositories.finding_review_repository import (
-    finding_curation_from_record,
     finding_feedback_from_record,
 )
 from repositories.objective_repository import (
@@ -449,12 +452,10 @@ class _Service:
         )
 
     async def record_curation(self, **kwargs):
-        return finding_curation_from_record(
-            {
-                "curation_id": "curation-1",
-                **kwargs,
-                "updated_at": "2026-07-22T00:00:00+00:00",
-            }
+        return FindingCuration(
+            curation_id="curation-1",
+            **kwargs,
+            updated_at="2026-07-22T00:00:00+00:00",
         )
 
     async def list_curations(self, **kwargs):
@@ -464,7 +465,9 @@ class _Service:
             await self.record_curation(
                 **kwargs,
                 curated_status="limited",
-                curated_finding=_finding_record("Narrower expert statement."),
+                curated_finding=parse_curated_finding(
+                    _finding_record("Narrower expert statement.")
+                ),
             ),
         )
 

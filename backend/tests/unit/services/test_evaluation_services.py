@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from application.chat.capabilities.contracts import CapabilityExecutionContext
+from application.chat.capabilities.finding_review import (
+    CurateFindingCapability,
+    CurateFindingToolRequest,
+)
 from application.core.objectives.analysis.experiment_query_service import (
     finding_response,
     objective_evidence_response,
@@ -11,6 +18,7 @@ from application.core.objectives.analysis.experiment_query_service import (
 from application.evaluation.core_evaluation_service import CoreEvaluationService
 from application.evaluation.finding_feedback_service import (
     FindingFeedbackService,
+    parse_curated_finding,
 )
 from application.evaluation.gold_service import EvaluationGoldService
 from application.evaluation.prediction_snapshot_service import (
@@ -834,7 +842,7 @@ async def test_finding_review_rejects_unknown_status_values() -> None:
             analysis_version=1,
             finding_id="finding-1",
             curated_status="bogus",
-            curated_finding=finding_response(published),
+            curated_finding=published,
         )
 
 
@@ -854,7 +862,7 @@ async def test_finding_curation_rejects_evidence_outside_published_finding() -> 
             analysis_version=1,
             finding_id="finding-1",
             curated_status="limited",
-            curated_finding=curated,
+            curated_finding=parse_curated_finding(curated),
         )
 
 
@@ -1043,3 +1051,72 @@ async def test_only_training_ready_samples_include_training_messages() -> None:
     ))["items"][0]
     assert rejected["dataset_use_status"] == "rejected"
     assert rejected["training_messages"] == []
+
+
+@pytest.mark.parametrize("entry", ("service", "agent"))
+async def test_typed_curation_preserves_published_finding_and_exports_expert_target(
+    entry,
+) -> None:
+    service = await _finding_feedback_service()
+    published = await service.objective_repository.read_finding(
+        "col-gold", "obj-1", 1, "finding-1"
+    )
+    assert published is not None
+    candidate = replace(
+        published,
+        limitations=(
+            *published.limitations,
+            "Expert review retains the original experiment scope.",
+        ),
+    )
+
+    if entry == "service":
+        curation = await service.record_curation(
+            collection_id="col-gold",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            curated_status="limited",
+            curated_finding=candidate,
+            reviewer="expert-1",
+        )
+        assert curation.curated_finding is candidate
+    else:
+        arguments = CurateFindingToolRequest(
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            curated_status="limited",
+            curated_finding=finding_response(candidate),
+        )
+        collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
+        result = await CurateFindingCapability(
+            collection_service=collection_service,
+            finding_feedback_service=service,
+        ).execute(
+            CapabilityExecutionContext(
+                session_id="review-session",
+                user_id="expert-1",
+                collection_id="col-gold",
+                tool_call_id="curate-1",
+            ),
+            arguments,
+        )
+        collection_service.get_collection_for_user.assert_awaited_once_with(
+            "col-gold", "expert-1"
+        )
+        assert result.data["curated_finding"] == finding_response(candidate)
+        curation = next(iter(service.review_repository.curations.values()))
+        assert curation.curated_finding is arguments._parsed_finding
+    dataset = await service.export_dataset(
+        collection_id="col-gold", objective_id="obj-1"
+    )
+
+    assert (
+        await service.objective_repository.read_finding(
+            "col-gold", "obj-1", 1, "finding-1"
+        )
+        == published
+    )
+    assert dataset["items"][0]["expert_target"] == finding_response(candidate)
+    assert dataset["items"][0]["system_prediction"] == finding_response(published)

@@ -200,7 +200,7 @@ class CurateFindingCapability:
             analysis_version=arguments.analysis_version,
             finding_id=arguments.finding_id,
             curated_status=arguments.curated_status,
-            curated_finding=arguments.curated_finding,
+            curated_finding=candidate,
             note=arguments.note,
             reviewer=context.user_id,
         )

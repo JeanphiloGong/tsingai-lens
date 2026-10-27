@@ -106,15 +106,6 @@ class ExecutionTimestamps:
         ):
             raise ValueError("finished_at cannot be earlier than started_at")
 
-    @classmethod
-    def from_mapping(cls, payload: Any) -> "ExecutionTimestamps":
-        source = payload if isinstance(payload, Mapping) else {}
-        return cls(
-            created_at=_optional_text(source.get("created_at")),
-            updated_at=_optional_text(source.get("updated_at")),
-            started_at=_optional_text(source.get("started_at")),
-            finished_at=_optional_text(source.get("finished_at")),
-        )
 
     def duration_ms(self) -> int | None:
         if self.started_at is None or self.finished_at is None:
@@ -123,17 +114,6 @@ class ExecutionTimestamps:
             (_timestamp(self.finished_at) - _timestamp(self.started_at)).total_seconds()
             * 1000
         )
-
-    def to_record(self) -> dict[str, str | None]:
-        record: dict[str, str | None] = {
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-        }
-        if self.created_at is not None:
-            record = {"created_at": self.created_at, **record}
-        if self.updated_at is not None:
-            record = {**record, "updated_at": self.updated_at}
-        return record
 
 
 @dataclass(frozen=True)
@@ -146,15 +126,6 @@ class TokenUsage:
         if min(self.input_tokens, self.output_tokens, self.total_tokens) < 0:
             raise ValueError("token usage cannot be negative")
 
-    @classmethod
-    def from_mapping(cls, payload: Any) -> "TokenUsage | None":
-        if not isinstance(payload, Mapping):
-            return None
-        return cls(
-            input_tokens=int(payload.get("input_tokens") or 0),
-            output_tokens=int(payload.get("output_tokens") or 0),
-            total_tokens=int(payload.get("total_tokens") or 0),
-        )
 
     @classmethod
     def sum(cls, values: Iterable["TokenUsage | None"]) -> "TokenUsage | None":
@@ -166,13 +137,6 @@ class TokenUsage:
             output_tokens=sum(value.output_tokens for value in available),
             total_tokens=sum(value.total_tokens for value in available),
         )
-
-    def to_record(self) -> dict[str, int]:
-        return {
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "total_tokens": self.total_tokens,
-        }
 
 
 @dataclass(frozen=True)
@@ -192,14 +156,6 @@ class ModelUsage:
                 "unreported_request_count must be between zero and request_count"
             )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ModelUsage":
-        return cls(
-            model_name=str(payload.get("model_name") or "").strip(),
-            request_count=int(payload.get("request_count") or 0),
-            token_usage=TokenUsage.from_mapping(payload.get("token_usage")),
-            unreported_request_count=int(payload.get("unreported_request_count") or 0),
-        )
 
     @classmethod
     def aggregate(cls, values: Iterable["ModelUsage"]) -> "ModelUsage":
@@ -217,16 +173,6 @@ class ModelUsage:
                 usage.unreported_request_count for usage in usages
             ),
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "model_name": self.model_name,
-            "request_count": self.request_count,
-            "token_usage": (
-                self.token_usage.to_record() if self.token_usage is not None else None
-            ),
-            "unreported_request_count": self.unreported_request_count,
-        }
 
 
 @dataclass(frozen=True)
@@ -253,26 +199,6 @@ class ExecutionStats:
     def unreported_request_count(self) -> int:
         return sum(usage.unreported_request_count for usage in self.model_usage)
 
-    @classmethod
-    def from_mapping(cls, payload: Any) -> "ExecutionStats":
-        source = payload if isinstance(payload, Mapping) else {}
-        duration_ms = source.get("duration_ms")
-        return cls(
-            duration_ms=int(duration_ms) if duration_ms is not None else None,
-            model_usage=tuple(
-                ModelUsage.from_mapping(item)
-                for item in source.get("model_usage") or ()
-                if isinstance(item, Mapping)
-            ),
-            prompt_versions=(
-                {
-                    str(task_type): str(version)
-                    for task_type, version in source["prompt_versions"].items()
-                }
-                if isinstance(source.get("prompt_versions"), Mapping)
-                else {}
-            ),
-        )
 
     @classmethod
     def aggregate(
@@ -303,17 +229,6 @@ class ExecutionStats:
             prompt_versions=prompt_versions,
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "duration_ms": self.duration_ms,
-            "token_usage": (
-                self.token_usage.to_record() if self.token_usage is not None else None
-            ),
-            "model_usage": [item.to_record() for item in self.model_usage],
-            "unreported_request_count": self.unreported_request_count,
-            "prompt_versions": dict(self.prompt_versions),
-        }
-
 
 @dataclass(frozen=True)
 class PipelineNodeRun:
@@ -335,22 +250,6 @@ class PipelineNodeRun:
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "output_summary", deepcopy(dict(self.output_summary)))
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PipelineNodeRun":
-        return cls(
-            name=str(payload.get("name") or "").strip(),
-            dependencies=tuple(str(item) for item in payload.get("dependencies") or ()),
-            status=_node_status(payload.get("status")),
-            errors=tuple(str(item) for item in payload.get("errors") or ()),
-            warnings=tuple(str(item) for item in payload.get("warnings") or ()),
-            stats=ExecutionStats.from_mapping(payload.get("stats")),
-            timestamps=ExecutionTimestamps.from_mapping(payload.get("timestamps")),
-            output_summary=(
-                dict(payload["output_summary"])
-                if isinstance(payload.get("output_summary"), Mapping)
-                else {}
-            ),
-        )
 
     def start(self, started_at: str) -> "PipelineNodeRun":
         return replace(
@@ -414,18 +313,6 @@ class PipelineNodeRun:
             status=PipelineNodeStatus.SKIPPED,
             timestamps=ExecutionTimestamps(finished_at=finished_at),
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "dependencies": list(self.dependencies),
-            "status": _node_status(self.status).value,
-            "errors": list(self.errors),
-            "warnings": list(self.warnings),
-            "stats": self.stats.to_record(),
-            "timestamps": self.timestamps.to_record(),
-            "output_summary": deepcopy(dict(self.output_summary)),
-        }
 
 
 @dataclass(frozen=True)
@@ -557,52 +444,6 @@ class PipelineRun:
             resumed_from_run_id=resumed_from_run_id,
         )
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "PipelineRun":
-        nodes_payload = payload.get("nodes") or {}
-        if isinstance(nodes_payload, Mapping):
-            nodes = tuple(
-                PipelineNodeRun.from_mapping(
-                    {**dict(node_payload), "name": name}
-                    if isinstance(node_payload, Mapping)
-                    else {"name": name}
-                )
-                for name, node_payload in nodes_payload.items()
-            )
-        else:
-            nodes = tuple(
-                PipelineNodeRun.from_mapping(item)
-                for item in nodes_payload
-                if isinstance(item, Mapping)
-            )
-        return cls(
-            pipeline_name=str(payload.get("pipeline_name") or "").strip(),
-            mode=str(payload.get("mode") or "").strip(),
-            run_id=str(payload.get("run_id") or "").strip(),
-            collection_id=str(payload.get("collection_id") or "").strip(),
-            scope_type=str(payload.get("scope_type") or "").strip(),
-            scope_id=str(payload.get("scope_id") or "").strip(),
-            status=_run_status(payload.get("status")),
-            nodes=nodes,
-            errors=tuple(str(item) for item in payload.get("errors") or ()),
-            warnings=tuple(str(item) for item in payload.get("warnings") or ()),
-            stats=ExecutionStats.from_mapping(payload.get("stats")),
-            timestamps=ExecutionTimestamps.from_mapping(payload.get("timestamps")),
-            input_fingerprint=_optional_text(payload.get("input_fingerprint")),
-            current_node=_optional_text(payload.get("current_node")),
-            progress_percent=int(payload.get("progress_percent") or 0),
-            progress_detail=(
-                dict(payload["progress_detail"])
-                if isinstance(payload.get("progress_detail"), Mapping)
-                else None
-            ),
-            context=(
-                dict(payload["context"])
-                if isinstance(payload.get("context"), Mapping)
-                else {}
-            ),
-            resumed_from_run_id=_optional_text(payload.get("resumed_from_run_id")),
-        )
 
     def node(self, name: str) -> PipelineNodeRun:
         for node in self.nodes:
@@ -687,32 +528,6 @@ class PipelineRun:
             for node in nodes
             for message in getattr(node, field_name)
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "pipeline_name": self.pipeline_name,
-            "mode": self.mode,
-            "run_id": self.run_id,
-            "collection_id": self.collection_id,
-            "scope_type": self.scope_type,
-            "scope_id": self.scope_id,
-            "input_fingerprint": self.input_fingerprint,
-            "status": _run_status(self.status).value,
-            "current_node": self.current_node,
-            "progress_percent": self.progress_percent,
-            "progress_detail": (
-                deepcopy(dict(self.progress_detail))
-                if self.progress_detail is not None
-                else None
-            ),
-            "nodes": {node.name: node.to_record() for node in self.nodes},
-            "errors": list(self.errors),
-            "warnings": list(self.warnings),
-            "stats": self.stats.to_record(),
-            "timestamps": self.timestamps.to_record(),
-            "context": deepcopy(dict(self.context)),
-            "resumed_from_run_id": self.resumed_from_run_id,
-        }
 
 
 @dataclass(frozen=True)
@@ -880,7 +695,7 @@ class PipelineRunRepository:
             row.mode = run.mode
             row.input_fingerprint = run.input_fingerprint
             row.status = run.status.value
-            row.record_json = run.to_record()
+            row.record_json = pipeline_run_record(run)
             row.updated_at = _datetime(
                 run.timestamps.updated_at or datetime.now(timezone.utc)
             )
@@ -919,7 +734,7 @@ def _run_row(run: PipelineRun) -> PipelineRunRow:
         mode=run.mode,
         input_fingerprint=run.input_fingerprint,
         status=run.status.value,
-        record_json=run.to_record(),
+        record_json=pipeline_run_record(run),
         created_at=created_timestamp,
         updated_at=updated_timestamp,
     )
@@ -943,7 +758,50 @@ def _to_run(row: PipelineRunRow) -> PipelineRun:
     timestamps["created_at"] = _iso(row.created_at)
     timestamps["updated_at"] = _iso(row.updated_at)
     payload["timestamps"] = timestamps
-    return PipelineRun.from_mapping(payload)
+    nodes_payload = payload.get("nodes") or {}
+    if isinstance(nodes_payload, Mapping):
+        nodes = tuple(
+            _node_from_json(
+                {**dict(node_payload), "name": name}
+                if isinstance(node_payload, Mapping)
+                else {"name": name}
+            )
+            for name, node_payload in nodes_payload.items()
+        )
+    else:
+        nodes = tuple(
+            _node_from_json(item)
+            for item in nodes_payload
+            if isinstance(item, Mapping)
+        )
+    return PipelineRun(
+        pipeline_name=str(payload.get("pipeline_name") or "").strip(),
+        mode=str(payload.get("mode") or "").strip(),
+        run_id=str(payload.get("run_id") or "").strip(),
+        collection_id=str(payload.get("collection_id") or "").strip(),
+        scope_type=str(payload.get("scope_type") or "").strip(),
+        scope_id=str(payload.get("scope_id") or "").strip(),
+        status=_run_status(payload.get("status")),
+        nodes=nodes,
+        errors=tuple(str(item) for item in payload.get("errors") or ()),
+        warnings=tuple(str(item) for item in payload.get("warnings") or ()),
+        stats=execution_stats_from_json(payload.get("stats")),
+        timestamps=_timestamps_from_json(payload.get("timestamps")),
+        input_fingerprint=_optional_text(payload.get("input_fingerprint")),
+        current_node=_optional_text(payload.get("current_node")),
+        progress_percent=int(payload.get("progress_percent") or 0),
+        progress_detail=(
+            dict(payload["progress_detail"])
+            if isinstance(payload.get("progress_detail"), Mapping)
+            else None
+        ),
+        context=(
+            dict(payload["context"])
+            if isinstance(payload.get("context"), Mapping)
+            else {}
+        ),
+        resumed_from_run_id=_optional_text(payload.get("resumed_from_run_id")),
+    )
 
 
 def _datetime(value: Any) -> datetime:
@@ -964,3 +822,153 @@ def _iso(value: datetime) -> str:
 
 
 __all__ = ['PipelineRunRepository']
+
+
+def _timestamps_from_json(payload: Any) -> "ExecutionTimestamps":
+    source = payload if isinstance(payload, Mapping) else {}
+    return ExecutionTimestamps(
+        created_at=_optional_text(source.get("created_at")),
+        updated_at=_optional_text(source.get("updated_at")),
+        started_at=_optional_text(source.get("started_at")),
+        finished_at=_optional_text(source.get("finished_at")),
+    )
+
+
+def _token_usage_from_json(payload: Any) -> "TokenUsage | None":
+    if not isinstance(payload, Mapping):
+        return None
+    return TokenUsage(
+        input_tokens=int(payload.get("input_tokens") or 0),
+        output_tokens=int(payload.get("output_tokens") or 0),
+        total_tokens=int(payload.get("total_tokens") or 0),
+    )
+
+
+def _model_usage_from_json(payload: Mapping[str, Any]) -> "ModelUsage":
+    return ModelUsage(
+        model_name=str(payload.get("model_name") or "").strip(),
+        request_count=int(payload.get("request_count") or 0),
+        token_usage=_token_usage_from_json(payload.get("token_usage")),
+        unreported_request_count=int(payload.get("unreported_request_count") or 0),
+    )
+
+
+def execution_stats_from_json(payload: Any) -> "ExecutionStats":
+    source = payload if isinstance(payload, Mapping) else {}
+    duration_ms = source.get("duration_ms")
+    return ExecutionStats(
+        duration_ms=int(duration_ms) if duration_ms is not None else None,
+        model_usage=tuple(
+            _model_usage_from_json(item)
+            for item in source.get("model_usage") or ()
+            if isinstance(item, Mapping)
+        ),
+        prompt_versions=(
+            {
+                str(task_type): str(version)
+                for task_type, version in source["prompt_versions"].items()
+            }
+            if isinstance(source.get("prompt_versions"), Mapping)
+            else {}
+        ),
+    )
+
+
+def _node_from_json(payload: Mapping[str, Any]) -> "PipelineNodeRun":
+    return PipelineNodeRun(
+        name=str(payload.get("name") or "").strip(),
+        dependencies=tuple(str(item) for item in payload.get("dependencies") or ()),
+        status=_node_status(payload.get("status")),
+        errors=tuple(str(item) for item in payload.get("errors") or ()),
+        warnings=tuple(str(item) for item in payload.get("warnings") or ()),
+        stats=execution_stats_from_json(payload.get("stats")),
+        timestamps=_timestamps_from_json(payload.get("timestamps")),
+        output_summary=(
+            dict(payload["output_summary"])
+            if isinstance(payload.get("output_summary"), Mapping)
+            else {}
+        ),
+    )
+
+
+def execution_timestamps_record(value: ExecutionTimestamps) -> dict[str, str | None]:
+    record: dict[str, str | None] = {
+        "started_at": value.started_at,
+        "finished_at": value.finished_at,
+    }
+    if value.created_at is not None:
+        record = {"created_at": value.created_at, **record}
+    if value.updated_at is not None:
+        record = {**record, "updated_at": value.updated_at}
+    return record
+
+
+def token_usage_record(value: TokenUsage) -> dict[str, int]:
+    return {
+        "input_tokens": value.input_tokens,
+        "output_tokens": value.output_tokens,
+        "total_tokens": value.total_tokens,
+    }
+
+
+def model_usage_record(value: ModelUsage) -> dict[str, Any]:
+    return {
+        "model_name": value.model_name,
+        "request_count": value.request_count,
+        "token_usage": (
+            token_usage_record(value.token_usage) if value.token_usage is not None else None
+        ),
+        "unreported_request_count": value.unreported_request_count,
+    }
+
+
+def execution_stats_record(value: ExecutionStats) -> dict[str, Any]:
+    return {
+        "duration_ms": value.duration_ms,
+        "token_usage": (
+            token_usage_record(value.token_usage) if value.token_usage is not None else None
+        ),
+        "model_usage": [model_usage_record(item) for item in value.model_usage],
+        "unreported_request_count": value.unreported_request_count,
+        "prompt_versions": dict(value.prompt_versions),
+    }
+
+
+def pipeline_node_record(value: PipelineNodeRun) -> dict[str, Any]:
+    return {
+        "name": value.name,
+        "dependencies": list(value.dependencies),
+        "status": _node_status(value.status).value,
+        "errors": list(value.errors),
+        "warnings": list(value.warnings),
+        "stats": execution_stats_record(value.stats),
+        "timestamps": execution_timestamps_record(value.timestamps),
+        "output_summary": deepcopy(dict(value.output_summary)),
+    }
+
+
+def pipeline_run_record(value: PipelineRun) -> dict[str, Any]:
+    return {
+        "pipeline_name": value.pipeline_name,
+        "mode": value.mode,
+        "run_id": value.run_id,
+        "collection_id": value.collection_id,
+        "scope_type": value.scope_type,
+        "scope_id": value.scope_id,
+        "input_fingerprint": value.input_fingerprint,
+        "status": _run_status(value.status).value,
+        "current_node": value.current_node,
+        "progress_percent": value.progress_percent,
+        "progress_detail": (
+            deepcopy(dict(value.progress_detail))
+            if value.progress_detail is not None
+            else None
+        ),
+        "nodes": {node.name: pipeline_node_record(node) for node in value.nodes},
+        "errors": list(value.errors),
+        "warnings": list(value.warnings),
+        "stats": execution_stats_record(value.stats),
+        "timestamps": execution_timestamps_record(value.timestamps),
+        "context": deepcopy(dict(value.context)),
+        "resumed_from_run_id": value.resumed_from_run_id,
+    }

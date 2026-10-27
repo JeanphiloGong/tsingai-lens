@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from repositories.pipeline_run_repository import pipeline_run_record
+
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -340,7 +342,7 @@ class PipelineRunService:
 
     @staticmethod
     def _project(run: PipelineRun) -> dict[str, Any]:
-        payload = run.to_record()
+        payload = pipeline_run_record(run)
         timestamps = payload.pop("timestamps")
         return PipelineRunService._sanitize_preparation_errors(
             {

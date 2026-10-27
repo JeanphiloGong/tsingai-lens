@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from repositories.pipeline_run_repository import execution_stats_record
+
+from repositories.pipeline_run_repository import execution_stats_from_json
+
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -273,7 +277,7 @@ class ObjectiveAnalysis:
                 str(key): str(value)
                 for key, value in dict(payload.get("prompt_versions") or {}).items()
             },
-            stats=ExecutionStats.from_mapping(payload.get("stats")),
+            stats=execution_stats_from_json(payload.get("stats")),
             status=_text(payload.get("status")) or "queued",
             phase=_text(payload.get("phase")) or "queued",
             processed_document_count=int(payload.get("processed_document_count") or 0),
@@ -394,7 +398,7 @@ class ObjectiveAnalysis:
             "pipeline_version": self.pipeline_version,
             "model_name": self.model_name,
             "prompt_versions": dict(self.prompt_versions),
-            "stats": self.stats.to_record(),
+            "stats": execution_stats_record(self.stats),
             "status": self.status,
             "phase": self.phase,
             "processed_document_count": self.processed_document_count,

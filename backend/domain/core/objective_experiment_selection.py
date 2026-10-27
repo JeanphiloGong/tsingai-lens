@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 
 def _terms(values: Any) -> tuple[str, ...]:
@@ -52,39 +52,6 @@ class ObjectiveExperimentSelection:
         object.__setattr__(self, "reasons", _terms(self.reasons))
         if not self.measurement_keys and not self.comparison_keys:
             raise ValueError("selection must choose measurements or comparisons")
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveExperimentSelection":
-        return cls(
-            selection_id=str(payload.get("selection_id") or "").strip(),
-            objective_id=str(payload.get("objective_id") or "").strip(),
-            analysis_version=int(payload.get("analysis_version") or 0),
-            experiment_id=str(payload.get("experiment_id") or "").strip(),
-            experiment_version=int(payload.get("experiment_version") or 0),
-            outcome=str(payload.get("outcome") or "").strip(),
-            measurement_keys=_terms(
-                payload.get("measurement_keys") or payload.get("measurement_ids")
-            ),
-            comparison_keys=_terms(
-                payload.get("comparison_keys") or payload.get("comparison_ids")
-            ),
-            missing_context=_terms(payload.get("missing_context")),
-            reasons=_terms(payload.get("reasons")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "selection_id": self.selection_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "experiment_id": self.experiment_id,
-            "experiment_version": self.experiment_version,
-            "outcome": self.outcome,
-            "measurement_keys": list(self.measurement_keys),
-            "comparison_keys": list(self.comparison_keys),
-            "missing_context": list(self.missing_context),
-            "reasons": list(self.reasons),
-        }
 
 
 __all__ = ["ObjectiveExperimentSelection"]

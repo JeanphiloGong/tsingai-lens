@@ -47,23 +47,6 @@ class ComparisonGroupMember:
         if self.role == "included" and self.comparability == "non_comparable":
             raise ValueError("non-comparable member cannot be included")
 
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ComparisonGroupMember":
-        return cls(
-            selection_id=str(payload.get("selection_id") or "").strip(),
-            role=str(payload.get("role") or "").strip(),
-            comparability=str(payload.get("comparability") or "unknown").strip(),
-            reason=str(payload.get("reason") or "").strip(),
-        )
-
-    def to_record(self) -> dict[str, str]:
-        return {
-            "selection_id": self.selection_id,
-            "role": self.role,
-            "comparability": self.comparability,
-            "reason": self.reason,
-        }
-
 
 @dataclass(frozen=True)
 class ComparisonGroup:
@@ -111,43 +94,6 @@ class ComparisonGroup:
             ),
         )
         object.__setattr__(self, "limitations", _terms(self.limitations))
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ComparisonGroup":
-        return cls(
-            group_id=str(payload.get("group_id") or "").strip(),
-            objective_id=str(payload.get("objective_id") or "").strip(),
-            analysis_version=int(payload.get("analysis_version") or 0),
-            outcome=str(payload.get("outcome") or "").strip(),
-            comparison_target=str(payload.get("comparison_target") or "").strip(),
-            comparison_basis=_terms(payload.get("comparison_basis")),
-            members=tuple(
-                ComparisonGroupMember.from_mapping(item)
-                for item in payload.get("members") or ()
-                if isinstance(item, Mapping)
-            ),
-            normalizations=tuple(
-                dict(item)
-                for item in payload.get("normalizations") or ()
-                if isinstance(item, Mapping)
-            ),
-            status=str(payload.get("status") or "insufficient").strip(),
-            limitations=_terms(payload.get("limitations")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "group_id": self.group_id,
-            "objective_id": self.objective_id,
-            "analysis_version": self.analysis_version,
-            "outcome": self.outcome,
-            "comparison_target": self.comparison_target,
-            "comparison_basis": list(self.comparison_basis),
-            "members": [item.to_record() for item in self.members],
-            "normalizations": [dict(item) for item in self.normalizations],
-            "status": self.status,
-            "limitations": list(self.limitations),
-        }
 
 
 __all__ = [

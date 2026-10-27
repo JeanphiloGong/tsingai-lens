@@ -43,16 +43,14 @@ class _Findings:
 
 
 def _selection(selection_id: str, experiment_id: str) -> ObjectiveExperimentSelection:
-    return ObjectiveExperimentSelection.from_mapping(
-        {
-            "selection_id": selection_id,
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "experiment_id": experiment_id,
-            "experiment_version": 1,
-            "outcome": "elongation",
-            "measurement_keys": ["m-1"],
-        }
+    return ObjectiveExperimentSelection(
+        selection_id=selection_id,
+        objective_id='objective-1',
+        analysis_version=1,
+        experiment_id=experiment_id,
+        experiment_version=1,
+        outcome='elongation',
+        measurement_keys=('m-1',),
     )
 
 

@@ -223,19 +223,12 @@ async def _selection_record(
             .order_by(SelectionComparisonRow.id)
         )
     )
-    return ObjectiveExperimentSelection.from_mapping(
-        {
-            "selection_id": row.selection_id,
-            "objective_id": row.objective_id,
-            "analysis_version": row.analysis_version,
-            "experiment_id": row.experiment_id,
-            "experiment_version": row.experiment_version,
-            "outcome": row.outcome,
-            "measurement_keys": list(measurement_keys),
-            "comparison_keys": list(comparison_keys),
-            "missing_context": list(row.missing_context_json),
-            "reasons": list(row.reasons_json),
-        }
+    return ObjectiveExperimentSelection(
+        selection_id=row.selection_id, objective_id=row.objective_id,
+        analysis_version=row.analysis_version, experiment_id=row.experiment_id,
+        experiment_version=row.experiment_version, outcome=row.outcome,
+        measurement_keys=measurement_keys, comparison_keys=comparison_keys,
+        missing_context=tuple(row.missing_context_json), reasons=tuple(row.reasons_json),
     )
 
 

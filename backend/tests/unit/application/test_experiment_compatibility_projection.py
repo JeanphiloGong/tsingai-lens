@@ -141,17 +141,15 @@ def _revision() -> PaperExperimentRevision:
 class _Selections:
     async def list_selections(self, collection_id, objective_id, analysis_version):
         return (
-            ObjectiveExperimentSelection.from_mapping(
-                {
-                    "selection_id": "selection-1",
-                    "objective_id": objective_id,
-                    "analysis_version": analysis_version,
-                    "experiment_id": "experiment-1",
-                    "experiment_version": 1,
-                    "outcome": "elongation",
-                    "measurement_keys": ["np-elongation", "p150-elongation"],
-                    "comparison_keys": ["np-vs-p150"],
-                }
+            ObjectiveExperimentSelection(
+                selection_id='selection-1',
+                objective_id=objective_id,
+                analysis_version=analysis_version,
+                experiment_id='experiment-1',
+                experiment_version=1,
+                outcome='elongation',
+                measurement_keys=('np-elongation', 'p150-elongation'),
+                comparison_keys=('np-vs-p150',),
             ),
         )
 

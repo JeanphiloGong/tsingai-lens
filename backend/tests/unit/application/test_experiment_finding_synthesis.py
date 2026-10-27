@@ -144,17 +144,15 @@ def _revision(
 
 
 def _selection(experiment_id: str, suffix: str) -> ObjectiveExperimentSelection:
-    return ObjectiveExperimentSelection.from_mapping(
-        {
-            "selection_id": f"selection-{suffix}",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "experiment_id": experiment_id,
-            "experiment_version": 1,
-            "outcome": "elongation",
-            "measurement_keys": ["m-np", "m-p150"],
-            "comparison_keys": ["c-preheat"],
-        }
+    return ObjectiveExperimentSelection(
+        selection_id=f'selection-{suffix}',
+        objective_id='objective-1',
+        analysis_version=1,
+        experiment_id=experiment_id,
+        experiment_version=1,
+        outcome='elongation',
+        measurement_keys=('m-np', 'm-p150'),
+        comparison_keys=('c-preheat',),
     )
 
 
@@ -270,16 +268,14 @@ def test_keeps_joint_changes_out_of_single_factor_causation() -> None:
 
 
 def test_does_not_merge_incompatible_methods_or_invent_measurement_only_finding() -> None:
-    measurement_only = ObjectiveExperimentSelection.from_mapping(
-        {
-            "selection_id": "selection-measurement",
-            "objective_id": "objective-1",
-            "analysis_version": 1,
-            "experiment_id": "experiment-c",
-            "experiment_version": 1,
-            "outcome": "elongation",
-            "measurement_keys": ["m-np", "m-p150"],
-        }
+    measurement_only = ObjectiveExperimentSelection(
+        selection_id='selection-measurement',
+        objective_id='objective-1',
+        analysis_version=1,
+        experiment_id='experiment-c',
+        experiment_version=1,
+        outcome='elongation',
+        measurement_keys=('m-np', 'm-p150'),
     )
     result = _synthesize(
         (

@@ -3204,6 +3204,58 @@ def test_evidence_extractor_rejects_invalid_output_types(response):
     assert len(client.chat.completions.calls) == 3
 
 
+@pytest.mark.parametrize("response", [
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": None, "scientific_context": {"material": [{"name": "alloy", "value": "Ti-6Al-4V"}]}}]},
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 100, "unknown_field": "value"}], "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": True}, "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."}}]},
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 140}], "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": None, "comparable": True}, "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."}, "attribution_scope": "isolated_effect"}]},
+    {"extractions": [{"evidence_role": "direct_result", "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 100}], "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": "true"}, "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."}}]},
+    {"extractions": [], "SOURCE": "echoed source"},
+])
+def test_evidence_extractor_does_not_hide_invalid_data_during_semantic_repair(response):
+    client = _FakeOpenAIClient(json.dumps(response))
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "block-1"},
+        "source": {"source_kind": "text_window", "source_ref": "block-1", "text": "Ti-6Al-4V porosity was measured."},
+    }
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceExtractor(_response_client(client)).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("evidence_role", ["direct_result"]),
+    ("evidence_role", {"role": "direct_result"}),
+    ("evidence_role", "INVALID"),
+    ("attribution_scope", "INVALID"),
+    ("resolution_status", "INVALID"),
+    ("comparison", {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": False}),
+    ("comparison", {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": True, "incomparability_reasons": ["different test conditions"]}),
+    ("changed_variables", [{"name": "power", "baseline_value": 100, "target_value": 100}] * 2),
+    ("changed_variables", [{"name": f"factor-{index}", "baseline_value": 100, "target_value": 100} for index in range(13)]),
+])
+def test_evidence_extractor_preserves_rejections_when_removing_fixed_variables(field, value):
+    extraction = {
+        "evidence_role": "direct_result",
+        "changed_variables": [{"name": "power", "baseline_value": 100, "target_value": 100}],
+        "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": True},
+        "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured."},
+        "attribution_scope": "isolated_effect",
+    }
+    extraction[field] = value
+    client = _FakeOpenAIClient(json.dumps({"extractions": [extraction]}))
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "block-1"},
+        "source": {"source_kind": "text_window", "source_ref": "block-1", "text": "Ti-6Al-4V porosity was measured."},
+    }
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceExtractor(_response_client(client)).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
+
+
 def test_structured_objective_evidence_rejects_single_variable_joint_effect():
     with pytest.raises(
         ValidationError,
@@ -3321,7 +3373,7 @@ def test_structured_objective_evidence_rejects_unbound_experimental_attribution(
         )
 
 
-def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
+def test_domain_model_extractors_rejects_top_level_prompt_echo_for_evidence():
     response = json.dumps(
         {
             "extractions": [
@@ -3347,9 +3399,10 @@ def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
             "SOURCE": "Relative density reached 99.5%.",
         }
     )
-    extractor = _response_client(_FakeOpenAIClient(response))
+    client = _FakeOpenAIClient(response)
+    extractor = _response_client(client)
 
-    parsed = ObjectiveSourceExtractor(extractor).extract_source(
+    payload = (
         {
             "objective": {
                 "question": "How does energy density affect relative density?"
@@ -3366,8 +3419,9 @@ def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
         }
     )
 
-    assert len(parsed.extractions) == 1
-    assert parsed.extractions[0].reported_result is not None
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ObjectiveSourceExtractor(extractor).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
 
 
 def test_objective_evidence_retries_direct_result_missing_reported_result():

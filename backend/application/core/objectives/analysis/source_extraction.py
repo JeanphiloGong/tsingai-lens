@@ -1011,16 +1011,18 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
         for variable in variables:
             if not isinstance(variable, Mapping):
                 return ()
-            name = str(variable.get("name") or "").strip()
+            name = variable.get("name")
             baseline = variable.get("baseline_value")
             target = variable.get("target_value")
             if (
-                not name
+                not isinstance(name, str)
+                or not name.strip()
                 or not is_complete_scalar(baseline)
                 or not is_complete_scalar(target)
                 or identical_nonempty_scalar(baseline, target)
             ):
                 return ()
+            name = name.strip()
             canonical_name = name.casefold()
             if canonical_name in seen:
                 return ()
@@ -1041,7 +1043,66 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
             normalized_extractions.append(extraction)
             continue
         normalized_extraction = dict(extraction)
-        variables = normalized_extraction.get("changed_variables")
+        variables = normalized_extraction.get("changed_variables", [])
+        comparison = normalized_extraction.get("comparison")
+        # Removing a fixed factor or an empty comparison must not also remove
+        # malformed fields or violations that the output model would reject.
+        if (
+            not isinstance(normalized_extraction.get("evidence_role", "irrelevant"), str)
+            or not isinstance(variables, list)
+            or len(variables) > 12
+            or any(
+                not isinstance(variable, Mapping)
+                or set(variable) - {"name", "baseline_value", "target_value", "unit"}
+                or not isinstance(variable.get("name"), str)
+                or any(
+                    variable.get(field) is not None
+                    and not isinstance(variable[field], (str, int, float, bool))
+                    for field in ("baseline_value", "target_value")
+                )
+                or (variable.get("unit") is not None and not isinstance(variable["unit"], str))
+                for variable in variables
+            )
+            or (
+                comparison is not None
+                and (
+                    not isinstance(comparison, Mapping)
+                    or set(comparison) - {
+                        "baseline_label", "target_label", "axis_names",
+                        "comparable", "incomparability_reasons",
+                    }
+                    or not isinstance(comparison.get("baseline_label"), str)
+                    or not isinstance(comparison.get("target_label"), str)
+                    or not isinstance(comparison.get("axis_names"), list)
+                    or any(not isinstance(axis, str) for axis in comparison["axis_names"])
+                    or not isinstance(comparison.get("comparable"), bool)
+                    or ("incomparability_reasons" in comparison and (
+                        not isinstance(comparison["incomparability_reasons"], list)
+                        or any(not isinstance(reason, str) for reason in comparison["incomparability_reasons"])
+                    ))
+                    or (
+                        not comparison["comparable"]
+                        and not comparison.get("incomparability_reasons")
+                    )
+                    or (
+                        comparison["comparable"]
+                        and comparison.get("incomparability_reasons")
+                    )
+                )
+            )
+            or normalized_extraction.get("attribution_scope", "not_attributable") not in (
+                "isolated_effect", "joint_effect", "association_only", "descriptive_only", "not_attributable"
+            )
+            or normalized_extraction.get("resolution_status", "partial") not in (
+                "resolved", "partial", "unresolved", "skipped", "unknown"
+            )
+        ):
+            normalized_extractions.append(normalized_extraction)
+            continue
+        variable_names = [variable["name"].casefold() for variable in variables]
+        if len(variable_names) != len(set(variable_names)):
+            normalized_extractions.append(normalized_extraction)
+            continue
         scientific_context = normalized_extraction.get("scientific_context")
         has_context_fact = isinstance(scientific_context, Mapping) and any(
             isinstance(scientific_context.get(family), list)
@@ -1049,8 +1110,7 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
             for family in _OBJECTIVE_CONTEXT_FIELD_NAMES
         )
         if (
-            str(normalized_extraction.get("evidence_role") or "")
-            in _OBJECTIVE_CONTEXT_ROLES
+            normalized_extraction.get("evidence_role") in _OBJECTIVE_CONTEXT_ROLES
             and normalized_extraction.get("reported_result") is not None
         ):
             # The role is model-authored metadata, while the reported result
@@ -1061,8 +1121,7 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
             normalized_extraction["evidence_role"] = "direct_result"
             changed = True
         if (
-            str(normalized_extraction.get("evidence_role") or "")
-            in _DIRECT_RESULT_ROUTE_ROLES
+            normalized_extraction.get("evidence_role") in _DIRECT_RESULT_ROUTE_ROLES
             and normalized_extraction.get("reported_result") is None
             and not variables
             and normalized_extraction.get("comparison") is None
@@ -1085,19 +1144,12 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
             )
             variables = normalized_extraction["changed_variables"]
             changed = True
-        if not isinstance(variables, list):
-            normalized_extractions.append(normalized_extraction)
-            continue
-
         fixed_names: set[str] = set()
         changed_variables: list[Any] = []
         for variable in variables:
-            if not isinstance(variable, Mapping):
-                changed_variables.append(variable)
-                continue
             baseline = variable.get("baseline_value")
             target = variable.get("target_value")
-            variable_name = str(variable.get("name") or "").strip().casefold()
+            variable_name = variable["name"].strip().casefold()
             if not variable_name or not identical_nonempty_scalar(
                 baseline,
                 target,
@@ -1110,10 +1162,9 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
         if fixed_names:
             normalized_extraction["changed_variables"] = changed_variables
         remaining_variable_names = {
-            str(variable.get("name") or "").strip().casefold()
+            variable["name"].strip().casefold()
             for variable in changed_variables
-            if isinstance(variable, Mapping)
-            and str(variable.get("name") or "").strip()
+            if variable["name"].strip()
         }
         comparison = extraction.get("comparison")
         if isinstance(comparison, Mapping) and isinstance(
@@ -1123,17 +1174,14 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
             normalized_comparison["axis_names"] = [
                 axis
                 for axis in comparison["axis_names"]
-                if str(axis).strip().casefold() not in fixed_names
-                or str(axis).strip().casefold() in remaining_variable_names
+                if axis.strip().casefold() not in fixed_names
+                or axis.strip().casefold() in remaining_variable_names
             ]
             normalized_extraction["comparison"] = normalized_comparison
         comparison = normalized_extraction.get("comparison")
         if isinstance(comparison, Mapping):
             axis_names = comparison.get("axis_names")
-            missing_axis_names = axis_names is None or (
-                isinstance(axis_names, list)
-                and not any(str(axis).strip() for axis in axis_names)
-            )
+            missing_axis_names = not any(axis.strip() for axis in axis_names)
             recovered_axis_names = (
                 complete_changed_variable_names(changed_variables)
                 if missing_axis_names
@@ -1167,7 +1215,7 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
         comparison_has_no_axes = (
             isinstance(comparison, Mapping)
             and isinstance(comparison.get("axis_names"), list)
-            and not any(str(axis).strip() for axis in comparison["axis_names"])
+            and not any(axis.strip() for axis in comparison["axis_names"])
         )
         if not changed_variables and (fixed_names or comparison_has_no_axes):
             normalized_extraction["comparison"] = None
@@ -1354,14 +1402,6 @@ class ObjectiveSourceExtractor:
             )
             if not isinstance(normalized, dict):
                 return normalized
-            extractions = normalized.get("extractions")
-            extra_keys = set(normalized) - {"extractions"}
-            if (
-                isinstance(extractions, list)
-                and extra_keys
-                and extra_keys <= _SOURCE_EXTRACTION_ECHOED_PROMPT_KEYS
-            ):
-                return {"extractions": extractions}
             if (
                 "extractions" not in normalized
                 and normalized

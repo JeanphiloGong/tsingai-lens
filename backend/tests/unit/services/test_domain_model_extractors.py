@@ -2261,6 +2261,21 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
     assert "different processing stages" in prompt
 
 
+@pytest.mark.parametrize("response", [
+    {"decisions": [{"pair_id": "pair-1", "equivalent": "false"}]},
+    {"decisions": [{"pair_id": "pair-1", "equivalent": 0}]},
+    {"decisions": None},
+])
+def test_axis_classifier_rejects_invalid_response_types(response):
+    client = _FakeOpenAIClient(json.dumps(response))
+    classifier = ResearchAxisEquivalenceClassifier(_response_client(client))
+
+    with pytest.raises(ValidationError):
+        classifier.classify({"axis_pairs": [{"pair_id": "pair-1", "axis_type": "variable", "left": "laser power", "right": "scan speed"}]})
+
+    assert len(client.chat.completions.calls) == 2
+
+
 def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
     invalid = json.dumps(
         {

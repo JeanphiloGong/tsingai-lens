@@ -131,7 +131,12 @@ async def preview_collection_objective_scope(
     return ObjectiveScopeResponse(
         collection_id=collection_id,
         objective_id=objective_id,
-        **preview.to_record(),
+        counts=preview.counts,
+        recommended_document_ids=list(preview.recommended_document_ids),
+        review_document_ids=list(preview.review_document_ids),
+        excluded_document_ids=list(preview.excluded_document_ids),
+        decisions=[asdict(item) for item in preview.decisions],
+        support_is_evidence=preview.support_is_evidence,
     )
 
 

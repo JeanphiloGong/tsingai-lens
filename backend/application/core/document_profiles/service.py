@@ -485,7 +485,12 @@ class DocumentProfileService:
         profiles: tuple[DocumentProfile, ...],
     ) -> dict[str, Any]:
         summary = summarize_document_profile_collection(profiles)
-        return summary.to_payload()
+        return {
+            "total_documents": summary.total_documents,
+            "by_doc_type": dict(summary.by_doc_type),
+            "warnings": list(summary.warnings),
+            "technical_failure_count": summary.technical_failure_count,
+        }
 
     def _build_document_content_blocks(
         self,

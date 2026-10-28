@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Protocol
+from typing import Iterable, Literal, Protocol
 
 from application.core.objectives import property_matching
 from application.core.objectives.domain_knowledge.registry import MaterialMatchQuality
@@ -37,18 +37,6 @@ class ObjectiveScopeDecision:
     map_limitations: tuple[str, ...]
     support_basis: tuple[str, ...]
     is_seed: bool = False
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "document_id": self.document_id,
-            "classification": self.classification,
-            "reason": self.reason,
-            "doc_role": self.doc_role,
-            "map_status": self.map_status,
-            "map_limitations": list(self.map_limitations),
-            "support_basis": list(self.support_basis),
-            "is_seed": self.is_seed,
-        }
 
 
 @dataclass(frozen=True)
@@ -88,16 +76,6 @@ class ObjectiveScopePreview:
             "likely_relevant": len(self.recommended_document_ids),
             "needs_inspection": len(self.review_document_ids),
             "confidently_out_of_scope": len(self.excluded_document_ids),
-        }
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "counts": self.counts,
-            "recommended_document_ids": list(self.recommended_document_ids),
-            "review_document_ids": list(self.review_document_ids),
-            "excluded_document_ids": list(self.excluded_document_ids),
-            "decisions": [item.to_record() for item in self.decisions],
-            "support_is_evidence": self.support_is_evidence,
         }
 
 

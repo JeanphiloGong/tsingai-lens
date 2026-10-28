@@ -3179,7 +3179,14 @@ async def test_plan_version_stays_on_model_updates_after_approved_write(write_st
         messages=resumed.messages, run_status=resumed.status, completion_reason=resumed.completion_reason,
     )
     assert recovered is not None
-    assert recovered.to_record() == after
+    assert recovered.plan_id == after["plan_id"]
+    assert recovered.version == after["plan_version"]
+    assert recovered.request == after["request"]
+    assert recovered.status.value == after["status"]
+    assert recovered.model_status.value == after["model_status"]
+    assert recovered.explanation == after["explanation"]
+    assert list(recovered.steps) == after["steps"]
+    assert recovered.blocking_reason == after["blocking_reason"]
 
 
 async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:

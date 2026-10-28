@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal
+from typing import Iterable, Literal
 
 from domain.shared.enums import (
     DOC_TYPE_EXPERIMENTAL,
@@ -38,14 +38,6 @@ class DocumentProfileSummary:
     by_doc_type: dict[str, int]
     warnings: tuple[str, ...]
     technical_failure_count: int
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "total_documents": self.total_documents,
-            "by_doc_type": dict(self.by_doc_type),
-            "warnings": list(self.warnings),
-            "technical_failure_count": self.technical_failure_count,
-        }
 
 
 def summarize_document_profile_collection(

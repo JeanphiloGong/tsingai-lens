@@ -429,18 +429,6 @@ class ResearchExecutionPlan:
             ),
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "plan_id": self.plan_id,
-            "plan_version": self.version,
-            "request": self.request,
-            "status": self.status.value,
-            "model_status": self.model_status.value,
-            "explanation": self.explanation,
-            "steps": [dict(step) for step in self.steps],
-            "blocking_reason": self.blocking_reason,
-        }
-
 
 @dataclass(frozen=True)
 class AgentRunLimits:
@@ -713,7 +701,18 @@ class _RunProgress:
                 termination_reason,
             )
         execution_plan_record = (
-            self.execution_plan.to_record() if self.execution_plan is not None else None
+            {
+                "plan_id": self.execution_plan.plan_id,
+                "plan_version": self.execution_plan.version,
+                "request": self.execution_plan.request,
+                "status": self.execution_plan.status.value,
+                "model_status": self.execution_plan.model_status.value,
+                "explanation": self.execution_plan.explanation,
+                "steps": [dict(step) for step in self.execution_plan.steps],
+                "blocking_reason": self.execution_plan.blocking_reason,
+            }
+            if self.execution_plan is not None
+            else None
         )
         log_payload = {
             "session_id": context.session_id, "request_id": get_request_id(), "phase": phase,
@@ -785,7 +784,24 @@ class AgentRunResult:
             error_code=self.error_code,
             pending_approval=self.pending_approval,
         )
-        object.__setattr__(self, "execution_plan", plan.to_record() if plan is not None else None)
+        object.__setattr__(
+            self,
+            "execution_plan",
+            (
+                {
+                    "plan_id": plan.plan_id,
+                    "plan_version": plan.version,
+                    "request": plan.request,
+                    "status": plan.status.value,
+                    "model_status": plan.model_status.value,
+                    "explanation": plan.explanation,
+                    "steps": [dict(step) for step in plan.steps],
+                    "blocking_reason": plan.blocking_reason,
+                }
+                if plan is not None
+                else None
+            ),
+        )
 
 class ResearchAgentRunner:
     def __init__(
@@ -1685,7 +1701,20 @@ class ResearchAgentRunner:
         progress: _RunProgress, *, active_user_message_id: str,
     ) -> ChatModelContext:
         """Compact old operations into provisional notes; the durable trajectory stays intact."""
-        execution_plan = progress.execution_plan.to_record() if progress.execution_plan else None
+        execution_plan = (
+            {
+                "plan_id": progress.execution_plan.plan_id,
+                "plan_version": progress.execution_plan.version,
+                "request": progress.execution_plan.request,
+                "status": progress.execution_plan.status.value,
+                "model_status": progress.execution_plan.model_status.value,
+                "explanation": progress.execution_plan.explanation,
+                "steps": [dict(step) for step in progress.execution_plan.steps],
+                "blocking_reason": progress.execution_plan.blocking_reason,
+            }
+            if progress.execution_plan
+            else None
+        )
         context_limit = self._effective_context_tokens(progress)
         input_budget = self.context_builder.input_budget(
             context_limit=context_limit, output_limit=self.limits.max_model_output_tokens,

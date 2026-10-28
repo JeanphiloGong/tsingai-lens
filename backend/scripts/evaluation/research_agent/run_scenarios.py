@@ -104,8 +104,6 @@ def scientific_snapshot(url):
 
 def save(path, value):
     def encode(item):
-        if hasattr(item, "to_record"):
-            return item.to_record()
         if hasattr(item, "__dataclass_fields__"):
             return asdict(item)
         raise TypeError(type(item).__name__)

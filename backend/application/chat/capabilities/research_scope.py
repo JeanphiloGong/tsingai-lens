@@ -68,17 +68,44 @@ class PreviewResearchScopeCapability:
 
         preview = screen_objective_scope(paper_maps, objective=arguments)
         likely_relevant = [
-            item.to_record()
+            {
+                "document_id": item.document_id,
+                "classification": item.classification,
+                "reason": item.reason,
+                "doc_role": item.doc_role,
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "support_basis": list(item.support_basis),
+                "is_seed": item.is_seed,
+            }
             for item in preview.decisions
             if item.classification == "likely_relevant"
         ]
         needs_inspection = [
-            item.to_record()
+            {
+                "document_id": item.document_id,
+                "classification": item.classification,
+                "reason": item.reason,
+                "doc_role": item.doc_role,
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "support_basis": list(item.support_basis),
+                "is_seed": item.is_seed,
+            }
             for item in preview.decisions
             if item.classification == "needs_inspection"
         ]
         confidently_out_of_scope = [
-            item.to_record()
+            {
+                "document_id": item.document_id,
+                "classification": item.classification,
+                "reason": item.reason,
+                "doc_role": item.doc_role,
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "support_basis": list(item.support_basis),
+                "is_seed": item.is_seed,
+            }
             for item in preview.decisions
             if item.classification == "confidently_out_of_scope"
         ]

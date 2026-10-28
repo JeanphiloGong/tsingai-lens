@@ -19,7 +19,6 @@ from typing import Any, Mapping
 
 from application.core.objectives.analysis.experiment_query_service import (
     finding_response,
-    paper_contribution_response,
     scientific_attribute_response,
 )
 from domain.core.finding import Finding, FindingPaperContribution
@@ -202,7 +201,43 @@ class ExperimentCompatibilityProjection:
         records; the coverage rows remain available for the legacy response.
         """
         contribution_by_document = {
-            document_id: _reset_contribution_links(paper_contribution_response(value))
+            document_id: _reset_contribution_links(
+                {
+                    "collection_id": value.collection_id,
+                    "objective_id": value.objective_id,
+                    "analysis_version": value.analysis_version,
+                    "document_id": value.document_id,
+                    "analysis_status": value.analysis_status,
+                    "relevance": value.relevance,
+                    "paper_role": value.paper_role,
+                    "contribution_summary": value.contribution_summary,
+                    "material_match": list(value.material_match),
+                    "changed_variables": list(value.changed_variables),
+                    "measured_property_scope": list(value.measured_property_scope),
+                    "test_environment_scope": list(value.test_environment_scope),
+                    "exclusion_reason": value.exclusion_reason,
+                    "warnings": list(value.warnings),
+                    "confidence": value.confidence,
+                    "evidence_disposition": value.evidence_disposition,
+                    "routed_source_count": value.routed_source_count,
+                    "extracted_source_count": value.extracted_source_count,
+                    "comparable_evidence_count": value.comparable_evidence_count,
+                    "failed_source_count": value.failed_source_count,
+                    "uninspected_source_count": value.uninspected_source_count,
+                    "evidence_disposition_reason": value.evidence_disposition_reason,
+                    "evidence_status_counts": {
+                        status: count for status, count in value.evidence_status_counts
+                    },
+                    "inspected_source_refs": [
+                        {
+                            "source_kind": source_ref.source_kind,
+                            "source_ref": source_ref.source_ref,
+                            "source_digest": source_ref.source_digest,
+                        }
+                        for source_ref in value.inspected_source_refs
+                    ],
+                }
+            )
             for document_id, value in state.contributions_by_document.items()
         }
         initialized_documents: set[str] = set()

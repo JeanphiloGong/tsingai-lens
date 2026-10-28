@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from application.core.objectives.analysis.experiment_query_service import (
     finding_response,
     objective_evidence_response,
-    paper_contribution_response,
 )
 from application.core.objectives.analysis_service import ObjectiveAnalysisDispatchError
 from application.core.objectives.objective_analysis_service import (
@@ -815,7 +814,46 @@ def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
     assert "diagnostics" not in payload["published_analysis"]
     assert payload["paper_contributions"] == [
         {
-            **paper_contribution_response(_paper_contribution()),
+            **{
+                "collection_id": _paper_contribution().collection_id,
+                "objective_id": _paper_contribution().objective_id,
+                "analysis_version": _paper_contribution().analysis_version,
+                "document_id": _paper_contribution().document_id,
+                "analysis_status": _paper_contribution().analysis_status,
+                "relevance": _paper_contribution().relevance,
+                "paper_role": _paper_contribution().paper_role,
+                "contribution_summary": _paper_contribution().contribution_summary,
+                "material_match": list(_paper_contribution().material_match),
+                "changed_variables": list(_paper_contribution().changed_variables),
+                "measured_property_scope": list(
+                    _paper_contribution().measured_property_scope
+                ),
+                "test_environment_scope": list(
+                    _paper_contribution().test_environment_scope
+                ),
+                "exclusion_reason": _paper_contribution().exclusion_reason,
+                "warnings": list(_paper_contribution().warnings),
+                "confidence": _paper_contribution().confidence,
+                "evidence_disposition": _paper_contribution().evidence_disposition,
+                "routed_source_count": _paper_contribution().routed_source_count,
+                "extracted_source_count": _paper_contribution().extracted_source_count,
+                "comparable_evidence_count": _paper_contribution().comparable_evidence_count,
+                "failed_source_count": _paper_contribution().failed_source_count,
+                "uninspected_source_count": _paper_contribution().uninspected_source_count,
+                "evidence_disposition_reason": _paper_contribution().evidence_disposition_reason,
+                "evidence_status_counts": {
+                    status: count
+                    for status, count in _paper_contribution().evidence_status_counts
+                },
+                "inspected_source_refs": [
+                    {
+                        "source_kind": source_ref.source_kind,
+                        "source_ref": source_ref.source_ref,
+                        "source_digest": source_ref.source_digest,
+                    }
+                    for source_ref in _paper_contribution().inspected_source_refs
+                ],
+            },
         }
     ]
     assert payload["active_analysis"]["stats"] == {

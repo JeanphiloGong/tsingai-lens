@@ -19,7 +19,6 @@ from application.chat.capabilities.finding_review import (
 from application.core.objectives.analysis.experiment_query_service import (
     finding_response,
     objective_evidence_response,
-    paper_contribution_response,
 )
 from application.evaluation.core_evaluation_service import CoreEvaluationService
 from application.evaluation.finding_feedback_service import (
@@ -120,7 +119,41 @@ class _RecordedExperimentProjection:
         self.contribution_value = contribution
         self.finding = finding_response(finding)
         self.evidence = objective_evidence_response(evidence)
-        self.contribution = paper_contribution_response(contribution)
+        self.contribution = {
+            "collection_id": contribution.collection_id,
+            "objective_id": contribution.objective_id,
+            "analysis_version": contribution.analysis_version,
+            "document_id": contribution.document_id,
+            "analysis_status": contribution.analysis_status,
+            "relevance": contribution.relevance,
+            "paper_role": contribution.paper_role,
+            "contribution_summary": contribution.contribution_summary,
+            "material_match": list(contribution.material_match),
+            "changed_variables": list(contribution.changed_variables),
+            "measured_property_scope": list(contribution.measured_property_scope),
+            "test_environment_scope": list(contribution.test_environment_scope),
+            "exclusion_reason": contribution.exclusion_reason,
+            "warnings": list(contribution.warnings),
+            "confidence": contribution.confidence,
+            "evidence_disposition": contribution.evidence_disposition,
+            "routed_source_count": contribution.routed_source_count,
+            "extracted_source_count": contribution.extracted_source_count,
+            "comparable_evidence_count": contribution.comparable_evidence_count,
+            "failed_source_count": contribution.failed_source_count,
+            "uninspected_source_count": contribution.uninspected_source_count,
+            "evidence_disposition_reason": contribution.evidence_disposition_reason,
+            "evidence_status_counts": {
+                status: count for status, count in contribution.evidence_status_counts
+            },
+            "inspected_source_refs": [
+                {
+                    "source_kind": source_ref.source_kind,
+                    "source_ref": source_ref.source_ref,
+                    "source_digest": source_ref.source_digest,
+                }
+                for source_ref in contribution.inspected_source_refs
+            ],
+        }
 
     async def read_analysis_records(
         self, collection_id, objective_id, analysis_version

@@ -19,7 +19,6 @@ from typing import Mapping
 import pytest
 from application.core.objectives.analysis.experiment_query_service import (
     objective_evidence_response,
-    paper_contribution_response,
 )
 from domain.core import (
     ObjectiveEvidence,
@@ -808,7 +807,7 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
         1,
         "paper-1",
     )
-    assert "frame_id" not in paper_contribution_response(contribution)
+    assert not hasattr(contribution, "frame_id")
 
 
 def test_paper_contribution_records_auditable_evidence_disposition() -> None:
@@ -876,7 +875,7 @@ def test_paper_contribution_preserves_inspected_source_lineage_without_evidence(
     )
 
     assert contribution.inspected_source_refs[0].source_ref == "block-results"
-    assert paper_contribution_response(contribution)["inspected_source_refs"] == [
+    assert [asdict(item) for item in contribution.inspected_source_refs] == [
         {
             "source_kind": "text_window",
             "source_ref": "block-results",

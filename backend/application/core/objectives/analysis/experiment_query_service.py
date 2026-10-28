@@ -11,7 +11,7 @@ from typing import Any
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.research_objective import ObjectiveEvidence, PaperContribution
+from domain.core.research_objective import ObjectiveEvidence
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from repositories.comparison_group_repository import ComparisonGroupRepository
 from repositories.experiment_finding_repository import (
@@ -1029,42 +1029,4 @@ def objective_evidence_response(value: ObjectiveEvidence) -> dict[str, Any]:
             if value.related_source_refs or value.related_source_refs_explicit
             else {}
         ),
-    }
-
-
-def paper_contribution_response(value: PaperContribution) -> dict[str, Any]:
-    return {
-        "collection_id": value.collection_id,
-        "objective_id": value.objective_id,
-        "analysis_version": value.analysis_version,
-        "document_id": value.document_id,
-        "analysis_status": value.analysis_status,
-        "relevance": value.relevance,
-        "paper_role": value.paper_role,
-        "contribution_summary": value.contribution_summary,
-        "material_match": list(value.material_match),
-        "changed_variables": list(value.changed_variables),
-        "measured_property_scope": list(value.measured_property_scope),
-        "test_environment_scope": list(value.test_environment_scope),
-        "exclusion_reason": value.exclusion_reason,
-        "warnings": list(value.warnings),
-        "confidence": value.confidence,
-        "evidence_disposition": value.evidence_disposition,
-        "routed_source_count": value.routed_source_count,
-        "extracted_source_count": value.extracted_source_count,
-        "comparable_evidence_count": value.comparable_evidence_count,
-        "failed_source_count": value.failed_source_count,
-        "uninspected_source_count": value.uninspected_source_count,
-        "evidence_disposition_reason": value.evidence_disposition_reason,
-        "evidence_status_counts": {
-            status: count for status, count in value.evidence_status_counts
-        },
-        "inspected_source_refs": [
-            {
-                "source_kind": source_ref.source_kind,
-                "source_ref": source_ref.source_ref,
-                "source_digest": source_ref.source_digest,
-            }
-            for source_ref in value.inspected_source_refs
-        ],
     }

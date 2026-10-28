@@ -898,7 +898,6 @@ async def _local_objective_bundle(
         from application.core.objectives.analysis.experiment_query_service import (
             finding_response,
             objective_evidence_response,
-            paper_contribution_response,
         )
         from application.evaluation import FindingFeedbackService  # noqa: PLC0415
         from infra.persistence.database import (  # noqa: PLC0415
@@ -1155,7 +1154,42 @@ async def _local_objective_bundle(
             else None
         ),
         "paper_contributions": [
-            paper_contribution_response(item) for item in paper_contributions
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "document_id": item.document_id,
+                "analysis_status": item.analysis_status,
+                "relevance": item.relevance,
+                "paper_role": item.paper_role,
+                "contribution_summary": item.contribution_summary,
+                "material_match": list(item.material_match),
+                "changed_variables": list(item.changed_variables),
+                "measured_property_scope": list(item.measured_property_scope),
+                "test_environment_scope": list(item.test_environment_scope),
+                "exclusion_reason": item.exclusion_reason,
+                "warnings": list(item.warnings),
+                "confidence": item.confidence,
+                "evidence_disposition": item.evidence_disposition,
+                "routed_source_count": item.routed_source_count,
+                "extracted_source_count": item.extracted_source_count,
+                "comparable_evidence_count": item.comparable_evidence_count,
+                "failed_source_count": item.failed_source_count,
+                "uninspected_source_count": item.uninspected_source_count,
+                "evidence_disposition_reason": item.evidence_disposition_reason,
+                "evidence_status_counts": {
+                    status: count for status, count in item.evidence_status_counts
+                },
+                "inspected_source_refs": [
+                    {
+                        "source_kind": source_ref.source_kind,
+                        "source_ref": source_ref.source_ref,
+                        "source_digest": source_ref.source_digest,
+                    }
+                    for source_ref in item.inspected_source_refs
+                ],
+            }
+            for item in paper_contributions
         ],
         "findings": [finding_response(item) for item in findings],
         "evidence": [objective_evidence_response(item) for item in published_evidence],

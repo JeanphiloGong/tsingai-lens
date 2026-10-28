@@ -8,10 +8,13 @@ from domain.core.research_objective import (
 
 
 from copy import deepcopy
+import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
@@ -20,6 +23,12 @@ from application.core.objectives.llm.structured_response import (
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
+from application.chat.capabilities.contracts import CapabilityExecutionContext
+from application.chat.capabilities.objective_candidate import (
+    CreateObjectiveCandidateCapability,
+    CreateObjectiveCandidateToolRequest,
+)
+from application.core.objectives.objective_authoring_service import ObjectiveAuthoringService
 from domain.core import PaperResearchMap
 
 
@@ -142,6 +151,59 @@ def form(reading, client, **kwargs):
         response_client=client,
         **kwargs,
     )
+
+
+@pytest.mark.parametrize("field", ["variables", "outcomes", "seed_document_ids"])
+def test_candidate_request_rejects_blank_scope_or_document_identity(field):
+    payload = {
+        "question": "How does laser power affect porosity?",
+        "variables": ["laser power"],
+        "outcomes": ["porosity"],
+        field: ["   "],
+    }
+    with pytest.raises(ValidationError):
+        CreateObjectiveCandidateToolRequest.model_validate(payload)
+
+
+def test_candidate_request_preserves_paper_id_case_through_actual_authoring():
+    repository = SimpleNamespace(
+        create_authored_candidate=AsyncMock(side_effect=lambda objective, **kwargs: objective),
+    )
+    capability = CreateObjectiveCandidateCapability(
+        objective_authoring_service=ObjectiveAuthoringService(
+            collection_service=SimpleNamespace(
+                get_collection_for_user=AsyncMock(), get_document=AsyncMock(),
+            ),
+            objective_repository=repository,
+        ),
+    )
+    request = CreateObjectiveCandidateToolRequest.model_validate({
+        "question": " How does laser power affect porosity? ",
+        "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"],
+        "variables": ["laser power", "Laser power"],
+        "outcomes": ["porosity"],
+        "constraints": ["LPBF", "lpbf"],
+        "seed_document_ids": ["Paper-A", "paper-a", "Paper-A"],
+        "excluded_document_ids": ["Paper-B", "paper-b", "Paper-B"],
+    })
+
+    result = asyncio.run(capability.execute(CapabilityExecutionContext(
+        session_id="chat-1", user_id="user-1", collection_id="col-1", tool_call_id="call-1",
+    ), request))
+
+    assert result.status.value == "succeeded"
+    objective = repository.create_authored_candidate.call_args.args[0]
+    assert objective.objective_id == "obj_how-does-laser-power-affect-porosity_e63c4889"
+    assert objective.material_scope == ("Ti-6Al-4V",)
+    assert objective.variables == ("laser power",)
+    assert objective.constraints == ("LPBF",)
+    assert objective.seed_document_ids == ("Paper-A", "paper-a")
+    assert objective.excluded_document_ids == ("Paper-B", "paper-b")
+    assert objective.origin == "chat_assisted"
+    assert objective.created_by_user_id == "user-1"
+    assert objective.created_by_tool_call_id == "call-1"
+    assert objective.active_analysis_version is None
+    assert objective.confirmation_status == "candidate"
 
 
 def test_distinct_experiments_form_one_reading_question_without_rewriting_them(

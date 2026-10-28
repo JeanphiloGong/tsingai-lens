@@ -6,7 +6,7 @@ from hashlib import sha256
 import json
 from typing import Any, Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -16,20 +16,9 @@ from application.core.objectives import property_matching
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 
-ShortText = Annotated[str, Field(min_length=1, max_length=240)]
-
-
-def normalize_terms(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        text = value.strip()
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(text)
-    return result
+ShortText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)
+]
 
 
 class ObjectiveDraftInput(BaseModel):
@@ -62,7 +51,14 @@ class ObjectiveDraftInput(BaseModel):
     )
     @classmethod
     def _normalize_lists(cls, values: list[str]) -> list[str]:
-        return normalize_terms(values)
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            key = value.casefold()
+            if key not in seen:
+                seen.add(key)
+                result.append(value)
+        return result
 
     @field_validator("question")
     @classmethod
@@ -259,5 +255,4 @@ __all__ = [
     "ObjectiveDraftInput",
     "ProposeObjectiveDraftsToolRequest",
     "ProposeObjectiveDraftsCapability",
-    "normalize_terms",
 ]

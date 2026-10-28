@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 from domain.core.research_objective import (
-    ResearchObjective,
-    _text,
     build_research_objective_id,
-    normalize_objective_terms,
 )
 
 from collections.abc import Mapping
@@ -82,12 +79,11 @@ class ObjectiveAuthoringService:
                 derivation_basis=derivation_basis,
             )
 
-        question = question.strip()
-        material_terms = normalize_objective_terms(material_scope)
-        variable_terms = normalize_objective_terms(variables)
-        outcome_terms = normalize_objective_terms(outcomes)
-        mechanism_terms = normalize_objective_terms(mechanisms)
-        constraint_terms = normalize_objective_terms(constraints)
+        material_terms = tuple(material_scope)
+        variable_terms = tuple(variables)
+        outcome_terms = tuple(outcomes)
+        mechanism_terms = tuple(mechanisms)
+        constraint_terms = tuple(constraints)
         comparator = _text(requested_comparator)
         parent_id = _text(parent_objective_id)
         objective = ResearchObjective(
@@ -110,8 +106,8 @@ class ObjectiveAuthoringService:
             mechanisms=mechanism_terms,
             constraints=constraint_terms,
             requested_comparator=comparator,
-            seed_document_ids=normalize_objective_terms(seed_document_ids),
-            excluded_document_ids=normalize_objective_terms(excluded_document_ids),
+            seed_document_ids=tuple(seed_document_ids),
+            excluded_document_ids=tuple(excluded_document_ids),
             confidence=0,
             reason=None,
             origin="chat_assisted",

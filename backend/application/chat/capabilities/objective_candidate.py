@@ -13,7 +13,6 @@ from application.chat.capabilities.contracts import (
 from application.chat.capabilities.objective_proposal import (
     ObjectiveDraftInput,
     ShortText,
-    normalize_terms,
 )
 from application.chat.capabilities.objective_derivation import (
     ObjectiveDerivationBasis,
@@ -36,7 +35,7 @@ class CreateObjectiveCandidateToolRequest(ObjectiveDraftInput):
     @field_validator("seed_document_ids", "excluded_document_ids")
     @classmethod
     def _normalize_document_ids(cls, values: list[str]) -> list[str]:
-        return normalize_terms(values)
+        return list(dict.fromkeys(values))
 
     @model_validator(mode="after")
     def _validate_derivation_lineage(self) -> "CreateObjectiveCandidateToolRequest":

@@ -23,15 +23,10 @@ from domain.core.finding import _stable_id as finding_stable_id
 from domain.core.finding import _strings as finding_strings
 from domain.core.finding import _text as finding_text
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
     SCIENTIFIC_RESULT_DIRECTIONS,
     ScientificAttribute,
     ScientificContext,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 from infra.persistence.postgres.models.comparison_group import (
     ComparisonGroupMemberRow,
     ComparisonGroupRow,
@@ -85,7 +80,7 @@ class ExperimentFindingRepository:
                     ExperimentFindingRow.finding_id == finding_id,
                 )
             )
-            return await _finding_record(session, row) if row is not None else None
+            return await load_experiment_finding(session, row) if row is not None else None
 
     async def list_findings(
         self,
@@ -111,7 +106,7 @@ class ExperimentFindingRepository:
             )
             records: list[Finding] = []
             for row in rows:
-                records.append(await _finding_record(session, row))
+                records.append(await load_experiment_finding(session, row))
             return tuple(records)
 
 
@@ -130,7 +125,7 @@ async def _add_finding(
         )
     )
     if existing is not None:
-        restored = await _finding_record(session, existing)
+        restored = await load_experiment_finding(session, existing)
         if restored == finding:
             return restored
         raise ValueError("finding identity already exists")
@@ -163,19 +158,75 @@ async def _add_finding(
         ],
         scientific_context_json={
             "material": [
-                _scientific_attribute_payload(attribute)
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
                 for attribute in finding.scientific_context.material
             ],
             "sample": [
-                _scientific_attribute_payload(attribute)
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
                 for attribute in finding.scientific_context.sample
             ],
             "process": [
-                _scientific_attribute_payload(attribute)
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
                 for attribute in finding.scientific_context.process
             ],
             "test": [
-                _scientific_attribute_payload(attribute)
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
                 for attribute in finding.scientific_context.test
             ],
         },
@@ -286,7 +337,7 @@ async def _validate_context(
     return selection_rows, group_rows
 
 
-async def _finding_record(
+async def load_experiment_finding(
     session: AsyncSession,
     row: ExperimentFindingRow,
 ) -> Finding:
@@ -367,7 +418,60 @@ async def _finding_record(
                 )
             )
         ),
-        scientific_context=_stored_scientific_context(row.scientific_context_json),
+        scientific_context=ScientificContext(
+            material=tuple(
+                (
+                    ScientificAttribute(
+                        name=item["name"],
+                        value=item["value"],
+                        unit=item.get("unit"),
+                        context_scope=item.get("context_scope", "unknown"),
+                        applies_to_outcomes=tuple(item.get("applies_to_outcomes", ())),
+                    )
+                    for item in (row.scientific_context_json or {}).get("material", ())
+                    or ()
+                )
+            ),
+            sample=tuple(
+                (
+                    ScientificAttribute(
+                        name=item["name"],
+                        value=item["value"],
+                        unit=item.get("unit"),
+                        context_scope=item.get("context_scope", "unknown"),
+                        applies_to_outcomes=tuple(item.get("applies_to_outcomes", ())),
+                    )
+                    for item in (row.scientific_context_json or {}).get("sample", ())
+                    or ()
+                )
+            ),
+            process=tuple(
+                (
+                    ScientificAttribute(
+                        name=item["name"],
+                        value=item["value"],
+                        unit=item.get("unit"),
+                        context_scope=item.get("context_scope", "unknown"),
+                        applies_to_outcomes=tuple(item.get("applies_to_outcomes", ())),
+                    )
+                    for item in (row.scientific_context_json or {}).get("process", ())
+                    or ()
+                )
+            ),
+            test=tuple(
+                (
+                    ScientificAttribute(
+                        name=item["name"],
+                        value=item["value"],
+                        unit=item.get("unit"),
+                        context_scope=item.get("context_scope", "unknown"),
+                        applies_to_outcomes=tuple(item.get("applies_to_outcomes", ())),
+                    )
+                    for item in (row.scientific_context_json or {}).get("test", ())
+                    or ()
+                )
+            ),
+        ),
         limitations=finding_strings(list(row.limitations_json)),
         paper_contributions=(),
         origin=finding_choice(row.origin, FINDING_ORIGINS, "system_generated"),
@@ -384,52 +488,3 @@ async def _finding_record(
 
 
 __all__ = ['ExperimentFindingRepository']
-
-
-def _context_attributes(records: Any) -> tuple[ScientificAttribute, ...]:
-    return tuple(
-        ScientificAttribute(
-            name=scientific_text(item.get("name")) or "",
-            value=(
-                scientific_scalar(item.get("value"))
-                if scientific_scalar(item.get("value")) is not None
-                else ""
-            ),
-            unit=scientific_text(item.get("unit")),
-            context_scope=scientific_choice(
-                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
-            ),
-            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
-        )
-        for item in (records if isinstance(records, (list, tuple)) else ())
-        if isinstance(item, Mapping)
-    )
-
-
-def _stored_scientific_context(value: Any) -> ScientificContext:
-    if not isinstance(value, Mapping):
-        return ScientificContext()
-    return ScientificContext(
-        material=_context_attributes(value.get("material")),
-        sample=_context_attributes(value.get("sample")),
-        process=_context_attributes(value.get("process")),
-        test=_context_attributes(value.get("test")),
-    )
-
-
-def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:
-    return {
-        "name": value.name,
-        "value": value.value,
-        "unit": value.unit,
-        **(
-            {"context_scope": value.context_scope}
-            if value.context_scope != "unknown"
-            else {}
-        ),
-        **(
-            {"applies_to_outcomes": list(value.applies_to_outcomes)}
-            if value.applies_to_outcomes
-            else {}
-        ),
-    }

@@ -83,8 +83,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    ValidationInfo,
-    field_validator,
     model_validator,
 )
 
@@ -243,45 +241,6 @@ _ADAPTIVE_CONTEXT_EXPLICIT_METHOD_HEADING_MARKERS = (
     "measurement",
     "test",
 )
-_SOURCE_EXTRACTION_ROLES = {
-    "direct_result",
-    "condition_context",
-    "mechanism_context",
-    "baseline_context",
-    "comparison_context",
-    "background_context",
-    "contradictory_result",
-    "irrelevant",
-}
-_SOURCE_EXTRACTION_ATTRIBUTION_SCOPES = {
-    "isolated_effect",
-    "joint_effect",
-    "association_only",
-    "descriptive_only",
-    "not_attributable",
-}
-_SOURCE_EXTRACTION_RESULT_DIRECTIONS = {
-    "increase",
-    "decrease",
-    "improve",
-    "worsen",
-    "no_change",
-    "mixed",
-    "unknown",
-}
-_SOURCE_CONTEXT_SCOPES = {
-    "experimental",
-    "simulation",
-    "background",
-    "unknown",
-}
-_SOURCE_EXTRACTION_RESOLUTION_STATUSES = {
-    "resolved",
-    "partial",
-    "unresolved",
-    "skipped",
-    "unknown",
-}
 _SOURCE_EXTRACTION_ECHOED_PROMPT_KEYS = {
     "OBJECTIVE",
     "OBJECTIVE VARIABLES",
@@ -562,29 +521,8 @@ def _provider_is_temporarily_unavailable(error: Exception) -> bool:
     return status_code in {408, 409, 429} or status_code >= 500
 
 
-def _normalize_underscored_choice(
-    value: object,
-    *,
-    allowed: set[str],
-    default: str,
-) -> str:
-    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-    return normalized if normalized in allowed else default
-
-
-def _normalize_list_container(value: object) -> object:
-    return [] if value is None else value
-
-
 class _SourceExtractionContractBase(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    @field_validator("confidence", mode="before", check_fields=False)
-    @classmethod
-    def _normalize_default_confidence(cls, value: object) -> object:
-        if value is not None:
-            return value
-        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 ScientificScalar = str | int | float | bool
@@ -598,20 +536,6 @@ class EvidenceAttributeModelOutput(_SourceExtractionContractBase):
         "unknown"
     )
     applies_to_outcomes: list[str] = Field(default_factory=list, max_length=4)
-
-    @field_validator("context_scope", mode="before")
-    @classmethod
-    def _normalize_context_scope(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_SOURCE_CONTEXT_SCOPES,
-            default="unknown",
-        )
-
-    @field_validator("applies_to_outcomes", mode="before")
-    @classmethod
-    def _normalize_applies_to_outcomes(cls, value: object) -> object:
-        return _normalize_list_container(value)
 
 
 class EvidenceVariableModelOutput(_SourceExtractionContractBase):
@@ -662,110 +586,12 @@ class EvidenceResultModelOutput(_SourceExtractionContractBase):
         "unknown",
     ] = "observed"
 
-    @field_validator("direction", mode="before")
-    @classmethod
-    def _normalize_direction(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_SOURCE_EXTRACTION_RESULT_DIRECTIONS,
-            default="unknown",
-        )
-
-    @field_validator("result_kind", mode="before")
-    @classmethod
-    def _normalize_result_kind(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed={
-                "measured",
-                "observed",
-                "predicted",
-                "simulated",
-                "modeled",
-                "unknown",
-            },
-            default="observed",
-        )
-
 
 class EvidenceContextModelOutput(_SourceExtractionContractBase):
     material: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
     sample: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
     process: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
     test: list[EvidenceAttributeModelOutput] = Field(default_factory=list)
-
-    @field_validator("material", "sample", "process", "test", mode="before")
-    @classmethod
-    def _normalize_lists(cls, value: object, info: ValidationInfo) -> object:
-        items = _normalize_list_container(value)
-        if not isinstance(items, list):
-            return items
-        normalized_items: list[object] = []
-        for item in items:
-            if isinstance(item, EvidenceAttributeModelOutput):
-                normalized_items.append(item)
-                continue
-            if isinstance(item, (str, int, float, bool)):
-                normalized_items.append(
-                    {"name": info.field_name, "value": item, "unit": None}
-                )
-                continue
-            if not isinstance(item, dict):
-                normalized_items.append(item)
-                continue
-
-            name = str(item.get("name") or info.field_name).strip()
-            unit = item.get("unit")
-            context_scope = item.get("context_scope")
-            applies_to_outcomes = item.get("applies_to_outcomes")
-
-            def with_context_metadata(attribute: dict[str, object]) -> dict[str, object]:
-                if context_scope is not None:
-                    attribute["context_scope"] = context_scope
-                if applies_to_outcomes is not None:
-                    attribute["applies_to_outcomes"] = applies_to_outcomes
-                return attribute
-
-            if "value" in item:
-                attribute_value = item["value"]
-                if isinstance(attribute_value, (dict, list)):
-                    attribute_value = json.dumps(
-                        attribute_value,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    )
-                normalized_items.append(
-                    with_context_metadata(
-                        {"name": name, "value": attribute_value, "unit": unit}
-                    )
-                )
-                continue
-
-            details = {
-                key: detail
-                for key, detail in item.items()
-                if key not in {"name", "unit"}
-            }
-            normalized_items.append(
-                with_context_metadata(
-                    {
-                        "name": name if details else info.field_name,
-                        "value": (
-                            json.dumps(
-                                details,
-                                ensure_ascii=False,
-                                separators=(",", ":"),
-                                sort_keys=True,
-                            )
-                            if details
-                            else name
-                        ),
-                        "unit": unit,
-                    }
-                )
-            )
-        return normalized_items
 
 
 class RequestedContextFactModelOutput(EvidenceAttributeModelOutput):
@@ -778,11 +604,6 @@ class RequestedContextFactsModelOutput(_SourceExtractionContractBase):
         default_factory=list,
         max_length=16,
     )
-
-    @field_validator("facts", mode="before")
-    @classmethod
-    def _normalize_facts(cls, value: object) -> object:
-        return _normalize_list_container(value)
 
 
 class EvidenceExtractionModelOutput(_SourceExtractionContractBase):
@@ -819,39 +640,7 @@ class EvidenceExtractionModelOutput(_SourceExtractionContractBase):
         "skipped",
         "unknown",
     ] = "partial"
-    confidence: float = 0.0
-
-    @field_validator("evidence_role", mode="before")
-    @classmethod
-    def _normalize_evidence_role(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_SOURCE_EXTRACTION_ROLES,
-            default="irrelevant",
-        )
-
-    @field_validator("attribution_scope", mode="before")
-    @classmethod
-    def _normalize_attribution_scope(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_SOURCE_EXTRACTION_ATTRIBUTION_SCOPES,
-            default="not_attributable",
-        )
-
-    @field_validator("resolution_status", mode="before")
-    @classmethod
-    def _normalize_resolution_status(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_SOURCE_EXTRACTION_RESOLUTION_STATUSES,
-            default="partial",
-        )
-
-    @field_validator("changed_variables", mode="before")
-    @classmethod
-    def _normalize_changed_variables(cls, value: object) -> object:
-        return _normalize_list_container(value)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _validate_scientific_contract(self) -> "EvidenceExtractionModelOutput":
@@ -907,11 +696,6 @@ class EvidenceExtractionsModelOutput(_SourceExtractionContractBase):
         max_length=_SOURCE_EXTRACTION_MAX_ITEMS,
     )
 
-    @field_validator("extractions", mode="before")
-    @classmethod
-    def _normalize_extractions(cls, value: object) -> object:
-        return _normalize_list_container(value)
-
 
 class DirectEvidenceResultModelOutput(EvidenceResultModelOutput):
     """Result-route fields that must be explicit in model output."""
@@ -938,11 +722,6 @@ class DirectEvidenceExtractionsModelOutput(_SourceExtractionContractBase):
         default_factory=list,
         max_length=_SOURCE_EXTRACTION_MAX_ITEMS,
     )
-
-    @field_validator("extractions", mode="before")
-    @classmethod
-    def _normalize_extractions(cls, value: object) -> object:
-        return _normalize_list_container(value)
 
 
 _DIRECT_RESULT_ROUTE_ROLES = {

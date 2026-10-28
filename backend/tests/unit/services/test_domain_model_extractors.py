@@ -3148,46 +3148,60 @@ def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
     assert client.chat.completions.calls == []
 
 
-def test_structured_objective_evidence_normalizes_compact_context_attributes():
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"material": ["316L stainless steel"]},
+        {"sample": [{"name": "cylindrical specimen", "shape": "cylindrical"}]},
+        {"process": [{"name": "hatch spacing", "value": [0.12, 0.111], "unit": "mm"}]},
+        {"test": [{"name": "density measurement", "method": "Archimedes"}]},
+    ],
+)
+def test_structured_objective_evidence_rejects_compact_context_attributes(context):
+    with pytest.raises(ValidationError):
+        EvidenceContextModelOutput.model_validate(context)
+
+
+def test_structured_objective_evidence_preserves_explicit_context_attributes():
     context = EvidenceContextModelOutput.model_validate(
         {
-            "material": ["316L stainless steel"],
-            "sample": [
-                {
-                    "name": "cylindrical specimen",
-                    "shape": "cylindrical",
-                    "size": "10 mm diameter x 10 mm height",
-                }
-            ],
-            "process": [
-                {
-                    "name": "hatch spacing",
-                    "value": [0.12, 0.111],
-                    "unit": "mm",
-                }
-            ],
+            "material": [{"name": "alloy", "value": "316L stainless steel"}],
+            "process": [{"name": "hatch spacing", "value": 0.12, "unit": "mm"}],
             "test": [
                 {
-                    "name": "density measurement",
-                    "method": "Archimedes",
+                    "name": "method",
+                    "value": "Archimedes",
+                    "context_scope": "experimental",
                 }
             ],
         }
     )
+    assert context.material[0].value == "316L stainless steel"
+    assert context.process[0].value == 0.12
+    assert context.process[0].unit == "mm"
+    assert context.test[0].context_scope == "experimental"
 
-    assert context.material[0].model_dump() == {
-        "name": "material",
-        "value": "316L stainless steel",
-        "unit": None,
-        "context_scope": "unknown",
-        "applies_to_outcomes": [],
+
+@pytest.mark.parametrize("response", [
+    {"extractions": None},
+    {"extractions": [{"evidence_role": "INVALID"}]},
+    {"extractions": [{"evidence_role": "condition_context", "confidence": None}]},
+    {"extractions": [{"evidence_role": "condition_context", "confidence": "0.8"}]},
+    {"extractions": [{"evidence_role": "condition_context", "scientific_context": {"material": ["Ti-6Al-4V"]}}]},
+    {"extractions": [{"evidence_role": "direct_result", "reported_result": {"outcome": "porosity", "result_text": "Porosity was measured.", "result_kind": "INVALID"}}]},
+    {"extractions": [{"evidence_role": "condition_context", "comparison": {"baseline_label": "A", "target_label": "B", "axis_names": ["power"], "comparable": "false"}}]},
+])
+def test_evidence_extractor_rejects_invalid_output_types(response):
+    client = _FakeOpenAIClient(json.dumps(response))
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "block-1"},
+        "source": {"source_kind": "text_window", "source_ref": "block-1", "text": "Ti-6Al-4V porosity was measured."},
     }
-    assert json.loads(str(context.sample[0].value)) == {
-        "shape": "cylindrical",
-        "size": "10 mm diameter x 10 mm height",
-    }
-    assert json.loads(str(context.process[0].value)) == [0.12, 0.111]
-    assert json.loads(str(context.test[0].value)) == {"method": "Archimedes"}
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceExtractor(_response_client(client)).extract_source(payload)
+    assert len(client.chat.completions.calls) == 3
 
 
 def test_structured_objective_evidence_rejects_single_variable_joint_effect():

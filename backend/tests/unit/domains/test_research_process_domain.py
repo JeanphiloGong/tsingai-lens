@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import domain.core as core_domain
 import pytest
-from application.core.objectives.analysis.source_extraction import (
-    _observation_from_extraction,
-)
 from domain.core import (
     ObjectiveEvidence,
+    SourceObservation,
 )
-from domain.core.research_objective import (
-    ObjectiveEvidence,
-)
+from domain.core.research_process import build_source_observation_id
 from domain.core.scientific_fact import (
     ScientificComparison,
     ScientificContext,
@@ -24,49 +20,33 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
     scientific_comparison = getattr(core_domain, "ScientificComparison")
     scientific_result = getattr(core_domain, "ScientificResult")
     scientific_context = getattr(core_domain, "ScientificContext")
-    payload = {
-        "collection_id": "col-1",
-        "objective_id": "obj-1",
-        "document_id": "doc-1",
-        "source_kind": "table",
-        "source_ref": "table-2",
-        "source_excerpt": "P150 elongation increased from 72% to 82%.",
-        "changed_variables": [
-            {
-                "name": "platform preheating",
-                "baseline_value": "NP",
-                "target_value": "P150",
-            }
-        ],
-        "comparison": {
-            "baseline_label": "NP",
-            "target_label": "P150",
-            "axis_names": ["platform preheating"],
-            "comparable": True,
-        },
-        "reported_result": {
-            "outcome": "elongation",
-            "baseline_value": 72,
-            "target_value": 82,
-            "value": 82,
-            "unit": "%",
-            "direction": "increase",
-            "result_text": "P150 elongation increased from 72% to 82%.",
-        },
-        "scientific_context": {
-            "material": [{"name": "alloy", "value": "316L"}],
-            "test": [{"name": "method", "value": "tensile test"}],
-        },
-        "confidence": 0.9,
-    }
-
-    observation = _observation_from_extraction(
-        {
-            **payload,
-            "observation_id": "obs-1",
-            "observation_role": "direct_result",
-            "status": "validated",
-        }
+    observation = SourceObservation(
+        observation_id="obs-1",
+        collection_id="col-1",
+        objective_id="obj-1",
+        document_id="doc-1",
+        source_kind="table",
+        source_ref="table-2",
+        source_excerpt="P150 elongation increased from 72% to 82%.",
+        observation_role="direct_result",
+        status="validated",
+        changed_variables=(ScientificVariable(
+            name="platform preheating", baseline_value="NP", target_value="P150",
+        ),),
+        comparison=ScientificComparison(
+            baseline_label="NP", target_label="P150",
+            axis_names=("platform preheating",), comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="elongation", baseline_value=72, target_value=82,
+            value=82, unit="%", direction="increase",
+            result_text="P150 elongation increased from 72% to 82%.",
+        ),
+        scientific_context=ScientificContext(
+            material=(core_domain.ScientificAttribute(name="alloy", value="316L"),),
+            test=(core_domain.ScientificAttribute(name="method", value="tensile test"),),
+        ),
+        confidence=0.9,
     )
     evidence = ObjectiveEvidence(
         collection_id=observation.collection_id,
@@ -108,27 +88,17 @@ def test_observation_and_evidence_share_neutral_scientific_fact_values() -> None
         assert not hasattr(core_domain, evidence_owned_name)
 
 
-def test_source_observation_ignores_legacy_anchor_ids() -> None:
-    observation = _observation_from_extraction(
-        {
-            "observation_id": "obs-1",
-            "collection_id": "col-1",
-            "objective_id": "obj-1",
-            "document_id": "doc-1",
-            "source_kind": "table",
-            "source_ref": "table-2",
-            "observation_role": "direct_result",
-            "source_excerpt": "Elongation was 82% for the preheated sample.",
-            "reported_result": {
-                "outcome": "elongation",
-                "value": 82,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Elongation was 82%.",
-            },
-            "confidence": 0.91,
-            "evidence_anchor_ids": ["anchor-1"],
-        }
+def test_source_observation_has_no_legacy_anchor_ids() -> None:
+    observation = SourceObservation(
+        observation_id="obs-1", collection_id="col-1", objective_id="obj-1",
+        document_id="doc-1", source_kind="table", source_ref="table-2",
+        observation_role="direct_result",
+        source_excerpt="Elongation was 82% for the preheated sample.",
+        reported_result=ScientificResult(
+            outcome="elongation", value=82, unit="%", direction="increase",
+            result_text="Elongation was 82%.",
+        ),
+        confidence=0.91,
     )
 
     assert observation.status == "unvalidated"
@@ -140,74 +110,47 @@ def test_source_observation_ignores_legacy_anchor_ids() -> None:
 
 def test_source_observation_rejects_missing_provenance() -> None:
     with pytest.raises(ValueError, match="source_ref"):
-        _observation_from_extraction(
-            {
-                "observation_id": "obs-1",
-                "collection_id": "col-1",
-                "objective_id": "obj-1",
-                "document_id": "doc-1",
-                "source_kind": "table",
-                "observation_role": "direct_result",
-                "source_excerpt": "A result.",
-                "reported_result": {
-                    "outcome": "elongation",
-                    "direction": "unknown",
-                    "result_text": "A result.",
-                },
-                "confidence": 0.5,
-            }
+        SourceObservation(
+            observation_id="obs-1", collection_id="col-1", objective_id="obj-1",
+            document_id="doc-1", source_kind="table", source_ref="",
+            observation_role="direct_result", source_excerpt="A result.",
+            reported_result=ScientificResult(
+                outcome="elongation", value=None, unit=None,
+                direction="unknown", result_text="A result.",
+            ),
+            confidence=0.5,
         )
 
 
-def test_source_observation_accepts_extraction_record_shape() -> None:
-    observation = _observation_from_extraction(
-        {
-            "evidence_id": "evd-1",
-            "objective_id": "obj-1",
-            "document_id": "doc-1",
-            "source_kind": "table",
-            "source_ref": "table-1",
-            "evidence_role": "direct_result",
-            "selection_status": "extracted",
-            "source_refs": [
-                {
-                    "source_kind": "table",
-                    "source_ref": "table-1",
-                    "source_excerpt": "Yield strength was 900 MPa.",
-                }
-            ],
-            "reported_result": {
-                "outcome": "yield strength",
-                "value": 900,
-                "unit": "MPa",
-                "direction": "increase",
-                "result_text": "Yield strength was 900 MPa.",
-            },
-            "confidence": 0.8,
-        }
+def test_source_observation_keeps_source_reference_and_evidence_identity() -> None:
+    observation = SourceObservation(
+        observation_id="evd-1", collection_id="col-1", objective_id="obj-1",
+        document_id="doc-1", source_kind="table", source_ref="table-1",
+        observation_role="direct_result", selection_status="extracted",
+        source_excerpt="Yield strength was 900 MPa.",
+        source_refs=({
+            "source_kind": "table", "source_ref": "table-1",
+            "source_excerpt": "Yield strength was 900 MPa.",
+        },),
+        reported_result=ScientificResult(
+            outcome="yield strength", value=900, unit="MPa", direction="increase",
+            result_text="Yield strength was 900 MPa.",
+        ),
+        confidence=0.8,
     )
 
     assert observation.evidence_id == "evd-1"
-    assert observation.collection_id == "unknown"
+    assert observation.collection_id == "col-1"
     assert observation.source_refs[0]["source_ref"] == "table-1"
     assert observation.source_excerpt == "Yield strength was 900 MPa."
-    assert observation.evidence_id == "evd-1"
 
 
 def test_rejected_source_observation_can_record_read_failure_without_excerpt() -> None:
-    observation = _observation_from_extraction(
-        {
-            "evidence_id": "failed-1",
-            "objective_id": "obj-1",
-            "document_id": "doc-1",
-            "source_kind": "table",
-            "source_ref": "table-1",
-            "evidence_role": "irrelevant",
-            "selection_status": "failed",
-            "failure_reason": "provider unavailable",
-            "status": "rejected",
-            "confidence": 0,
-        }
+    observation = SourceObservation(
+        observation_id="failed-1", collection_id="col-1", objective_id="obj-1",
+        document_id="doc-1", source_kind="table", source_ref="table-1",
+        observation_role="irrelevant", source_excerpt="", selection_status="failed",
+        failure_reason="provider unavailable", status="rejected", confidence=0,
     )
 
     assert observation.status == "rejected"
@@ -249,5 +192,13 @@ def test_rejected_source_observation_can_record_read_failure_without_excerpt() -
 )
 def test_extraction_preserves_source_observation_identity(payload):
     assert (
-        _observation_from_extraction(payload).observation_id == payload["expected_id"]
+        build_source_observation_id(
+            objective_id=payload["objective_id"],
+            document_id=payload["document_id"],
+            source_kind=payload["source_kind"],
+            source_ref=payload["source_ref"],
+            observation_role=payload["evidence_role"],
+            reported_result=payload.get("reported_result"),
+            scientific_context=payload.get("scientific_context"),
+        ) == payload["expected_id"]
     )

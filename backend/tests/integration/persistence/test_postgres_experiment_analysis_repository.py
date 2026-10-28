@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 import pytest
 from domain.core import Finding
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
@@ -209,7 +211,7 @@ async def test_complete_analysis_graph_commits_once_and_is_idempotent(
         created_by="test-agent",
     )
     repository = ExperimentAnalysisRepository(
-        objective_repository.session_factory
+        database.AsyncSessionLocal
     )
 
     first = await repository.write_graph(graph)
@@ -254,7 +256,7 @@ async def test_failed_cross_paper_finding_rolls_back_the_entire_analysis_graph(
         analysis_version=analysis.analysis_version,
         with_group=False,
     )
-    session_factory = objective_repository.session_factory
+    session_factory = database.AsyncSessionLocal
     repository = ExperimentAnalysisRepository(session_factory)
 
     with pytest.raises(ValueError, match="requires a comparison group"):
@@ -334,7 +336,7 @@ async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
         ),
         created_by="test-agent",
     )
-    session_factory = objective_repository.session_factory
+    session_factory = database.AsyncSessionLocal
     repository = ExperimentAnalysisRepository(session_factory)
     transaction_factory = PostgresExperimentAnalysisTransactionFactory(
         session_factory

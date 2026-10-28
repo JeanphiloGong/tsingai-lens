@@ -27,7 +27,7 @@ def profile_repository():
     manager.__aenter__ = AsyncMock(return_value=session)
     manager.__aexit__ = AsyncMock(return_value=None)
     factory = MagicMock(return_value=manager)
-    return DocumentProfileRepository(factory), session
+    return DocumentProfileRepository(), session
 
 
 def test_stored_document_profile_reads_canonical_fields(profile_repository) -> None:

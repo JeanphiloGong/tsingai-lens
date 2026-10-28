@@ -1,3 +1,4 @@
+from infra.persistence import database
 """Moved execution records preserve publication and failure history in PostgreSQL."""
 
 
@@ -48,7 +49,7 @@ async def objective_repository(source_repository):
         await source_repository.replace_document(
             COLLECTION_ID, _source(document_id, title=document_id),
         )
-    repository = ObjectiveRepository(source_repository.session_factory)
+    repository = ObjectiveRepository(database.AsyncSessionLocal)
     objective = ResearchObjective(
         collection_id=_text(COLLECTION_ID) or "",
         objective_id=_text(OBJECTIVE_ID)
@@ -166,7 +167,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         _comparison_experiment,
     )
 
-    sessions = source_repository.session_factory
+    sessions = database.AsyncSessionLocal
     repository = ObjectiveRepository(sessions)
     objective = ResearchObjective(
         collection_id=_text(COLLECTION_ID) or "",
@@ -310,7 +311,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
 async def test_published_evidence_gap_survives_a_failed_followup(
     source_repository,
 ) -> None:
-    repository = ObjectiveRepository(source_repository.session_factory)
+    repository = ObjectiveRepository(database.AsyncSessionLocal)
     objective = ResearchObjective(
         collection_id=_text(COLLECTION_ID) or "",
         objective_id="laser-power-porosity",

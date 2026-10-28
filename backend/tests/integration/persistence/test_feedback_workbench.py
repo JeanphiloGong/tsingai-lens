@@ -182,7 +182,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         chat_repository=chat,
         collection_service=collection_service,
     )
-    snapshots = DatasetSnapshotRepository(postgres_session_factory)
+    snapshots = DatasetSnapshotRepository()
     snapshot_service = DatasetSnapshotService(
         repository=snapshots,
         case_repository=cases,

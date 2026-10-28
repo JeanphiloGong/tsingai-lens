@@ -1,3 +1,4 @@
+from infra.persistence import database
 from copy import deepcopy
 from infra.source.artifact_bundle import source_documents_from_records
 from tests.support.postgres import seed_collection
@@ -245,11 +246,11 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
         get_collection_for_user=AsyncMock(return_value={"documents": records}),
         get_document=AsyncMock(return_value=records[1]),
     )
-    sources = SourceArtifactRepository(postgres_session_factory)
+    sources = SourceArtifactRepository()
     browse = BrowseCollectionPapersCapability(
         collection_service=collection_service,
-        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
-        paper_map_repository=PaperMapRepository(postgres_session_factory),
+        document_profile_repository=DocumentProfileRepository(),
+        paper_map_repository=PaperMapRepository(),
         source_artifact_repository=sources,
     )
     inspect = InspectDocumentSourcesCapability(
@@ -261,7 +262,7 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     )
 
     async def scenario():
-        await seed_collection(sources.session_factory, 'c', document_ids=(source_document.document_id,))
+        await seed_collection(database.AsyncSessionLocal, 'c', document_ids=(source_document.document_id,))
         await sources.replace_document("c", source_document)
         survey = await browse.execute(context, BrowseCollectionPapersToolRequest())
         assert [paper["source_status"] for paper in survey.data["papers"]] == ["available", "unavailable"]

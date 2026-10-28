@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence import database
 from tests.support.postgres import seed_collection
 
 from dataclasses import replace
@@ -67,7 +69,7 @@ async def source_repository(postgres_session_factory):
         (_document("doc_a"), _document("doc_b")),
         updated_at=NOW,
     )
-    return SourceArtifactRepository(postgres_session_factory)
+    return SourceArtifactRepository()
 
 
 def _document(document_id: str) -> StoredDocument:
@@ -177,9 +179,9 @@ async def test_source_repository_round_trips_each_current_document_independently
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
 
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") == first
@@ -212,7 +214,7 @@ async def test_profile_only_row_is_not_a_prepared_source(source_repository):
         DocumentProfileRepository,
     )
 
-    profiles = DocumentProfileRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository()
     await profiles.replace(
         COLLECTION_ID,
         DocumentProfile(
@@ -232,9 +234,9 @@ async def test_source_repository_batch_read_is_exact_ordered_and_complete(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     selected = await source_repository.read_documents(
@@ -262,9 +264,9 @@ async def test_replacing_one_document_source_does_not_rebuild_other_documents(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
 
     revised_first = replace(
@@ -278,7 +280,7 @@ async def test_replacing_one_document_source_does_not_rebuild_other_documents(
         table_cells=(),
         figures=(),
     )
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(revised_first.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(revised_first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, revised_first)
 
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") == revised_first
@@ -289,7 +291,7 @@ async def test_source_repository_round_trips_document_references_and_tree(
     source_repository,
 ) -> None:
     source = _source("doc_a", title="Paper A")
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(source.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
     references = SourceReferenceSet(
         entries=(
@@ -337,9 +339,9 @@ async def test_source_reference_batch_excludes_unselected_documents(
 ) -> None:
     first = _source("doc_a", title="Paper A")
     second = _source("doc_b", title="Paper B")
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(first.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(first.document_id,))
     await source_repository.replace_document(COLLECTION_ID, first)
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(second.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(second.document_id,))
     await source_repository.replace_document(COLLECTION_ID, second)
     await source_repository.replace_document_references(
         "doc_a",
@@ -386,7 +388,7 @@ async def test_source_repository_rejects_cross_document_children_and_references(
             replace(source, blocks=(foreign_block,)),
         )
 
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(source.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
     foreign_references = SourceReferenceSet(
         entries=(

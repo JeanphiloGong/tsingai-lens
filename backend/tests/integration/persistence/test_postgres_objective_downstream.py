@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from dataclasses import replace
 from typing import Mapping
 
@@ -225,7 +227,7 @@ async def test_finding_review_round_trips_published_analysis_identity(
     objective_repository,
 ) -> None:
     analysis = await _publish_next_analysis(objective_repository)
-    reviews = FindingReviewRepository(objective_repository.session_factory)
+    reviews = FindingReviewRepository()
     finding = _finding(analysis.analysis_version)
 
     feedback = await reviews.upsert_feedback(
@@ -282,7 +284,7 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
 ) -> None:
     analysis = await _publish_next_analysis(objective_repository)
     finding = _finding(analysis.analysis_version)
-    async with objective_repository.session_factory.begin() as session:
+    async with database.AsyncSessionLocal.begin() as session:
         session.add(
             ExperimentFindingRow(
                 finding_id=finding.finding_id,
@@ -410,7 +412,7 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
             )
         )
 
-    reviews = FindingReviewRepository(objective_repository.session_factory)
+    reviews = FindingReviewRepository()
     feedback = await reviews.upsert_feedback(
         FindingFeedback(
             feedback_id="experiment-feedback-1",

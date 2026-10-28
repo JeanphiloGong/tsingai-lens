@@ -58,7 +58,7 @@ def _service(pipeline_run_service: PipelineRunService) -> ObjectiveDiscoveryServ
 
 
 async def test_objective_discovery_reuses_one_active_run_and_executes_once(monkeypatch: pytest.MonkeyPatch, *, postgres_session_factory) -> None:
-    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    pipeline_run_service = PipelineRunService(PipelineRunRepository())
     service = _service(pipeline_run_service)
     calls = 0
 
@@ -107,7 +107,7 @@ async def test_objective_discovery_reuses_one_active_run_and_executes_once(monke
 
 
 async def test_objective_discovery_records_failure_and_allows_retry(monkeypatch: pytest.MonkeyPatch, *, postgres_session_factory) -> None:
-    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    pipeline_run_service = PipelineRunService(PipelineRunRepository())
     service = _service(pipeline_run_service)
 
     async def resolve_inputs(_collection_id, document_ids):
@@ -139,7 +139,7 @@ async def test_objective_discovery_records_failure_and_allows_retry(monkeypatch:
 
 
 async def test_objective_discovery_progress_does_not_move_backwards(*, postgres_session_factory) -> None:
-    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    pipeline_run_service = PipelineRunService(PipelineRunRepository())
     service = _service(pipeline_run_service)
     run = await pipeline_run_service.create_run(
         "col_a",
@@ -180,7 +180,7 @@ async def test_objective_discovery_progress_does_not_move_backwards(*, postgres_
 
 
 async def test_objective_discovery_restart_recovery_allows_retry(*, postgres_session_factory) -> None:
-    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    pipeline_run_service = PipelineRunService(PipelineRunRepository())
     service = _service(pipeline_run_service)
     active, _created = await pipeline_run_service.get_or_create_collection_run(
         collection_id="col_a",

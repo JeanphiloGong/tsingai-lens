@@ -55,7 +55,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
                 updated_at="2026-07-20T00:00:00+00:00",
             )
         )
-    repository = EvaluationRepository(sessions)
+    repository = EvaluationRepository()
     gold_set = EvaluationGoldSet(
         gold_id="gold-v1",
         collection_id="col-gold",
@@ -202,7 +202,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
     postgres_session_factory,
 ) -> None:
     sessions = postgres_session_factory
-    repository = EvaluationRepository(sessions)
+    repository = EvaluationRepository()
     with pytest.raises(IntegrityError):
         await repository.upsert_gold_set(
             EvaluationGoldSet(

@@ -150,12 +150,11 @@ async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
     try:
         sessions = build_session_factory(engine)
         documents = await SourceArtifactRepository(
-            sessions
-        ).read_collection_documents(collection_id)
-        profiles = await DocumentProfileRepository(sessions).list_collection(
+            ).read_collection_documents(collection_id)
+        profiles = await DocumentProfileRepository().list_collection(
             collection_id
         )
-        paper_maps = await PaperMapRepository(sessions).list_collection(
+        paper_maps = await PaperMapRepository().list_collection(
             collection_id
         )
         objective_repository = ObjectiveRepository(sessions)

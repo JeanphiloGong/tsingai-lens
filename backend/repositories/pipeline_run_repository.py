@@ -10,7 +10,9 @@ from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document import Document
@@ -552,15 +554,12 @@ _SUCCESS_STATUSES = ("completed", "partial_success")
 
 
 class PipelineRunRepository:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def add_run(self, run: PipelineRun) -> PipelineRun:
-        async with self.session_factory.begin() as session:
+        async with AsyncSessionLocal() as db, db.begin():
             created_at = run.timestamps.created_at
             if created_at is None:
                 raise ValueError("persisted pipeline run requires created_at")
-            session.add(
+            db.add(
                 PipelineRunRow(
                     run_id=run.run_id,
                     collection_id=run.collection_id,
@@ -635,15 +634,15 @@ class PipelineRunRepository:
     ) -> tuple[PipelineRun, bool]:
         if run.scope_type != "collection" or run.scope_id != run.collection_id:
             raise ValueError("collection run must use its collection as scope")
-        async with self.session_factory.begin() as session:
-            collection = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            collection = await db.scalar(
                 select(Collection)
                 .where(Collection.collection_id == run.collection_id)
                 .with_for_update()
             )
             if collection is None:
                 raise FileNotFoundError(f"collection not found: {run.collection_id}")
-            active = await self._active_run(session, run)
+            active = await self._active_run(db, run)
             if active is not None:
                 payload = active.record_json
                 return (
@@ -739,7 +738,7 @@ class PipelineRunRepository:
             created_at = run.timestamps.created_at
             if created_at is None:
                 raise ValueError("persisted pipeline run requires created_at")
-            session.add(
+            db.add(
                 PipelineRunRow(
                     run_id=run.run_id,
                     collection_id=run.collection_id,
@@ -816,8 +815,8 @@ class PipelineRunRepository:
     ) -> tuple[PipelineRun, bool]:
         if run.scope_type != "document" or run.input_fingerprint is None:
             raise ValueError("document run requires document scope and input fingerprint")
-        async with self.session_factory.begin() as session:
-            document = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            document = await db.scalar(
                 select(Document)
                 .where(
                     Document.collection_id == run.collection_id,
@@ -829,9 +828,9 @@ class PipelineRunRepository:
                 raise FileNotFoundError(
                     f"document not found: {run.collection_id}/{run.scope_id}"
                 )
-            existing = await self._active_run(session, run)
+            existing = await self._active_run(db, run)
             if existing is None and reuse_completed:
-                existing = await session.scalar(
+                existing = await db.scalar(
                     select(PipelineRunRow)
                     .where(
                         PipelineRunRow.pipeline_name == run.pipeline_name,
@@ -938,7 +937,7 @@ class PipelineRunRepository:
             created_at = run.timestamps.created_at
             if created_at is None:
                 raise ValueError("persisted pipeline run requires created_at")
-            session.add(
+            db.add(
                 PipelineRunRow(
                     run_id=run.run_id,
                     collection_id=run.collection_id,
@@ -1008,8 +1007,8 @@ class PipelineRunRepository:
             return run, True
 
     async def read_run(self, run_id: str) -> PipelineRun | None:
-        async with self.session_factory() as session:
-            row = await session.get(PipelineRunRow, run_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(PipelineRunRow, run_id)
             if row is None:
                 return None
             payload = row.record_json
@@ -1127,8 +1126,8 @@ class PipelineRunRepository:
             statement = statement.offset(offset)
         if limit is not None:
             statement = statement.limit(limit)
-        async with self.session_factory() as session:
-            rows = await session.execute(statement)
+        async with AsyncSessionLocal() as db:
+            rows = await db.execute(statement)
             return tuple(
                 PipelineRunSummary(
                     run_id=row.run_id,
@@ -1148,8 +1147,8 @@ class PipelineRunRepository:
             )
 
     async def update_run(self, run: PipelineRun) -> bool:
-        async with self.session_factory.begin() as session:
-            row = await session.get(PipelineRunRow, run.run_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(PipelineRunRow, run.run_id)
             if row is None:
                 return False
             row.collection_id = run.collection_id
@@ -1216,10 +1215,10 @@ class PipelineRunRepository:
 
     @staticmethod
     async def _active_run(
-        session: AsyncSession,
+        db: AsyncSession,
         run: PipelineRun,
     ) -> PipelineRunRow | None:
-        return await session.scalar(
+        return await db.scalar(
             select(PipelineRunRow)
             .where(
                 PipelineRunRow.pipeline_name == run.pipeline_name,

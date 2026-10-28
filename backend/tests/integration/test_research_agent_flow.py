@@ -96,7 +96,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
     chat_repository = ChatRepository(postgres_session_factory)
-    source_artifact_repository = SourceArtifactRepository(postgres_session_factory)
+    source_artifact_repository = SourceArtifactRepository()
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(
@@ -137,10 +137,10 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     app = create_app(
         auth_session_service=auth_session_service,
         collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository()),
         source_artifact_repository=source_artifact_repository,
-        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
-        paper_map_repository=PaperMapRepository(postgres_session_factory),
+        document_profile_repository=DocumentProfileRepository(),
+        paper_map_repository=PaperMapRepository(),
         objective_repository=objective_repository,
         finding_review_repository=object(),
         experiment_plan_repository=object(),

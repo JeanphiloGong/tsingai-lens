@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 import asyncio
 from hashlib import sha256
 
@@ -48,8 +50,8 @@ class _ImmediateDocumentPreparationService:
         )
         if not created:
             return run
-        session_factory = self.collection_service.repository.session_factory
-        await SourceArtifactRepository(session_factory).replace_document(
+        session_factory = database.AsyncSessionLocal
+        await SourceArtifactRepository().replace_document(
             collection_id,
             SourceDocument(
                 document_id=document_id, document_order=0,
@@ -60,7 +62,7 @@ class _ImmediateDocumentPreparationService:
                 metadata={"source_fingerprint": fingerprint},
             ),
         )
-        await DocumentProfileRepository(session_factory).replace(
+        await DocumentProfileRepository().replace(
             collection_id,
             DocumentProfile(
                 document_id=document_id, title=document.document.original_filename,
@@ -99,18 +101,18 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service, 
 
     from main import create_app
 
-    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    pipeline_run_service = PipelineRunService(PipelineRunRepository())
     with TestClient(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             pipeline_run_service=pipeline_run_service,
-            source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
-            document_profile_repository=DocumentProfileRepository(postgres_session_factory),
-            paper_map_repository=PaperMapRepository(postgres_session_factory),
+            source_artifact_repository=SourceArtifactRepository(),
+            document_profile_repository=DocumentProfileRepository(),
+            paper_map_repository=PaperMapRepository(),
             objective_repository=ObjectiveRepository(postgres_session_factory),
-            finding_review_repository=FindingReviewRepository(postgres_session_factory),
-            experiment_plan_repository=ExperimentPlanRepository(postgres_session_factory),
+            finding_review_repository=FindingReviewRepository(),
+            experiment_plan_repository=ExperimentPlanRepository(),
             chat_repository=ChatRepository(postgres_session_factory),
         )
     ) as client:

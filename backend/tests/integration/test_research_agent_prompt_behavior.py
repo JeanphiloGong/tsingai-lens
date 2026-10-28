@@ -93,7 +93,7 @@ async def _fixture_collection(collection_service, *, postgres_session_factory):
         (stored_document,),
         updated_at=now,
     )
-    sources = SourceArtifactRepository(postgres_session_factory)
+    sources = SourceArtifactRepository()
     await sources.replace_document(
         collection["collection_id"],
         source_documents_from_records(
@@ -110,8 +110,8 @@ async def _fixture_collection(collection_service, *, postgres_session_factory):
 
 
 def _runner(*, client: AsyncOpenAI, collection_service, sources, postgres_session_factory):
-    profiles = DocumentProfileRepository(postgres_session_factory)
-    maps = PaperMapRepository(postgres_session_factory)
+    profiles = DocumentProfileRepository()
+    maps = PaperMapRepository()
     objective_repository = _EmptyObjectiveRepository()
     handlers = (
         GetCollectionContextCapability(

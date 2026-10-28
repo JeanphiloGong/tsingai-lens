@@ -17,23 +17,20 @@ from infra.persistence.postgres.models.evaluation import (
 from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 
 class FindingReviewRepository:
     backend_name = "postgresql"
 
-    def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession]
-    ) -> None:
-        self.session_factory = session_factory
-
     async def upsert_feedback(
         self, feedback: FindingFeedback
     ) -> FindingFeedback:
-        async with self.session_factory.begin() as session:
-            await _require_finding(session, feedback)
-            existing = await session.get(
+        async with AsyncSessionLocal() as db, db.begin():
+            await _require_finding(db, feedback)
+            existing = await db.get(
                 FindingFeedbackRecord, feedback.feedback_id
             )
             if existing is not None and _feedback_key(existing) != _feedback_key(
@@ -51,8 +48,8 @@ class FindingReviewRepository:
             row.reviewer = feedback.reviewer
             row.created_at = _datetime(feedback.created_at)
             if existing is None:
-                session.add(row)
-            await session.flush()
+                db.add(row)
+            await db.flush()
             return replace(
                 feedback,
                 note=row.note,
@@ -67,7 +64,7 @@ class FindingReviewRepository:
         analysis_version: int | None = None,
         finding_id: str | None = None,
     ) -> tuple[FindingFeedback, ...]:
-        async with self.session_factory() as session:
+        async with AsyncSessionLocal() as db:
             statement = select(FindingFeedbackRecord).where(
                 FindingFeedbackRecord.collection_id == collection_id
             )
@@ -83,7 +80,7 @@ class FindingReviewRepository:
                 statement = statement.where(
                     FindingFeedbackRecord.finding_id == finding_id
                 )
-            rows = await session.scalars(
+            rows = await db.scalars(
                 statement.order_by(
                     FindingFeedbackRecord.created_at,
                     FindingFeedbackRecord.feedback_id,
@@ -108,9 +105,9 @@ class FindingReviewRepository:
     async def upsert_curation(
         self, curation: FindingCuration
     ) -> FindingCuration:
-        async with self.session_factory.begin() as session:
-            await _require_finding(session, curation)
-            existing = await session.get(
+        async with AsyncSessionLocal() as db, db.begin():
+            await _require_finding(db, curation)
+            existing = await db.get(
                 FindingCurationRecord, curation.curation_id
             )
             if existing is not None and _curation_key(existing) != _curation_key(
@@ -201,8 +198,8 @@ class FindingReviewRepository:
             row.reviewer = curation.reviewer
             row.updated_at = _datetime(curation.updated_at)
             if existing is None:
-                session.add(row)
-            await session.flush()
+                db.add(row)
+            await db.flush()
             return replace(
                 curation,
                 curated_finding=replace(finding, certainty=round(finding.certainty, 2)),
@@ -218,7 +215,7 @@ class FindingReviewRepository:
         analysis_version: int | None = None,
         finding_id: str | None = None,
     ) -> tuple[FindingCuration, ...]:
-        async with self.session_factory() as session:
+        async with AsyncSessionLocal() as db:
             statement = select(FindingCurationRecord).where(
                 FindingCurationRecord.collection_id == collection_id
             )
@@ -234,7 +231,7 @@ class FindingReviewRepository:
                 statement = statement.where(
                     FindingCurationRecord.finding_id == finding_id
                 )
-            rows = await session.scalars(
+            rows = await db.scalars(
                 statement.order_by(
                     FindingCurationRecord.updated_at,
                     FindingCurationRecord.curation_id,
@@ -356,8 +353,8 @@ def _isoformat(value: datetime) -> str:
     return value.isoformat()
 
 
-async def _require_finding(session: AsyncSession, value: object) -> None:
-    row = await session.get(
+async def _require_finding(db: AsyncSession, value: object) -> None:
+    row = await db.get(
         ObjectiveAnalysisRecord,
         (
             value.collection_id,
@@ -369,7 +366,7 @@ async def _require_finding(session: AsyncSession, value: object) -> None:
         item.get("finding_id") == value.finding_id
         for item in (row.payload or {}).get("findings", ())
     )
-    experiment_finding = await session.scalar(
+    experiment_finding = await db.scalar(
         select(ExperimentFindingRow).where(
             ExperimentFindingRow.collection_id == value.collection_id,
             ExperimentFindingRow.objective_id == value.objective_id,

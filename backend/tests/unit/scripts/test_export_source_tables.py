@@ -138,7 +138,7 @@ async def test_existing_source_table_export_keeps_table_rows(
             ),
         ),
     )
-    repository = SourceArtifactRepository(postgres_session_factory)
+    repository = SourceArtifactRepository()
     await seed_collection(postgres_session_factory, "col_demo", document_ids=("paper-1",))
     await repository.replace_document("col_demo", document)
     monkeypatch.setattr(

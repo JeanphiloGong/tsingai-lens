@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.dataset_snapshot import DatasetSnapshot
 from infra.persistence.postgres.models.feedback import FeedbackDatasetSnapshotRow
@@ -16,12 +18,9 @@ from infra.persistence.postgres.models.feedback import FeedbackDatasetSnapshotRo
 class DatasetSnapshotRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def save(self, snapshot: DatasetSnapshot) -> DatasetSnapshot:
-        async with self.session_factory.begin() as session:
-            existing = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            existing = await db.scalar(
                 select(FeedbackDatasetSnapshotRow).where(
                     FeedbackDatasetSnapshotRow.owner_id == snapshot.owner_id,
                     FeedbackDatasetSnapshotRow.manifest_digest
@@ -59,8 +58,8 @@ class DatasetSnapshotRepository:
                 excluded_count=snapshot.excluded_count,
                 created_at=_datetime(snapshot.created_at),
             )
-            session.add(row)
-            await session.flush()
+            db.add(row)
+            await db.flush()
             return DatasetSnapshot(
                 dataset_id=row.dataset_id,
                 owner_id=row.owner_id,
@@ -77,8 +76,8 @@ class DatasetSnapshotRepository:
             )
 
     async def read(self, dataset_id: str) -> DatasetSnapshot | None:
-        async with self.session_factory() as session:
-            row = await session.get(FeedbackDatasetSnapshotRow, dataset_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(FeedbackDatasetSnapshotRow, dataset_id)
             return (
                 DatasetSnapshot(
                     dataset_id=row.dataset_id,
@@ -125,8 +124,8 @@ class DatasetSnapshotRepository:
             statement = statement.where(
                 FeedbackDatasetSnapshotRow.dataset_type == dataset_type
             )
-        async with self.session_factory() as session:
-            rows = await session.scalars(statement)
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(statement)
             return tuple(
                 DatasetSnapshot(
                     dataset_id=row.dataset_id,

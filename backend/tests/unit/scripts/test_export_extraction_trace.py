@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence import database
 from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
@@ -105,7 +107,7 @@ class _ObjectiveRepository:
 @pytest.mark.anyio
 async def test_export_trace_writes_current_source_and_objective_views(tmp_path, monkeypatch, *, postgres_session_factory):
     trace = _load_trace_module()
-    source_repository = SourceArtifactRepository(postgres_session_factory)
+    source_repository = SourceArtifactRepository()
     source_document = source_documents_from_records(
         documents=[
             {
@@ -126,9 +128,9 @@ async def test_export_trace_writes_current_source_and_objective_views(tmp_path, 
             }
         ],
     )[0]
-    await seed_collection(source_repository.session_factory, 'col-test', document_ids=(source_document.document_id,))
+    await seed_collection(database.AsyncSessionLocal, 'col-test', document_ids=(source_document.document_id,))
     await source_repository.replace_document("col-test", source_document)
-    profile_repository = DocumentProfileRepository(postgres_session_factory)
+    profile_repository = DocumentProfileRepository()
     await profile_repository.replace(
         "col-test",
         DocumentProfile(
@@ -158,7 +160,7 @@ async def test_export_trace_writes_current_source_and_objective_views(tmp_path, 
     monkeypatch.setattr(
         trace,
         "PaperMapRepository",
-        lambda _sessions: PaperMapRepository(postgres_session_factory),
+        lambda _sessions: PaperMapRepository(),
     )
     monkeypatch.setattr(
         trace,

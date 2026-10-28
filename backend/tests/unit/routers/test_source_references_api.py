@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence import database
 from tests.support.postgres import seed_collection
 
 from types import SimpleNamespace
@@ -31,14 +33,14 @@ def anyio_backend() -> str:
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
-        await seed_collection(repository.session_factory, collection_id, document_ids=(document.document_id,))
+        await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document.document_id,))
         await repository.replace_document(collection_id, document)
 
 
 @pytest.fixture()
 def source_reference_services(monkeypatch, tmp_path, *, postgres_session_factory):
     collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
-    repository = SourceArtifactRepository(postgres_session_factory)
+    repository = SourceArtifactRepository()
     workflow_service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
     )

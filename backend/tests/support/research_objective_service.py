@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
@@ -119,7 +121,7 @@ def build_research_objective_service(
     collection_service,
     **kwargs,
 ) -> ObjectiveExperimentAnalysisService:
-    session_factory = collection_service.repository.session_factory
+    session_factory = database.AsyncSessionLocal
     objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
         kwargs.setdefault("objective_source_screener", objective_judgments)
@@ -129,14 +131,14 @@ def build_research_objective_service(
             kwargs.get("document_profile_service"),
             "source_artifact_repository",
             None,
-        ) or SourceArtifactRepository(session_factory)
+        ) or SourceArtifactRepository()
     document_profile_repository = kwargs.pop(
         "document_profile_repository",
-        DocumentProfileRepository(session_factory),
+        DocumentProfileRepository(),
     )
     paper_map_repository = kwargs.pop(
         "paper_map_repository",
-        PaperMapRepository(session_factory),
+        PaperMapRepository(),
     )
     objective_repository = kwargs.pop(
         "objective_repository",

@@ -500,7 +500,7 @@ class _RecordedExperimentProjection:
 
 
 async def test_evaluation_gold_service_registers_gold_set_for_collection(*, postgres_session_factory):
-    repository = EvaluationRepository(postgres_session_factory)
+    repository = EvaluationRepository()
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
         evaluation_repository=repository,
@@ -528,7 +528,7 @@ async def test_evaluation_gold_service_registers_gold_set_for_collection(*, post
 
 
 async def test_evaluation_gold_service_accepts_collection_file_storage_key(*, postgres_session_factory):
-    repository = EvaluationRepository(postgres_session_factory)
+    repository = EvaluationRepository()
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
         evaluation_repository=repository,
@@ -555,7 +555,7 @@ async def test_evaluation_gold_service_accepts_collection_file_storage_key(*, po
 async def test_evaluation_gold_service_rejects_missing_collection(*, postgres_session_factory):
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(existing=set()),
-        evaluation_repository=EvaluationRepository(postgres_session_factory),
+        evaluation_repository=EvaluationRepository(),
     )
 
     with pytest.raises(FileNotFoundError):
@@ -569,7 +569,7 @@ async def test_evaluation_gold_service_rejects_missing_collection(*, postgres_se
 async def test_evaluation_gold_service_rejects_gold_item_outside_collection(*, postgres_session_factory):
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
-        evaluation_repository=EvaluationRepository(postgres_session_factory),
+        evaluation_repository=EvaluationRepository(),
     )
 
     with pytest.raises(ValueError, match="gold item document is not in collection"):
@@ -777,7 +777,7 @@ async def _published_objective_repository(*, postgres_session_factory) -> Object
 
 async def _finding_feedback_service(*, postgres_session_factory) -> FindingFeedbackService:
     return FindingFeedbackService(
-        review_repository=FindingReviewRepository(postgres_session_factory),
+        review_repository=FindingReviewRepository(),
         objective_repository=await _published_objective_repository(postgres_session_factory=postgres_session_factory),
     )
 
@@ -785,7 +785,7 @@ async def _finding_feedback_service(*, postgres_session_factory) -> FindingFeedb
 def _prediction_snapshot_service(
     objective_repository: ObjectiveRepository,
 ) -> tuple[EvaluationPredictionSnapshotService, EvaluationRepository]:
-    evaluation_repository = EvaluationRepository(objective_repository.session_factory)
+    evaluation_repository = EvaluationRepository()
     return (
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
@@ -864,7 +864,7 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads(*, postg
     repository.list_evidence = reject_legacy_read
     repository.list_contributions = reject_legacy_read
 
-    evaluation_repository = EvaluationRepository(postgres_session_factory)
+    evaluation_repository = EvaluationRepository()
     snapshot_service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         objective_repository=repository,
@@ -872,7 +872,7 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads(*, postg
         experiment_projection=projection,
     )
     feedback_service = FindingFeedbackService(
-        review_repository=FindingReviewRepository(postgres_session_factory),
+        review_repository=FindingReviewRepository(),
         objective_repository=repository,
         experiment_projection=projection,
     )
@@ -930,7 +930,7 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     snapshot_service, _ = _prediction_snapshot_service(repository)
     snapshot_service.experiment_projection = RejectingProjection()
     feedback_service = FindingFeedbackService(
-        review_repository=FindingReviewRepository(postgres_session_factory),
+        review_repository=FindingReviewRepository(),
         objective_repository=repository,
         experiment_projection=RejectingProjection(),
     )
@@ -2198,7 +2198,7 @@ async def research_records(postgres_session_factory, anyio_backend):
 
     await seed_collection(postgres_session_factory, "col-gold", document_ids=("doc-1",))
     text = "At 500 C, tensile strength increased to 620 MPa."
-    await SourceArtifactRepository(postgres_session_factory).replace_document(
+    await SourceArtifactRepository().replace_document(
         "col-gold",
         SourceDocument(
             document_id="doc-1", document_order=0, title="Temperature and strength", text=text,

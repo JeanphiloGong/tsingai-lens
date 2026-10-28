@@ -50,11 +50,11 @@ async def preparation(tmp_path, *, postgres_session_factory):
         (document,),
         updated_at=document.created_at,
     )
-    sources = SourceArtifactRepository(postgres_session_factory)
+    sources = SourceArtifactRepository()
     profiles = DocumentProfileService(
-        collections, sources, DocumentProfileRepository(postgres_session_factory)
+        collections, sources, DocumentProfileRepository()
     )
-    runs = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    runs = PipelineRunService(PipelineRunRepository())
     service = DocumentPreparationService(
         collection_service=collections,
         pipeline_run_service=runs,

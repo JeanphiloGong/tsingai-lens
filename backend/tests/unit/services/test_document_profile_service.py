@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence import database
 from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
@@ -36,8 +38,8 @@ def _build_profile_service(tmp_path, *, postgres_session_factory):
     collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     return collection_service, DocumentProfileService(
         collection_service,
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
-        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
+        document_profile_repository=DocumentProfileRepository(),
     )
 
 
@@ -56,7 +58,7 @@ async def _write_source_artifacts(
             blocks=blocks.to_dict(orient="records"),
     )
     for document in source_documents:
-        await seed_collection(profile_service.source_artifact_repository.session_factory, collection_id, document_ids=(document.document_id,))
+        await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document.document_id,))
         await profile_service.source_artifact_repository.replace_document(
             collection_id,
             document,
@@ -276,8 +278,8 @@ async def test_document_profile_service_short_circuits_insufficient_content(tmp_
     collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     profile_service = DocumentProfileService(
         collection_service,
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
-        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
+        document_profile_repository=DocumentProfileRepository(),
         document_profile_extractor=ExplodingExtractor(),
     )
     collection = await collection_service.create_collection("Sparse Profiles")
@@ -346,8 +348,8 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     profile_service = DocumentProfileService(
         collection_service,
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
-        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
+        document_profile_repository=DocumentProfileRepository(),
         document_profile_extractor=OneFailedProfileExtractor(),
     )
     collection = await collection_service.create_collection("Partial Profiles")
@@ -450,7 +452,7 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypa
     collection = await collections.create_collection("Twenty papers")
     collection_id = collection["collection_id"]
     for index in range(20):
-        await seed_collection(service.source_artifact_repository.session_factory, collection_id, document_ids=(f'doc_{index}',))
+        await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(f'doc_{index}',))
         await service.source_artifact_repository.replace_document(
             collection_id,
             SourceDocument(
@@ -460,7 +462,7 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypa
                 text=f"Measured porosity {index}%.",
             ),
         )
-        await seed_collection(service.document_profile_repository.session_factory, collection_id, document_ids=(f'doc_{index}',))
+        await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(f'doc_{index}',))
         await service.document_profile_repository.replace(
             collection_id,
             DocumentProfile(
@@ -504,7 +506,7 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
         "collection_id"
     ]
     if has_other_source:
-        await seed_collection(service.source_artifact_repository.session_factory, collection_id, document_ids=('other',))
+        await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=('other',))
         await service.source_artifact_repository.replace_document(
             collection_id,
             SourceDocument(
@@ -547,7 +549,7 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
 async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(tmp_path, metadata, title, expected_title, expected_filename, *, postgres_session_factory):
     collections, service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection_id = (await collections.create_collection("Metadata"))["collection_id"]
-    await seed_collection(service.source_artifact_repository.session_factory, collection_id, document_ids=('doc_a',))
+    await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=('doc_a',))
     await service.source_artifact_repository.replace_document(
         collection_id,
         SourceDocument(

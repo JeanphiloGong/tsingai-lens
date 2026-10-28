@@ -38,12 +38,12 @@ def _app_repository_dependencies(auth_session_service, *, postgres_session_facto
     from repositories.objective_repository import ObjectiveRepository
 
     return {
-        "source_artifact_repository": SourceArtifactRepository(postgres_session_factory),
-        "document_profile_repository": DocumentProfileRepository(postgres_session_factory),
-        "paper_map_repository": PaperMapRepository(postgres_session_factory),
+        "source_artifact_repository": SourceArtifactRepository(),
+        "document_profile_repository": DocumentProfileRepository(),
+        "paper_map_repository": PaperMapRepository(),
         "objective_repository": ObjectiveRepository(postgres_session_factory),
-        "finding_review_repository": FindingReviewRepository(postgres_session_factory),
-        "experiment_plan_repository": ExperimentPlanRepository(postgres_session_factory),
+        "finding_review_repository": FindingReviewRepository(),
+        "experiment_plan_repository": ExperimentPlanRepository(),
         "chat_repository": object(),
     }
 
@@ -63,7 +63,7 @@ def _build_client(monkeypatch, tmp_path, auth_session_service, collection_servic
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+            pipeline_run_service=PipelineRunService(PipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service, postgres_session_factory=postgres_session_factory),
         )
     ) as client:
@@ -144,7 +144,7 @@ def test_app_lifespan_composes_one_shared_collection_service(monkeypatch, tmp_pa
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+            pipeline_run_service=PipelineRunService(PipelineRunRepository()),
             experiment_analysis_writer=Mock(spec=ExperimentAnalysisWriter),
             **_app_repository_dependencies(auth_session_service, postgres_session_factory=postgres_session_factory),
         )
@@ -225,7 +225,7 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(monkeypatch
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+            pipeline_run_service=PipelineRunService(PipelineRunRepository()),
             **_app_repository_dependencies(auth_session_service, postgres_session_factory=postgres_session_factory),
         )
     ):

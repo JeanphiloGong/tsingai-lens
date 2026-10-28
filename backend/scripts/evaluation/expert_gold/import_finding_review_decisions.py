@@ -53,7 +53,7 @@ async def import_review_decisions(
         engine = build_database_engine(DatabaseSettings())
         session_factory = build_session_factory(engine)
         feedback_service = FindingFeedbackService(
-            review_repository=FindingReviewRepository(session_factory),
+            review_repository=FindingReviewRepository(),
             objective_repository=ObjectiveRepository(session_factory),
         )
     try:

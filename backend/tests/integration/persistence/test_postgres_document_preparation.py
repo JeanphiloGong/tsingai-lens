@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence import database
 from tests.support.postgres import seed_collection
 
 
@@ -64,8 +66,8 @@ def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
 
 
 async def test_profiles_and_paper_maps_are_current_per_document(source_repository) -> None:
-    profiles = DocumentProfileRepository(source_repository.session_factory)
-    paper_maps = PaperMapRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository()
+    paper_maps = PaperMapRepository()
     first_profile = _profile("doc_a", "Paper A")
     second_profile = _profile("doc_b", "Paper B")
     first_map = _paper_map("doc_a")
@@ -89,7 +91,7 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
         revised_map,
         second_map,
     )
-    async with source_repository.session_factory() as session:
+    async with database.AsyncSessionLocal() as session:
         stored_map = await session.scalar(
             select(DocumentPreparationRow).where(
                 DocumentPreparationRow.document_id == "doc_a"
@@ -102,11 +104,11 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
 
 
 async def test_profile_replacement_does_not_relabel_current_source(source_repository) -> None:
-    profiles = DocumentProfileRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository()
     source = _source("doc_a", title="Current source")
-    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(source.document_id,))
+    await seed_collection(database.AsyncSessionLocal, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
-    async with source_repository.session_factory() as session:
+    async with database.AsyncSessionLocal() as session:
         row = await session.get(DocumentPreparationRow, "doc_a")
         current_fingerprint = row.source_fingerprint
     stale_profile = replace(_profile("doc_a", "Previous profile"), source_fingerprint="old-source")
@@ -117,7 +119,7 @@ async def test_profile_replacement_does_not_relabel_current_source(source_reposi
     await collection_repository.update_document(
         replace(document, document=replace(document.document, status="processing"))
     )
-    async with source_repository.session_factory() as session:
+    async with database.AsyncSessionLocal() as session:
         row = await session.get(DocumentPreparationRow, "doc_a")
         assert row.source_fingerprint == current_fingerprint
         assert row.profile_json["source_fingerprint"] == "old-source"
@@ -128,7 +130,7 @@ async def test_profile_replacement_does_not_relabel_current_source(source_reposi
 
 
 async def test_profile_only_preparation_is_not_a_source(source_repository) -> None:
-    profiles = DocumentProfileRepository(source_repository.session_factory)
+    profiles = DocumentProfileRepository()
     await profiles.replace(COLLECTION_ID, _profile("doc_a", "Imported profile"))
     assert await source_repository.read_document(COLLECTION_ID, "doc_a") is None
     assert await source_repository.read_collection_documents(COLLECTION_ID) == ()
@@ -136,7 +138,7 @@ async def test_profile_only_preparation_is_not_a_source(source_repository) -> No
 
 async def test_paper_map_requires_a_profile_in_the_shared_row(source_repository) -> None:
     await source_repository.replace_document(COLLECTION_ID, _source("doc_a", title="Source only"))
-    paper_maps = PaperMapRepository(source_repository.session_factory)
+    paper_maps = PaperMapRepository()
     with pytest.raises(FileNotFoundError, match="document profile not found"):
         await paper_maps.replace(COLLECTION_ID, _paper_map("doc_a"))
 
@@ -152,7 +154,7 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(source_re
         status="processing",
     )
     pipeline_run_service = PipelineRunService(
-        PipelineRunRepository(source_repository.session_factory)
+        PipelineRunRepository()
     )
     run, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=COLLECTION_ID,
@@ -165,7 +167,7 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(source_re
     service = DocumentPreparationService(
         collection_service=collection_service,
         pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         document_profile_service=object(),
         max_concurrency=1,
     )

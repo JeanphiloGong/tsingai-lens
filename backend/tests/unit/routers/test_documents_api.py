@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from infra.persistence import database
 from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
@@ -49,7 +51,7 @@ async def _store_document_profiles(
 ) -> None:
     for row in profiles:
         await seed_collection(
-            document_profile_service.document_profile_repository.session_factory,
+            database.AsyncSessionLocal,
             collection_id, document_ids=(row["document_id"],),
         )
         await document_profile_service.document_profile_repository.replace(
@@ -71,18 +73,18 @@ async def _store_document_profiles(
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
-        await seed_collection(repository.session_factory, collection_id, document_ids=(document.document_id,))
+        await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document.document_id,))
         await repository.replace_document(collection_id, document)
 
 
 @pytest.fixture()
 def document_services(tmp_path, *, postgres_session_factory):
     collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
-    source_repository = SourceArtifactRepository(postgres_session_factory)
+    source_repository = SourceArtifactRepository()
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
-        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
+        document_profile_repository=DocumentProfileRepository(),
     )
     document_markdown_service = DocumentMarkdownService(
         collection_service,

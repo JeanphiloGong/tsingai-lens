@@ -51,7 +51,7 @@ def _run(
 async def test_document_run_reuses_active_and_matching_completed_work(
     source_repository,
 ) -> None:
-    runs = PipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     first = _run("run-first", "fingerprint-a")
     assert await runs.get_or_create_document_run(first) == (first, True)
 
@@ -78,7 +78,7 @@ async def test_document_run_reuses_active_and_matching_completed_work(
 
 
 async def test_collection_run_reuses_only_active_work(source_repository) -> None:
-    runs = PipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     first = _run(
         "run-discovery-first",
         "scope-a",
@@ -115,7 +115,7 @@ async def test_collection_run_reuses_only_active_work(source_repository) -> None
 async def test_pipeline_run_round_trips_progress_nodes_and_context(
     source_repository,
 ) -> None:
-    runs = PipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     queued = _run("run-round-trip", "fingerprint-a")
     await runs.add_run(queued)
     source_node = queued.node("source_parsing").start(NOW).succeed(
@@ -153,7 +153,7 @@ async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
 ) -> None:
     from repositories import pipeline_run_repository as module
 
-    runs = PipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     await runs.add_run(_run("history-only", "fingerprint-history"))
 
     def reject_full_hydration(*_args, **_kwargs):
@@ -170,7 +170,7 @@ async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
 async def test_artifact_retry_bypasses_completed_run_but_reuses_active_run(
     source_repository,
 ):
-    runs = PipelineRunRepository(source_repository.session_factory)
+    runs = PipelineRunRepository()
     first = _run("run-incomplete-artifacts", "same-input")
     await runs.add_run(first.start(NOW).finish(PipelineRunStatus.COMPLETED, NOW))
     retry, created = await runs.get_or_create_document_run(

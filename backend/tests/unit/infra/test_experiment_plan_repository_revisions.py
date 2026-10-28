@@ -38,7 +38,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
 
 
 async def test_append_preserves_history_and_lists_only_the_leaf_revision(*, postgres_session_factory) -> None:
-    repository = ExperimentPlanRepository(postgres_session_factory)
+    repository = ExperimentPlanRepository()
     parent = _plan()
     child = _plan(
         plan_id="plan-v2",
@@ -60,7 +60,7 @@ async def test_append_preserves_history_and_lists_only_the_leaf_revision(*, post
 
 
 async def test_append_rejects_a_second_successor_of_the_same_revision(*, postgres_session_factory) -> None:
-    repository = ExperimentPlanRepository(postgres_session_factory)
+    repository = ExperimentPlanRepository()
     parent = _plan()
     first_child = _plan(
         plan_id="plan-v2-a",
@@ -84,7 +84,7 @@ async def test_append_rejects_a_second_successor_of_the_same_revision(*, postgre
 
 
 async def test_existing_revision_is_immutable(*, postgres_session_factory) -> None:
-    repository = ExperimentPlanRepository(postgres_session_factory)
+    repository = ExperimentPlanRepository()
     original = _plan()
     await repository.upsert_plan(original)
 

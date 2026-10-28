@@ -19,7 +19,7 @@ def anyio_backend():
 async def test_gold_registration_rejects_unknown_target_before_persistence(target_layer):
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
-        evaluation_repository=EvaluationRepository(None),
+        evaluation_repository=EvaluationRepository(),
     )
     with pytest.raises(ValueError, match="unsupported evaluation target layer"):
         await service.register_gold_set(

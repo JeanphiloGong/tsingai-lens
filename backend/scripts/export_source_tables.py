@@ -164,8 +164,7 @@ async def _load_existing_artifacts(
     engine = build_database_engine(DatabaseSettings())
     try:
         documents = await SourceArtifactRepository(
-            build_session_factory(engine)
-        ).read_collection_documents(collection_id)
+            ).read_collection_documents(collection_id)
     finally:
         await engine.dispose()
     if not documents:

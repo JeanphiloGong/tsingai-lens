@@ -423,7 +423,7 @@ class _AuthService:
 
 def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(collection_service, *, postgres_session_factory) -> None:
     service = _Service()
-    inert_pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    inert_pipeline_run_service = PipelineRunService(PipelineRunRepository())
     app = create_app(
         auth_session_service=_AuthService(),
         collection_service=collection_service,
@@ -464,7 +464,7 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(collection_serv
     app = create_app(
         auth_session_service=_AuthService(),
         collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository()),
         source_artifact_repository=object(),
         document_profile_repository=object(),
         paper_map_repository=object(),
@@ -503,7 +503,7 @@ def test_title_route_validates_input_and_hides_unowned_sessions(collection_servi
     session = asyncio.run(service.create_session(collection_id="col-1", user_id="user-1"))
     app = create_app(
         auth_session_service=_AuthService(), collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository()),
         source_artifact_repository=object(), document_profile_repository=object(),
         paper_map_repository=object(), objective_repository=ObjectiveRepository(postgres_session_factory),
         finding_review_repository=object(), experiment_plan_repository=object(),

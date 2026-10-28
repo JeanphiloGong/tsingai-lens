@@ -54,7 +54,16 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         ))
     try:
         factory = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.feedback_dataset_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.pipeline_run_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.dataset_snapshot_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.finding_review_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.evaluation_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.experiment_plan_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.source_artifact_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.paper_map_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.document_profile_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.collection_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.auth_repository.AsyncSessionLocal", factory)
         yield factory

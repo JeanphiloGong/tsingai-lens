@@ -913,7 +913,7 @@ async def _local_objective_bundle(
         try:
             session_factory = build_session_factory(engine)
             repository = ObjectiveRepository(session_factory)
-            review_repository = FindingReviewRepository(session_factory)
+            review_repository = FindingReviewRepository()
             feedback_service = FindingFeedbackService(
                 review_repository=review_repository,
                 objective_repository=repository,
@@ -1817,8 +1817,7 @@ async def _load_source_index(
         engine = build_database_engine(DatabaseSettings())
         try:
             documents = await SourceArtifactRepository(
-                build_session_factory(engine)
-            ).read_collection_documents(collection_id)
+                ).read_collection_documents(collection_id)
         finally:
             await engine.dispose()
     index: dict[tuple[str, str, str], dict[str, Any]] = {}

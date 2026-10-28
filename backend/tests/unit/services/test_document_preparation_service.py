@@ -1,3 +1,4 @@
+from infra.persistence import database
 import asyncio
 from dataclasses import replace
 
@@ -93,8 +94,8 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
 
     service = DocumentPreparationService(
         collection_service=CollectionService(),
-        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository()),
+        source_artifact_repository=SourceArtifactRepository(),
         document_profile_service=object(),
         max_concurrency=1,
     )
@@ -163,7 +164,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
             )
             return self.document
 
-    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    pipeline_run_service = PipelineRunService(PipelineRunRepository())
     task, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
@@ -176,7 +177,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     service = DocumentPreparationService(
         collection_service=collection_service,
         pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         document_profile_service=object(),
         max_concurrency=1,
     )
@@ -233,7 +234,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(*, pos
         ) -> StoredDocument:
             raise OSError("database temporarily unavailable")
 
-    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    pipeline_run_service = PipelineRunService(PipelineRunRepository())
     task, _created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
@@ -245,7 +246,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(*, pos
     service = DocumentPreparationService(
         collection_service=collection_service,
         pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         document_profile_service=object(),
         max_concurrency=1,
     )
@@ -332,8 +333,8 @@ async def test_profile_preparation_reuses_current_source_and_profile(*, postgres
     async def fail_if_parsed(**kwargs):
         raise AssertionError("the current SourceDocument should be reused")
 
-    sources = SourceArtifactRepository(postgres_session_factory)
-    await seed_collection(sources.session_factory, collection_id, document_ids=(document_id,))
+    sources = SourceArtifactRepository()
+    await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document_id,))
     await sources.replace_document(
         collection_id,
         SourceDocument(
@@ -433,7 +434,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(mon
     service = DocumentPreparationService(
         collection_service=CollectionService(),
         pipeline_run_service=RunService(),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         document_profile_service=ProfileService(),
         source_artifact_builder=None,
         max_concurrency=1,
@@ -517,8 +518,8 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             )
 
     collection_service = CollectionService()
-    source_repository = SourceArtifactRepository(postgres_session_factory)
-    await seed_collection(source_repository.session_factory, collection_id, document_ids=(document_id,))
+    source_repository = SourceArtifactRepository()
+    await seed_collection(database.AsyncSessionLocal, collection_id, document_ids=(document_id,))
     await source_repository.replace_document(
         collection_id,
         SourceDocument(

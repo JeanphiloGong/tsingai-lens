@@ -115,7 +115,7 @@ async def test_replay_uses_service_permission_and_exact_approval(mode, *, postgr
                    ModelTurn(content="Saved"), ModelTurn(content="No tools needed."),
                    ModelTurn(content="No tools needed for the saved review."))
     service = ChatSessionService(repository=repo, collection_service=_CollectionService(),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory), runner=ResearchAgentRunner(
+        source_artifact_repository=SourceArtifactRepository(), runner=ResearchAgentRunner(
             model=model,
             capabilities=CapabilityRegistry((write,))))
     case = {"id": "S21", "collection_id": "col-1", "user_id": "user-1", "scientific_rubric": ["Check review"],

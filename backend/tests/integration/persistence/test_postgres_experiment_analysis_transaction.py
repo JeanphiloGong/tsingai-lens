@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from dataclasses import replace
 
 import pytest
@@ -167,7 +169,7 @@ async def test_shared_transaction_rolls_back_graph_and_objective_publication(
     objective_repository,
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
-    session_factory = objective_repository.session_factory
+    session_factory = database.AsyncSessionLocal
     experiments = PaperExperimentRepository(session_factory)
     selections = ObjectiveExperimentSelectionRepository(session_factory)
     transaction_factory = PostgresExperimentAnalysisTransactionFactory(session_factory)
@@ -245,7 +247,7 @@ async def test_finding_failure_rolls_back_revisions_selections_groups_and_findin
     objective_repository,
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
-    session_factory = objective_repository.session_factory
+    session_factory = database.AsyncSessionLocal
     experiments = PaperExperimentRepository(session_factory)
     selections = ObjectiveExperimentSelectionRepository(session_factory)
     groups = ComparisonGroupRepository(session_factory)

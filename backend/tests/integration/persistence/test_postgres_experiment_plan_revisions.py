@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from domain.core.research_objective import (
     ResearchObjective,
     _text,
@@ -60,7 +62,7 @@ async def experiment_plan_repository(source_repository):
         created_by_tool_call_id="call-plan-objective",
     )
     await ObjectiveRepository(
-        source_repository.session_factory
+        database.AsyncSessionLocal
     ).create_authored_candidate(
         objective,
         created_by_user_id="user_source",
@@ -75,7 +77,7 @@ async def experiment_plan_repository(source_repository):
             created_at="2026-09-07T00:30:00+00:00",
         )
     )
-    return ExperimentPlanRepository(source_repository.session_factory)
+    return ExperimentPlanRepository()
 
 
 def _plan(**overrides) -> ExperimentPlanRecord:

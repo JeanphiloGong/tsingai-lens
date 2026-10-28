@@ -38,7 +38,7 @@ async def test_session_permission_controls_actual_write(mode, expected, *, postg
     model = _Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Correct the trend"}),)),
                    ModelTurn(content="The feedback is saved."), discover=(write.spec.name,))
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-                                source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+                                source_artifact_repository=SourceArtifactRepository(),
                                 runner=ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((write,))))
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     permission = await repository.set_permission(session.session_id, "user-1", mode=mode,
@@ -70,7 +70,7 @@ async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(*, postgre
     write = _WriteCapability()
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         runner=ResearchAgentRunner(model=_Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Review"}),)),
             ModelTurn(content="The review remains unsaved."),
             discover=(write.spec.name,)), capabilities=CapabilityRegistry((write,))))
@@ -120,7 +120,7 @@ async def test_each_automatic_write_rechecks_current_permission(revoke, *, postg
         ModelTurn(content="Both revisions are saved."),
     )
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         runner=ResearchAgentRunner(
             model=model,
             capabilities=CapabilityRegistry((finding_write, plan_write)),
@@ -162,7 +162,7 @@ async def test_permission_controller_enforces_owner_and_revision(*, postgres_ses
     from tests.unit.routers.test_chat_sessions_api import _request
     repository = ChatRepository(postgres_session_factory)
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())))
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     assert (await get_chat_permission(session.session_id, _request(service)))["mode"] == "confirm"
@@ -220,7 +220,7 @@ async def test_new_session_inherits_collection_default_permission(default, expec
     service = ChatSessionService(
         repository=repository,
         collection_service=_CollectionDefaults(),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())),
     )
 
@@ -251,7 +251,7 @@ async def test_collection_read_only_default_is_applied_before_runner_tool_select
     service = ChatSessionService(
         repository=repository,
         collection_service=_CollectionDefaults(),
-        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())),
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")

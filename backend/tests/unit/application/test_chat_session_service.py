@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from domain.chat import ChatToolRequest
 from tests.support.postgres import seed_collection
 
@@ -116,7 +118,7 @@ async def research_sources(postgres_session_factory):
     from tests.support.postgres import seed_collection
 
     await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))
-    await SourceArtifactRepository(postgres_session_factory).replace_document(
+    await SourceArtifactRepository().replace_document(
         "col-1",
         SourceDocument(
             document_id="doc-1", document_order=0, title="Canonical Paper A",
@@ -138,7 +140,7 @@ def _service(
 ) -> ChatSessionService:
     return ChatSessionService(
         collection_service=_CollectionService(),
-        source_artifact_repository=SourceArtifactRepository(repository.session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         repository=repository,
         runner=ResearchAgentRunner(
             model=model,
@@ -185,7 +187,7 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(*, 
     repository = ChatRepository(postgres_session_factory)
     service = ChatSessionService(
         collection_service=_CollectionService(),
-        source_artifact_repository=SourceArtifactRepository(repository.session_factory),
+        source_artifact_repository=SourceArtifactRepository(),
         repository=repository,
         runner=ResearchAgentRunner(
             model=_Model(ModelTurn(content="answer")),
@@ -275,7 +277,7 @@ async def test_chat_session_service_persists_selected_source_with_user_message(*
 @pytest.mark.parametrize("forged_second_block", [False, True])
 async def test_selected_blocks_are_canonicalized_together_before_a_turn(forged_second_block: bool, *, postgres_session_factory) -> None:
     repository = ChatRepository(postgres_session_factory)
-    sources = SourceArtifactRepository(repository.session_factory)
+    sources = SourceArtifactRepository()
     methods = SourceBlock(
         block_id="methods", document_id="doc-1", block_type="paragraph",
         text="Conductivity was measured using EIS at 25 C.", block_order=1,
@@ -283,7 +285,7 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(forged_s
     )
     document = await sources.read_document("col-1", "doc-1")
     document = replace(document, blocks=(*document.blocks, methods))
-    await seed_collection(sources.session_factory, 'col-1', document_ids=(document.document_id,))
+    await seed_collection(database.AsyncSessionLocal, 'col-1', document_ids=(document.document_id,))
     await sources.replace_document("col-1", document)
     service = ChatSessionService(
         collection_service=_CollectionService(), source_artifact_repository=sources,
@@ -1002,7 +1004,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     now = [0.0]
     monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
     repository = ChatRepository(postgres_session_factory)
-    sources = SourceArtifactRepository(repository.session_factory)
+    sources = SourceArtifactRepository()
     collection = _CollectionService()
     read = ReadSourceCapability(collection_service=collection, source_artifact_repository=sources)
     cancelled = asyncio.Event()

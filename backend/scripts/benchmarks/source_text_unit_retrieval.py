@@ -267,7 +267,7 @@ async def main_async() -> int:
     fixture = json.loads(args.fixture.resolve().read_text(encoding="utf-8"))
     engine = build_database_engine(DatabaseSettings())
     try:
-        repository = SourceArtifactRepository(build_session_factory(engine))
+        repository = SourceArtifactRepository()
         text_units = await repository.list_text_units(args.collection_id)
         blocks = await repository.list_blocks(args.collection_id)
     finally:

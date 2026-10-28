@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.evaluation.records import (
     EvaluationFailure,
@@ -26,9 +28,6 @@ from infra.persistence.postgres.models.evaluation import (
 
 class EvaluationRepository:
     backend_name = "postgresql"
-
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
 
     async def upsert_gold_set(
         self,
@@ -50,8 +49,8 @@ class EvaluationRepository:
             }
             for item in gold_items
         ]
-        async with self.session_factory.begin() as session:
-            row = await session.get(EvaluationGoldSetRecord, gold_set.gold_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(EvaluationGoldSetRecord, gold_set.gold_id)
             if row is not None and row.collection_id != gold_set.collection_id:
                 raise ValueError("gold set identity cannot be reassigned")
             if row is None:
@@ -66,7 +65,7 @@ class EvaluationRepository:
                     items=next_items,
                     updated_at=_now(),
                 )
-                session.add(row)
+                db.add(row)
             else:
                 row.version = gold_set.version
                 row.target_layer = gold_set.target_layer
@@ -77,8 +76,8 @@ class EvaluationRepository:
                 row.updated_at = _now()
 
     async def read_gold_set(self, gold_id: str) -> EvaluationGoldSet | None:
-        async with self.session_factory() as session:
-            row = await session.get(EvaluationGoldSetRecord, gold_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(EvaluationGoldSetRecord, gold_id)
             if row is None:
                 return None
             return EvaluationGoldSet(
@@ -92,8 +91,8 @@ class EvaluationRepository:
             )
 
     async def list_gold_items(self, gold_id: str) -> tuple[EvaluationGoldItem, ...]:
-        async with self.session_factory() as session:
-            row = await session.get(EvaluationGoldSetRecord, gold_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(EvaluationGoldSetRecord, gold_id)
             if row is None:
                 return ()
             return tuple(
@@ -126,8 +125,8 @@ class EvaluationRepository:
             }
             for item in snapshot.items
         ]
-        async with self.session_factory.begin() as session:
-            row = await session.get(EvaluationPredictionSnapshotRecord, snapshot.snapshot_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(EvaluationPredictionSnapshotRecord, snapshot.snapshot_id)
             if row is not None and row.collection_id != snapshot.collection_id:
                 raise ValueError("prediction snapshot identity cannot be reassigned")
             if row is None:
@@ -141,7 +140,7 @@ class EvaluationRepository:
                     items=next_items,
                     created_at=_now(),
                 )
-                session.add(row)
+                db.add(row)
             else:
                 row.target_layer = snapshot.target_layer
                 row.fact_source = snapshot.fact_source
@@ -153,8 +152,8 @@ class EvaluationRepository:
         self,
         snapshot_id: str,
     ) -> EvaluationPredictionSnapshot | None:
-        async with self.session_factory() as session:
-            row = await session.get(EvaluationPredictionSnapshotRecord, snapshot_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(EvaluationPredictionSnapshotRecord, snapshot_id)
             if row is None:
                 return None
             return EvaluationPredictionSnapshot(
@@ -221,9 +220,9 @@ class EvaluationRepository:
             }
             for failure in run.failures
         ]
-        async with self.session_factory.begin() as session:
-            gold = await session.get(EvaluationGoldSetRecord, run.gold_id)
-            snapshot = await session.get(
+        async with AsyncSessionLocal() as db, db.begin():
+            gold = await db.get(EvaluationGoldSetRecord, run.gold_id)
+            snapshot = await db.get(
                 EvaluationPredictionSnapshotRecord, run.prediction_snapshot_id
             )
             if gold is None or snapshot is None:
@@ -233,7 +232,7 @@ class EvaluationRepository:
                 or snapshot.collection_id != run.collection_id
             ):
                 raise ValueError("evaluation parents must share collection")
-            row = await session.get(EvaluationRunRecord, run.evaluation_run_id)
+            row = await db.get(EvaluationRunRecord, run.evaluation_run_id)
             if row is not None and row.collection_id != run.collection_id:
                 raise ValueError("evaluation run identity cannot be reassigned")
             if row is None:
@@ -251,7 +250,7 @@ class EvaluationRepository:
                     failures=next_failures,
                     created_at=_now(),
                 )
-                session.add(row)
+                db.add(row)
             else:
                 row.gold_id = run.gold_id
                 row.prediction_snapshot_id = run.prediction_snapshot_id
@@ -264,8 +263,8 @@ class EvaluationRepository:
                 row.failures = next_failures
 
     async def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None:
-        async with self.session_factory() as session:
-            row = await session.get(EvaluationRunRecord, evaluation_run_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(EvaluationRunRecord, evaluation_run_id)
             if row is None:
                 return None
             return EvaluationRun(
@@ -312,8 +311,8 @@ class EvaluationRepository:
             )
 
     async def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]:
-        async with self.session_factory() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(EvaluationRunRecord)
                 .where(EvaluationRunRecord.collection_id == collection_id)
                 .order_by(

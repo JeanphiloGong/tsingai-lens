@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.core.document_profile import DocumentProfile
 from infra.persistence.postgres.models.document import Document
@@ -15,9 +17,6 @@ from infra.persistence.postgres.models.document_preparation import (
 
 
 class DocumentProfileRepository:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def replace(self, collection_id: str, profile: DocumentProfile) -> None:
         next_profile = {
             "document_id": profile.document_id,
@@ -31,17 +30,17 @@ class DocumentProfileRepository:
             "profile_fingerprint": profile.profile_fingerprint,
             "generated_at": profile.generated_at,
         }
-        async with self.session_factory.begin() as session:
-            document = await session.get(Document, profile.document_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            document = await db.get(Document, profile.document_id)
             if document is None or document.collection_id != collection_id:
                 raise FileNotFoundError(
                     "collection document not found: "
                     f"{collection_id}/{profile.document_id}"
                 )
-            row = await session.get(DocumentPreparationRow, profile.document_id)
+            row = await db.get(DocumentPreparationRow, profile.document_id)
             if row is None:
                 now = datetime.now(timezone.utc)
-                session.add(
+                db.add(
                     DocumentPreparationRow(
                         document_id=profile.document_id,
                         profile_json=next_profile,
@@ -58,8 +57,8 @@ class DocumentProfileRepository:
         collection_id: str,
         document_id: str,
     ) -> DocumentProfile | None:
-        async with self.session_factory() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db:
+            row = await db.scalar(
                 select(DocumentPreparationRow)
                 .join(
                     Document,
@@ -94,7 +93,7 @@ class DocumentProfileRepository:
     ) -> tuple[DocumentProfile, ...]:
         if document_ids == ():
             return ()
-        async with self.session_factory() as session:
+        async with AsyncSessionLocal() as db:
             statement = (
                 select(DocumentPreparationRow)
                 .join(
@@ -107,7 +106,7 @@ class DocumentProfileRepository:
                 statement = statement.where(
                     DocumentPreparationRow.document_id.in_(document_ids)
                 )
-            rows = await session.scalars(
+            rows = await db.scalars(
                 statement.order_by(DocumentPreparationRow.document_id)
             )
             profiles = []

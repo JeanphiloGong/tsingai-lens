@@ -15,7 +15,7 @@ def anyio_backend() -> str:
 
 
 async def test_pipeline_run_service_lists_scope_status_and_progress(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    service = PipelineRunService(PipelineRunRepository())
     run_a = await service.create_run(
         "col_a",
         "document_preparation",
@@ -52,7 +52,7 @@ async def test_pipeline_run_service_lists_scope_status_and_progress(*, postgres_
 
 
 async def test_pipeline_run_service_persists_node_and_terminal_failure(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    service = PipelineRunService(PipelineRunRepository())
     run, _created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -83,7 +83,7 @@ async def test_pipeline_run_service_persists_node_and_terminal_failure(*, postgr
 
 
 async def test_document_run_reuses_active_and_matching_completed_work(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    service = PipelineRunService(PipelineRunRepository())
     first, created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -120,7 +120,7 @@ async def test_document_run_reuses_active_and_matching_completed_work(*, postgre
 
 
 async def test_collection_run_reuses_only_active_work_and_preserves_context(*, postgres_session_factory) -> None:
-    service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
+    service = PipelineRunService(PipelineRunRepository())
     first, created = await service.get_or_create_collection_run(
         collection_id="col_a",
         pipeline_name="objective_discovery",
@@ -150,7 +150,7 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context(*, p
 
 
 async def test_historical_preparation_errors_are_safe_without_rewriting_storage(*, postgres_session_factory):
-    repository = PipelineRunRepository(postgres_session_factory)
+    repository = PipelineRunRepository()
     service = PipelineRunService(repository)
     run = await service.create_run(
         "col_a",

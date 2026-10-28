@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.goal import (
     ExperimentPlanRecord,
@@ -22,19 +24,14 @@ from infra.persistence.postgres.models.objective_workspace import (
 class ExperimentPlanRepository:
     backend_name = "postgresql"
 
-    def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession]
-    ) -> None:
-        self.session_factory = session_factory
-
     async def upsert_plan(
         self, plan: ExperimentPlanRecord
     ) -> ExperimentPlanRecord:
         if plan.parent_plan_id is not None:
             raise ValueError("use append_plan_revision for a successor revision")
-        async with self.session_factory.begin() as session:
-            await _validate_source_message(session, plan)
-            row = await session.get(ObjectiveExperimentPlan, plan.plan_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            await _validate_source_message(db, plan)
+            row = await db.get(ObjectiveExperimentPlan, plan.plan_id)
             if row is not None:
                 existing = ExperimentPlanRecord(
                     plan_id=row.plan_id,
@@ -79,8 +76,8 @@ class ExperimentPlanRepository:
                 created_at=_datetime(plan.created_at),
                 updated_at=_datetime(plan.updated_at),
             )
-            session.add(row)
-            await session.flush()
+            db.add(row)
+            await db.flush()
             return ExperimentPlanRecord(
                 plan_id=row.plan_id,
                 collection_id=row.collection_id,
@@ -106,8 +103,8 @@ class ExperimentPlanRepository:
         parent_plan_id = plan.parent_plan_id
         if parent_plan_id is None:
             raise ValueError("successor revision requires parent_plan_id")
-        async with self.session_factory.begin() as session:
-            parent_row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            parent_row = await db.scalar(
                 select(ObjectiveExperimentPlan)
                 .where(ObjectiveExperimentPlan.plan_id == parent_plan_id)
                 .with_for_update()
@@ -115,11 +112,11 @@ class ExperimentPlanRepository:
             if parent_row is None:
                 raise ValueError("experiment plan parent revision was not found")
             _validate_successor(parent_row, plan)
-            if await session.get(ObjectiveExperimentPlan, plan.plan_id) is not None:
+            if await db.get(ObjectiveExperimentPlan, plan.plan_id) is not None:
                 raise ExperimentPlanRevisionConflictError(
                     "experiment plan revision identity already exists"
                 )
-            existing_child = await session.scalar(
+            existing_child = await db.scalar(
                 select(ObjectiveExperimentPlan.plan_id).where(
                     ObjectiveExperimentPlan.parent_plan_id == parent_row.plan_id
                 )
@@ -128,7 +125,7 @@ class ExperimentPlanRepository:
                 raise ExperimentPlanRevisionConflictError(
                     "experiment plan revision has already been superseded"
                 )
-            await _validate_source_message(session, plan)
+            await _validate_source_message(db, plan)
             row = ObjectiveExperimentPlan(
                 plan_id=plan.plan_id,
                 collection_id=plan.collection_id,
@@ -149,9 +146,9 @@ class ExperimentPlanRepository:
                 created_at=_datetime(plan.created_at),
                 updated_at=_datetime(plan.updated_at),
             )
-            session.add(row)
+            db.add(row)
             try:
-                await session.flush()
+                await db.flush()
             except IntegrityError as exc:
                 if _constraint_name(exc) == (
                     "uq_objective_experiment_plans_parent_plan_id"
@@ -185,8 +182,8 @@ class ExperimentPlanRepository:
         objective_id: str,
         plan_id: str,
     ) -> ExperimentPlanRecord | None:
-        async with self.session_factory() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db:
+            row = await db.scalar(
                 select(ObjectiveExperimentPlan).where(
                     ObjectiveExperimentPlan.plan_id == plan_id,
                     ObjectiveExperimentPlan.collection_id == collection_id,
@@ -219,8 +216,8 @@ class ExperimentPlanRepository:
         collection_id: str,
         objective_id: str,
     ) -> tuple[ExperimentPlanRecord, ...]:
-        async with self.session_factory() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(ObjectiveExperimentPlan)
                 .where(
                     ObjectiveExperimentPlan.collection_id == collection_id,
@@ -264,14 +261,14 @@ class ExperimentPlanRepository:
 
 
 async def _validate_source_message(
-    session: AsyncSession,
+    db: AsyncSession,
     plan: ExperimentPlanRecord,
 ) -> None:
     if plan.source_message_id is None:
         return
-    message = await session.get(ChatMessageRow, plan.source_message_id)
+    message = await db.get(ChatMessageRow, plan.source_message_id)
     chat = (
-        await session.get(ChatSessionRow, message.session_id)
+        await db.get(ChatSessionRow, message.session_id)
         if message is not None
         else None
     )

@@ -19,7 +19,9 @@ from domain.core.research_objective import (
 )
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import (
@@ -28,17 +30,14 @@ from infra.persistence.postgres.models.document_preparation import (
 
 
 class PaperMapRepository:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def replace(self, collection_id: str, paper_map: PaperResearchMap) -> None:
-        async with self.session_factory.begin() as session:
-            document = await session.get(Document, paper_map.document_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            document = await db.get(Document, paper_map.document_id)
             if document is None or document.collection_id != collection_id:
                 raise FileNotFoundError(
                     f"collection document not found: {collection_id}/{paper_map.document_id}"
                 )
-            row = await session.scalar(
+            row = await db.scalar(
                 select(DocumentPreparationRow)
                 .join(
                     Document,
@@ -160,8 +159,8 @@ class PaperMapRepository:
         collection_id: str,
         document_id: str,
     ) -> PaperResearchMap | None:
-        async with self.session_factory() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db:
+            row = await db.scalar(
                 select(DocumentPreparationRow)
                 .join(
                     Document,
@@ -374,7 +373,7 @@ class PaperMapRepository:
     ) -> tuple[PaperResearchMap, ...]:
         if document_ids == ():
             return ()
-        async with self.session_factory() as session:
+        async with AsyncSessionLocal() as db:
             statement = (
                 select(DocumentPreparationRow)
                 .join(
@@ -387,7 +386,7 @@ class PaperMapRepository:
                 statement = statement.where(
                     DocumentPreparationRow.document_id.in_(document_ids)
                 )
-            rows = await session.scalars(
+            rows = await db.scalars(
                 statement.order_by(DocumentPreparationRow.document_id)
             )
             paper_maps = []

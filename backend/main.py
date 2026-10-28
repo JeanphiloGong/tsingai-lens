@@ -367,19 +367,19 @@ async def build_application_runtime(
             object_store=collection_service.object_store,
         )
         pipeline_run_service = overrides.pipeline_run_service or PipelineRunService(
-            PipelineRunRepository(session_factory)
+            PipelineRunRepository()
         )
         source_artifact_repository = (
             overrides.source_artifact_repository
-            or SourceArtifactRepository(session_factory)
+            or SourceArtifactRepository()
         )
         document_profile_repository = (
             overrides.document_profile_repository
-            or DocumentProfileRepository(session_factory)
+            or DocumentProfileRepository()
         )
         paper_map_repository = (
             overrides.paper_map_repository
-            or PaperMapRepository(session_factory)
+            or PaperMapRepository()
         )
         objective_repository = (
             overrides.objective_repository
@@ -463,11 +463,11 @@ async def build_application_runtime(
             )
         finding_review_repository = (
             overrides.finding_review_repository
-            or FindingReviewRepository(session_factory)
+            or FindingReviewRepository()
         )
         experiment_plan_repository = (
             overrides.experiment_plan_repository
-            or ExperimentPlanRepository(session_factory)
+            or ExperimentPlanRepository()
         )
         chat_repository = overrides.chat_repository or (
             ChatRepository(session_factory)

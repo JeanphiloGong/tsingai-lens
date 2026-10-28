@@ -43,7 +43,18 @@ class FeedbackDatasetRepository:
 
     async def create(self, dataset: Dataset) -> Dataset:
         async with self.session_factory.begin() as session:
-            row = FeedbackDatasetRow(**_row_values(dataset))
+            now = datetime.now(timezone.utc)
+            row = FeedbackDatasetRow(
+                dataset_id=dataset.dataset_id,
+                collection_id=dataset.collection_id,
+                name=dataset.name,
+                task_type=dataset.task_type,
+                construction_spec=deepcopy(dataset.construction_spec),
+                spec_version=dataset.spec_version,
+                created_by=dataset.created_by,
+                created_at=now,
+                updated_at=now,
+            )
             session.add(row)
             await session.flush()
         return dataset
@@ -51,12 +62,36 @@ class FeedbackDatasetRepository:
     async def read(self, dataset_id: str) -> Dataset | None:
         async with self.session_factory() as session:
             row = await session.get(FeedbackDatasetRow, dataset_id)
-            return _to_domain(row) if row is not None else None
+            if row is None:
+                return None
+            return Dataset(
+                dataset_id=row.dataset_id,
+                collection_id=row.collection_id,
+                name=row.name,
+                task_type=row.task_type,
+                construction_spec=deepcopy(row.construction_spec or {}),
+                spec_version=row.spec_version,
+                created_by=row.created_by,
+            )
 
     async def read_record(self, dataset_id: str) -> StoredDataset | None:
         async with self.session_factory() as session:
             row = await session.get(FeedbackDatasetRow, dataset_id)
-            return _to_record(row) if row is not None else None
+            if row is None:
+                return None
+            return StoredDataset(
+                dataset=Dataset(
+                    dataset_id=row.dataset_id,
+                    collection_id=row.collection_id,
+                    name=row.name,
+                    task_type=row.task_type,
+                    construction_spec=deepcopy(row.construction_spec or {}),
+                    spec_version=row.spec_version,
+                    created_by=row.created_by,
+                ),
+                created_at=_datetime(row.created_at),
+                updated_at=_datetime(row.updated_at),
+            )
 
     async def list_records_for_collection(
         self,
@@ -75,7 +110,22 @@ class FeedbackDatasetRepository:
             .limit(limit)
         )
         async with self.session_factory() as session:
-            return tuple(_to_record(row) for row in await session.scalars(statement))
+            return tuple(
+                StoredDataset(
+                    dataset=Dataset(
+                        dataset_id=row.dataset_id,
+                        collection_id=row.collection_id,
+                        name=row.name,
+                        task_type=row.task_type,
+                        construction_spec=deepcopy(row.construction_spec or {}),
+                        spec_version=row.spec_version,
+                        created_by=row.created_by,
+                    ),
+                    created_at=_datetime(row.created_at),
+                    updated_at=_datetime(row.updated_at),
+                )
+                for row in await session.scalars(statement)
+            )
 
 
 async def ensure_system_datasets(
@@ -98,7 +148,17 @@ async def ensure_system_datasets(
             )
             try:
                 async with session.begin_nested():
-                    session.add(FeedbackDatasetRow(**_row_values(dataset, now=now)))
+                    session.add(FeedbackDatasetRow(
+                        dataset_id=dataset.dataset_id,
+                        collection_id=dataset.collection_id,
+                        name=dataset.name,
+                        task_type=dataset.task_type,
+                        construction_spec=deepcopy(dataset.construction_spec),
+                        spec_version=dataset.spec_version,
+                        created_by=dataset.created_by,
+                        created_at=now,
+                        updated_at=now,
+                    ))
                     await session.flush()
             except IntegrityError:
                 row = await session.get(FeedbackDatasetRow, dataset_id)
@@ -107,43 +167,16 @@ async def ensure_system_datasets(
                 continue
         if row is None:
             raise RuntimeError("system feedback dataset creation raced and was not readable")
-        records.append(_to_domain(row))
+        records.append(Dataset(
+            dataset_id=row.dataset_id,
+            collection_id=row.collection_id,
+            name=row.name,
+            task_type=row.task_type,
+            construction_spec=deepcopy(row.construction_spec or {}),
+            spec_version=row.spec_version,
+            created_by=row.created_by,
+        ))
     return tuple(records)
-
-
-def _row_values(dataset: Dataset, *, now: datetime | None = None) -> dict[str, Any]:
-    now = now or datetime.now(timezone.utc)
-    return {
-        "dataset_id": dataset.dataset_id,
-        "collection_id": dataset.collection_id,
-        "name": dataset.name,
-        "task_type": dataset.task_type,
-        "construction_spec": deepcopy(dataset.construction_spec),
-        "spec_version": dataset.spec_version,
-        "created_by": dataset.created_by,
-        "created_at": now,
-        "updated_at": now,
-    }
-
-
-def _to_domain(row: FeedbackDatasetRow) -> Dataset:
-    return Dataset(
-        dataset_id=row.dataset_id,
-        collection_id=row.collection_id,
-        name=row.name,
-        task_type=row.task_type,  # type: ignore[arg-type]
-        construction_spec=deepcopy(row.construction_spec or {}),
-        spec_version=row.spec_version,
-        created_by=row.created_by,
-    )
-
-
-def _to_record(row: FeedbackDatasetRow) -> StoredDataset:
-    return StoredDataset(
-        dataset=_to_domain(row),
-        created_at=_datetime(row.created_at),
-        updated_at=_datetime(row.updated_at),
-    )
 
 
 def _datetime(value: Any) -> datetime:

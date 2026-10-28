@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any, Mapping
@@ -11,10 +12,9 @@ from application.goal.protocol_contract import (
 )
 from application.goal.research_plan_contract import ResearchPlanStructure
 from domain.goal import ExperimentPlanRecord
+from domain.goal.experiment_plan import _optional_text, _required_text
 from repositories.experiment_plan_repository import (
     ExperimentPlanRepository,
-    experiment_plan_from_record,
-    experiment_plan_record,
 )
 
 _HISTORICAL_REVIEW_GATE = "reviewed_findings"
@@ -50,29 +50,27 @@ class ExperimentPlanService:
         created_by: str | None = None,
     ) -> ExperimentPlanRecord:
         now = _now_iso()
-        plan = experiment_plan_from_record(
-            {
-                "plan_id": _plan_id(
-                    collection_id,
-                    objective_id,
-                    title,
-                    content,
-                    now,
-                ),
-                "collection_id": collection_id,
-                "objective_id": objective_id,
-                "title": title,
-                "content": content,
-                "status": "draft",
-                "source_message_id": None,
-                "source_links": [],
-                "metadata": {"source": "manual"},
-                "created_by": created_by,
-                "updated_by": created_by,
-                "structured_plan": _validated_structure(structured_plan),
-                "created_at": now,
-                "updated_at": now,
-            }
+        plan = ExperimentPlanRecord(
+            plan_id=_plan_id(
+                collection_id,
+                objective_id,
+                title,
+                content,
+                now,
+            ),
+            collection_id=_required_text(collection_id, "collection_id"),
+            objective_id=_required_text(objective_id, "objective_id"),
+            title=_required_text(title, "title"),
+            content=_required_text(content, "content"),
+            status="draft",
+            source_message_id=None,
+            source_links=(),
+            metadata={"source": "manual"},
+            created_by=_optional_text(created_by),
+            updated_by=_optional_text(created_by),
+            structured_plan=_validated_structure(structured_plan),
+            created_at=now,
+            updated_at=now,
         )
         return await self.repository.upsert_plan(plan)
 
@@ -121,37 +119,35 @@ class ExperimentPlanService:
             )
 
         now = _now_iso()
-        plan = experiment_plan_from_record(
-            {
-                "plan_id": _plan_id(
-                    collection_id,
-                    objective_id,
-                    title,
-                    content,
-                    created_by_tool_call_id,
-                    now,
-                ),
-                "collection_id": collection_id,
-                "objective_id": objective_id,
-                "title": title,
-                "content": content,
-                "status": "draft",
-                "source_message_id": None,
-                "source_links": normalized_links,
-                "metadata": {
-                    "source": "research_agent",
-                    "review_gate": _HISTORICAL_REVIEW_GATE,
-                    "source_findings": [dict(item) for item in source_findings],
-                    "created_by_tool_call_id": created_by_tool_call_id,
-                    "source_validity": "current",
-                    "source_validity_reasons": [],
-                },
-                "created_by": created_by,
-                "updated_by": created_by,
-                "structured_plan": _validated_structure(structured_plan),
-                "created_at": now,
-                "updated_at": now,
-            }
+        plan = ExperimentPlanRecord(
+            plan_id=_plan_id(
+                collection_id,
+                objective_id,
+                title,
+                content,
+                created_by_tool_call_id,
+                now,
+            ),
+            collection_id=_required_text(collection_id, "collection_id"),
+            objective_id=_required_text(objective_id, "objective_id"),
+            title=_required_text(title, "title"),
+            content=_required_text(content, "content"),
+            status="draft",
+            source_message_id=None,
+            source_links=tuple(normalized_links),
+            metadata={
+                "source": "research_agent",
+                "review_gate": _HISTORICAL_REVIEW_GATE,
+                "source_findings": [dict(item) for item in source_findings],
+                "created_by_tool_call_id": created_by_tool_call_id,
+                "source_validity": "current",
+                "source_validity_reasons": [],
+            },
+            created_by=_optional_text(created_by),
+            updated_by=_optional_text(created_by),
+            structured_plan=_validated_structure(structured_plan),
+            created_at=now,
+            updated_at=now,
         )
         return await self.repository.upsert_plan(plan)
 
@@ -316,13 +312,14 @@ class ExperimentPlanService:
                 objective_id=plan.objective_id,
                 source_findings=source_findings,
             )
-        payload = experiment_plan_record(plan)
-        payload["metadata"] = {
-            **dict(plan.metadata),
-            "source_validity": validity,
-            "source_validity_reasons": reasons,
-        }
-        return experiment_plan_from_record(payload)
+        return replace(
+            plan,
+            metadata={
+                **dict(plan.metadata),
+                "source_validity": validity,
+                "source_validity_reasons": reasons,
+            },
+        )
 
 
 def _now_iso() -> str:

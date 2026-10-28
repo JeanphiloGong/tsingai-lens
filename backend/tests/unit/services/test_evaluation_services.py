@@ -882,22 +882,22 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
     }
     await service.review_repository.upsert_curation(
         FindingCuration(
-            curation_id=\"curation-1\",
+            curation_id="curation-1",
             **identity,
-            curated_status=\"limited\",
+            curated_status="limited",
             curated_finding=published,
-            updated_at=\"2026-08-02T10:00:00+00:00\",
+            updated_at="2026-08-02T10:00:00+00:00",
             note=None,
             reviewer=None,
         )
     )
     await service.review_repository.upsert_feedback(
         FindingFeedback(
-            feedback_id=\"feedback-1\",
+            feedback_id="feedback-1",
             **identity,
-            review_status=\"incorrect\",
-            issue_type=\"overclaim\",
-            created_at=\"2026-08-02T11:00:00+00:00\",
+            review_status="incorrect",
+            issue_type="overclaim",
+            created_at="2026-08-02T11:00:00+00:00",
             note=None,
             reviewer=None,
         )
@@ -913,11 +913,11 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
 
     await service.review_repository.upsert_curation(
         FindingCuration(
-            curation_id=\"curation-1\",
+            curation_id="curation-1",
             **identity,
-            curated_status=\"limited\",
+            curated_status="limited",
             curated_finding=published,
-            updated_at=\"2026-08-02T12:00:00+00:00\",
+            updated_at="2026-08-02T12:00:00+00:00",
             note=None,
             reviewer=None,
         )

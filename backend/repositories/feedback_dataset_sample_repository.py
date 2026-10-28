@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from domain.feedback.sample_revision import (
-    RevisionContent, SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
+    SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
     SFT_SCHEMA_VERSION, PREFERENCE_SCHEMA_VERSION, EVALUATION_SCHEMA_VERSION,
 )
 
@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -1292,71 +1292,3 @@ def _iso(value: datetime) -> str:
 
 
 __all__ = ['BuildCompletionKind', 'CollectedDatasetSample', 'ConfirmedDatasetMember', 'DatasetSampleRevisionConflict', 'DatasetSampleActionConflict', 'FeedbackDatasetSampleRepository']
-
-
-def revision_content_from_json(value: Mapping[str, Any]) -> RevisionContent:
-    schema = str(value.get("schema_version") or "")
-    if schema == SFT_SCHEMA_VERSION:
-        return SftRevisionContent(
-            schema_version=str(value.get('schema_version') or ''),
-            messages=tuple(value.get('messages') or ()),
-            context=tuple(value.get('context') or ()),
-            target=str(value.get('target') or ''),
-            evidence=tuple(value.get('evidence') or ()),
-        )
-    if schema == PREFERENCE_SCHEMA_VERSION:
-        return PreferenceRevisionContent(
-            schema_version=str(value.get('schema_version') or ''),
-            messages=tuple(value.get('messages') or ()),
-            context=tuple(value.get('context') or ()),
-            response_a=str(value.get('response_a') or ''),
-            response_b=str(value.get('response_b') or ''),
-            suggested_preference=value.get('suggested_preference'),
-            rationale=str(value.get('rationale') or ''),
-            evidence=tuple(value.get('evidence') or ()),
-            human_preference=value.get('human_preference', value.get('preference')),
-        )
-    if schema == EVALUATION_SCHEMA_VERSION:
-        return EvaluationRevisionContent(
-            schema_version=str(value.get('schema_version') or ''),
-            messages=tuple(value.get('messages') or ()),
-            context=tuple(value.get('context') or ()),
-            reference=str(value.get('reference') or ''),
-            criteria=tuple(value.get('criteria') or ()),
-            evaluation_mode=str(value.get('evaluation_mode') or 'reference'),
-            evidence=tuple(value.get('evidence') or ()),
-        )
-    raise ValueError("unsupported sample revision schema")
-
-
-def revision_content_json(content: RevisionContent) -> dict[str, Any]:
-    if isinstance(content, SftRevisionContent):
-        return {
-            'schema_version': content.schema_version,
-            'messages': [dict(item) for item in content.messages],
-            'context': [dict(item) for item in content.context],
-            'target': content.target,
-            'evidence': [dict(item) for item in content.evidence],
-        }
-    if isinstance(content, PreferenceRevisionContent):
-        return {
-            'schema_version': content.schema_version,
-            'messages': [dict(item) for item in content.messages],
-            'context': [dict(item) for item in content.context],
-            'response_a': content.response_a,
-            'response_b': content.response_b,
-            'suggested_preference': content.suggested_preference,
-            'rationale': content.rationale,
-            'evidence': [dict(item) for item in content.evidence],
-            'human_preference': content.human_preference,
-        }
-    else:
-        return {
-            'schema_version': content.schema_version,
-            'messages': [dict(item) for item in content.messages],
-            'context': [dict(item) for item in content.context],
-            'reference': content.reference,
-            'criteria': list(content.criteria),
-            'evaluation_mode': content.evaluation_mode,
-            'evidence': [dict(item) for item in content.evidence],
-        }

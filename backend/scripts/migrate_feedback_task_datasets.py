@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -207,16 +207,24 @@ def legacy_row_to_content(
         }
 
     try:
-        # Import lazily so this pure conversion remains easy to exercise from
-        # the migration unit tests.
-        from repositories.feedback_dataset_sample_repository import (
-            revision_content_from_json, revision_content_json,
+        from domain.feedback.sample_revision import (
+            SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
         )
-
-        parsed = revision_content_from_json(content)
+        if task_type == "sft":
+            parsed = SftRevisionContent(**content)
+        elif task_type == "preference":
+            parsed = PreferenceRevisionContent(**content)
+        else:
+            parsed = EvaluationRevisionContent(**content)
     except (TypeError, ValueError) as exc:
         return None, (f"legacy_content_invalid:{str(exc)}",)
-    return revision_content_json(parsed), ()
+    saved_content = asdict(parsed)
+    saved_content["messages"] = list(parsed.messages)
+    saved_content["context"] = list(parsed.context)
+    saved_content["evidence"] = list(parsed.evidence)
+    if isinstance(parsed, EvaluationRevisionContent):
+        saved_content["criteria"] = list(parsed.criteria)
+    return saved_content, ()
 
 
 def build_plan_from_records(

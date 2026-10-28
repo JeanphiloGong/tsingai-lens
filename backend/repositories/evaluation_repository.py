@@ -48,6 +48,19 @@ class EvaluationRepository:
     ) -> None:
         if any(item.gold_id != gold_set.gold_id for item in gold_items):
             raise ValueError("gold item does not belong to gold set")
+        next_items = [
+            {
+                "gold_item_id": item.gold_item_id,
+                "gold_id": item.gold_id,
+                "document_id": item.document_id,
+                "family": item.family,
+                "item_key": item.item_key,
+                "payload": dict(item.payload),
+                "evidence_refs": [dict(ref) for ref in item.evidence_refs],
+                "metadata": dict(item.metadata or {}),
+            }
+            for item in gold_items
+        ]
         async with self.session_factory.begin() as session:
             row = await session.get(EvaluationGoldSetRecord, gold_set.gold_id)
             if row is not None and row.collection_id != gold_set.collection_id:
@@ -60,10 +73,8 @@ class EvaluationRepository:
                     target_layer=gold_set.target_layer,
                     metric_profile=gold_set.metric_profile,
                     description=gold_set.description,
-                    metadata_json=_json_value(gold_set.metadata or {}),
-                    items=_json_value(
-                        [_gold_item_record(item) for item in gold_items]
-                    ),
+                    metadata_json=dict(gold_set.metadata or {}),
+                    items=next_items,
                     updated_at=_now(),
                 )
                 session.add(row)
@@ -72,16 +83,24 @@ class EvaluationRepository:
                 row.target_layer = gold_set.target_layer
                 row.metric_profile = gold_set.metric_profile
                 row.description = gold_set.description
-                row.metadata_json = _json_value(gold_set.metadata or {})
-                row.items = _json_value(
-                    [_gold_item_record(item) for item in gold_items]
-                )
+                row.metadata_json = dict(gold_set.metadata or {})
+                row.items = next_items
                 row.updated_at = _now()
 
     async def read_gold_set(self, gold_id: str) -> EvaluationGoldSet | None:
         async with self.session_factory() as session:
             row = await session.get(EvaluationGoldSetRecord, gold_id)
-            return _gold_set(row) if row is not None else None
+            if row is None:
+                return None
+            return EvaluationGoldSet(
+                gold_id=row.gold_id,
+                collection_id=row.collection_id,
+                version=row.version,
+                target_layer=row.target_layer,
+                metric_profile=row.metric_profile,
+                description=row.description,
+                metadata=dict(row.metadata_json or {}),
+            )
 
     async def list_gold_items(self, gold_id: str) -> tuple[EvaluationGoldItem, ...]:
         async with self.session_factory() as session:
@@ -89,7 +108,16 @@ class EvaluationRepository:
             if row is None:
                 return ()
             return tuple(
-                evaluation_gold_item_from_record(item)
+                EvaluationGoldItem(
+                    gold_item_id=item["gold_item_id"],
+                    gold_id=item["gold_id"],
+                    document_id=item["document_id"],
+                    family=item["family"],
+                    item_key=item["item_key"],
+                    payload=dict(item["payload"]),
+                    evidence_refs=tuple(dict(ref) for ref in item.get("evidence_refs", ())),
+                    metadata=dict(item.get("metadata") or {}),
+                )
                 for item in _sorted_records(row.items)
             )
 
@@ -225,24 +253,6 @@ class EvaluationRepository:
             )
 
 
-def _gold_set(row: EvaluationGoldSetRecord) -> EvaluationGoldSet:
-    return evaluation_gold_set_from_record(
-        {
-            "gold_id": row.gold_id,
-            "collection_id": row.collection_id,
-            "version": row.version,
-            "target_layer": row.target_layer,
-            "metric_profile": row.metric_profile,
-            "description": row.description,
-            "metadata": row.metadata_json,
-        }
-    )
-
-
-def _gold_item_record(item: EvaluationGoldItem) -> dict[str, Any]:
-    return evaluation_gold_item_record(item)
-
-
 def _prediction_item_record(item: EvaluationPredictionItem) -> dict[str, Any]:
     return evaluation_prediction_item_record(item)
 
@@ -323,44 +333,6 @@ def _now() -> datetime:
 
 
 __all__ = ['EvaluationRepository']
-
-
-def evaluation_gold_set_from_record(payload: Mapping[str, Any]) -> EvaluationGoldSet:
-    return EvaluationGoldSet(
-        gold_id=_normalize_text(payload.get("gold_id")) or "",
-        collection_id=_normalize_text(payload.get("collection_id")) or "",
-        version=_normalize_text(payload.get("version")) or "v1",
-        target_layer=_normalize_choice(payload.get("target_layer"), allowed=EVALUATION_TARGET_LAYERS, default="core"),
-        metric_profile=_normalize_text(payload.get("metric_profile")) or "materials_core_v1",
-        description=_normalize_text(payload.get("description")),
-        metadata=_normalize_mapping(payload.get("metadata")),
-    )
-
-
-def evaluation_gold_set_record(value: EvaluationGoldSet) -> dict[str, Any]:
-    return {"gold_id": value.gold_id, "collection_id": value.collection_id, "version": value.version,
-            "target_layer": value.target_layer, "metric_profile": value.metric_profile,
-            "description": value.description, "metadata": dict(value.metadata or {})}
-
-
-def evaluation_gold_item_from_record(payload: Mapping[str, Any]) -> EvaluationGoldItem:
-    return EvaluationGoldItem(
-        gold_item_id=_normalize_text(payload.get("gold_item_id")) or "",
-        gold_id=_normalize_text(payload.get("gold_id")) or "",
-        document_id=_normalize_text(payload.get("document_id")) or "",
-        family=_normalize_text(payload.get("family")) or "",
-        item_key=_normalize_text(payload.get("item_key")) or "",
-        payload=_normalize_mapping(payload.get("payload")),
-        evidence_refs=_normalize_mapping_tuple(payload.get("evidence_refs")),
-        metadata=_normalize_mapping(payload.get("metadata")),
-    )
-
-
-def evaluation_gold_item_record(value: EvaluationGoldItem) -> dict[str, Any]:
-    return {"gold_item_id": value.gold_item_id, "gold_id": value.gold_id,
-            "document_id": value.document_id, "family": value.family, "item_key": value.item_key,
-            "payload": dict(value.payload), "evidence_refs": [dict(item) for item in value.evidence_refs],
-            "metadata": dict(value.metadata or {})}
 
 
 def evaluation_prediction_item_from_record(payload: Mapping[str, Any]) -> EvaluationPredictionItem:

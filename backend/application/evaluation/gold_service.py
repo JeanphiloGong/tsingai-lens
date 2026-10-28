@@ -4,11 +4,14 @@ from typing import Any, Mapping
 
 from application.source.collection_service import CollectionService
 from domain.evaluation import EvaluationGoldItem, EvaluationGoldSet
-from repositories.evaluation_repository import (
-    EvaluationRepository,
-    evaluation_gold_item_from_record,
-    evaluation_gold_set_from_record,
+from domain.evaluation.records import (
+    EVALUATION_TARGET_LAYERS,
+    _normalize_choice,
+    _normalize_mapping,
+    _normalize_mapping_tuple,
+    _normalize_text,
 )
+from repositories.evaluation_repository import EvaluationRepository
 
 
 class EvaluationGoldService:
@@ -38,19 +41,29 @@ class EvaluationGoldService:
         collection_document_ids = await self._collection_document_ids(
             collection_id
         )
-        gold_set = evaluation_gold_set_from_record(
-            {
-                "gold_id": gold_id,
-                "collection_id": collection_id,
-                "version": version,
-                "target_layer": target_layer,
-                "metric_profile": metric_profile,
-                "description": description,
-                "metadata": metadata or {},
-            }
+        gold_set = EvaluationGoldSet(
+            gold_id=_normalize_text(gold_id) or "",
+            collection_id=_normalize_text(collection_id) or "",
+            version=_normalize_text(version) or "v1",
+            target_layer=_normalize_choice(
+                target_layer, allowed=EVALUATION_TARGET_LAYERS, default="core",
+            ),
+            metric_profile=_normalize_text(metric_profile) or "materials_core_v1",
+            description=_normalize_text(description),
+            metadata=_normalize_mapping(metadata),
         )
         gold_items = tuple(
-            self._gold_item_from_input(gold_set.gold_id, item) for item in items
+            EvaluationGoldItem(
+                gold_item_id=_normalize_text(item.get("gold_item_id")) or "",
+                gold_id=gold_set.gold_id,
+                document_id=_normalize_text(item.get("document_id")) or "",
+                family=_normalize_text(item.get("family")) or "",
+                item_key=_normalize_text(item.get("item_key")) or "",
+                payload=_normalize_mapping(item.get("payload")),
+                evidence_refs=_normalize_mapping_tuple(item.get("evidence_refs")),
+                metadata=_normalize_mapping(item.get("metadata")),
+            )
+            for item in items
         )
         self._validate_gold_item_documents(
             collection_id=collection_id,
@@ -59,15 +72,6 @@ class EvaluationGoldService:
         )
         await self.evaluation_repository.upsert_gold_set(gold_set, gold_items)
         return gold_set
-
-    def _gold_item_from_input(
-        self,
-        gold_id: str,
-        item: Mapping[str, Any],
-    ) -> EvaluationGoldItem:
-        payload = dict(item)
-        payload["gold_id"] = gold_id
-        return evaluation_gold_item_from_record(payload)
 
     async def _collection_document_ids(self, collection_id: str) -> set[str]:
         keys: set[str] = set()

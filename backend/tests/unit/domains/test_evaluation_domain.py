@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from domain.evaluation import (
     EvaluationFailure,
-    EvaluationGoldItem,
-    EvaluationGoldSet,
     EvaluationPredictionItem,
     EvaluationPredictionSnapshot,
     EvaluationRun,
@@ -12,10 +10,6 @@ from domain.evaluation import (
 from repositories.evaluation_repository import (
     evaluation_failure_from_record,
     evaluation_failure_record,
-    evaluation_gold_item_from_record,
-    evaluation_gold_item_record,
-    evaluation_gold_set_from_record,
-    evaluation_gold_set_record,
     evaluation_prediction_item_from_record,
     evaluation_prediction_item_record,
     evaluation_prediction_snapshot_from_record,
@@ -25,41 +19,6 @@ from repositories.evaluation_repository import (
     evaluation_score_from_record,
     evaluation_score_record,
 )
-
-
-def test_evaluation_gold_records_round_trip_collection_bound_contracts():
-    gold_set = evaluation_gold_set_from_record(
-        {
-            "gold_id": "lpbf_316l_gold_v1",
-            "collection_id": "col_gold",
-            "version": "v1",
-            "target_layer": "core",
-            "metric_profile": "materials_core_v1",
-            "description": "LPBF 316L gold collection",
-            "metadata": {"domain": "materials"},
-        }
-    )
-    gold_item = evaluation_gold_item_from_record(
-        {
-            "gold_item_id": "gold-measurement-1",
-            "gold_id": gold_set.gold_id,
-            "document_id": "doc-1",
-            "family": "measurement_results",
-            "item_key": "doc-1:sample-a:yield_strength",
-            "payload": {
-                "sample": "sample-a",
-                "metric": "yield_strength",
-                "value": 520,
-                "unit": "MPa",
-            },
-            "evidence_refs": [{"document_id": "doc-1", "quote": "520 MPa"}],
-        }
-    )
-
-    assert evaluation_gold_set_from_record(evaluation_gold_set_record(gold_set)) == gold_set
-    assert evaluation_gold_item_from_record(evaluation_gold_item_record(gold_item)) == gold_item
-    assert gold_set.collection_id == "col_gold"
-    assert gold_item.family == "measurement_results"
 
 
 def test_prediction_snapshot_and_evaluation_run_round_trip_failures():

@@ -9,7 +9,6 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from domain.chat.permissions import permission_record
 from domain.source import Collection as CollectionAggregate
 from domain.source import Document as DocumentAggregate
 from infra.persistence.postgres.models.collection import Collection
@@ -243,7 +242,7 @@ class CollectionRepository:
             row = await session.get(Collection, collection_id, with_for_update=True)
             if row is None:
                 return False
-            current_revision = permission_record(row.agent_default_permission)["revision"]
+            current_revision = (row.agent_default_permission or {}).get("revision", 0)
             if current_revision != expected_revision:
                 raise ValueError("permission_revision_conflict")
             row.agent_default_permission = dict(permission)

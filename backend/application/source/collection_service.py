@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
-from domain.chat.permissions import change_permission, permission_record
+from domain.chat.permissions import change_permission
 from domain.source import Collection
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.collection_workspace import CollectionPaths
@@ -168,9 +168,16 @@ class CollectionService:
     ) -> dict[str, Any]:
         if not await self.collection_belongs_to_user(collection_id, owner_user_id):
             raise FileNotFoundError(f"collection not found: {collection_id}")
-        return permission_record(
-            await self.repository.read_agent_default_permission(collection_id)
-        )
+        permission = {
+            "mode": "confirm",
+            "actions": [],
+            "expires_at": None,
+            "revision": 0,
+        }
+        saved = await self.repository.read_agent_default_permission(collection_id)
+        if saved:
+            permission.update(saved)
+        return permission
 
     async def set_agent_default_permission_for_user(
         self,
@@ -184,9 +191,15 @@ class CollectionService:
         expected_revision: int,
     ) -> dict[str, Any]:
         await self.get_collection_for_user(collection_id, owner_user_id)
-        current = permission_record(
-            await self.repository.read_agent_default_permission(collection_id)
-        )
+        current = {
+            "mode": "confirm",
+            "actions": [],
+            "expires_at": None,
+            "revision": 0,
+        }
+        saved = await self.repository.read_agent_default_permission(collection_id)
+        if saved:
+            current.update(saved)
         updated = change_permission(
             current,
             mode=mode,

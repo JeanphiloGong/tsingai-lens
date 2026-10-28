@@ -29,17 +29,6 @@ AUTO_ACTIONS = frozenset({
 MAX_AUTOMATIC_PERMISSION_HOURS = 24
 
 
-def permission_record(value: Mapping[str, Any] | None) -> dict[str, Any]:
-    record = {
-        "mode": "confirm",
-        "actions": [],
-        "expires_at": None,
-        "revision": 0,
-    }
-    if value:
-        record.update(value)
-    return record
-
 
 def change_permission(
     current: Mapping[str, Any] | None,
@@ -50,7 +39,14 @@ def change_permission(
     expires_at: str | None,
     expected_revision: int,
 ) -> dict[str, Any]:
-    current_record = permission_record(current)
+    current_record = {
+        "mode": "confirm",
+        "actions": [],
+        "expires_at": None,
+        "revision": 0,
+    }
+    if current:
+        current_record.update(current)
     if current_record["revision"] != expected_revision:
         raise ValueError("permission_revision_conflict")
     if mode not in {"read_only", "confirm", "auto"}:
@@ -93,7 +89,14 @@ def permits_automatic(
     *,
     now: str,
 ) -> bool:
-    record = permission_record(permission)
+    record = {
+        "mode": "confirm",
+        "actions": [],
+        "expires_at": None,
+        "revision": 0,
+    }
+    if permission:
+        record.update(permission)
     expiry = record.get("expires_at")
     if expiry is not None:
         try:
@@ -119,6 +122,5 @@ __all__ = [
     "MAX_AUTOMATIC_PERMISSION_HOURS",
     "ToolPermissionMode",
     "change_permission",
-    "permission_record",
     "permits_automatic",
 ]

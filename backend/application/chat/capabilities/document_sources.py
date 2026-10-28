@@ -53,11 +53,11 @@ async def _unavailable_document_sources(
 
 
 class InspectDocumentSourcesToolRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     document_id: str = Field(min_length=1, max_length=240)
     query: str | None = Field(default=None, max_length=240)
-    source_ref: str | None = Field(default=None, max_length=240)
+    source_ref: str | None = Field(default=None, min_length=1, max_length=240)
     heading_path: str | None = Field(
         default=None, max_length=1000,
         description="Exact heading_path from the document outline; omit to inspect the whole prepared document.",
@@ -68,7 +68,7 @@ class InspectDocumentSourcesToolRequest(BaseModel):
     limit: int = Field(default=200, ge=1, le=200,
                        description="Optional record cap. Omit to read a batch of complete passages fitted to the available context.")
 
-    @field_validator("document_id", "query", "source_ref", "heading_path")
+    @field_validator("query", "heading_path")
     @classmethod
     def _normalize_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -113,35 +113,23 @@ class SearchSourcesToolRequest(BaseModel):
 
 
 class InspectTableToolRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     document_id: str = Field(min_length=1, max_length=240)
     table_ref: str = Field(min_length=1, max_length=240)
     row_offset: int = Field(default=0, ge=0)
     row_limit: int = Field(default=20, ge=1, le=50)
 
-    @field_validator("document_id", "table_ref")
-    @classmethod
-    def _normalize_text(cls, value: str) -> str:
-        return value.strip()
-
-
 class ReadSourceToolRequest(BaseModel):
     """Identify one canonical Source and request a bounded exact excerpt."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     document_id: str = Field(min_length=1, max_length=240)
     source_kind: ReadableSourceKind
     source_ref: str = Field(min_length=1, max_length=240)
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=_READ_SOURCE_CONTENT_LIMIT, ge=1, le=_READ_SOURCE_CONTENT_LIMIT)
-
-    @field_validator("document_id", "source_ref")
-    @classmethod
-    def _normalize_text(cls, value: str) -> str:
-        return value.strip()
-
 
 class ReadSourceCapability:
     spec = ToolSpec(

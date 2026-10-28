@@ -153,7 +153,7 @@ class DocumentMarkdownService:
             raise SourceFigureImageNotFoundError(
                 collection_id, document_key, figure_key
             )
-        image_path = self._normalize_text(figure.image_path)
+        image_path = normalize_display_text(figure.image_path)
         if not image_path:
             raise SourceFigureImageUnavailableError(
                 collection_id, document_key, figure_key
@@ -163,7 +163,7 @@ class DocumentMarkdownService:
             content = self.collection_service.read_figure_asset(
                 collection_id,
                 image_path,
-                self._normalize_text(figure.asset_sha256),
+                normalize_display_text(figure.asset_sha256),
             )
         except ValueError as exc:
             raise SourceFigureImageUnavailableError(
@@ -187,7 +187,7 @@ class DocumentMarkdownService:
                 collection_id, document_key, figure_key
             )
         media_type = (
-            self._normalize_text(figure.image_mime_type) or "application/octet-stream"
+            normalize_display_text(figure.image_mime_type) or "application/octet-stream"
         )
         image_suffix = Path(image_path).suffix.lower()
         return {
@@ -231,7 +231,7 @@ class DocumentMarkdownService:
         source_map: list[dict[str, Any]] = []
         warnings: list[str] = []
 
-        title = self._normalize_text(display_title)
+        title = normalize_display_text(display_title)
         if title:
             parts.append(f"# {title}")
             source_map.append(
@@ -262,7 +262,7 @@ class DocumentMarkdownService:
                 or content_rendered
             )
 
-        if not content_rendered and self._normalize_text(document.text):
+        if not content_rendered and normalize_display_text(document.text):
             warnings.append("block_structure_missing")
             parts.extend(self._split_document_text(document.text))
 
@@ -308,7 +308,7 @@ class DocumentMarkdownService:
             return bool(rendered) or rendered_child
 
         if node_type in {"paragraph", "list_item"}:
-            text = self._normalize_text(node.text)
+            text = normalize_display_text(node.text)
             if not text:
                 return False
             if is_garbled_pdf_text(text):
@@ -322,7 +322,7 @@ class DocumentMarkdownService:
             table = tables_by_id.get(str(node.source_ref_id or ""))
             if table is None:
                 return False
-            caption = self._normalize_text(table.caption_text)
+            caption = normalize_display_text(table.caption_text)
             if caption:
                 parts.append(f"**Table.** {caption}")
             table_markdown = self._render_table(table)
@@ -349,7 +349,7 @@ class DocumentMarkdownService:
             return True
 
         if node_type == "reference_entry":
-            text = self._normalize_text(node.text)
+            text = normalize_display_text(node.text)
             if not text:
                 return False
             parts.append(text)
@@ -370,7 +370,7 @@ class DocumentMarkdownService:
         node: SourceDocumentNode,
         has_document_title: bool,
     ) -> str | None:
-        title = self._normalize_text(node.title)
+        title = normalize_display_text(node.title)
         if not title:
             return None
         level = self._markdown_heading_level(node.level, has_document_title)
@@ -415,8 +415,8 @@ class DocumentMarkdownService:
         collection_id: str,
         document_id: str,
     ) -> str | None:
-        caption = self._normalize_text(figure.caption_text)
-        label = self._normalize_text(figure.figure_label)
+        caption = normalize_display_text(figure.caption_text)
+        label = normalize_display_text(figure.figure_label)
         image_markdown = None
         if await self._figure_image_available(
             collection_id=collection_id,
@@ -489,7 +489,7 @@ class DocumentMarkdownService:
         return [
             " ".join(chunk.split())
             for chunk in re.split(r"\n\s*\n", text)
-            if self._normalize_text(chunk)
+            if normalize_display_text(chunk)
         ]
 
     def _table_source_map_entry(self, table: SourceTable) -> dict[str, Any]:
@@ -565,7 +565,7 @@ class DocumentMarkdownService:
             if source_filename
             else None
         )
-        title = self._normalize_text(document.title)
+        title = normalize_display_text(document.title)
         display_title = (
             stored_to_original.get(title, title) if title else display_source_filename
         )
@@ -585,8 +585,8 @@ class DocumentMarkdownService:
             return {}
         filenames: dict[str, str] = {}
         for record in collection["documents"]:
-            original = self._normalize_text(record.get("original_filename"))
-            stored = self._normalize_text(record.get("stored_filename"))
+            original = normalize_display_text(record.get("original_filename"))
+            stored = normalize_display_text(record.get("stored_filename"))
             if original and stored:
                 filenames[Path(stored).name] = Path(original).name
         return filenames
@@ -603,10 +603,7 @@ class DocumentMarkdownService:
         return None
 
     def _metadata_text(self, metadata: Mapping[str, Any], key: str) -> str | None:
-        return self._normalize_text(metadata.get(key))
-
-    def _normalize_text(self, value: Any) -> str | None:
-        return normalize_display_text(value)
+        return normalize_display_text(metadata.get(key))
 
     def _anchor(self, prefix: str, value: str) -> str:
         slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip()).strip("-")

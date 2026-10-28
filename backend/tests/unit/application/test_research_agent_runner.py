@@ -5217,3 +5217,33 @@ async def test_original_inconel_request_survives_reading_compaction_and_provider
     assert len([message for message in result.messages if message.tool_result and message.tool_result.data.get("content")]) == len(sources.executed_arguments)
     assert result.messages[0].content == prompt
     assert not any(call.risk is ToolRisk.WRITE for call in result.tool_calls)
+
+
+@pytest.mark.parametrize(
+    ("model_name", "arguments"),
+    [
+        ("ReadSourceToolRequest", {"document_id": " ", "source_kind": "text_window", "source_ref": "block-1"}),
+        ("ReadSourceToolRequest", {"document_id": "paper-1", "source_kind": "text_window", "source_ref": " "}),
+        ("InspectTableToolRequest", {"document_id": "paper-1", "table_ref": " "}),
+        ("InspectDocumentSourcesToolRequest", {"document_id": " "}),
+        ("InspectDocumentSourcesToolRequest", {"document_id": "paper-1", "source_ref": " "}),
+    ],
+)
+def test_source_requests_reject_blank_identifiers(model_name, arguments) -> None:
+    from application.chat.capabilities import document_sources
+
+    with pytest.raises(ValueError):
+        getattr(document_sources, model_name).model_validate(arguments)
+
+
+def test_source_inspection_preserves_exact_ids_and_normalizes_search_text() -> None:
+    from application.chat.capabilities.document_sources import InspectDocumentSourcesToolRequest
+
+    request = InspectDocumentSourcesToolRequest(
+        document_id=" Paper  A ", source_ref=" Block  B ",
+        query=" laser   power ", heading_path=" Methods   >  LPBF ",
+    )
+    assert request.document_id == "Paper  A"
+    assert request.source_ref == "Block  B"
+    assert request.query == "laser power"
+    assert request.heading_path == "Methods > LPBF"

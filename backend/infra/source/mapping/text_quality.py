@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 
-def normalize_display_text(value: Any) -> str | None:
+def normalize_display_text(value: str | None) -> str | None:
     if value is None:
         return None
-    text = " ".join(str(value).replace("\ufffd", " ").strip().split())
+    text = " ".join(value.replace("\ufffd", " ").split())
     return text or None
 
 

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchScope,
+    PaperResearchRelationship,
+    PaperResearchSourceRef,
+)
+
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -57,7 +63,6 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from domain.evaluation import FindingCuration, FindingFeedback
-from repositories.paper_map_repository import paper_map_from_payload
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 from tests.support.repositories.objective_repository import MemoryObjectiveRepository
 
@@ -377,38 +382,37 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
         ),
         rank=1,
     )
-    skim = paper_map_from_payload(
-        {
-            "document_id": "doc-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": list(objective.material_scope),
-                    "relationships": [
-                        {
-                            "relationship_id": (
-                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+    skim = PaperResearchMap(
+        document_id="doc-1",
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=_TEMPERATURE_STRENGTH_STUDY_ID,
+                document_id="doc-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=objective.material_scope,
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        varied_factors=objective.variables,
+                        outcome=objective.outcomes[0],
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-7"
                             ),
-                            "varied_factors": list(objective.variables),
-                            "outcome": objective.outcomes[0],
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": "block-7",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="high",
+        confidence=0.9,
+        warnings=(),
     )
     await repository.replace(
         "col-gold",
@@ -719,38 +723,37 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
         ),
         rank=1,
     )
-    skim = paper_map_from_payload(
-        {
-            "document_id": "doc-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": list(objective.material_scope),
-                    "relationships": [
-                        {
-                            "relationship_id": (
-                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+    skim = PaperResearchMap(
+        document_id="doc-1",
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=_TEMPERATURE_STRENGTH_STUDY_ID,
+                document_id="doc-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=objective.material_scope,
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        varied_factors=objective.variables,
+                        outcome=objective.outcomes[0],
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-7"
                             ),
-                            "varied_factors": list(objective.variables),
-                            "outcome": objective.outcomes[0],
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": "block-7",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="high",
+        confidence=0.9,
+        warnings=(),
     )
     repository = MemoryObjectiveRepository.from_facts(
         "col-gold",

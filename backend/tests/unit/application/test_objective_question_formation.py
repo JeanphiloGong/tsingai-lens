@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from repositories.paper_map_repository import (
-    paper_map_payload,
+from domain.core.research_objective import (
+    PaperResearchSourceRef,
+    build_paper_research_scope,
+    build_paper_research_relationship,
 )
 
-
-from repositories.paper_map_repository import paper_map_from_payload
 
 from copy import deepcopy
 import json
@@ -27,29 +27,36 @@ from domain.core import PaperResearchMap
 def reading():
     factors = (("laser power",), ("scan speed",), ("laser power", "scan speed"))
     maps = tuple(
-        paper_map_from_payload(
-            {
-                "document_id": name,
-                "doc_role": "experimental",
-                "studies": [
-                    {
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["LPBF"],
-                        "relationships": [
-                            {
-                                "varied_factors": list(varied),
-                                "outcome": "porosity",
-                                "confidence": 0.8,
-                                "source_refs": [
-                                    {"source_kind": "block", "source_ref": "abstract"}
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            }
+        PaperResearchMap(
+            document_id=name,
+            doc_role="experimental",
+            studies=(
+                build_paper_research_scope(
+                    document_id=name,
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label=None,
+                    material_scope=("Ti-6Al-4V",),
+                    process_context=("LPBF",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id=name,
+                            varied_factors=varied,
+                            outcome="porosity",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="abstract"
+                                ),
+                            ),
+                            confidence=0.8,
+                        ),
+                    ),
+                    confidence=0.0,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         )
         for name, varied in zip(("A", "B", "C"), factors)
     )
@@ -140,7 +147,7 @@ def form(reading, client, **kwargs):
 def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     reading, proposal
 ):
-    before = deepcopy([paper_map_payload(m) for m in reading[0]])
+    before = deepcopy(reading[0])
     client, requests = model_client(proposal)
     result = form(reading, client)
     assert len(result.candidates) == 1
@@ -150,7 +157,7 @@ def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
     assert candidate.objective.outcomes == ("porosity",)
     assert candidate.objective.confirmation_status == "candidate"
     assert candidate.objective.active_analysis_version is None
-    assert [paper_map_payload(m) for m in reading[0]] == before
+    assert reading[0] == before
     for selection, original in zip(candidate.papers, reading[0]):
         assert selection.paper_map is original
         assert selection.source_texts == (
@@ -176,7 +183,14 @@ def test_background_selection_survives_without_becoming_an_experimental_seed(
 
 def test_excerpts_can_justify_inspection_without_a_complete_map(reading, proposal):
     maps = tuple(
-        paper_map_from_payload({"document_id": m.document_id})
+        PaperResearchMap(
+            document_id=m.document_id,
+            doc_role="uncertain",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+        )
         for m in reading[0]
     )
     client, _ = model_client(proposal)
@@ -307,7 +321,15 @@ def test_invalid_input_never_reaches_the_model(reading, proposal, invalid):
         del texts["A", "abstract"]
     else:
         maps = tuple(
-            paper_map_from_payload({"document_id": str(i)}) for i in range(13)
+            PaperResearchMap(
+                document_id=str(i),
+                doc_role="uncertain",
+                studies=(),
+                evidence_density="unknown",
+                confidence=0.0,
+                warnings=(),
+            )
+            for i in range(13)
         )
         texts = {(m.document_id, "abstract"): "Original abstract." for m in maps}
     client, requests = model_client(proposal)

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_json
+from domain.feedback.sample_revision import SftRevisionContent
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
+from dataclasses import asdict
+
 
 import asyncio
 from types import SimpleNamespace
@@ -68,14 +69,12 @@ def _sample() -> DatasetSample:
 
 
 def _revision() -> SampleRevision:
-    content = revision_content_from_json(
-        {
-            "schema_version": "literature-sft.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "文献 A", "text": "原文"}],
-            "target": "候选回答",
-            "evidence": [{"document_title": "文献 A", "text": "原文"}],
-        }
+    content = SftRevisionContent(
+        schema_version="literature-sft.v1",
+        messages=({"role": "user", "content": "比较 A、B。"},),
+        context=({"document_title": "文献 A", "text": "原文"},),
+        target="候选回答",
+        evidence=({"document_title": "文献 A", "text": "原文"},),
     )
     return SampleRevision(
         revision_id="revision-1",
@@ -332,7 +331,7 @@ def test_first_revision_request_passes_null_revision_and_generation_to_service()
     payload = SampleRevisionUpdateRequest.model_validate({
         "expected_revision_id": None,
         "expected_generation": 3,
-        "content": revision_content_json(_revision().content),
+        "content": asdict(_revision().content),
     })
     response = asyncio.run(task_datasets.update_dataset_sample(
         "fdset_1", "sample-1", payload, _request(Service()),

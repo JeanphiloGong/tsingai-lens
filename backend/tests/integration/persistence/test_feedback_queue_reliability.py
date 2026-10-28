@@ -1,6 +1,5 @@
 """Feedback ingestion, source changes, and selected publication against PostgreSQL."""
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
 
 import asyncio
 from dataclasses import replace
@@ -107,8 +106,12 @@ async def _confirm_all_sft(chain, service):
     confirmed = []
     for sample in samples:
         edited = await service.update_sample(
-            user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample.sample_id,
-            expected_revision_id=sample.current_revision_id, expected_generation=sample.generation, content=revision_content_from_json(_content()),
+            user_id=USER_ID,
+            dataset_id=dataset.dataset_id,
+            sample_id=sample.sample_id,
+            expected_revision_id=sample.current_revision_id,
+            expected_generation=sample.generation,
+            content=SftRevisionContent(**_content()),
         )
         confirmed.append(await service.confirm_sample(
             user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample.sample_id,
@@ -383,9 +386,15 @@ async def test_completion_rechecks_case_after_candidate_generation(feedback_chai
         row = await session.get(FeedbackCaseRow, case.case_id)
         row.context_snapshot = {**row.context_snapshot, "additional_evidence": "New evidence arrived during generation."}
     revision = SampleRevision.build_worker(
-        revision_id="stale-candidate", sample_id=sample_id, revision_no=1,
-        content=revision_content_from_json(_content()), input_digest=sample.source_digest,
-        construction_spec_version=1, provenance={}, created_at=_now(), job_id=job.job_id,
+        revision_id="stale-candidate",
+        sample_id=sample_id,
+        revision_no=1,
+        content=SftRevisionContent(**_content()),
+        input_digest=sample.source_digest,
+        construction_spec_version=1,
+        provenance={},
+        created_at=_now(),
+        job_id=job.job_id,
     )
     completed = await repository.complete_build(
         job=job, sample_id=sample_id, generation=sample.generation, revision=revision,

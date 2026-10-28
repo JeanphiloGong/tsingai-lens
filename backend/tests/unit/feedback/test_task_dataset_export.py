@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_json
+from domain.feedback.sample_revision import (
+    EvaluationRevisionContent,
+    PreferenceRevisionContent,
+    SftRevisionContent,
+)
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
 
 import json
 from dataclasses import replace
@@ -52,24 +55,22 @@ def _dataset() -> Dataset:
 
 
 def _content(index: int = 1) -> SftRevisionContent:
-    return revision_content_from_json(
-        {
-            "schema_version": "literature-sft.v1",
-            "messages": [{"role": "user", "content": f"比较文献 {index} 的预热条件。"}],
-            "context": [
-                {
-                    "document_title": f"文献 {index}",
-                    "text": "图注记录了 200 C 的预热条件。",
-                }
-            ],
-            "target": "文献图注明确记录了 200 C 的预热条件。",
-            "evidence": [
-                {
-                    "document_title": f"文献 {index}",
-                    "text": "图注记录了 200 C 的预热条件。",
-                }
-            ],
-        }
+    return SftRevisionContent(
+        schema_version="literature-sft.v1",
+        messages=({"role": "user", "content": f"比较文献 {index} 的预热条件。"},),
+        context=(
+            {
+                "document_title": f"文献 {index}",
+                "text": "图注记录了 200 C 的预热条件。",
+            },
+        ),
+        target="文献图注明确记录了 200 C 的预热条件。",
+        evidence=(
+            {
+                "document_title": f"文献 {index}",
+                "text": "图注记录了 200 C 的预热条件。",
+            },
+        ),
     )
 
 
@@ -476,17 +477,15 @@ async def test_export_without_excerpts_preserves_input_and_identity(task_type) -
 
 
 async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected() -> None:
-    content = revision_content_from_json(
-        {
-            "schema_version": "literature-preference.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "文献", "text": "原文"}],
-            "response_a": "回答 A",
-            "response_b": "回答 B",
-            "suggested_preference": "a",
-            "rationale": "AI 建议 A",
-            "evidence": [{"document_title": "文献", "text": "原文"}],
-        }
+    content = PreferenceRevisionContent(
+        schema_version="literature-preference.v1",
+        messages=({"role": "user", "content": "比较 A、B。"},),
+        context=({"document_title": "文献", "text": "原文"},),
+        response_a="回答 A",
+        response_b="回答 B",
+        suggested_preference="a",
+        rationale="AI 建议 A",
+        evidence=({"document_title": "文献", "text": "原文"},),
     )
     dataset = replace(_dataset(), task_type="preference")
     samples = _Samples(_content_member(content, sample_id="preference-1"))
@@ -496,9 +495,7 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
     assert preview.exportable_count == 0
     assert any(issue.code == "preference_not_pairwise" for issue in preview.issues)
 
-    content_with_label = revision_content_from_json(
-        {**revision_content_json(content), "human_preference": "b"}
-    )
+    content_with_label = replace(content, human_preference="b")
     samples.members = [_content_member(content_with_label, sample_id="preference-1")]
     preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
     assert preview.issues == ()
@@ -520,16 +517,14 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
 
 @pytest.mark.anyio
 async def test_evaluation_export_keeps_reference_and_criteria_outside_input() -> None:
-    content = revision_content_from_json(
-        {
-            "schema_version": "literature-evaluation.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "文献", "text": "原文"}],
-            "reference": "B 有预热。",
-            "criteria": ["指出 B 的预热条件", "引用图注"],
-            "evaluation_mode": "reference",
-            "evidence": [{"document_title": "文献", "text": "原文"}],
-        }
+    content = EvaluationRevisionContent(
+        schema_version="literature-evaluation.v1",
+        messages=({"role": "user", "content": "比较 A、B。"},),
+        context=({"document_title": "文献", "text": "原文"},),
+        reference="B 有预热。",
+        criteria=("指出 B 的预热条件", "引用图注"),
+        evaluation_mode="reference",
+        evidence=({"document_title": "文献", "text": "原文"},),
     )
     dataset = replace(_dataset(), task_type="evaluation")
     service = _service(
@@ -563,13 +558,23 @@ async def test_published_files_load_offline_without_review_data_in_input(tmp_pat
         "evidence": [{"document_title": "P006.pdf", "text": "Review-only evidence marker"}],
     }
     if task_type == "sft":
-        content = revision_content_from_json({**common, "target": "每个条件三次拉伸测试。"})
+        content = SftRevisionContent(**common, target="每个条件三次拉伸测试。")
     elif task_type == "preference":
-        content = revision_content_from_json({**common, "response_a": "每个条件三次拉伸测试。",
-            "response_b": "每个条件一次。", "human_preference": "a", "rationale": "Private review rationale"})
+        content = PreferenceRevisionContent(
+            **common,
+            response_a="每个条件三次拉伸测试。",
+            response_b="每个条件一次。",
+            human_preference="a",
+            rationale="Private review rationale",
+            suggested_preference=None,
+        )
     else:
-        content = revision_content_from_json({**common, "reference": "每个条件三次拉伸测试。",
-            "criteria": ["明确三次测试。"], "evaluation_mode": "reference"})
+        content = EvaluationRevisionContent(
+            **common,
+            reference="每个条件三次拉伸测试。",
+            criteria=("明确三次测试。",),
+            evaluation_mode="reference",
+        )
     service = _service(_Samples(_content_member(content, sample_id="p006")), _Exports(), replace(_dataset(), task_type=task_type))
     preview = await service.preview_for_user(user_id="user-1", dataset_id="fdset_export_test")
     export = await service.publish_for_user(user_id="user-1", dataset_id="fdset_export_test",
@@ -603,12 +608,16 @@ def test_frozen_content_and_preview_fingerprints_keep_their_stored_contract():
     import json
     from domain.feedback.dataset_export import ExportIssue, ExportMember, ExportPreview, member_digest
     from domain.feedback.sample_revision import content_digest_for
-    from repositories.feedback_dataset_sample_repository import revision_content_from_json, revision_content_json
 
     fixtures = json.loads((Path(__file__).parents[2] / "fixtures" / "sample_revision_fingerprints.json").read_text())
     for fixture in fixtures:
-        content = revision_content_from_json(fixture["content"])
-        assert revision_content_json(content) == fixture["content"]
+        value = fixture["content"]
+        if value["schema_version"] == "literature-sft.v1":
+            content = SftRevisionContent(**value)
+        elif value["schema_version"] == "literature-preference.v1":
+            content = PreferenceRevisionContent(**value)
+        else:
+            content = EvaluationRevisionContent(**value)
         assert content_digest_for(content) == fixture["content_digest"]
         member = ExportMember(
             sample_id="sample-fixed", source_case_id="case-fixed", revision_id="revision-fixed", revision_no=2,

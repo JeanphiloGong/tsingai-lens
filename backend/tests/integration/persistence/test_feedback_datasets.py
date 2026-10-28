@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
+from domain.feedback.sample_revision import SftRevisionContent
+
+from domain.feedback.sample_revision import PreferenceRevisionContent, EvaluationRevisionContent
 
 import asyncio
 import json
@@ -158,28 +160,28 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
             break
     sample = await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id)
     assert sample.status == "needs_input" and sample.current_revision_id is None
-    content = {"schema_version": f"literature-{task_type}.v1",
+    common = {"schema_version": f"literature-{task_type}.v1",
         "messages": [{"role": "user", "content": "Compare A and B's preheating."}],
         "context": [{"document_title": "Paper B", "text": "Preheated at 200 C."}],
         "evidence": [{"document_title": "Paper B", "text": "Preheated at 200 C."}]}
     if task_type == "sft":
-        content["target"] = "Paper B was preheated at 200 C."
+        content = SftRevisionContent(**common, target="Paper B was preheated at 200 C.")
     elif task_type == "preference":
-        content.update(response_a="No preheating.", response_b="Preheated at 200 C.",
+        content = PreferenceRevisionContent(**common, response_a="No preheating.", response_b="Preheated at 200 C.",
             suggested_preference=None, human_preference="b", rationale="Supported by the caption.")
     else:
-        content.update(reference="Preheated at 200 C.", criteria=["Reports 200 C without inventing A's condition."],
+        content = EvaluationRevisionContent(**common, reference="Preheated at 200 C.", criteria=("Reports 200 C without inventing A's condition.",),
             evaluation_mode="reference")
     from application.feedback.dataset_service import FeedbackDatasetConflict
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
         await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
-            expected_revision_id=None, expected_generation=sample.generation + 1, content=revision_content_from_json(content))
+            expected_revision_id=None, expected_generation=sample.generation + 1, content=content)
     saved = await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
-        expected_revision_id=None, expected_generation=sample.generation, content=revision_content_from_json(content))
+        expected_revision_id=None, expected_generation=sample.generation, content=content)
     assert saved.status == "needs_confirmation" and saved.confirmed_revision_id is None
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
         await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
-            expected_revision_id=None, expected_generation=sample.generation, content=revision_content_from_json(content))
+            expected_revision_id=None, expected_generation=sample.generation, content=content)
     await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
         expected_revision_id=saved.current_revision_id)
     exports = FeedbackDatasetExportService(dataset_service=service, sample_repository=samples,
@@ -485,16 +487,21 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     new = await next_worker.claim_next_dataset_sample_build_job(later.isoformat())
     assert new is not None and new.lease_version == old.lease_version + 1
     revision = SampleRevision.build_worker(
-        revision_id=f"revision_{uuid4().hex[:32]}", sample_id=sample.sample_id, revision_no=1,
-        content=revision_content_from_json({
-            "schema_version": "literature-sft.v1",
-            "messages": [{"role": "user", "content": "Compare A and B."}],
-            "context": [{"document_title": "B", "text": "Preheated at 200 C."}],
-            "target": "B used 200 C.",
-            "evidence": [{"document_title": "B", "text": "Preheated at 200 C."}],
-        }),
-        input_digest=sample.source_digest, construction_spec_version=dataset.spec_version,
-        provenance={}, created_at=later.isoformat(), job_id=old.job_id,
+        revision_id=f"revision_{uuid4().hex[:32]}",
+        sample_id=sample.sample_id,
+        revision_no=1,
+        content=SftRevisionContent(
+            schema_version="literature-sft.v1",
+            messages=({"role": "user", "content": "Compare A and B."},),
+            context=({"document_title": "B", "text": "Preheated at 200 C."},),
+            target="B used 200 C.",
+            evidence=({"document_title": "B", "text": "Preheated at 200 C."},),
+        ),
+        input_digest=sample.source_digest,
+        construction_spec_version=dataset.spec_version,
+        provenance={},
+        created_at=later.isoformat(),
+        job_id=old.job_id,
     )
     assert await samples.complete_build(
         job=old, sample_id=sample.sample_id, generation=sample.generation,

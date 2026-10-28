@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from dataclasses import asdict
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from application.core.objectives.analysis.experiment_query_service import (
     objective_analysis_response,
 )
 from domain.core import PreparedDocumentInput, ResearchObjective
 from domain.core.research_objective import ResearchObjective
-from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord, ObjectiveResearchRecord
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
 
@@ -37,13 +41,18 @@ def test_research_objective_does_not_expose_persistence_timestamps() -> None:
     assert not hasattr(objective, "updated_at")
 
 
-def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> None:
+@pytest.mark.anyio
+async def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> None:
     created_at = datetime(2026, 9, 2, 1, 2, 3, tzinfo=UTC)
     updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     objective = _objective()
-    row = ObjectiveRepository._new_objective_row(
-        objective,
-        now=created_at,
+    row = ObjectiveResearchRecord(
+        collection_id=objective.collection_id,
+        objective_id=objective.objective_id,
+        rank=objective.rank,
+        origin=objective.origin,
+        payload={key: list(value) if isinstance(value, tuple) else value for key, value in asdict(objective).items()},
+        created_at=created_at,
     )
     row.updated_at = updated_at
 
@@ -52,13 +61,14 @@ def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> None:
     assert row.created_at == created_at
     assert row.updated_at == updated_at
 
-    restored = ObjectiveRepository._objective_record_from_row(row)
+    restored = await _repository(row).read_objective_record("collection-1", "objective-1")
     assert restored.objective == objective
     assert restored.created_at == created_at
     assert restored.updated_at == updated_at
 
 
-def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
+@pytest.mark.anyio
+async def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
     column_created_at = datetime(2026, 9, 2, 1, 2, 3, tzinfo=UTC)
     column_updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     legacy_created_at = datetime(2020, 1, 1, tzinfo=UTC)
@@ -70,7 +80,7 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
         origin="system_discovered",
         created_by_tool_call_id=None,
         payload={
-            **ObjectiveRepository._objective_payload(_objective()),
+            **asdict(_objective()),
             "created_at": legacy_created_at.isoformat(),
             "updated_at": legacy_updated_at.isoformat(),
         },
@@ -78,13 +88,14 @@ def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
         updated_at=column_updated_at,
     )
 
-    restored = ObjectiveRepository._objective_record_from_row(row)
+    restored = await _repository(row).read_objective_record("collection-1", "objective-1")
 
     assert restored.created_at == column_created_at
     assert restored.updated_at == column_updated_at
 
 
-def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> None:
+@pytest.mark.anyio
+async def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> None:
     analysis = ObjectiveAnalysis(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -107,11 +118,14 @@ def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> 
         ),
     )
 
-    row = ObjectiveRepository._new_analysis_row(
-        analysis,
-        now=datetime(2026, 9, 5, tzinfo=UTC),
+    row = ObjectiveAnalysisRecord(
+        collection_id=analysis.collection_id,
+        objective_id=analysis.objective_id,
+        analysis_version=analysis.analysis_version,
+        status=analysis.status,
+        payload={**objective_analysis_response(analysis), "diagnostics": list(analysis.diagnostics)},
+        created_at=datetime(2026, 9, 5, tzinfo=UTC),
     )
-
     assert "diagnostics" not in objective_analysis_response(analysis)
     assert row.payload["diagnostics"] == [
         {
@@ -120,10 +134,24 @@ def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> 
             "status": "verified",
         }
     ]
-    assert ObjectiveRepository._analysis_from_row(row).diagnostics == (
+    restored = await _repository(row).read_analysis("collection-1", "objective-1", 1)
+    assert restored.diagnostics == (
         {
             "trace_type": "table_matrix_repair",
             "table_id": "table-1",
             "status": "verified",
         },
     )
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+def _repository(row):
+    session = AsyncMock()
+    session.get.return_value = row
+    factory = MagicMock()
+    factory.return_value.__aenter__.return_value = session
+    return ObjectiveRepository(factory)

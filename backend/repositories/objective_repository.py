@@ -497,7 +497,45 @@ class ObjectiveRepository:
                     )
                 )
             )
-            by_id = {row.objective_id: self._objective_from_row(row) for row in rows}
+            by_id = {
+                row.objective_id: ResearchObjective(
+                    collection_id=row.collection_id,
+                    objective_id=row.objective_id,
+                    question=row.payload.get("question", ""),
+                    material_scope=tuple(row.payload.get("material_scope", ())),
+                    variables=tuple(row.payload.get("variables", ())),
+                    outcomes=tuple(row.payload.get("outcomes", ())),
+                    mechanisms=tuple(row.payload.get("mechanisms", ())),
+                    constraints=tuple(row.payload.get("constraints", ())),
+                    requested_comparator=row.payload.get("requested_comparator"),
+                    seed_document_ids=tuple(row.payload.get("seed_document_ids", ())),
+                    excluded_document_ids=tuple(
+                        row.payload.get("excluded_document_ids", ())
+                    ),
+                    confidence=row.payload.get("confidence", 0.0),
+                    reason=row.payload.get("reason"),
+                    source_relationship_ids=tuple(
+                        row.payload.get("source_relationship_ids", ())
+                    ),
+                    parent_objective_id=row.payload.get("parent_objective_id"),
+                    parent_analysis_version=row.payload.get("parent_analysis_version"),
+                    derivation_basis=_objective_derivation_basis(
+                        row.payload.get("derivation_basis")
+                    ),
+                    rank=row.payload.get("rank"),
+                    confirmation_status=row.payload.get(
+                        "confirmation_status", "candidate"
+                    ),
+                    active_analysis_version=row.payload.get("active_analysis_version"),
+                    published_analysis_version=row.payload.get(
+                        "published_analysis_version"
+                    ),
+                    origin=row.payload.get("origin", "system_discovered"),
+                    created_by_user_id=row.payload.get("created_by_user_id"),
+                    created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
+                )
+                for row in rows
+            }
             return ObjectiveFactSet(
                 research_objectives_ready=collection.discovery_ready,
                 document_inputs=tuple(
@@ -546,7 +584,45 @@ class ObjectiveRepository:
                     )
                 )
             )
-            return tuple(self._objective_from_row(row) for row in rows)
+            return tuple(
+                ResearchObjective(
+                    collection_id=row.collection_id,
+                    objective_id=row.objective_id,
+                    question=row.payload.get("question", ""),
+                    material_scope=tuple(row.payload.get("material_scope", ())),
+                    variables=tuple(row.payload.get("variables", ())),
+                    outcomes=tuple(row.payload.get("outcomes", ())),
+                    mechanisms=tuple(row.payload.get("mechanisms", ())),
+                    constraints=tuple(row.payload.get("constraints", ())),
+                    requested_comparator=row.payload.get("requested_comparator"),
+                    seed_document_ids=tuple(row.payload.get("seed_document_ids", ())),
+                    excluded_document_ids=tuple(
+                        row.payload.get("excluded_document_ids", ())
+                    ),
+                    confidence=row.payload.get("confidence", 0.0),
+                    reason=row.payload.get("reason"),
+                    source_relationship_ids=tuple(
+                        row.payload.get("source_relationship_ids", ())
+                    ),
+                    parent_objective_id=row.payload.get("parent_objective_id"),
+                    parent_analysis_version=row.payload.get("parent_analysis_version"),
+                    derivation_basis=_objective_derivation_basis(
+                        row.payload.get("derivation_basis")
+                    ),
+                    rank=row.payload.get("rank"),
+                    confirmation_status=row.payload.get(
+                        "confirmation_status", "candidate"
+                    ),
+                    active_analysis_version=row.payload.get("active_analysis_version"),
+                    published_analysis_version=row.payload.get(
+                        "published_analysis_version"
+                    ),
+                    origin=row.payload.get("origin", "system_discovered"),
+                    created_by_user_id=row.payload.get("created_by_user_id"),
+                    created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
+                )
+                for row in rows
+            )
 
     async def list_objective_records(
         self,
@@ -564,7 +640,57 @@ class ObjectiveRepository:
                     )
                 )
             )
-            return tuple(self._objective_record_from_row(row) for row in rows)
+            return tuple(
+                StoredObjective(
+                    objective=ResearchObjective(
+                        collection_id=row.collection_id,
+                        objective_id=row.objective_id,
+                        question=row.payload.get("question", ""),
+                        material_scope=tuple(row.payload.get("material_scope", ())),
+                        variables=tuple(row.payload.get("variables", ())),
+                        outcomes=tuple(row.payload.get("outcomes", ())),
+                        mechanisms=tuple(row.payload.get("mechanisms", ())),
+                        constraints=tuple(row.payload.get("constraints", ())),
+                        requested_comparator=row.payload.get("requested_comparator"),
+                        seed_document_ids=tuple(
+                            row.payload.get("seed_document_ids", ())
+                        ),
+                        excluded_document_ids=tuple(
+                            row.payload.get("excluded_document_ids", ())
+                        ),
+                        confidence=row.payload.get("confidence", 0.0),
+                        reason=row.payload.get("reason"),
+                        source_relationship_ids=tuple(
+                            row.payload.get("source_relationship_ids", ())
+                        ),
+                        parent_objective_id=row.payload.get("parent_objective_id"),
+                        parent_analysis_version=row.payload.get(
+                            "parent_analysis_version"
+                        ),
+                        derivation_basis=_objective_derivation_basis(
+                            row.payload.get("derivation_basis")
+                        ),
+                        rank=row.payload.get("rank"),
+                        confirmation_status=row.payload.get(
+                            "confirmation_status", "candidate"
+                        ),
+                        active_analysis_version=row.payload.get(
+                            "active_analysis_version"
+                        ),
+                        published_analysis_version=row.payload.get(
+                            "published_analysis_version"
+                        ),
+                        origin=row.payload.get("origin", "system_discovered"),
+                        created_by_user_id=row.payload.get("created_by_user_id"),
+                        created_by_tool_call_id=row.payload.get(
+                            "created_by_tool_call_id"
+                        ),
+                    ),
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                for row in rows
+            )
 
     async def create_authored_candidate(
         self,
@@ -627,7 +753,46 @@ class ObjectiveRepository:
                 ObjectiveResearchRecord,
                 (collection_id, objective_id),
             )
-            return self._objective_from_row(row) if row is not None else None
+            return (
+                ResearchObjective(
+                    collection_id=row.collection_id,
+                    objective_id=row.objective_id,
+                    question=row.payload.get("question", ""),
+                    material_scope=tuple(row.payload.get("material_scope", ())),
+                    variables=tuple(row.payload.get("variables", ())),
+                    outcomes=tuple(row.payload.get("outcomes", ())),
+                    mechanisms=tuple(row.payload.get("mechanisms", ())),
+                    constraints=tuple(row.payload.get("constraints", ())),
+                    requested_comparator=row.payload.get("requested_comparator"),
+                    seed_document_ids=tuple(row.payload.get("seed_document_ids", ())),
+                    excluded_document_ids=tuple(
+                        row.payload.get("excluded_document_ids", ())
+                    ),
+                    confidence=row.payload.get("confidence", 0.0),
+                    reason=row.payload.get("reason"),
+                    source_relationship_ids=tuple(
+                        row.payload.get("source_relationship_ids", ())
+                    ),
+                    parent_objective_id=row.payload.get("parent_objective_id"),
+                    parent_analysis_version=row.payload.get("parent_analysis_version"),
+                    derivation_basis=_objective_derivation_basis(
+                        row.payload.get("derivation_basis")
+                    ),
+                    rank=row.payload.get("rank"),
+                    confirmation_status=row.payload.get(
+                        "confirmation_status", "candidate"
+                    ),
+                    active_analysis_version=row.payload.get("active_analysis_version"),
+                    published_analysis_version=row.payload.get(
+                        "published_analysis_version"
+                    ),
+                    origin=row.payload.get("origin", "system_discovered"),
+                    created_by_user_id=row.payload.get("created_by_user_id"),
+                    created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
+                )
+                if row is not None
+                else None
+            )
 
     async def read_objective_record(
         self,
@@ -639,7 +804,58 @@ class ObjectiveRepository:
                 ObjectiveResearchRecord,
                 (collection_id, objective_id),
             )
-            return self._objective_record_from_row(row) if row is not None else None
+            return (
+                StoredObjective(
+                    objective=ResearchObjective(
+                        collection_id=row.collection_id,
+                        objective_id=row.objective_id,
+                        question=row.payload.get("question", ""),
+                        material_scope=tuple(row.payload.get("material_scope", ())),
+                        variables=tuple(row.payload.get("variables", ())),
+                        outcomes=tuple(row.payload.get("outcomes", ())),
+                        mechanisms=tuple(row.payload.get("mechanisms", ())),
+                        constraints=tuple(row.payload.get("constraints", ())),
+                        requested_comparator=row.payload.get("requested_comparator"),
+                        seed_document_ids=tuple(
+                            row.payload.get("seed_document_ids", ())
+                        ),
+                        excluded_document_ids=tuple(
+                            row.payload.get("excluded_document_ids", ())
+                        ),
+                        confidence=row.payload.get("confidence", 0.0),
+                        reason=row.payload.get("reason"),
+                        source_relationship_ids=tuple(
+                            row.payload.get("source_relationship_ids", ())
+                        ),
+                        parent_objective_id=row.payload.get("parent_objective_id"),
+                        parent_analysis_version=row.payload.get(
+                            "parent_analysis_version"
+                        ),
+                        derivation_basis=_objective_derivation_basis(
+                            row.payload.get("derivation_basis")
+                        ),
+                        rank=row.payload.get("rank"),
+                        confirmation_status=row.payload.get(
+                            "confirmation_status", "candidate"
+                        ),
+                        active_analysis_version=row.payload.get(
+                            "active_analysis_version"
+                        ),
+                        published_analysis_version=row.payload.get(
+                            "published_analysis_version"
+                        ),
+                        origin=row.payload.get("origin", "system_discovered"),
+                        created_by_user_id=row.payload.get("created_by_user_id"),
+                        created_by_tool_call_id=row.payload.get(
+                            "created_by_tool_call_id"
+                        ),
+                    ),
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                if row is not None
+                else None
+            )
 
     async def confirm_objective(
         self,
@@ -1093,16 +1309,73 @@ class ObjectiveRepository:
                 )
                 if objective_row is None:
                     return None
-                analysis_version = self._objective_from_row(
-                    objective_row
-                ).active_analysis_version
+                analysis_version = objective_row.payload.get('active_analysis_version')
             if analysis_version is None:
                 return None
             row = await session.get(
                 ObjectiveAnalysisRecord,
                 (collection_id, objective_id, analysis_version),
             )
-            return self._analysis_from_row(row) if row is not None else None
+            return (
+                ObjectiveAnalysis(
+                    collection_id=row.payload.get("collection_id", ""),
+                    objective_id=row.payload.get("objective_id", ""),
+                    analysis_version=row.payload.get("analysis_version", 0),
+                    document_inputs=tuple(
+                        (
+                            PreparedDocumentInput(
+                                document_id=item.get("document_id", ""),
+                                preparation_fingerprint=item.get(
+                                    "preparation_fingerprint", ""
+                                ),
+                            )
+                            for item in row.payload.get("document_inputs", ())
+                        )
+                    ),
+                    pipeline_version=row.payload.get("pipeline_version", ""),
+                    model_name=row.payload.get("model_name"),
+                    prompt_versions={
+                        str(key): str(value)
+                        for key, value in dict(
+                            row.payload.get("prompt_versions", {})
+                        ).items()
+                    },
+                    stats=execution_stats_from_json(row.payload.get("stats")),
+                    status=row.payload.get("status", "queued"),
+                    phase=row.payload.get("phase", "queued"),
+                    processed_document_count=row.payload.get(
+                        "processed_document_count", 0
+                    ),
+                    total_document_count=row.payload.get("total_document_count", 0),
+                    current_document_id=row.payload.get("current_document_id"),
+                    progress_message=row.payload.get("progress_message"),
+                    error_code=row.payload.get("error_code"),
+                    error_message=row.payload.get("error_message"),
+                    created_at=_datetime_or_none(row.payload.get("created_at")),
+                    started_at=_datetime_or_none(row.payload.get("started_at")),
+                    completed_at=_datetime_or_none(row.payload.get("completed_at")),
+                    diagnostics=tuple(
+                        (dict(item) for item in row.payload.get("diagnostics", ()))
+                    ),
+                    origin=row.payload.get("origin", "system_generated"),
+                    scientific_record_source=row.payload.get(
+                        "scientific_record_source",
+                        (
+                            "experiment_graph"
+                            if row.payload.get("origin", "system_generated")
+                            == "system_generated"
+                            else "authored_snapshot"
+                        ),
+                    ),
+                    source_analysis_version=row.payload.get("source_analysis_version"),
+                    created_by_user_id=row.payload.get("created_by_user_id"),
+                    created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
+                    abstention_reason=row.payload.get("abstention_reason"),
+                    abstention_note=row.payload.get("abstention_note"),
+                )
+                if row is not None
+                else None
+            )
 
     async def read_published_analysis(
         self,
@@ -1116,16 +1389,73 @@ class ObjectiveRepository:
             )
             if objective_row is None:
                 return None
-            version = self._objective_from_row(
-                objective_row
-            ).published_analysis_version
+            version = objective_row.payload.get('published_analysis_version')
             if version is None:
                 return None
             row = await session.get(
                 ObjectiveAnalysisRecord,
                 (collection_id, objective_id, version),
             )
-            return self._analysis_from_row(row) if row is not None else None
+            return (
+                ObjectiveAnalysis(
+                    collection_id=row.payload.get("collection_id", ""),
+                    objective_id=row.payload.get("objective_id", ""),
+                    analysis_version=row.payload.get("analysis_version", 0),
+                    document_inputs=tuple(
+                        (
+                            PreparedDocumentInput(
+                                document_id=item.get("document_id", ""),
+                                preparation_fingerprint=item.get(
+                                    "preparation_fingerprint", ""
+                                ),
+                            )
+                            for item in row.payload.get("document_inputs", ())
+                        )
+                    ),
+                    pipeline_version=row.payload.get("pipeline_version", ""),
+                    model_name=row.payload.get("model_name"),
+                    prompt_versions={
+                        str(key): str(value)
+                        for key, value in dict(
+                            row.payload.get("prompt_versions", {})
+                        ).items()
+                    },
+                    stats=execution_stats_from_json(row.payload.get("stats")),
+                    status=row.payload.get("status", "queued"),
+                    phase=row.payload.get("phase", "queued"),
+                    processed_document_count=row.payload.get(
+                        "processed_document_count", 0
+                    ),
+                    total_document_count=row.payload.get("total_document_count", 0),
+                    current_document_id=row.payload.get("current_document_id"),
+                    progress_message=row.payload.get("progress_message"),
+                    error_code=row.payload.get("error_code"),
+                    error_message=row.payload.get("error_message"),
+                    created_at=_datetime_or_none(row.payload.get("created_at")),
+                    started_at=_datetime_or_none(row.payload.get("started_at")),
+                    completed_at=_datetime_or_none(row.payload.get("completed_at")),
+                    diagnostics=tuple(
+                        (dict(item) for item in row.payload.get("diagnostics", ()))
+                    ),
+                    origin=row.payload.get("origin", "system_generated"),
+                    scientific_record_source=row.payload.get(
+                        "scientific_record_source",
+                        (
+                            "experiment_graph"
+                            if row.payload.get("origin", "system_generated")
+                            == "system_generated"
+                            else "authored_snapshot"
+                        ),
+                    ),
+                    source_analysis_version=row.payload.get("source_analysis_version"),
+                    created_by_user_id=row.payload.get("created_by_user_id"),
+                    created_by_tool_call_id=row.payload.get("created_by_tool_call_id"),
+                    abstention_reason=row.payload.get("abstention_reason"),
+                    abstention_note=row.payload.get("abstention_note"),
+                )
+                if row is not None
+                else None
+            )
 
     async def list_contributions(
         self,

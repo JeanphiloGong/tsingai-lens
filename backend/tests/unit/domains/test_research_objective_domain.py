@@ -560,7 +560,8 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
     assert published.published_analysis_version == 1
 
 
-def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
+@pytest.mark.anyio
+async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
     payload = objective_analysis_response(_analysis())
     payload.pop("scientific_record_source")
     payload.update(
@@ -572,9 +573,12 @@ def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> No
         }
     )
 
-    authored = ObjectiveRepository._analysis_from_row(
-        ObjectiveAnalysisRecord(payload=payload)
-    )
+    from unittest.mock import AsyncMock, MagicMock
+    session = AsyncMock()
+    session.get.return_value = ObjectiveAnalysisRecord(payload=payload)
+    factory = MagicMock()
+    factory.return_value.__aenter__.return_value = session
+    authored = await ObjectiveRepository(factory).read_analysis("collection-1", "objective-1", 2)
 
     assert authored.scientific_record_source == "authored_snapshot"
 
@@ -2180,3 +2184,8 @@ def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separatel
     }
     assert density_objective.source_relationship_ids == (density_id,)
     assert strength_objective.source_relationship_ids == (strength_id,)
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"

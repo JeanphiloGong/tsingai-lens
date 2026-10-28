@@ -64,8 +64,6 @@ from domain.core.research_objective import _positive_ints as objective_positive_
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.research_objective import (
     _text,
-    normalize_objective_confidence,
-    normalize_objective_terms,
 )
 from domain.core.scientific_fact import (
     SCIENTIFIC_CONTEXT_SCOPES,
@@ -3141,21 +3139,13 @@ class ObjectiveRepository:
                         item.get("paper_role"), PAPER_ROLE_VALUES, "uncertain"
                     ),
                     contribution_summary=finding_text(item.get("contribution_summary")),
-                    material_match=normalize_objective_terms(
-                        item.get("material_match")
-                    ),
-                    changed_variables=normalize_objective_terms(
-                        item.get("changed_variables")
-                    ),
-                    measured_property_scope=normalize_objective_terms(
-                        item.get("measured_property_scope")
-                    ),
-                    test_environment_scope=normalize_objective_terms(
-                        item.get("test_environment_scope")
-                    ),
+                    material_match=tuple(item.get("material_match", ())),
+                    changed_variables=tuple(item.get("changed_variables", ())),
+                    measured_property_scope=tuple(item.get("measured_property_scope", ())),
+                    test_environment_scope=tuple(item.get("test_environment_scope", ())),
                     exclusion_reason=finding_text(item.get("exclusion_reason")),
-                    warnings=normalize_objective_terms(item.get("warnings")),
-                    confidence=normalize_objective_confidence(item.get("confidence")),
+                    warnings=tuple(item.get("warnings", ())),
+                    confidence=item.get("confidence", 0.0),
                     evidence_disposition=finding_text(item.get("evidence_disposition")),
                     routed_source_count=objective_non_negative_int_or_none(
                         item.get("routed_source_count")
@@ -3933,9 +3923,7 @@ class ObjectiveRepository:
                             "unknown",
                         ),
                         failure_reason=finding_text(item.get("failure_reason")),
-                        confidence=normalize_objective_confidence(
-                            item.get("confidence")
-                        ),
+                        confidence=item.get("confidence", 0.0),
                         related_source_refs_explicit="related_source_refs" in item,
                         origin=finding_choice(
                             item.get("origin"), EVIDENCE_ORIGINS, "system_generated"
@@ -3955,7 +3943,7 @@ class ObjectiveRepository:
                         ),
                         created_at=_finding_creation_time(item.get("created_at")),
                         authoring_note=finding_text(item.get("authoring_note")),
-                        warnings=normalize_objective_terms(item.get("warnings")),
+                        warnings=tuple(item.get("warnings", ())),
                     )
                     for item in page
                 ),

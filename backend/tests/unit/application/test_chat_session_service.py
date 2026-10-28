@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from domain.chat import ChatToolRequest
 from tests.support.postgres import seed_collection
 
 import asyncio
@@ -711,14 +713,80 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker(*, post
         message_id="assistant-1",
         session_id=session.session_id,
         content="",
-        tool_calls=(ChatToolCall.requested(
-            tool_call_id="call-orphaned",
-            session_id=session.session_id,
-            assistant_message_id="assistant-1",
-            name="inspect_document_sources",
-            arguments={},
-            risk=ToolRisk.READ,
-        ).to_request(),),
+        tool_calls=(ChatToolRequest(
+            tool_call_id=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).tool_call_id,
+            name=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).name,
+            arguments=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).arguments,
+            position=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).position,
+            decision_user_id=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).decision_user_id,
+            decision_arguments_digest=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).decision_arguments_digest,
+            decided_at=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).decided_at,
+            decision_basis=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).decision_basis,
+            authorization_revision=ChatToolCall.requested(
+                tool_call_id="call-orphaned",
+                session_id=session.session_id,
+                assistant_message_id="assistant-1",
+                name="inspect_document_sources",
+                arguments={},
+                risk=ToolRisk.READ,
+            ).authorization_revision,
+        ),),
         created_at="2026-10-10T00:00:01Z",
     )
     running = ChatToolCall.requested(

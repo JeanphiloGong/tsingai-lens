@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import pytest
 from domain.chat import ChatToolRequest
@@ -477,15 +477,23 @@ def _tool_pair(
 
         created_at="2026-08-19T00:00:00+00:00",
     )
-    result = ChatMessage.from_tool_result(
+    tool_result = ChatToolResult(
+        tool_call_id=call_id,
+        status="succeeded",
+        data=payload or {"collection_id": "col-1"},
+    )
+    result = ChatMessage(
         message_id=f"msg-result-{call_id}",
         session_id="chat-1",
-        result=ChatToolResult(
-            tool_call_id=call_id,
-            status="succeeded",
-            data=payload or {"collection_id": "col-1"},
+        role="tool",
+        content=json.dumps(
+            asdict(tool_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
         ),
         created_at="2026-08-19T00:00:00+00:00",
+        tool_call_id=tool_result.tool_call_id,
+        tool_result=tool_result,
     )
     return call, result
 
@@ -539,15 +547,23 @@ def test_context_builder_budgets_tool_result_once_for_model_wire_content() -> No
 
         created_at="2026-08-19T00:00:00+00:00",
     )
-    result = ChatMessage.from_tool_result(
+    first_tool_result = ChatToolResult(
+        tool_call_id="call-scope",
+        status="succeeded",
+        data={"scope_records": ["x" * 4000]},
+    )
+    result = ChatMessage(
         message_id="msg-scope-result",
         session_id="chat-1",
-        result=ChatToolResult(
-            tool_call_id="call-scope",
-            status="succeeded",
-            data={"scope_records": ["x" * 4000]},
+        role="tool",
+        content=json.dumps(
+            asdict(first_tool_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
         ),
         created_at="2026-08-19T00:00:00+00:00",
+        tool_call_id=first_tool_result.tool_call_id,
+        tool_result=first_tool_result,
     )
 
     selected = ChatContextBuilder(max_messages=3, max_chars=5_000).for_model(
@@ -662,10 +678,21 @@ def test_complete_batch_is_indivisible_under_message_budget() -> None:
     first, result = _tool_pair()
     second_request = ChatToolRequest("call-2", "read_source", {}, 1)
     first = replace(first, tool_calls=(*first.tool_calls, second_request))
-    second_result = ChatMessage.from_tool_result(
-        message_id="result-2", session_id="chat-1",
-        result=ChatToolResult(tool_call_id="call-2", status="succeeded", data={"document_id": "paper-2"}),
+    second_tool_result = ChatToolResult(
+        tool_call_id="call-2", status="succeeded", data={"document_id": "paper-2"}
+    )
+    second_result = ChatMessage(
+        message_id="result-2",
+        session_id="chat-1",
+        role="tool",
+        content=json.dumps(
+            asdict(second_tool_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-08T00:00:00+00:00",
+        tool_call_id=second_tool_result.tool_call_id,
+        tool_result=second_tool_result,
     )
     active = _user("active", "Compare the two papers")
     messages = (active, first, result, second_result)
@@ -686,21 +713,41 @@ def test_default_context_keeps_eight_findings_for_a_constrained_research_plan() 
         requests.append(ChatToolRequest(call_id, "inspect_published_finding", {
             "objective_id": "elongation", "finding_id": f"finding-{index}"
         }, index))
-        results.append(ChatMessage.from_tool_result(
-            message_id=f"result-{index}", session_id="chat-1",
-            result=ChatToolResult(tool_call_id=call_id, status="succeeded", data={
-                "finding": {"finding_id": f"finding-{index}", "statement": "Annealing changes elongation; process conditions limit transferability."},
-                "evidence": [{
-                    "evidence_id": f"evidence-{index}-{page}",
-                    "document_id": "lpbf-tc4",
-                    "source_ref": f"results-{page}",
-                    "source_excerpt": (
-                        "The annealed Ti-6Al-4V specimen showed improved elongation with reduced strength. "
-                        "Specimen orientation and test temperature were held fixed; no independent laser-power effect was measured. "
-                    ) * 4,
-                } for page in range(8)],
-            }), created_at="2026-09-09T00:00:00+00:00",
-        ))
+        third_tool_result = ChatToolResult(
+            tool_call_id=call_id,
+            status="succeeded",
+            data={
+                "finding": {
+                    "finding_id": f"finding-{index}",
+                    "statement": "Annealing changes elongation; process conditions limit transferability.",
+                },
+                "evidence": [
+                    {
+                        "evidence_id": f"evidence-{index}-{page}",
+                        "document_id": "lpbf-tc4",
+                        "source_ref": f"results-{page}",
+                        "source_excerpt": "The annealed Ti-6Al-4V specimen showed improved elongation with reduced strength. Specimen orientation and test temperature were held fixed; no independent laser-power effect was measured. "
+                        * 4,
+                    }
+                    for page in range(8)
+                ],
+            },
+        )
+        results.append(
+            ChatMessage(
+                message_id=f"result-{index}",
+                session_id="chat-1",
+                role="tool",
+                content=json.dumps(
+                    asdict(third_tool_result),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
+                created_at="2026-09-09T00:00:00+00:00",
+                tool_call_id=third_tool_result.tool_call_id,
+                tool_result=third_tool_result,
+            )
+        )
     call = ChatMessage.assistant_tool_calls(
         message_id="finding-batch", session_id="chat-1", content="",
         tool_calls=tuple(requests), created_at="2026-09-09T00:00:00+00:00",

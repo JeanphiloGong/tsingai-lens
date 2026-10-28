@@ -1,3 +1,4 @@
+from copy import deepcopy
 from infra.source.artifact_bundle import source_documents_from_records
 from tests.support.postgres import seed_collection
 import asyncio
@@ -17,7 +18,6 @@ from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesCapability,
     InspectDocumentSourcesToolRequest,
 )
-from application.chat.tool_result_projection import tool_result_record
 from domain.source.artifacts import SourceBlock, SourceDocument
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.paper_map_repository import PaperMapRepository
@@ -176,7 +176,22 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
     assert result.data["paper_total"] == 7
     assert len(result.warnings) == 1
     assert "3" in result.warnings[0]
-    assert "private-storage-detail" not in str(tool_result_record(result))
+    assert "private-storage-detail" not in str({
+        "tool_call_id": result.tool_call_id,
+        "status": result.status.value,
+        "data": deepcopy(dict(result.data)),
+        "resource_refs": [
+            {
+                "resource_type": item.resource_type,
+                "resource_id": item.resource_id,
+                "href": item.href,
+            }
+            for item in result.resource_refs
+        ],
+        "warnings": list(result.warnings),
+        "error_code": result.error_code,
+        "error_message": result.error_message,
+    })
     assert "paper-6" in caplog.text
 
     miss = asyncio.run(capability.execute(context, BrowseCollectionPapersToolRequest(query="not-a-filename")))

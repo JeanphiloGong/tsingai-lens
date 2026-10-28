@@ -5389,7 +5389,7 @@ def _objective_strategy_candidates(source: Mapping[str, Any]) -> set[str]:
     candidates: set[str] = set()
     labels = [
         str(row[0] or "")
-        for row in normalize_table_matrix(source.get("table_matrix"))
+        for row in normalize_table_matrix(source.get("table_matrix", ()))
         if row and str(row[0] or "").strip()
     ]
     labels.extend(
@@ -6377,7 +6377,7 @@ def build_evidence_prompt_source(
         if not table_markdown:
             table_markdown = str(
                 render_markdown_table(
-                    normalize_table_matrix(source.get("table_matrix")),
+                    normalize_table_matrix(source.get("table_matrix", ())),
                     [str(value) for value in source.get("column_headers", ())],
                     header_row_count=int(source.get("header_row_count", 1) or 0),
                 )

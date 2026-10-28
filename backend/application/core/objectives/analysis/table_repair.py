@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from collections import Counter
+from collections.abc import Sequence
 from hashlib import sha256
 from typing import Any
 
@@ -123,7 +124,7 @@ def find_table_label_continuation(
 ) -> dict[str, Any] | None:
     """Locate an explicit label-only carryover, never infer a specimen name."""
     number = _TABLE_NUMBER.match(caption_text.strip())
-    matrix = normalize_table_matrix(list(getattr(table, "table_matrix", ()) or ()))
+    matrix = normalize_table_matrix(table.table_matrix)
     if number is None or len(matrix) < 2:
         return None
     table_number = number.group(1).rstrip(".").casefold()
@@ -159,9 +160,7 @@ def find_table_label_continuation(
     ]
     if not headers or headers != donor_headers or len(headers) != len(last_row):
         return None
-    donor_matrix = normalize_table_matrix(
-        list(getattr(candidate, "table_matrix", ()) or ())
-    )
+    donor_matrix = normalize_table_matrix(candidate.table_matrix)
     marker = _CONTINUED_TABLE.fullmatch(
         str(getattr(candidate, "caption_text", "") or "").strip()
     )
@@ -214,7 +213,7 @@ def repair_table_source(
         source=source,
     ):
         return source, None
-    original_matrix = normalize_table_matrix(source.get("table_matrix"))
+    original_matrix = normalize_table_matrix(source.get("table_matrix", ()))
     canonical_matrix = _canonical_objective_table_matrix(
         source=source,
         matrix=original_matrix,
@@ -541,7 +540,7 @@ def _build_objective_table_matrix_repair_payloads(
     source: dict[str, Any],
     paper_facts_extractor: PaperFactsExtractor,
 ) -> tuple[dict[str, Any], ...]:
-    matrix = normalize_table_matrix(source.get("table_matrix"))
+    matrix = normalize_table_matrix(source.get("table_matrix", ()))
     canonical_matrix = _canonical_objective_table_matrix(source=source, matrix=matrix)
     if not canonical_matrix:
         return ()
@@ -1098,14 +1097,8 @@ def _objective_repaired_header_is_supported(
     return True
 
 
-def normalize_table_matrix(value: Any) -> list[list[str]]:
-    if not isinstance(value, list):
-        return []
-    return [
-        [str(cell).strip() for cell in row]
-        for row in value
-        if isinstance(row, (list, tuple))
-    ]
+def normalize_table_matrix(value: Sequence[Sequence[str]]) -> list[list[str]]:
+    return [[cell.strip() for cell in row] for row in value]
 
 
 def _cleanup_objective_repaired_table_matrix_residual_fragments(

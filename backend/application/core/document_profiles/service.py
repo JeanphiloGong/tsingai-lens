@@ -584,7 +584,7 @@ class DocumentProfileService:
         file_lookup: dict[str, Any],
     ) -> str | None:
         for key in _TITLE_FIELD_CANDIDATES:
-            candidate = document.title.strip() or None if key == "title" else None
+            candidate = (document.title or "").strip() or None if key == "title" else None
             candidate = candidate or (document.metadata.get(key) or "").strip() or None
             if candidate is None or candidate == document.document_id:
                 continue
@@ -613,7 +613,7 @@ class DocumentProfileService:
             if filename and filename != document.document_id:
                 return stored_to_source.get(filename, filename)
 
-        title_value = document.title.strip() or None
+        title_value = (document.title or "").strip() or None
         if title_value and title_value in stored_to_source:
             return stored_to_source[title_value]
 

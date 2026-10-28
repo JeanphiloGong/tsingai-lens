@@ -58,7 +58,7 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-from domain.evaluation import FindingCuration, FindingFeedback
+from domain.evaluation import EvaluationGoldItem, FindingCuration, FindingFeedback
 from domain.source import SourceBlock, SourceDocument
 from repositories.source_artifact_repository import SourceArtifactRepository
 from repositories.finding_review_repository import FindingReviewRepository

@@ -14,28 +14,19 @@ from typing import (
 from domain.core import PaperStudyDisposition
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
-    FINDING_ASSERTION_STRENGTHS,
-    FINDING_ORIGINS,
-    FINDING_SYNTHESIS_STATUSES,
     PAPER_CONTRIBUTION_STATUSES,
     Finding,
     FindingMechanismRelation,
     FindingPaperContribution,
 )
-from domain.core.finding import _certainty as finding_certainty
 from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _non_negative_int as finding_non_negative_int
-from domain.core.finding import _positive_int as finding_positive_int
 from domain.core.finding import _stable_id as finding_stable_id
-from domain.core.finding import _strings as finding_strings
 from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     EVIDENCE_ORIGINS,
     EVIDENCE_RESOLUTION_STATUS_VALUES,
     EVIDENCE_ROLE_VALUES,
-    OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_EVIDENCE_STATES,
-    OBJECTIVE_ORIGINS,
     PAPER_RELEVANCE_VALUES,
     PAPER_ROLE_VALUES,
     SOURCE_KIND_VALUES,
@@ -66,7 +57,6 @@ from domain.core.research_objective import (
     _text,
 )
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
     SCIENTIFIC_RESULT_DIRECTIONS,
     SCIENTIFIC_RESULT_KINDS,
     ScientificAttribute,
@@ -3145,7 +3135,7 @@ class ObjectiveRepository:
                     test_environment_scope=tuple(item.get("test_environment_scope", ())),
                     exclusion_reason=finding_text(item.get("exclusion_reason")),
                     warnings=tuple(item.get("warnings", ())),
-                    confidence=item.get("confidence", 0.0),
+                    confidence=round(item.get("confidence", 0.0), 4),
                     evidence_disposition=finding_text(item.get("evidence_disposition")),
                     routed_source_count=objective_non_negative_int_or_none(
                         item.get("routed_source_count")
@@ -3923,7 +3913,7 @@ class ObjectiveRepository:
                             "unknown",
                         ),
                         failure_reason=finding_text(item.get("failure_reason")),
-                        confidence=item.get("confidence", 0.0),
+                        confidence=round(item.get("confidence", 0.0), 4),
                         related_source_refs_explicit="related_source_refs" in item,
                         origin=finding_choice(
                             item.get("origin"), EVIDENCE_ORIGINS, "system_generated"

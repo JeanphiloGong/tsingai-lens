@@ -212,3 +212,40 @@ def _repository(row):
     factory = MagicMock()
     factory.return_value.__aenter__.return_value = session
     return ObjectiveRepository(factory)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("confidence, expected", [(0.8123456, 0.8123), (0.999999, 1.0), (0.0, 0.0)])
+async def test_saved_analysis_confidence_keeps_four_digit_read_precision(confidence, expected):
+    identity = {
+        "collection_id": "collection-1", "objective_id": "objective-1",
+        "analysis_version": 1, "document_id": "paper-1", "confidence": confidence,
+    }
+    row = ObjectiveAnalysisRecord(
+        collection_id="collection-1", objective_id="objective-1", analysis_version=1,
+        payload={
+            "paper_contributions": [{
+                **identity, "analysis_status": "analyzed", "relevance": "high",
+                "paper_role": "primary_experiment",
+            }],
+            "evidence_records": [{
+                **identity, "evidence_id": "evidence-1", "source_kind": "text_window",
+                "source_ref": "results-1", "source_excerpt": "Strength increased to 950 MPa.",
+                "evidence_role": "direct_result", "selection_status": "extracted",
+                "attribution_scope": "descriptive_only", "resolution_status": "resolved",
+                "reported_result": {
+                    "outcome": "strength", "value": 950, "unit": "MPa",
+                    "direction": "increase", "result_text": "Strength increased to 950 MPa.",
+                },
+            }],
+        },
+    )
+    repository = _repository(row)
+
+    contributions = await repository.list_contributions("collection-1", "objective-1", 1)
+    evidence, total = await repository.list_evidence("collection-1", "objective-1", 1)
+
+    assert len(contributions) == total == 1
+    assert contributions[0].confidence == evidence[0].confidence == expected
+    assert row.payload["paper_contributions"][0]["confidence"] == confidence
+    assert row.payload["evidence_records"][0]["confidence"] == confidence

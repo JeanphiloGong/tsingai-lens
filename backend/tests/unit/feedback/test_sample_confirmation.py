@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
+from domain.feedback.sample_revision import SftRevisionContent
+
 
 from dataclasses import replace
 
@@ -121,14 +122,12 @@ def _sample() -> DatasetSample:
 
 def _revision(revision_id: str, author_kind: str) -> SampleRevision:
     # Use the mapping form so the test mirrors the HTTP payload shape.
-    content = revision_content_from_json(
-        {
-            "schema_version": "literature-sft.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "文献 A", "text": "原文"}],
-            "target": "候选回答",
-            "evidence": [{"document_title": "文献 A", "text": "原文"}],
-        }
+    content = SftRevisionContent(
+        schema_version="literature-sft.v1",
+        messages=({"role": "user", "content": "比较 A、B。"},),
+        context=({"document_title": "文献 A", "text": "原文"},),
+        target="候选回答",
+        evidence=({"document_title": "文献 A", "text": "原文"},),
     )
     return SampleRevision(
         revision_id=revision_id,
@@ -182,8 +181,20 @@ async def test_no_excerpt_candidate_can_be_saved_and_confirmed() -> None:
     content = {"schema_version": "literature-sft.v1",
         "messages": [{"role": "user", "content": "Summarize the research decision."}],
         "context": [], "evidence": [], "target": "Compare laser power at fixed scan speed."}
-    saved = await service.update_sample(user_id="user-1", dataset_id="fdset-1", sample_id="sample-1",
-        expected_revision_id=None, expected_generation=1, content=revision_content_from_json(content))
+    saved = await service.update_sample(
+        user_id="user-1",
+        dataset_id="fdset-1",
+        sample_id="sample-1",
+        expected_revision_id=None,
+        expected_generation=1,
+        content=SftRevisionContent(
+            schema_version=content["schema_version"],
+            messages=tuple(content["messages"]),
+            context=tuple(content["context"]),
+            target=content["target"],
+            evidence=tuple(content["evidence"]),
+        ),
+    )
     assert saved.status == "needs_confirmation"
     confirmed = await service.confirm_sample(user_id="user-1", dataset_id="fdset-1", sample_id="sample-1",
         expected_revision_id=saved.current_revision_id)
@@ -201,13 +212,13 @@ async def test_human_edit_appends_revision_and_clears_confirmation() -> None:
         dataset_id="fdset-1",
         sample_id="sample-1",
         expected_revision_id="revision-1",
-        content=revision_content_from_json({
-            "schema_version": "literature-sft.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "文献 A", "text": "原文"}],
-            "target": "人工修订回答",
-            "evidence": [{"document_title": "文献 A", "text": "原文"}],
-        }),
+        content=SftRevisionContent(
+            schema_version="literature-sft.v1",
+            messages=({"role": "user", "content": "比较 A、B。"},),
+            context=({"document_title": "文献 A", "text": "原文"},),
+            target="人工修订回答",
+            evidence=({"document_title": "文献 A", "text": "原文"},),
+        ),
     )
 
     assert result.status == "needs_confirmation"
@@ -239,13 +250,13 @@ async def test_confirmation_binds_current_revision_and_stale_edit_is_rejected() 
             dataset_id="fdset-1",
             sample_id="sample-1",
             expected_revision_id="old-revision",
-            content=revision_content_from_json({
-                "schema_version": "literature-sft.v1",
-                "messages": [{"role": "user", "content": "比较 A、B。"}],
-                "context": [{"document_title": "文献 A", "text": "原文"}],
-                "target": "晚到修改",
-                "evidence": [{"document_title": "文献 A", "text": "原文"}],
-            }),
+            content=SftRevisionContent(
+                schema_version="literature-sft.v1",
+                messages=({"role": "user", "content": "比较 A、B。"},),
+                context=({"document_title": "文献 A", "text": "原文"},),
+                target="晚到修改",
+                evidence=({"document_title": "文献 A", "text": "原文"},),
+            ),
         )
 
 
@@ -265,13 +276,13 @@ async def test_edit_rejects_sample_when_source_case_digest_changed() -> None:
             dataset_id="fdset-1",
             sample_id="sample-1",
             expected_revision_id="revision-1",
-            content=revision_content_from_json({
-                "schema_version": "literature-sft.v1",
-                "messages": [{"role": "user", "content": "比较 A、B。"}],
-                "context": [{"document_title": "文献 A", "text": "原文"}],
-                "target": "新的人工回答",
-                "evidence": [{"document_title": "文献 A", "text": "原文"}],
-            }),
+            content=SftRevisionContent(
+                schema_version="literature-sft.v1",
+                messages=({"role": "user", "content": "比较 A、B。"},),
+                context=({"document_title": "文献 A", "text": "原文"},),
+                target="新的人工回答",
+                evidence=({"document_title": "文献 A", "text": "原文"},),
+            ),
         )
 
 

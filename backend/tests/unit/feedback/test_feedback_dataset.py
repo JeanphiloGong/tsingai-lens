@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
+from domain.feedback.sample_revision import SftRevisionContent
+
 
 from datetime import datetime, timezone
 
@@ -154,8 +155,20 @@ async def test_needs_input_can_save_its_first_complete_human_revision(excerpt: s
     content = {"schema_version": "literature-sft.v1", "messages": [{"role": "user", "content": "Compare A and B."}],
                "context": [{"document_title": "B", "text": excerpt}],
                "target": excerpt, "evidence": [{"document_title": "B", "text": excerpt}]}
-    saved = await service.update_sample(user_id="user-1", dataset_id=dataset.dataset_id, sample_id="sample-1",
-        expected_revision_id=None, expected_generation=1, content=revision_content_from_json(content))
+    saved = await service.update_sample(
+        user_id="user-1",
+        dataset_id=dataset.dataset_id,
+        sample_id="sample-1",
+        expected_revision_id=None,
+        expected_generation=1,
+        content=SftRevisionContent(
+            schema_version=content["schema_version"],
+            messages=tuple(content["messages"]),
+            context=tuple(content["context"]),
+            target=content["target"],
+            evidence=tuple(content["evidence"]),
+        ),
+    )
     assert saved.status == "needs_confirmation"
     assert samples.revision.revision_no == 1
     assert samples.revision.author_kind == "human"
@@ -170,8 +183,20 @@ async def test_needs_input_can_save_its_first_complete_human_revision(excerpt: s
         assert "source_ref" not in record
         assert samples.revision.provenance["source_refs"] == []
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
-        await service.update_sample(user_id="user-1", dataset_id=dataset.dataset_id, sample_id="sample-1",
-            expected_revision_id=None, expected_generation=1, content=revision_content_from_json(content))
+        await service.update_sample(
+            user_id="user-1",
+            dataset_id=dataset.dataset_id,
+            sample_id="sample-1",
+            expected_revision_id=None,
+            expected_generation=1,
+            content=SftRevisionContent(
+                schema_version=content["schema_version"],
+                messages=tuple(content["messages"]),
+                context=tuple(content["context"]),
+                target=content["target"],
+                evidence=tuple(content["evidence"]),
+            ),
+        )
 
 
 @pytest.mark.anyio

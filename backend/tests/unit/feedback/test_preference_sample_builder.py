@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
+from domain.feedback.sample_revision import PreferenceRevisionContent
 
 
 import pytest
@@ -270,17 +270,30 @@ def test_validation_rejects_different_inputs_and_treats_label_as_explicit() -> N
 ])
 @pytest.mark.parametrize("has_previous", [False, True])
 async def test_builder_does_not_invent_matching_input_digests(extra, reason, has_previous):
-    previous = SampleRevision.build_worker(
-        revision_id="previous-revision", sample_id="sample-1", revision_no=1,
-        content=revision_content_from_json({
-            "schema_version": "literature-preference.v1",
-            "messages": [{"role": "user", "content": "比较 A、B。"}],
-            "context": [{"document_title": "B", "text": "证据"}],
-            "evidence": [{"document_title": "B", "text": "证据"}],
-            "response_a": "回答 A", "response_b": "回答 B",
-        }), input_digest="a" * 64, construction_spec_version=1, provenance={},
-        created_at="2026-09-29T00:00:00+00:00", job_id="old-job",
-    ) if has_previous else None
+    previous = (
+        SampleRevision.build_worker(
+            revision_id="previous-revision",
+            sample_id="sample-1",
+            revision_no=1,
+            content=PreferenceRevisionContent(
+                schema_version="literature-preference.v1",
+                messages=({"role": "user", "content": "比较 A、B。"},),
+                context=({"document_title": "B", "text": "证据"},),
+                evidence=({"document_title": "B", "text": "证据"},),
+                response_a="回答 A",
+                response_b="回答 B",
+                suggested_preference=None,
+                rationale="",
+            ),
+            input_digest="a" * 64,
+            construction_spec_version=1,
+            provenance={},
+            created_at="2026-09-29T00:00:00+00:00",
+            job_id="old-job",
+        )
+        if has_previous
+        else None
+    )
     result = await PreferenceSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,
         previous_revision=previous, review_note="核对同一任务。" if has_previous else None,
@@ -296,15 +309,24 @@ async def test_builder_does_not_invent_matching_input_digests(extra, reason, has
 @pytest.mark.parametrize("input_digest,spec_version", [("b" * 64, 1), ("a" * 64, 2)])
 async def test_rebuild_uses_current_evidence_when_previous_revision_is_stale(input_digest, spec_version):
     previous = SampleRevision.build_worker(
-        revision_id="old-revision", sample_id="sample-1", revision_no=1,
-        content=revision_content_from_json({
-            "schema_version": "literature-preference.v1",
-            "messages": [{"role": "user", "content": "旧问题"}],
-            "context": [{"document_title": "B", "text": "旧证据"}],
-            "evidence": [{"document_title": "B", "text": "旧证据"}],
-            "response_a": "旧回答 A", "response_b": "旧回答 B",
-        }), input_digest=input_digest, construction_spec_version=spec_version,
-        provenance={}, created_at="2026-09-29T00:00:00+00:00", job_id="old-job",
+        revision_id="old-revision",
+        sample_id="sample-1",
+        revision_no=1,
+        content=PreferenceRevisionContent(
+            schema_version="literature-preference.v1",
+            messages=({"role": "user", "content": "旧问题"},),
+            context=({"document_title": "B", "text": "旧证据"},),
+            evidence=({"document_title": "B", "text": "旧证据"},),
+            response_a="旧回答 A",
+            response_b="旧回答 B",
+            suggested_preference=None,
+            rationale="",
+        ),
+        input_digest=input_digest,
+        construction_spec_version=spec_version,
+        provenance={},
+        created_at="2026-09-29T00:00:00+00:00",
+        job_id="old-job",
     )
 
     class Generator:

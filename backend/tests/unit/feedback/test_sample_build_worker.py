@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
+from domain.feedback.sample_revision import PreferenceRevisionContent
+
 
 import asyncio
 from dataclasses import replace
@@ -182,16 +183,24 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
     samples = _Samples(sample)
     if task_type == "preference":
         previous = SampleRevision.build_worker(
-            revision_id="previous-revision", sample_id=sample.sample_id, revision_no=1,
-            content=revision_content_from_json({
-                "schema_version": "literature-preference.v1",
-                "messages": [{"role": "user", "content": "比较 A、B。"}],
-                "context": [{"document_title": "文献 B", "text": "证据原文"}],
-                "evidence": [{"document_title": "文献 B", "text": "证据原文"}],
-                "response_a": "当前回答 A", "response_b": "当前回答 B", "rationale": "旧理由",
-            }), input_digest=sample.source_digest, construction_spec_version=1,
+            revision_id="previous-revision",
+            sample_id=sample.sample_id,
+            revision_no=1,
+            content=PreferenceRevisionContent(
+                schema_version="literature-preference.v1",
+                messages=({"role": "user", "content": "比较 A、B。"},),
+                context=({"document_title": "文献 B", "text": "证据原文"},),
+                evidence=({"document_title": "文献 B", "text": "证据原文"},),
+                response_a="当前回答 A",
+                response_b="当前回答 B",
+                rationale="旧理由",
+                suggested_preference=None,
+            ),
+            input_digest=sample.source_digest,
+            construction_spec_version=1,
             provenance={"evidence_records": [{"source_ref": "blk-1"}]},
-            created_at="2026-09-29T00:00:00+00:00", job_id="previous-job",
+            created_at="2026-09-29T00:00:00+00:00",
+            job_id="previous-job",
         )
         samples.revision = previous
         samples.sample = replace(sample, current_revision_id=previous.revision_id)

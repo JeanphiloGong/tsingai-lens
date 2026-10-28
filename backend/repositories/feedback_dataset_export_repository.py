@@ -107,7 +107,7 @@ class FeedbackDatasetExportRepository:
                         "rationale": content_value.rationale,
                         "human_preference": content_value.human_preference,
                     }
-                elif isinstance(content_value, EvaluationRevisionContent):
+                else:
                     content_payload = {
                         "schema_version": content_value.schema_version,
                         "messages": [dict(item) for item in content_value.messages],
@@ -117,8 +117,6 @@ class FeedbackDatasetExportRepository:
                         "criteria": list(content_value.criteria),
                         "evaluation_mode": content_value.evaluation_mode,
                     }
-                else:
-                    raise ValueError("unsupported sample revision content")
                 member_values.append(
                     {
                         "sample_id": member.sample_id,

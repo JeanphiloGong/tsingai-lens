@@ -234,7 +234,37 @@ class SampleRevision:
 
 
 def content_digest_for(content: RevisionContent) -> str:
-    payload = content_fingerprint_basis(content)
+    content_value = content
+    if isinstance(content_value, SftRevisionContent):
+        payload = {
+            "schema_version": content_value.schema_version,
+            "messages": [dict(item) for item in content_value.messages],
+            "context": [dict(item) for item in content_value.context],
+            "evidence": [dict(item) for item in content_value.evidence],
+            "target": content_value.target,
+        }
+    elif isinstance(content_value, PreferenceRevisionContent):
+        payload = {
+            "schema_version": content_value.schema_version,
+            "messages": [dict(item) for item in content_value.messages],
+            "context": [dict(item) for item in content_value.context],
+            "evidence": [dict(item) for item in content_value.evidence],
+            "response_a": content_value.response_a,
+            "response_b": content_value.response_b,
+            "suggested_preference": content_value.suggested_preference,
+            "rationale": content_value.rationale,
+            "human_preference": content_value.human_preference,
+        }
+    else:
+        payload = {
+            "schema_version": content_value.schema_version,
+            "messages": [dict(item) for item in content_value.messages],
+            "context": [dict(item) for item in content_value.context],
+            "evidence": [dict(item) for item in content_value.evidence],
+            "reference": content_value.reference,
+            "criteria": list(content_value.criteria),
+            "evaluation_mode": content_value.evaluation_mode,
+        }
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -312,36 +342,3 @@ __all__ = [
     "SftRevisionContent",
     "content_digest_for",
 ]
-
-
-def content_fingerprint_basis(content: RevisionContent) -> dict[str, Any]:
-    if isinstance(content, SftRevisionContent):
-        return {
-            'schema_version': content.schema_version,
-            'messages': [dict(item) for item in content.messages],
-            'context': [dict(item) for item in content.context],
-            'target': content.target,
-            'evidence': [dict(item) for item in content.evidence],
-        }
-    if isinstance(content, PreferenceRevisionContent):
-        return {
-            'schema_version': content.schema_version,
-            'messages': [dict(item) for item in content.messages],
-            'context': [dict(item) for item in content.context],
-            'response_a': content.response_a,
-            'response_b': content.response_b,
-            'suggested_preference': content.suggested_preference,
-            'rationale': content.rationale,
-            'evidence': [dict(item) for item in content.evidence],
-            'human_preference': content.human_preference,
-        }
-    else:
-        return {
-            'schema_version': content.schema_version,
-            'messages': [dict(item) for item in content.messages],
-            'context': [dict(item) for item in content.context],
-            'reference': content.reference,
-            'criteria': list(content.criteria),
-            'evaluation_mode': content.evaluation_mode,
-            'evidence': [dict(item) for item in content.evidence],
-        }

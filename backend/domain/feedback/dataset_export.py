@@ -16,7 +16,6 @@ from domain.feedback.sample_revision import (
     RevisionContent,
     SftRevisionContent,
     content_digest_for,
-    content_fingerprint_basis,
 )
 
 
@@ -108,27 +107,68 @@ class ExportPreview:
         created_at: str,
         expires_at: str,
     ) -> "ExportPreview":
+        member_values = []
+        for member in members:
+            content_value = member.content
+            if isinstance(content_value, SftRevisionContent):
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "target": content_value.target,
+                }
+            elif isinstance(content_value, PreferenceRevisionContent):
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "response_a": content_value.response_a,
+                    "response_b": content_value.response_b,
+                    "suggested_preference": content_value.suggested_preference,
+                    "rationale": content_value.rationale,
+                    "human_preference": content_value.human_preference,
+                }
+            else:
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "reference": content_value.reference,
+                    "criteria": list(content_value.criteria),
+                    "evaluation_mode": content_value.evaluation_mode,
+                }
+            member_values.append(
+                {
+                    "sample_id": member.sample_id,
+                    "source_case_id": member.source_case_id,
+                    "revision_id": member.revision_id,
+                    "revision_no": member.revision_no,
+                    "content": content_payload,
+                    "content_digest": member.content_digest,
+                    "input_digest": member.input_digest,
+                    "provenance": _copy(member.provenance),
+                    "row_key": member.row_key,
+                }
+            )
         digest_basis = {
-            "schema_versions": sorted({member.content.schema_version for member in members}),
+            "schema_versions": sorted(
+                {member.content.schema_version for member in members}
+            ),
             "dataset_id": dataset_id,
-            "members": [{
-                'sample_id': member.sample_id,
-                'source_case_id': member.source_case_id,
-                'revision_id': member.revision_id,
-                'revision_no': member.revision_no,
-                'content': content_fingerprint_basis(member.content),
-                'content_digest': member.content_digest,
-                'input_digest': member.input_digest,
-                'provenance': _copy(member.provenance),
-                'row_key': member.row_key,
-            } for member in members],
-            "issues": [{
-                'sample_id': issue.sample_id,
-                'revision_id': issue.revision_id,
-                'code': issue.code,
-                'message': issue.message,
-                'question': issue.question,
-            } for issue in issues],
+            "members": (member_values),
+            "issues": [
+                {
+                    "sample_id": issue.sample_id,
+                    "revision_id": issue.revision_id,
+                    "code": issue.code,
+                    "message": issue.message,
+                    "question": issue.question,
+                }
+                for issue in issues
+            ],
         }
         return cls(
             preview_id=preview_id,

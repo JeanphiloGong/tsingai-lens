@@ -505,7 +505,7 @@ class FeedbackDatasetSampleRepository:
                     "rationale": content_value.rationale,
                     "human_preference": content_value.human_preference,
                 }
-            elif isinstance(content_value, EvaluationRevisionContent):
+            else:
                 content_payload = {
                     "schema_version": content_value.schema_version,
                     "messages": [dict(item) for item in content_value.messages],
@@ -515,8 +515,6 @@ class FeedbackDatasetSampleRepository:
                     "criteria": list(content_value.criteria),
                     "evaluation_mode": content_value.evaluation_mode,
                 }
-            else:
-                raise ValueError("unsupported sample revision content")
             session.add(
                 FeedbackSampleRevisionRow(
                     revision_id=revision.revision_id,
@@ -912,7 +910,7 @@ class FeedbackDatasetSampleRepository:
                         "rationale": content_value.rationale,
                         "human_preference": content_value.human_preference,
                     }
-                elif isinstance(content_value, EvaluationRevisionContent):
+                else:
                     content_payload = {
                         "schema_version": content_value.schema_version,
                         "messages": [dict(item) for item in content_value.messages],
@@ -922,8 +920,6 @@ class FeedbackDatasetSampleRepository:
                         "criteria": list(content_value.criteria),
                         "evaluation_mode": content_value.evaluation_mode,
                     }
-                else:
-                    raise ValueError("unsupported sample revision content")
                 session.add(
                     FeedbackSampleRevisionRow(
                         revision_id=revision.revision_id,

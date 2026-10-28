@@ -239,26 +239,17 @@ async def test_worker_rejects_unknown_payload_and_keeps_no_result() -> None:
     assert not cases.results
 
 
-def test_feedback_message_snapshot_keeps_digest_shape_without_approval_metadata():
-    from application.feedback.analysis_handler import feedback_message_record
-    from domain.chat import ChatToolRequest
-
-    message = ChatMessage(
-        message_id="answer-1", session_id="session-1", role="assistant",
-        content="Inspect the reported tensile conditions.", created_at="2026-10-20T00:00:00+00:00",
-        tool_calls=(ChatToolRequest(
-            tool_call_id="call-1", name="read_source", arguments={"pages": [3]},
-            position=0, decision_user_id="reviewer-1", authorization_revision=2,
-        ),),
+async def test_feedback_digest_is_stable_when_the_same_version_is_reanalysed():
+    chat = _Chat(feedback=None)
+    chat.feedback = ChatMessageFeedback.for_answer(
+        message=chat.answer, feedback_id="feedback-1", user_id="user-1",
+        rating="not_helpful", reason="incorrect", comment="Check the caption.",
+        now="2026-09-24T00:00:03+00:00",
     )
-    snapshot = feedback_message_record(message)
-    assert snapshot == {
-        "message_id": "answer-1", "session_id": "session-1", "role": "assistant",
-        "content": "Inspect the reported tensile conditions.",
-        "created_at": "2026-10-20T00:00:00+00:00", "tool_call_id": None,
-        "tool_calls": [{"tool_call_id": "call-1", "name": "read_source",
-                        "arguments": {"pages": [3]}, "position": 0}],
-        "tool_result": None, "source_contexts": [],
-    }
-    snapshot["tool_calls"][0]["arguments"]["pages"].append(4)
-    assert message.tool_calls[0].arguments == {"pages": [3]}
+    job = _job(chat.feedback.feedback_id, idempotency_key=chat.feedback.analysis_version_key)
+    handler = FeedbackAnalysisHandler(chat_repository=chat)
+    first, snapshot, _ = await handler.handle(job)
+    second, repeated_snapshot, _ = await handler.handle(job)
+    assert second.input_digest == first.input_digest
+    assert repeated_snapshot == snapshot
+    assert first.input_digest == "07566d4a74c484c6acf31619676b04f6b6ba01313e7222a55d654f92c3253c58"

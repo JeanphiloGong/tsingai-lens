@@ -10,7 +10,6 @@ from hashlib import sha256
 from typing import Any, Protocol
 from uuid import uuid4
 
-from application.chat.source_context_projection import source_context_record
 from application.feedback.source_coverage import (
     ChatCoverageAudit,
     build_evidence_coverage,
@@ -156,7 +155,63 @@ class FeedbackAnalysisHandler:
                 "response_digest": feedback.response_digest,
             },
             "session_id": feedback.session_id,
-            "answer": feedback_message_record(answer),
+            "answer": {
+                "message_id": answer.message_id,
+                "session_id": answer.session_id,
+                "role": answer.role.value,
+                "content": answer.content,
+                "created_at": answer.created_at,
+                "tool_call_id": answer.tool_call_id,
+                "tool_calls": [
+                    {
+                        "tool_call_id": call.tool_call_id,
+                        "name": call.name,
+                        "arguments": deepcopy(dict(call.arguments)),
+                        "position": call.position,
+                    }
+                    for call in answer.tool_calls
+                ],
+                "tool_result": (
+                    {
+                        "tool_call_id": answer.tool_result.tool_call_id,
+                        "status": answer.tool_result.status.value,
+                        "data": deepcopy(dict(answer.tool_result.data)),
+                        "resource_refs": [
+                            {
+                                "resource_type": item.resource_type,
+                                "resource_id": item.resource_id,
+                                "href": item.href,
+                            }
+                            for item in answer.tool_result.resource_refs
+                        ],
+                        "warnings": list(answer.tool_result.warnings),
+                        "error_code": answer.tool_result.error_code,
+                        "error_message": answer.tool_result.error_message,
+                    }
+                    if answer.tool_result is not None
+                    else None
+                ),
+                "source_contexts": [
+                    {
+                        "resource_ref": {
+                            "resource_type": source.resource_ref.resource_type,
+                            "resource_id": source.resource_ref.resource_id,
+                            "href": source.resource_ref.href,
+                        },
+                        "collection_id": source.collection_id,
+                        "document_id": source.document_id,
+                        "document_title": source.document_title,
+                        "source_kind": source.source_kind,
+                        "source_ref": source.source_ref,
+                        "page": source.page,
+                        "quote": source.quote,
+                        "heading_path": source.heading_path,
+                        "quote_truncated": source.quote_truncated,
+                        "source_digest": source.source_digest,
+                    }
+                    for source in answer.source_contexts
+                ],
+            },
             "coverage": asdict(coverage),
         }
         input_digest = sha256(
@@ -295,37 +350,3 @@ __all__ = [
     "RuleBasedFeedbackAnalysisEngine",
     "read_chat_coverage_audit",
 ]
-
-
-def feedback_message_record(message: ChatMessage) -> dict[str, Any]:
-    """Snapshot the message for the stable feedback input digest, excluding approvals."""
-    return {
-        "message_id": message.message_id,
-        "session_id": message.session_id,
-        "role": message.role.value,
-        "content": message.content,
-        "created_at": message.created_at,
-        "tool_call_id": message.tool_call_id,
-        "tool_calls": [
-            {"tool_call_id": call.tool_call_id, "name": call.name,
-             "arguments": deepcopy(dict(call.arguments)), "position": call.position}
-            for call in message.tool_calls
-        ],
-        "tool_result": {
-            "tool_call_id": message.tool_result.tool_call_id,
-            "status": message.tool_result.status.value,
-            "data": deepcopy(dict(message.tool_result.data)),
-            "resource_refs": [
-                {
-                    "resource_type": item.resource_type,
-                    "resource_id": item.resource_id,
-                    "href": item.href,
-                }
-                for item in message.tool_result.resource_refs
-            ],
-            "warnings": list(message.tool_result.warnings),
-            "error_code": message.tool_result.error_code,
-            "error_message": message.tool_result.error_message,
-        } if message.tool_result is not None else None,
-        "source_contexts": [source_context_record(source) for source in message.source_contexts],
-    }

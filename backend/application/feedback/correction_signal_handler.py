@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from domain.feedback.correction_signal import CORRECTION_SIGNAL_TYPE
 
 import json
@@ -15,7 +16,6 @@ from uuid import uuid4
 from application.feedback.analysis_handler import (
     AnalysisInputError,
     conversation_before_answer,
-    feedback_message_record,
     read_chat_coverage_audit,
 )
 from application.feedback.source_coverage import build_evidence_coverage
@@ -207,11 +207,125 @@ class CorrectionSignalAnalysisHandler:
                 "content": signal.content,
                 "created_at": signal.created_at,
             },
-            "anchor": feedback_message_record(anchor),
+            "anchor": {
+                "message_id": anchor.message_id,
+                "session_id": anchor.session_id,
+                "role": anchor.role.value,
+                "content": anchor.content,
+                "created_at": anchor.created_at,
+                "tool_call_id": anchor.tool_call_id,
+                "tool_calls": [
+                    {
+                        "tool_call_id": call.tool_call_id,
+                        "name": call.name,
+                        "arguments": deepcopy(dict(call.arguments)),
+                        "position": call.position,
+                    }
+                    for call in anchor.tool_calls
+                ],
+                "tool_result": (
+                    {
+                        "tool_call_id": anchor.tool_result.tool_call_id,
+                        "status": anchor.tool_result.status.value,
+                        "data": deepcopy(dict(anchor.tool_result.data)),
+                        "resource_refs": [
+                            {
+                                "resource_type": item.resource_type,
+                                "resource_id": item.resource_id,
+                                "href": item.href,
+                            }
+                            for item in anchor.tool_result.resource_refs
+                        ],
+                        "warnings": list(anchor.tool_result.warnings),
+                        "error_code": anchor.tool_result.error_code,
+                        "error_message": anchor.tool_result.error_message,
+                    }
+                    if anchor.tool_result is not None
+                    else None
+                ),
+                "source_contexts": [
+                    {
+                        "resource_ref": {
+                            "resource_type": source.resource_ref.resource_type,
+                            "resource_id": source.resource_ref.resource_id,
+                            "href": source.resource_ref.href,
+                        },
+                        "collection_id": source.collection_id,
+                        "document_id": source.document_id,
+                        "document_title": source.document_title,
+                        "source_kind": source.source_kind,
+                        "source_ref": source.source_ref,
+                        "page": source.page,
+                        "quote": source.quote,
+                        "heading_path": source.heading_path,
+                        "quote_truncated": source.quote_truncated,
+                        "source_digest": source.source_digest,
+                    }
+                    for source in anchor.source_contexts
+                ],
+            },
             "coverage": asdict(coverage),
             "related_message_ids": [item.message_id for item in related_messages],
             "corrected_answer": (
-                feedback_message_record(corrected) if corrected else None
+                {
+                    "message_id": corrected.message_id,
+                    "session_id": corrected.session_id,
+                    "role": corrected.role.value,
+                    "content": corrected.content,
+                    "created_at": corrected.created_at,
+                    "tool_call_id": corrected.tool_call_id,
+                    "tool_calls": [
+                        {
+                            "tool_call_id": call.tool_call_id,
+                            "name": call.name,
+                            "arguments": deepcopy(dict(call.arguments)),
+                            "position": call.position,
+                        }
+                        for call in corrected.tool_calls
+                    ],
+                    "tool_result": (
+                        {
+                            "tool_call_id": corrected.tool_result.tool_call_id,
+                            "status": corrected.tool_result.status.value,
+                            "data": deepcopy(dict(corrected.tool_result.data)),
+                            "resource_refs": [
+                                {
+                                    "resource_type": item.resource_type,
+                                    "resource_id": item.resource_id,
+                                    "href": item.href,
+                                }
+                                for item in corrected.tool_result.resource_refs
+                            ],
+                            "warnings": list(corrected.tool_result.warnings),
+                            "error_code": corrected.tool_result.error_code,
+                            "error_message": corrected.tool_result.error_message,
+                        }
+                        if corrected.tool_result is not None
+                        else None
+                    ),
+                    "source_contexts": [
+                        {
+                            "resource_ref": {
+                                "resource_type": source.resource_ref.resource_type,
+                                "resource_id": source.resource_ref.resource_id,
+                                "href": source.resource_ref.href,
+                            },
+                            "collection_id": source.collection_id,
+                            "document_id": source.document_id,
+                            "document_title": source.document_title,
+                            "source_kind": source.source_kind,
+                            "source_ref": source.source_ref,
+                            "page": source.page,
+                            "quote": source.quote,
+                            "heading_path": source.heading_path,
+                            "quote_truncated": source.quote_truncated,
+                            "source_digest": source.source_digest,
+                        }
+                        for source in corrected.source_contexts
+                    ],
+                }
+                if corrected
+                else None
             ),
             "corrected_coverage": (
                 asdict(corrected_coverage) if corrected_coverage else None

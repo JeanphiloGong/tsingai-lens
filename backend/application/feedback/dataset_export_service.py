@@ -70,7 +70,9 @@ class FeedbackDatasetExportService:
     async def preview_for_user(
         self, *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
     ) -> ExportPreview:
-        dataset = await self._read_dataset(user_id, dataset_id)
+        dataset = await self.dataset_service.read_for_user(
+            user_id=user_id, dataset_id=dataset_id
+        )
         if sample_ids is not None and (not sample_ids or len(set(sample_ids)) != len(sample_ids)):
             raise DatasetExportError("export_sample_selection_invalid")
         members = await self._read_confirmed_members(dataset_id, sample_ids=sample_ids)
@@ -80,7 +82,19 @@ class FeedbackDatasetExportService:
             if not selected or len(selected) != len(sample_ids) or not selected <= available:
                 raise DatasetExportError("export_sample_selection_invalid")
             members = tuple(item for item in members if item.sample.sample_id in selected)
-        export_members = tuple(_export_member(item) for item in members)
+        export_members = tuple(
+            ExportMember(
+                sample_id=item.sample.sample_id,
+                source_case_id=item.sample.source_case_id,
+                revision_id=item.revision.revision_id,
+                revision_no=item.revision.revision_no,
+                content=item.revision.content,
+                content_digest=item.revision.content_digest,
+                input_digest=item.revision.input_digest,
+                provenance=item.revision.provenance,
+            )
+            for item in members
+        )
         issues = tuple(
             issue
             for member in export_members
@@ -107,7 +121,9 @@ class FeedbackDatasetExportService:
         allow_partial: bool,
         idempotency_key: str,
     ) -> DatasetExport:
-        dataset = await self._read_dataset(user_id, dataset_id)
+        dataset = await self.dataset_service.read_for_user(
+            user_id=user_id, dataset_id=dataset_id
+        )
         if not idempotency_key.strip() or len(idempotency_key) > 128:
             raise DatasetExportError("export_idempotency_key_invalid")
         preview = await self.repository.read_preview(preview_id)
@@ -124,7 +140,16 @@ class FeedbackDatasetExportService:
 
         selected = {member.sample_id for member in preview.members}
         current = tuple(
-            _export_member(item)
+            ExportMember(
+                sample_id=item.sample.sample_id,
+                source_case_id=item.sample.source_case_id,
+                revision_id=item.revision.revision_id,
+                revision_no=item.revision.revision_no,
+                content=item.revision.content,
+                content_digest=item.revision.content_digest,
+                input_digest=item.revision.input_digest,
+                provenance=item.revision.provenance,
+            )
             for item in await self._read_confirmed_members(dataset_id, sample_ids=list(selected))
         )
         if member_digest(current) != member_digest(preview.members):
@@ -196,7 +221,9 @@ class FeedbackDatasetExportService:
     async def list_for_user(
         self, *, user_id: str, dataset_id: str, limit: int = 50, offset: int = 0
     ) -> DatasetExportListResult:
-        await self._read_dataset(user_id, dataset_id)
+        await self.dataset_service.read_for_user(
+            user_id=user_id, dataset_id=dataset_id
+        )
         if limit < 1 or limit > 200 or offset < 0:
             raise DatasetExportError("pagination_invalid")
         items = await self.repository.list_exports(
@@ -207,7 +234,9 @@ class FeedbackDatasetExportService:
     async def read_for_user(
         self, *, user_id: str, dataset_id: str, export_id: str
     ) -> DatasetExport:
-        await self._read_dataset(user_id, dataset_id)
+        await self.dataset_service.read_for_user(
+            user_id=user_id, dataset_id=dataset_id
+        )
         export = await self.repository.read_export(export_id)
         if export is None or export.dataset_id != dataset_id:
             raise FileNotFoundError("dataset export not found")
@@ -246,11 +275,6 @@ class FeedbackDatasetExportService:
             return export, payload, "application/json", "manifest.json"
         raise DatasetExportError("export_format_invalid")
 
-    async def _read_dataset(self, user_id: str, dataset_id: str):
-        return await self.dataset_service.read_for_user(
-            user_id=user_id, dataset_id=dataset_id
-        )
-
     async def _read_confirmed_members(
         self, dataset_id: str, *, sample_ids: list[str] | None = None
     ) -> tuple[ConfirmedDatasetMember, ...]:
@@ -260,19 +284,6 @@ class FeedbackDatasetExportService:
             )
         except DatasetSampleRevisionConflict as exc:
             raise DatasetExportError(str(exc)) from exc
-
-
-def _export_member(item: ConfirmedDatasetMember) -> ExportMember:
-    return ExportMember(
-        sample_id=item.sample.sample_id,
-        source_case_id=item.sample.source_case_id,
-        revision_id=item.revision.revision_id,
-        revision_no=item.revision.revision_no,
-        content=item.revision.content,
-        content_digest=item.revision.content_digest,
-        input_digest=item.revision.input_digest,
-        provenance=item.revision.provenance,
-    )
 
 
 def _validate_member(

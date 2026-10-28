@@ -378,6 +378,9 @@ def test_paper_map_extractor_rejects_explicit_wrong_shapes(field, value):
     {"factor_assertions": [17], "outcome": "microstructure", "source_labels": ["S1"]},
     {"factor_assertions": [{"label": 17, "role": "varied", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
     {"factor_assertions": [{"label": "power", "role": "INVALID", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [{"label": "power", "role": [], "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [], "outcome": "microstructure", "source_labels": ["S1", "S1"]},
+    {"factor_assertions": [{"label": "power", "role": "varied", "source_labels": ["S1"]}, {"label": "Power", "role": "varied", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
     {"factor_assertions": [], "outcome": {"invalid": "object"}, "source_labels": ["S1"]},
     {"factor_assertions": [], "outcome": "microstructure", "source_labels": [17]},
 ])

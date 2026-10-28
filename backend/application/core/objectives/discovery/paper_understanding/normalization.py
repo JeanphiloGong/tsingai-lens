@@ -42,6 +42,7 @@ def _downgrade_unresolved_relationships(value: object) -> object:
                     not isinstance(item, Mapping)
                     or set(item) - {"label", "role", "source_labels"}
                     or not isinstance(item.get("label"), str)
+                    or not isinstance(item.get("role"), str)
                     or item.get("role") not in {"varied", "compared", "modeled"}
                     or not isinstance(item.get("source_labels"), list)
                     or not item["source_labels"]
@@ -52,6 +53,10 @@ def _downgrade_unresolved_relationships(value: object) -> object:
                     for item in factor_values
                 )
             ):
+                retained_relationships.append(relationship)
+                continue
+            factor_labels = [item["label"].strip().casefold() for item in factor_values]
+            if len(factor_labels) != len(set(factor_labels)):
                 retained_relationships.append(relationship)
                 continue
             if "confidence" in study and (
@@ -84,6 +89,7 @@ def _downgrade_unresolved_relationships(value: object) -> object:
                 or not isinstance(lineage_values, list)
                 or not lineage_values
                 or any(not isinstance(item, str) for item in lineage_values)
+                or len(lineage_values) != len(set(lineage_values))
             ):
                 retained_relationships.append(relationship)
                 continue

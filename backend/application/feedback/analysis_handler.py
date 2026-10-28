@@ -11,7 +11,6 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from application.chat.source_context_projection import source_context_record
-from application.chat.tool_result_projection import tool_result_record
 from application.feedback.source_coverage import (
     ChatCoverageAudit,
     build_evidence_coverage,
@@ -312,6 +311,21 @@ def feedback_message_record(message: ChatMessage) -> dict[str, Any]:
              "arguments": deepcopy(dict(call.arguments)), "position": call.position}
             for call in message.tool_calls
         ],
-        "tool_result": tool_result_record(message.tool_result) if message.tool_result is not None else None,
+        "tool_result": {
+            "tool_call_id": message.tool_result.tool_call_id,
+            "status": message.tool_result.status.value,
+            "data": deepcopy(dict(message.tool_result.data)),
+            "resource_refs": [
+                {
+                    "resource_type": item.resource_type,
+                    "resource_id": item.resource_id,
+                    "href": item.href,
+                }
+                for item in message.tool_result.resource_refs
+            ],
+            "warnings": list(message.tool_result.warnings),
+            "error_code": message.tool_result.error_code,
+            "error_message": message.tool_result.error_message,
+        } if message.tool_result is not None else None,
         "source_contexts": [source_context_record(source) for source in message.source_contexts],
     }

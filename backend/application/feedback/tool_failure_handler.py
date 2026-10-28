@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from domain.feedback.tool_failure import TOOL_FAILURE_SIGNAL_TYPE
 
 import json
@@ -11,7 +13,6 @@ from hashlib import sha256
 from typing import Any, Protocol
 from uuid import uuid4
 
-from application.chat.tool_result_projection import tool_result_record
 from application.feedback.analysis_handler import AnalysisInputError
 from domain.chat import ChatMessage, ChatMessageRole, ToolCallStatus, ToolResultStatus
 from domain.feedback import (
@@ -151,7 +152,22 @@ class ToolFailureAnalysisHandler:
         if result_message.tool_call_id != call.tool_call_id or result_message.tool_result is None:
             raise AnalysisInputError("tool_failure_identity_mismatch")
         result = result_message.tool_result
-        actual_digest = tool_result_digest(tool_result_record(result))
+        actual_digest = tool_result_digest({
+            "tool_call_id": result.tool_call_id,
+            "status": result.status.value,
+            "data": deepcopy(dict(result.data)),
+            "resource_refs": [
+                {
+                    "resource_type": item.resource_type,
+                    "resource_id": item.resource_id,
+                    "href": item.href,
+                }
+                for item in result.resource_refs
+            ],
+            "warnings": list(result.warnings),
+            "error_code": result.error_code,
+            "error_message": result.error_message,
+        })
         if actual_digest != values["result_digest"]:
             raise AnalysisInputError("tool_failure_superseded")
         if result.status is not ToolResultStatus.FAILED or call.status is not ToolCallStatus.FAILED:
@@ -199,7 +215,22 @@ class ToolFailureAnalysisHandler:
                 "status": call.status.value,
                 "error_code": call.error_code,
             },
-            "result": tool_result_record(result),
+            "result": {
+                "tool_call_id": result.tool_call_id,
+                "status": result.status.value,
+                "data": deepcopy(dict(result.data)),
+                "resource_refs": [
+                    {
+                        "resource_type": item.resource_type,
+                        "resource_id": item.resource_id,
+                        "href": item.href,
+                    }
+                    for item in result.resource_refs
+                ],
+                "warnings": list(result.warnings),
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+            },
             "coverage": asdict(coverage),
             "related_message_ids": list(related),
             "answer_message_id": answer_message_id,

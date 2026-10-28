@@ -57,10 +57,6 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from domain.evaluation import FindingCuration, FindingFeedback
-from repositories.finding_review_repository import (
-    finding_curation_from_record,
-    finding_feedback_from_record,
-)
 from repositories.paper_map_repository import paper_map_from_payload
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 from tests.support.repositories.objective_repository import MemoryObjectiveRepository
@@ -885,25 +881,25 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
         "finding_id": "finding-1",
     }
     await service.review_repository.upsert_curation(
-        finding_curation_from_record(
-            {
-                "curation_id": "curation-1",
-                **identity,
-                "curated_status": "limited",
-                "curated_finding": finding_response(published),
-                "updated_at": "2026-08-02T10:00:00+00:00",
-            }
+        FindingCuration(
+            curation_id=\"curation-1\",
+            **identity,
+            curated_status=\"limited\",
+            curated_finding=published,
+            updated_at=\"2026-08-02T10:00:00+00:00\",
+            note=None,
+            reviewer=None,
         )
     )
     await service.review_repository.upsert_feedback(
-        finding_feedback_from_record(
-            {
-                "feedback_id": "feedback-1",
-                **identity,
-                "review_status": "incorrect",
-                "issue_type": "overclaim",
-                "created_at": "2026-08-02T11:00:00+00:00",
-            }
+        FindingFeedback(
+            feedback_id=\"feedback-1\",
+            **identity,
+            review_status=\"incorrect\",
+            issue_type=\"overclaim\",
+            created_at=\"2026-08-02T11:00:00+00:00\",
+            note=None,
+            reviewer=None,
         )
     )
 
@@ -916,14 +912,14 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
     assert rejected["training_messages"] == []
 
     await service.review_repository.upsert_curation(
-        finding_curation_from_record(
-            {
-                "curation_id": "curation-1",
-                **identity,
-                "curated_status": "limited",
-                "curated_finding": finding_response(published),
-                "updated_at": "2026-08-02T12:00:00+00:00",
-            }
+        FindingCuration(
+            curation_id=\"curation-1\",
+            **identity,
+            curated_status=\"limited\",
+            curated_finding=published,
+            updated_at=\"2026-08-02T12:00:00+00:00\",
+            note=None,
+            reviewer=None,
         )
     )
 

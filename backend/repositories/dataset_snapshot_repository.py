@@ -24,11 +24,25 @@ class DatasetSnapshotRepository:
             existing = await session.scalar(
                 select(FeedbackDatasetSnapshotRow).where(
                     FeedbackDatasetSnapshotRow.owner_id == snapshot.owner_id,
-                    FeedbackDatasetSnapshotRow.manifest_digest == snapshot.manifest_digest,
+                    FeedbackDatasetSnapshotRow.manifest_digest
+                    == snapshot.manifest_digest,
                 )
             )
             if existing is not None:
-                return _snapshot(existing)
+                return DatasetSnapshot(
+                    dataset_id=existing.dataset_id,
+                    owner_id=existing.owner_id,
+                    collection_id=existing.collection_id,
+                    dataset_type=existing.dataset_type,
+                    rows=tuple(deepcopy(existing.rows or ())),
+                    exclusions=tuple(deepcopy(existing.exclusions or ())),
+                    provenance=deepcopy(existing.provenance or {}),
+                    manifest=deepcopy(existing.manifest or {}),
+                    manifest_digest=existing.manifest_digest,
+                    provenance_digest=existing.provenance_digest,
+                    content_digest=existing.content_digest,
+                    created_at=_iso(existing.created_at),
+                )
             row = FeedbackDatasetSnapshotRow(
                 dataset_id=snapshot.dataset_id,
                 owner_id=snapshot.owner_id,
@@ -47,12 +61,42 @@ class DatasetSnapshotRepository:
             )
             session.add(row)
             await session.flush()
-            return _snapshot(row)
+            return DatasetSnapshot(
+                dataset_id=row.dataset_id,
+                owner_id=row.owner_id,
+                collection_id=row.collection_id,
+                dataset_type=row.dataset_type,
+                rows=tuple(deepcopy(row.rows or ())),
+                exclusions=tuple(deepcopy(row.exclusions or ())),
+                provenance=deepcopy(row.provenance or {}),
+                manifest=deepcopy(row.manifest or {}),
+                manifest_digest=row.manifest_digest,
+                provenance_digest=row.provenance_digest,
+                content_digest=row.content_digest,
+                created_at=_iso(row.created_at),
+            )
 
     async def read(self, dataset_id: str) -> DatasetSnapshot | None:
         async with self.session_factory() as session:
             row = await session.get(FeedbackDatasetSnapshotRow, dataset_id)
-            return _snapshot(row) if row is not None else None
+            return (
+                DatasetSnapshot(
+                    dataset_id=row.dataset_id,
+                    owner_id=row.owner_id,
+                    collection_id=row.collection_id,
+                    dataset_type=row.dataset_type,
+                    rows=tuple(deepcopy(row.rows or ())),
+                    exclusions=tuple(deepcopy(row.exclusions or ())),
+                    provenance=deepcopy(row.provenance or {}),
+                    manifest=deepcopy(row.manifest or {}),
+                    manifest_digest=row.manifest_digest,
+                    provenance_digest=row.provenance_digest,
+                    content_digest=row.content_digest,
+                    created_at=_iso(row.created_at),
+                )
+                if row is not None
+                else None
+            )
 
     async def list_for_owner(
         self,
@@ -83,24 +127,23 @@ class DatasetSnapshotRepository:
             )
         async with self.session_factory() as session:
             rows = await session.scalars(statement)
-            return tuple(_snapshot(row) for row in rows)
-
-
-def _snapshot(row: FeedbackDatasetSnapshotRow) -> DatasetSnapshot:
-    return DatasetSnapshot(
-        dataset_id=row.dataset_id,
-        owner_id=row.owner_id,
-        collection_id=row.collection_id,
-        dataset_type=row.dataset_type,  # type: ignore[arg-type]
-        rows=tuple(deepcopy(row.rows or ())),
-        exclusions=tuple(deepcopy(row.exclusions or ())),
-        provenance=deepcopy(row.provenance or {}),
-        manifest=deepcopy(row.manifest or {}),
-        manifest_digest=row.manifest_digest,
-        provenance_digest=row.provenance_digest,
-        content_digest=row.content_digest,
-        created_at=_iso(row.created_at),
-    )
+            return tuple(
+                DatasetSnapshot(
+                    dataset_id=row.dataset_id,
+                    owner_id=row.owner_id,
+                    collection_id=row.collection_id,
+                    dataset_type=row.dataset_type,
+                    rows=tuple(deepcopy(row.rows or ())),
+                    exclusions=tuple(deepcopy(row.exclusions or ())),
+                    provenance=deepcopy(row.provenance or {}),
+                    manifest=deepcopy(row.manifest or {}),
+                    manifest_digest=row.manifest_digest,
+                    provenance_digest=row.provenance_digest,
+                    content_digest=row.content_digest,
+                    created_at=_iso(row.created_at),
+                )
+                for row in rows
+            )
 
 
 def _datetime(value: Any) -> datetime:
@@ -120,4 +163,4 @@ def _iso(value: datetime) -> str:
     return _datetime(value).isoformat()
 
 
-__all__ = ['DatasetSnapshotRepository']
+__all__ = ["DatasetSnapshotRepository"]

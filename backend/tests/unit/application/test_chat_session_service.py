@@ -996,7 +996,11 @@ async def test_chat_session_service_checkpoints_every_agent_step(*, postgres_ses
 
 
 @pytest.mark.parametrize("ending", ["timeout", "budget"])
-async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending: str, *, postgres_session_factory) -> None:
+async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending: str, monkeypatch, *, postgres_session_factory) -> None:
+    from application.chat import agent_runner as agent_runner_module
+
+    now = [0.0]
+    monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
     repository = ChatRepository(postgres_session_factory)
     sources = SourceArtifactRepository(repository.session_factory)
     collection = _CollectionService()
@@ -1012,6 +1016,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
                 try:
                     await asyncio.Event().wait()
                 finally:
+                    now[0] = 0.5
                     cancelled.set()
             return await super().respond(**kwargs)
 
@@ -1024,8 +1029,8 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     )
     runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((read,)),
-        # Leave enough setup time to reach the deliberately hanging third call;
-        # the whole-turn budget still cancels it promptly.
+        # Charge the controlled deadline to the hanging model call, independently
+        # of database checkpoint latency during setup.
         limits=AgentRunLimits(max_elapsed_seconds=0.5, max_model_tokens=100),
     )
     service = ChatSessionService(repository=repository, collection_service=collection,

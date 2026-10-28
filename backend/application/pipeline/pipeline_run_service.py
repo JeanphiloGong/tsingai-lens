@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from repositories.pipeline_run_repository import pipeline_run_record
-
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -68,7 +66,62 @@ class PipelineRunService:
             input_fingerprint=input_fingerprint,
             context=context,
         )
-        return self._project(await self.repository.add_run(run))
+        run = await self.repository.add_run(run)
+        return self._sanitize_preparation_errors(
+            {
+                **{
+                    key: value
+                    for key, value in asdict(run).items()
+                    if key != "timestamps"
+                },
+                "status": run.status.value,
+                "nodes": {
+                    node.name: {
+                        **asdict(node),
+                        "dependencies": list(node.dependencies),
+                        "status": node.status.value,
+                        "errors": list(node.errors),
+                        "warnings": list(node.warnings),
+                        "stats": {
+                            "duration_ms": node.stats.duration_ms,
+                            "token_usage": (
+                                asdict(node.stats.token_usage)
+                                if node.stats.token_usage is not None
+                                else None
+                            ),
+                            "model_usage": [
+                                asdict(item) for item in node.stats.model_usage
+                            ],
+                            "unreported_request_count": node.stats.unreported_request_count,
+                            "prompt_versions": dict(node.stats.prompt_versions),
+                        },
+                        "timestamps": {
+                            key: value
+                            for key, value in asdict(node.timestamps).items()
+                            if value is not None or key in ("started_at", "finished_at")
+                        },
+                    }
+                    for node in run.nodes
+                },
+                "errors": list(run.errors),
+                "warnings": list(run.warnings),
+                "stats": {
+                    "duration_ms": run.stats.duration_ms,
+                    "token_usage": (
+                        asdict(run.stats.token_usage)
+                        if run.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [asdict(item) for item in run.stats.model_usage],
+                    "unreported_request_count": run.stats.unreported_request_count,
+                    "prompt_versions": dict(run.stats.prompt_versions),
+                },
+                "created_at": run.timestamps.created_at,
+                "updated_at": run.timestamps.updated_at,
+                "started_at": run.timestamps.started_at,
+                "finished_at": run.timestamps.finished_at,
+            }
+        )
 
     async def get_or_create_document_run(
         self,
@@ -95,7 +148,65 @@ class PipelineRunService:
             ),
             reuse_completed=reuse_completed,
         )
-        return self._project(run), created
+        return (
+            self._sanitize_preparation_errors(
+                {
+                    **{
+                        key: value
+                        for key, value in asdict(run).items()
+                        if key != "timestamps"
+                    },
+                    "status": run.status.value,
+                    "nodes": {
+                        node.name: {
+                            **asdict(node),
+                            "dependencies": list(node.dependencies),
+                            "status": node.status.value,
+                            "errors": list(node.errors),
+                            "warnings": list(node.warnings),
+                            "stats": {
+                                "duration_ms": node.stats.duration_ms,
+                                "token_usage": (
+                                    asdict(node.stats.token_usage)
+                                    if node.stats.token_usage is not None
+                                    else None
+                                ),
+                                "model_usage": [
+                                    asdict(item) for item in node.stats.model_usage
+                                ],
+                                "unreported_request_count": node.stats.unreported_request_count,
+                                "prompt_versions": dict(node.stats.prompt_versions),
+                            },
+                            "timestamps": {
+                                key: value
+                                for key, value in asdict(node.timestamps).items()
+                                if value is not None
+                                or key in ("started_at", "finished_at")
+                            },
+                        }
+                        for node in run.nodes
+                    },
+                    "errors": list(run.errors),
+                    "warnings": list(run.warnings),
+                    "stats": {
+                        "duration_ms": run.stats.duration_ms,
+                        "token_usage": (
+                            asdict(run.stats.token_usage)
+                            if run.stats.token_usage is not None
+                            else None
+                        ),
+                        "model_usage": [asdict(item) for item in run.stats.model_usage],
+                        "unreported_request_count": run.stats.unreported_request_count,
+                        "prompt_versions": dict(run.stats.prompt_versions),
+                    },
+                    "created_at": run.timestamps.created_at,
+                    "updated_at": run.timestamps.updated_at,
+                    "started_at": run.timestamps.started_at,
+                    "finished_at": run.timestamps.finished_at,
+                }
+            ),
+            created,
+        )
 
     async def get_or_create_collection_run(
         self,
@@ -119,13 +230,125 @@ class PipelineRunService:
                 context=context,
             )
         )
-        return self._project(run), created
+        return (
+            self._sanitize_preparation_errors(
+                {
+                    **{
+                        key: value
+                        for key, value in asdict(run).items()
+                        if key != "timestamps"
+                    },
+                    "status": run.status.value,
+                    "nodes": {
+                        node.name: {
+                            **asdict(node),
+                            "dependencies": list(node.dependencies),
+                            "status": node.status.value,
+                            "errors": list(node.errors),
+                            "warnings": list(node.warnings),
+                            "stats": {
+                                "duration_ms": node.stats.duration_ms,
+                                "token_usage": (
+                                    asdict(node.stats.token_usage)
+                                    if node.stats.token_usage is not None
+                                    else None
+                                ),
+                                "model_usage": [
+                                    asdict(item) for item in node.stats.model_usage
+                                ],
+                                "unreported_request_count": node.stats.unreported_request_count,
+                                "prompt_versions": dict(node.stats.prompt_versions),
+                            },
+                            "timestamps": {
+                                key: value
+                                for key, value in asdict(node.timestamps).items()
+                                if value is not None
+                                or key in ("started_at", "finished_at")
+                            },
+                        }
+                        for node in run.nodes
+                    },
+                    "errors": list(run.errors),
+                    "warnings": list(run.warnings),
+                    "stats": {
+                        "duration_ms": run.stats.duration_ms,
+                        "token_usage": (
+                            asdict(run.stats.token_usage)
+                            if run.stats.token_usage is not None
+                            else None
+                        ),
+                        "model_usage": [asdict(item) for item in run.stats.model_usage],
+                        "unreported_request_count": run.stats.unreported_request_count,
+                        "prompt_versions": dict(run.stats.prompt_versions),
+                    },
+                    "created_at": run.timestamps.created_at,
+                    "updated_at": run.timestamps.updated_at,
+                    "started_at": run.timestamps.started_at,
+                    "finished_at": run.timestamps.finished_at,
+                }
+            ),
+            created,
+        )
 
     async def get_run(self, run_id: str) -> dict[str, Any]:
         run = await self.repository.read_run(run_id)
         if run is None:
             raise FileNotFoundError(f"pipeline run not found: {run_id}")
-        return self._project(run)
+        return self._sanitize_preparation_errors(
+            {
+                **{
+                    key: value
+                    for key, value in asdict(run).items()
+                    if key != "timestamps"
+                },
+                "status": run.status.value,
+                "nodes": {
+                    node.name: {
+                        **asdict(node),
+                        "dependencies": list(node.dependencies),
+                        "status": node.status.value,
+                        "errors": list(node.errors),
+                        "warnings": list(node.warnings),
+                        "stats": {
+                            "duration_ms": node.stats.duration_ms,
+                            "token_usage": (
+                                asdict(node.stats.token_usage)
+                                if node.stats.token_usage is not None
+                                else None
+                            ),
+                            "model_usage": [
+                                asdict(item) for item in node.stats.model_usage
+                            ],
+                            "unreported_request_count": node.stats.unreported_request_count,
+                            "prompt_versions": dict(node.stats.prompt_versions),
+                        },
+                        "timestamps": {
+                            key: value
+                            for key, value in asdict(node.timestamps).items()
+                            if value is not None or key in ("started_at", "finished_at")
+                        },
+                    }
+                    for node in run.nodes
+                },
+                "errors": list(run.errors),
+                "warnings": list(run.warnings),
+                "stats": {
+                    "duration_ms": run.stats.duration_ms,
+                    "token_usage": (
+                        asdict(run.stats.token_usage)
+                        if run.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [asdict(item) for item in run.stats.model_usage],
+                    "unreported_request_count": run.stats.unreported_request_count,
+                    "prompt_versions": dict(run.stats.prompt_versions),
+                },
+                "created_at": run.timestamps.created_at,
+                "updated_at": run.timestamps.updated_at,
+                "started_at": run.timestamps.started_at,
+                "finished_at": run.timestamps.finished_at,
+            }
+        )
 
     async def list_runs(
         self,
@@ -201,7 +424,61 @@ class PipelineRunService:
         )
         if not await self.repository.update_run(updated):
             raise FileNotFoundError(f"pipeline run not found: {run_id}")
-        return self._project(updated)
+        return self._sanitize_preparation_errors(
+            {
+                **{
+                    key: value
+                    for key, value in asdict(updated).items()
+                    if key != "timestamps"
+                },
+                "status": updated.status.value,
+                "nodes": {
+                    node.name: {
+                        **asdict(node),
+                        "dependencies": list(node.dependencies),
+                        "status": node.status.value,
+                        "errors": list(node.errors),
+                        "warnings": list(node.warnings),
+                        "stats": {
+                            "duration_ms": node.stats.duration_ms,
+                            "token_usage": (
+                                asdict(node.stats.token_usage)
+                                if node.stats.token_usage is not None
+                                else None
+                            ),
+                            "model_usage": [
+                                asdict(item) for item in node.stats.model_usage
+                            ],
+                            "unreported_request_count": node.stats.unreported_request_count,
+                            "prompt_versions": dict(node.stats.prompt_versions),
+                        },
+                        "timestamps": {
+                            key: value
+                            for key, value in asdict(node.timestamps).items()
+                            if value is not None or key in ("started_at", "finished_at")
+                        },
+                    }
+                    for node in updated.nodes
+                },
+                "errors": list(updated.errors),
+                "warnings": list(updated.warnings),
+                "stats": {
+                    "duration_ms": updated.stats.duration_ms,
+                    "token_usage": (
+                        asdict(updated.stats.token_usage)
+                        if updated.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [asdict(item) for item in updated.stats.model_usage],
+                    "unreported_request_count": updated.stats.unreported_request_count,
+                    "prompt_versions": dict(updated.stats.prompt_versions),
+                },
+                "created_at": updated.timestamps.created_at,
+                "updated_at": updated.timestamps.updated_at,
+                "started_at": updated.timestamps.started_at,
+                "finished_at": updated.timestamps.finished_at,
+            }
+        )
 
     async def finish_run(
         self,
@@ -339,20 +616,6 @@ class PipelineRunService:
             if phase.startswith("objective_discovery"):
                 return "objective_candidates"
         return None
-
-    @staticmethod
-    def _project(run: PipelineRun) -> dict[str, Any]:
-        payload = pipeline_run_record(run)
-        timestamps = payload.pop("timestamps")
-        return PipelineRunService._sanitize_preparation_errors(
-            {
-                **payload,
-                "created_at": timestamps.get("created_at"),
-                "updated_at": timestamps.get("updated_at"),
-                "started_at": timestamps.get("started_at"),
-                "finished_at": timestamps.get("finished_at"),
-            }
-        )
 
     @staticmethod
     def _sanitize_preparation_errors(payload: dict[str, Any]) -> dict[str, Any]:

@@ -1,12 +1,5 @@
 from __future__ import annotations
 
-from repositories.pipeline_run_repository import pipeline_node_record, pipeline_run_record
-
-from repositories.pipeline_run_repository import _to_run
-from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
-from datetime import datetime
-
-
 from dataclasses import replace
 
 import pytest
@@ -90,8 +83,7 @@ def test_pipeline_node_records_the_runtime_dependency_graph() -> None:
 
     assert node.status is PipelineNodeStatus.SKIPPED
     assert node.dependencies == ()
-    assert pipeline_node_record(node)["dependencies"] == []
-    assert pipeline_node_record(node)["output_summary"] == {}
+    assert node.output_summary == {}
 
 
 def test_execution_stats_aggregate_usage_by_model() -> None:
@@ -124,83 +116,21 @@ def test_execution_stats_aggregate_usage_by_model() -> None:
     }
 
 
-def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
-    payload = {
-        "pipeline_name": "document_preparation",
-        "mode": "standard",
-        "run_id": "run_1",
-        "collection_id": "col_1",
-        "scope_type": "document",
-        "scope_id": "doc_1",
-        "input_fingerprint": "input-fingerprint",
-        "status": "running",
-        "current_node": "source_artifacts",
-        "progress_percent": 45,
-        "progress_detail": {
-            "unit": "document",
-            "message": "Parsing the document.",
-        },
-        "nodes": {
-            "source_artifacts": {
-                "name": "source_artifacts",
-                "dependencies": [],
-                "status": "succeeded",
-                "errors": [],
-                "warnings": ["one warning"],
-                "stats": {
-                    "duration_ms": 1000,
-                    "token_usage": None,
-                    "model_usage": [],
-                    "unreported_request_count": 0,
-                    "prompt_versions": {},
-                },
-                "timestamps": {
-                    "started_at": "2026-08-11T01:00:01+00:00",
-                    "finished_at": "2026-08-11T01:00:02+00:00",
-                },
-                "output_summary": {"document_count": 2},
-            }
-        },
-        "errors": [],
-        "warnings": ["source_artifacts: one warning"],
-        "stats": {
-            "duration_ms": 1000,
-            "token_usage": None,
-            "model_usage": [],
-            "unreported_request_count": 0,
-            "prompt_versions": {},
-        },
-        "timestamps": {
-            "created_at": "2026-08-11T01:00:00+00:00",
-            "started_at": "2026-08-11T01:00:01+00:00",
-            "finished_at": None,
-            "updated_at": "2026-08-11T01:00:01+00:00",
-        },
-        "context": {"requested_by": "upload"},
-        "resumed_from_run_id": None,
-    }
-
-    assert pipeline_run_record(_saved_run(payload)) == payload
-
-
 def test_pipeline_statuses_reject_unknown_values() -> None:
+    run = PipelineRun.create(
+        pipeline_name="collection_build",
+        mode="standard",
+        run_id="run_1",
+        collection_id="col_1",
+        scope_type="collection",
+        scope_id="col_1",
+        node_dependencies={},
+        created_at="2026-08-11T01:00:00+00:00",
+    )
     with pytest.raises(ValueError, match="pipeline run status"):
-        _saved_run(
-            {
-                "pipeline_name": "collection_build",
-                "mode": "standard",
-                "run_id": "run_1",
-                "collection_id": "col_1",
-                "scope_type": "collection",
-                "scope_id": "col_1",
-                "status": "done",
-                "nodes": {},
-                "timestamps": {},
-            }
-        )
-
+        replace(run, status="done")
     with pytest.raises(ValueError, match="pipeline node status"):
-        pipeline_node_record(replace(PipelineNodeRun(name="source_artifacts"), status="done"))
+        replace(PipelineNodeRun(name="source_artifacts"), status="done")
 
 
 def test_execution_timestamps_reject_finish_before_start() -> None:
@@ -272,15 +202,3 @@ def test_pipeline_run_updates_browser_progress_without_changing_artifacts() -> N
     }
     with pytest.raises(ValueError, match="progress_percent"):
         run.with_progress(current_node="source_parsing", progress_percent=101)
-
-
-def _saved_run(payload):
-    timestamps = payload.get("timestamps", {})
-    return _to_run(PipelineRunRow(
-        run_id=payload["run_id"], collection_id=payload["collection_id"],
-        pipeline_name=payload["pipeline_name"], scope_type=payload["scope_type"],
-        scope_id=payload["scope_id"], mode=payload["mode"], status=payload["status"],
-        input_fingerprint=payload.get("input_fingerprint"), record_json=payload,
-        created_at=datetime.fromisoformat(timestamps.get("created_at", "2026-08-11T01:00:00+00:00")),
-        updated_at=datetime.fromisoformat(timestamps.get("updated_at", "2026-08-11T01:00:00+00:00")),
-    ))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
@@ -557,7 +557,76 @@ class PipelineRunRepository:
 
     async def add_run(self, run: PipelineRun) -> PipelineRun:
         async with self.session_factory.begin() as session:
-            session.add(_run_row(run))
+            created_at = run.timestamps.created_at
+            if created_at is None:
+                raise ValueError("persisted pipeline run requires created_at")
+            session.add(
+                PipelineRunRow(
+                    run_id=run.run_id,
+                    collection_id=run.collection_id,
+                    pipeline_name=run.pipeline_name,
+                    scope_type=run.scope_type,
+                    scope_id=run.scope_id,
+                    mode=run.mode,
+                    input_fingerprint=run.input_fingerprint,
+                    status=run.status.value,
+                    record_json={
+                        **asdict(run),
+                        "status": run.status.value,
+                        "nodes": {
+                            node.name: {
+                                **asdict(node),
+                                "dependencies": list(node.dependencies),
+                                "status": node.status.value,
+                                "errors": list(node.errors),
+                                "warnings": list(node.warnings),
+                                "stats": {
+                                    "duration_ms": node.stats.duration_ms,
+                                    "token_usage": (
+                                        asdict(node.stats.token_usage)
+                                        if node.stats.token_usage is not None
+                                        else None
+                                    ),
+                                    "model_usage": [
+                                        asdict(item) for item in node.stats.model_usage
+                                    ],
+                                    "unreported_request_count": node.stats.unreported_request_count,
+                                    "prompt_versions": dict(node.stats.prompt_versions),
+                                },
+                                "timestamps": {
+                                    key: value
+                                    for key, value in asdict(node.timestamps).items()
+                                    if value is not None
+                                    or key in ("started_at", "finished_at")
+                                },
+                            }
+                            for node in run.nodes
+                        },
+                        "errors": list(run.errors),
+                        "warnings": list(run.warnings),
+                        "stats": {
+                            "duration_ms": run.stats.duration_ms,
+                            "token_usage": (
+                                asdict(run.stats.token_usage)
+                                if run.stats.token_usage is not None
+                                else None
+                            ),
+                            "model_usage": [
+                                asdict(item) for item in run.stats.model_usage
+                            ],
+                            "unreported_request_count": run.stats.unreported_request_count,
+                            "prompt_versions": dict(run.stats.prompt_versions),
+                        },
+                        "timestamps": {
+                            key: value
+                            for key, value in asdict(run.timestamps).items()
+                            if value is not None or key in ("started_at", "finished_at")
+                        },
+                    },
+                    created_at=_datetime(created_at),
+                    updated_at=_datetime(run.timestamps.updated_at or created_at),
+                )
+            )
         return run
 
     async def get_or_create_collection_run(
@@ -576,8 +645,167 @@ class PipelineRunRepository:
                 raise FileNotFoundError(f"collection not found: {run.collection_id}")
             active = await self._active_run(session, run)
             if active is not None:
-                return _to_run(active), False
-            session.add(_run_row(run))
+                payload = active.record_json
+                return (
+                    PipelineRun(
+                        pipeline_name=active.pipeline_name,
+                        mode=active.mode,
+                        run_id=active.run_id,
+                        collection_id=active.collection_id,
+                        scope_type=active.scope_type,
+                        scope_id=active.scope_id,
+                        status=PipelineRunStatus(active.status),
+                        nodes=tuple(
+                            PipelineNodeRun(
+                                name=name,
+                                dependencies=tuple(node.get("dependencies", ())),
+                                status=PipelineNodeStatus(node.get("status", "queued")),
+                                errors=tuple(node.get("errors", ())),
+                                warnings=tuple(node.get("warnings", ())),
+                                stats=ExecutionStats(
+                                    duration_ms=(node.get("stats") or {}).get(
+                                        "duration_ms"
+                                    ),
+                                    model_usage=tuple(
+                                        ModelUsage(
+                                            model_name=item["model_name"],
+                                            request_count=item["request_count"],
+                                            token_usage=(
+                                                TokenUsage(**item["token_usage"])
+                                                if item.get("token_usage") is not None
+                                                else None
+                                            ),
+                                            unreported_request_count=item.get(
+                                                "unreported_request_count", 0
+                                            ),
+                                        )
+                                        for item in (node.get("stats") or {}).get(
+                                            "model_usage", ()
+                                        )
+                                    ),
+                                    prompt_versions=(node.get("stats") or {}).get(
+                                        "prompt_versions", {}
+                                    ),
+                                ),
+                                timestamps=ExecutionTimestamps(
+                                    **node.get("timestamps", {})
+                                ),
+                                output_summary=node.get("output_summary", {}),
+                            )
+                            for name, node in payload.get("nodes", {}).items()
+                        ),
+                        errors=tuple(payload.get("errors", ())),
+                        warnings=tuple(payload.get("warnings", ())),
+                        stats=ExecutionStats(
+                            duration_ms=(payload.get("stats") or {}).get("duration_ms"),
+                            model_usage=tuple(
+                                ModelUsage(
+                                    model_name=item["model_name"],
+                                    request_count=item["request_count"],
+                                    token_usage=(
+                                        TokenUsage(**item["token_usage"])
+                                        if item.get("token_usage") is not None
+                                        else None
+                                    ),
+                                    unreported_request_count=item.get(
+                                        "unreported_request_count", 0
+                                    ),
+                                )
+                                for item in (payload.get("stats") or {}).get(
+                                    "model_usage", ()
+                                )
+                            ),
+                            prompt_versions=(payload.get("stats") or {}).get(
+                                "prompt_versions", {}
+                            ),
+                        ),
+                        timestamps=ExecutionTimestamps(
+                            created_at=_iso(active.created_at),
+                            updated_at=_iso(active.updated_at),
+                            started_at=payload.get("timestamps", {}).get("started_at"),
+                            finished_at=payload.get("timestamps", {}).get(
+                                "finished_at"
+                            ),
+                        ),
+                        input_fingerprint=active.input_fingerprint,
+                        current_node=payload.get("current_node"),
+                        progress_percent=payload.get("progress_percent", 0),
+                        progress_detail=payload.get("progress_detail"),
+                        context=payload.get("context", {}),
+                        resumed_from_run_id=payload.get("resumed_from_run_id"),
+                    ),
+                    False,
+                )
+            created_at = run.timestamps.created_at
+            if created_at is None:
+                raise ValueError("persisted pipeline run requires created_at")
+            session.add(
+                PipelineRunRow(
+                    run_id=run.run_id,
+                    collection_id=run.collection_id,
+                    pipeline_name=run.pipeline_name,
+                    scope_type=run.scope_type,
+                    scope_id=run.scope_id,
+                    mode=run.mode,
+                    input_fingerprint=run.input_fingerprint,
+                    status=run.status.value,
+                    record_json={
+                        **asdict(run),
+                        "status": run.status.value,
+                        "nodes": {
+                            node.name: {
+                                **asdict(node),
+                                "dependencies": list(node.dependencies),
+                                "status": node.status.value,
+                                "errors": list(node.errors),
+                                "warnings": list(node.warnings),
+                                "stats": {
+                                    "duration_ms": node.stats.duration_ms,
+                                    "token_usage": (
+                                        asdict(node.stats.token_usage)
+                                        if node.stats.token_usage is not None
+                                        else None
+                                    ),
+                                    "model_usage": [
+                                        asdict(item) for item in node.stats.model_usage
+                                    ],
+                                    "unreported_request_count": node.stats.unreported_request_count,
+                                    "prompt_versions": dict(node.stats.prompt_versions),
+                                },
+                                "timestamps": {
+                                    key: value
+                                    for key, value in asdict(node.timestamps).items()
+                                    if value is not None
+                                    or key in ("started_at", "finished_at")
+                                },
+                            }
+                            for node in run.nodes
+                        },
+                        "errors": list(run.errors),
+                        "warnings": list(run.warnings),
+                        "stats": {
+                            "duration_ms": run.stats.duration_ms,
+                            "token_usage": (
+                                asdict(run.stats.token_usage)
+                                if run.stats.token_usage is not None
+                                else None
+                            ),
+                            "model_usage": [
+                                asdict(item) for item in run.stats.model_usage
+                            ],
+                            "unreported_request_count": run.stats.unreported_request_count,
+                            "prompt_versions": dict(run.stats.prompt_versions),
+                        },
+                        "timestamps": {
+                            key: value
+                            for key, value in asdict(run.timestamps).items()
+                            if value is not None or key in ("started_at", "finished_at")
+                        },
+                    },
+                    created_at=_datetime(created_at),
+                    updated_at=_datetime(run.timestamps.updated_at or created_at),
+                )
+            )
             return run, True
 
     async def get_or_create_document_run(
@@ -601,33 +829,269 @@ class PipelineRunRepository:
                 raise FileNotFoundError(
                     f"document not found: {run.collection_id}/{run.scope_id}"
                 )
-            active = await self._active_run(session, run)
-            if active is not None:
-                return _to_run(active), False
-            if not reuse_completed:
-                session.add(_run_row(run))
-                return run, True
-            completed = await session.scalar(
-                select(PipelineRunRow)
-                .where(
-                    PipelineRunRow.pipeline_name == run.pipeline_name,
-                    PipelineRunRow.scope_type == run.scope_type,
-                    PipelineRunRow.scope_id == run.scope_id,
-                    PipelineRunRow.input_fingerprint == run.input_fingerprint,
-                    PipelineRunRow.status.in_(_SUCCESS_STATUSES),
+            existing = await self._active_run(session, run)
+            if existing is None and reuse_completed:
+                existing = await session.scalar(
+                    select(PipelineRunRow)
+                    .where(
+                        PipelineRunRow.pipeline_name == run.pipeline_name,
+                        PipelineRunRow.scope_type == run.scope_type,
+                        PipelineRunRow.scope_id == run.scope_id,
+                        PipelineRunRow.input_fingerprint == run.input_fingerprint,
+                        PipelineRunRow.status.in_(_SUCCESS_STATUSES),
+                    )
+                    .order_by(PipelineRunRow.updated_at.desc(), PipelineRunRow.run_id.desc())
+                    .limit(1)
                 )
-                .order_by(PipelineRunRow.updated_at.desc(), PipelineRunRow.run_id.desc())
-                .limit(1)
+            if existing is not None:
+                payload = existing.record_json
+                return (
+                    PipelineRun(
+                        pipeline_name=existing.pipeline_name,
+                        mode=existing.mode,
+                        run_id=existing.run_id,
+                        collection_id=existing.collection_id,
+                        scope_type=existing.scope_type,
+                        scope_id=existing.scope_id,
+                        status=PipelineRunStatus(existing.status),
+                        nodes=tuple(
+                            PipelineNodeRun(
+                                name=name,
+                                dependencies=tuple(node.get("dependencies", ())),
+                                status=PipelineNodeStatus(node.get("status", "queued")),
+                                errors=tuple(node.get("errors", ())),
+                                warnings=tuple(node.get("warnings", ())),
+                                stats=ExecutionStats(
+                                    duration_ms=(node.get("stats") or {}).get(
+                                        "duration_ms"
+                                    ),
+                                    model_usage=tuple(
+                                        ModelUsage(
+                                            model_name=item["model_name"],
+                                            request_count=item["request_count"],
+                                            token_usage=(
+                                                TokenUsage(**item["token_usage"])
+                                                if item.get("token_usage") is not None
+                                                else None
+                                            ),
+                                            unreported_request_count=item.get(
+                                                "unreported_request_count", 0
+                                            ),
+                                        )
+                                        for item in (node.get("stats") or {}).get(
+                                            "model_usage", ()
+                                        )
+                                    ),
+                                    prompt_versions=(node.get("stats") or {}).get(
+                                        "prompt_versions", {}
+                                    ),
+                                ),
+                                timestamps=ExecutionTimestamps(
+                                    **node.get("timestamps", {})
+                                ),
+                                output_summary=node.get("output_summary", {}),
+                            )
+                            for name, node in payload.get("nodes", {}).items()
+                        ),
+                        errors=tuple(payload.get("errors", ())),
+                        warnings=tuple(payload.get("warnings", ())),
+                        stats=ExecutionStats(
+                            duration_ms=(payload.get("stats") or {}).get("duration_ms"),
+                            model_usage=tuple(
+                                ModelUsage(
+                                    model_name=item["model_name"],
+                                    request_count=item["request_count"],
+                                    token_usage=(
+                                        TokenUsage(**item["token_usage"])
+                                        if item.get("token_usage") is not None
+                                        else None
+                                    ),
+                                    unreported_request_count=item.get(
+                                        "unreported_request_count", 0
+                                    ),
+                                )
+                                for item in (payload.get("stats") or {}).get(
+                                    "model_usage", ()
+                                )
+                            ),
+                            prompt_versions=(payload.get("stats") or {}).get(
+                                "prompt_versions", {}
+                            ),
+                        ),
+                        timestamps=ExecutionTimestamps(
+                            created_at=_iso(existing.created_at),
+                            updated_at=_iso(existing.updated_at),
+                            started_at=payload.get("timestamps", {}).get("started_at"),
+                            finished_at=payload.get("timestamps", {}).get(
+                                "finished_at"
+                            ),
+                        ),
+                        input_fingerprint=existing.input_fingerprint,
+                        current_node=payload.get("current_node"),
+                        progress_percent=payload.get("progress_percent", 0),
+                        progress_detail=payload.get("progress_detail"),
+                        context=payload.get("context", {}),
+                        resumed_from_run_id=payload.get("resumed_from_run_id"),
+                    ),
+                    False,
+                )
+            created_at = run.timestamps.created_at
+            if created_at is None:
+                raise ValueError("persisted pipeline run requires created_at")
+            session.add(
+                PipelineRunRow(
+                    run_id=run.run_id,
+                    collection_id=run.collection_id,
+                    pipeline_name=run.pipeline_name,
+                    scope_type=run.scope_type,
+                    scope_id=run.scope_id,
+                    mode=run.mode,
+                    input_fingerprint=run.input_fingerprint,
+                    status=run.status.value,
+                    record_json={
+                        **asdict(run),
+                        "status": run.status.value,
+                        "nodes": {
+                            node.name: {
+                                **asdict(node),
+                                "dependencies": list(node.dependencies),
+                                "status": node.status.value,
+                                "errors": list(node.errors),
+                                "warnings": list(node.warnings),
+                                "stats": {
+                                    "duration_ms": node.stats.duration_ms,
+                                    "token_usage": (
+                                        asdict(node.stats.token_usage)
+                                        if node.stats.token_usage is not None
+                                        else None
+                                    ),
+                                    "model_usage": [
+                                        asdict(item) for item in node.stats.model_usage
+                                    ],
+                                    "unreported_request_count": node.stats.unreported_request_count,
+                                    "prompt_versions": dict(node.stats.prompt_versions),
+                                },
+                                "timestamps": {
+                                    key: value
+                                    for key, value in asdict(node.timestamps).items()
+                                    if value is not None
+                                    or key in ("started_at", "finished_at")
+                                },
+                            }
+                            for node in run.nodes
+                        },
+                        "errors": list(run.errors),
+                        "warnings": list(run.warnings),
+                        "stats": {
+                            "duration_ms": run.stats.duration_ms,
+                            "token_usage": (
+                                asdict(run.stats.token_usage)
+                                if run.stats.token_usage is not None
+                                else None
+                            ),
+                            "model_usage": [
+                                asdict(item) for item in run.stats.model_usage
+                            ],
+                            "unreported_request_count": run.stats.unreported_request_count,
+                            "prompt_versions": dict(run.stats.prompt_versions),
+                        },
+                        "timestamps": {
+                            key: value
+                            for key, value in asdict(run.timestamps).items()
+                            if value is not None or key in ("started_at", "finished_at")
+                        },
+                    },
+                    created_at=_datetime(created_at),
+                    updated_at=_datetime(run.timestamps.updated_at or created_at),
+                )
             )
-            if completed is not None:
-                return _to_run(completed), False
-            session.add(_run_row(run))
             return run, True
 
     async def read_run(self, run_id: str) -> PipelineRun | None:
         async with self.session_factory() as session:
             row = await session.get(PipelineRunRow, run_id)
-            return _to_run(row) if row is not None else None
+            if row is None:
+                return None
+            payload = row.record_json
+            return PipelineRun(
+                pipeline_name=row.pipeline_name,
+                mode=row.mode,
+                run_id=row.run_id,
+                collection_id=row.collection_id,
+                scope_type=row.scope_type,
+                scope_id=row.scope_id,
+                status=PipelineRunStatus(row.status),
+                nodes=tuple(
+                    PipelineNodeRun(
+                        name=name,
+                        dependencies=tuple(node.get("dependencies", ())),
+                        status=PipelineNodeStatus(node.get("status", "queued")),
+                        errors=tuple(node.get("errors", ())),
+                        warnings=tuple(node.get("warnings", ())),
+                        stats=ExecutionStats(
+                            duration_ms=(node.get("stats") or {}).get("duration_ms"),
+                            model_usage=tuple(
+                                ModelUsage(
+                                    model_name=item["model_name"],
+                                    request_count=item["request_count"],
+                                    token_usage=(
+                                        TokenUsage(**item["token_usage"])
+                                        if item.get("token_usage") is not None
+                                        else None
+                                    ),
+                                    unreported_request_count=item.get(
+                                        "unreported_request_count", 0
+                                    ),
+                                )
+                                for item in (node.get("stats") or {}).get(
+                                    "model_usage", ()
+                                )
+                            ),
+                            prompt_versions=(node.get("stats") or {}).get(
+                                "prompt_versions", {}
+                            ),
+                        ),
+                        timestamps=ExecutionTimestamps(**node.get("timestamps", {})),
+                        output_summary=node.get("output_summary", {}),
+                    )
+                    for name, node in payload.get("nodes", {}).items()
+                ),
+                errors=tuple(payload.get("errors", ())),
+                warnings=tuple(payload.get("warnings", ())),
+                stats=ExecutionStats(
+                    duration_ms=(payload.get("stats") or {}).get("duration_ms"),
+                    model_usage=tuple(
+                        ModelUsage(
+                            model_name=item["model_name"],
+                            request_count=item["request_count"],
+                            token_usage=(
+                                TokenUsage(**item["token_usage"])
+                                if item.get("token_usage") is not None
+                                else None
+                            ),
+                            unreported_request_count=item.get(
+                                "unreported_request_count", 0
+                            ),
+                        )
+                        for item in (payload.get("stats") or {}).get("model_usage", ())
+                    ),
+                    prompt_versions=(payload.get("stats") or {}).get(
+                        "prompt_versions", {}
+                    ),
+                ),
+                timestamps=ExecutionTimestamps(
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=payload.get("timestamps", {}).get("started_at"),
+                    finished_at=payload.get("timestamps", {}).get("finished_at"),
+                ),
+                input_fingerprint=row.input_fingerprint,
+                current_node=payload.get("current_node"),
+                progress_percent=payload.get("progress_percent", 0),
+                progress_detail=payload.get("progress_detail"),
+                context=payload.get("context", {}),
+                resumed_from_run_id=payload.get("resumed_from_run_id"),
+            )
 
     async def list_runs(
         self,
@@ -695,7 +1159,56 @@ class PipelineRunRepository:
             row.mode = run.mode
             row.input_fingerprint = run.input_fingerprint
             row.status = run.status.value
-            row.record_json = pipeline_run_record(run)
+            row.record_json = {
+                **asdict(run),
+                "status": run.status.value,
+                "nodes": {
+                    node.name: {
+                        **asdict(node),
+                        "dependencies": list(node.dependencies),
+                        "status": node.status.value,
+                        "errors": list(node.errors),
+                        "warnings": list(node.warnings),
+                        "stats": {
+                            "duration_ms": node.stats.duration_ms,
+                            "token_usage": (
+                                asdict(node.stats.token_usage)
+                                if node.stats.token_usage is not None
+                                else None
+                            ),
+                            "model_usage": [
+                                asdict(item) for item in node.stats.model_usage
+                            ],
+                            "unreported_request_count": node.stats.unreported_request_count,
+                            "prompt_versions": dict(node.stats.prompt_versions),
+                        },
+                        "timestamps": {
+                            key: value
+                            for key, value in asdict(node.timestamps).items()
+                            if value is not None or key in ("started_at", "finished_at")
+                        },
+                    }
+                    for node in run.nodes
+                },
+                "errors": list(run.errors),
+                "warnings": list(run.warnings),
+                "stats": {
+                    "duration_ms": run.stats.duration_ms,
+                    "token_usage": (
+                        asdict(run.stats.token_usage)
+                        if run.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [asdict(item) for item in run.stats.model_usage],
+                    "unreported_request_count": run.stats.unreported_request_count,
+                    "prompt_versions": dict(run.stats.prompt_versions),
+                },
+                "timestamps": {
+                    key: value
+                    for key, value in asdict(run.timestamps).items()
+                    if value is not None or key in ("started_at", "finished_at")
+                },
+            }
             row.updated_at = _datetime(
                 run.timestamps.updated_at or datetime.now(timezone.utc)
             )
@@ -719,91 +1232,6 @@ class PipelineRunRepository:
         )
 
 
-def _run_row(run: PipelineRun) -> PipelineRunRow:
-    created_at = run.timestamps.created_at
-    if created_at is None:
-        raise ValueError("persisted pipeline run requires created_at")
-    created_timestamp = _datetime(created_at)
-    updated_timestamp = _datetime(run.timestamps.updated_at or created_at)
-    return PipelineRunRow(
-        run_id=run.run_id,
-        collection_id=run.collection_id,
-        pipeline_name=run.pipeline_name,
-        scope_type=run.scope_type,
-        scope_id=run.scope_id,
-        mode=run.mode,
-        input_fingerprint=run.input_fingerprint,
-        status=run.status.value,
-        record_json=pipeline_run_record(run),
-        created_at=created_timestamp,
-        updated_at=updated_timestamp,
-    )
-
-
-def _to_run(row: PipelineRunRow) -> PipelineRun:
-    payload = dict(row.record_json)
-    payload.update(
-        {
-            "run_id": row.run_id,
-            "collection_id": row.collection_id,
-            "pipeline_name": row.pipeline_name,
-            "scope_type": row.scope_type,
-            "scope_id": row.scope_id,
-            "mode": row.mode,
-            "input_fingerprint": row.input_fingerprint,
-            "status": row.status,
-        }
-    )
-    timestamps = dict(payload.get("timestamps") or {})
-    timestamps["created_at"] = _iso(row.created_at)
-    timestamps["updated_at"] = _iso(row.updated_at)
-    payload["timestamps"] = timestamps
-    nodes_payload = payload.get("nodes") or {}
-    if isinstance(nodes_payload, Mapping):
-        nodes = tuple(
-            _node_from_json(
-                {**dict(node_payload), "name": name}
-                if isinstance(node_payload, Mapping)
-                else {"name": name}
-            )
-            for name, node_payload in nodes_payload.items()
-        )
-    else:
-        nodes = tuple(
-            _node_from_json(item)
-            for item in nodes_payload
-            if isinstance(item, Mapping)
-        )
-    return PipelineRun(
-        pipeline_name=str(payload.get("pipeline_name") or "").strip(),
-        mode=str(payload.get("mode") or "").strip(),
-        run_id=str(payload.get("run_id") or "").strip(),
-        collection_id=str(payload.get("collection_id") or "").strip(),
-        scope_type=str(payload.get("scope_type") or "").strip(),
-        scope_id=str(payload.get("scope_id") or "").strip(),
-        status=_run_status(payload.get("status")),
-        nodes=nodes,
-        errors=tuple(str(item) for item in payload.get("errors") or ()),
-        warnings=tuple(str(item) for item in payload.get("warnings") or ()),
-        stats=execution_stats_from_json(payload.get("stats")),
-        timestamps=_timestamps_from_json(payload.get("timestamps")),
-        input_fingerprint=_optional_text(payload.get("input_fingerprint")),
-        current_node=_optional_text(payload.get("current_node")),
-        progress_percent=int(payload.get("progress_percent") or 0),
-        progress_detail=(
-            dict(payload["progress_detail"])
-            if isinstance(payload.get("progress_detail"), Mapping)
-            else None
-        ),
-        context=(
-            dict(payload["context"])
-            if isinstance(payload.get("context"), Mapping)
-            else {}
-        ),
-        resumed_from_run_id=_optional_text(payload.get("resumed_from_run_id")),
-    )
-
-
 def _datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -822,153 +1250,3 @@ def _iso(value: datetime) -> str:
 
 
 __all__ = ['PipelineRunRepository']
-
-
-def _timestamps_from_json(payload: Any) -> "ExecutionTimestamps":
-    source = payload if isinstance(payload, Mapping) else {}
-    return ExecutionTimestamps(
-        created_at=_optional_text(source.get("created_at")),
-        updated_at=_optional_text(source.get("updated_at")),
-        started_at=_optional_text(source.get("started_at")),
-        finished_at=_optional_text(source.get("finished_at")),
-    )
-
-
-def _token_usage_from_json(payload: Any) -> "TokenUsage | None":
-    if not isinstance(payload, Mapping):
-        return None
-    return TokenUsage(
-        input_tokens=int(payload.get("input_tokens") or 0),
-        output_tokens=int(payload.get("output_tokens") or 0),
-        total_tokens=int(payload.get("total_tokens") or 0),
-    )
-
-
-def _model_usage_from_json(payload: Mapping[str, Any]) -> "ModelUsage":
-    return ModelUsage(
-        model_name=str(payload.get("model_name") or "").strip(),
-        request_count=int(payload.get("request_count") or 0),
-        token_usage=_token_usage_from_json(payload.get("token_usage")),
-        unreported_request_count=int(payload.get("unreported_request_count") or 0),
-    )
-
-
-def execution_stats_from_json(payload: Any) -> "ExecutionStats":
-    source = payload if isinstance(payload, Mapping) else {}
-    duration_ms = source.get("duration_ms")
-    return ExecutionStats(
-        duration_ms=int(duration_ms) if duration_ms is not None else None,
-        model_usage=tuple(
-            _model_usage_from_json(item)
-            for item in source.get("model_usage") or ()
-            if isinstance(item, Mapping)
-        ),
-        prompt_versions=(
-            {
-                str(task_type): str(version)
-                for task_type, version in source["prompt_versions"].items()
-            }
-            if isinstance(source.get("prompt_versions"), Mapping)
-            else {}
-        ),
-    )
-
-
-def _node_from_json(payload: Mapping[str, Any]) -> "PipelineNodeRun":
-    return PipelineNodeRun(
-        name=str(payload.get("name") or "").strip(),
-        dependencies=tuple(str(item) for item in payload.get("dependencies") or ()),
-        status=_node_status(payload.get("status")),
-        errors=tuple(str(item) for item in payload.get("errors") or ()),
-        warnings=tuple(str(item) for item in payload.get("warnings") or ()),
-        stats=execution_stats_from_json(payload.get("stats")),
-        timestamps=_timestamps_from_json(payload.get("timestamps")),
-        output_summary=(
-            dict(payload["output_summary"])
-            if isinstance(payload.get("output_summary"), Mapping)
-            else {}
-        ),
-    )
-
-
-def execution_timestamps_record(value: ExecutionTimestamps) -> dict[str, str | None]:
-    record: dict[str, str | None] = {
-        "started_at": value.started_at,
-        "finished_at": value.finished_at,
-    }
-    if value.created_at is not None:
-        record = {"created_at": value.created_at, **record}
-    if value.updated_at is not None:
-        record = {**record, "updated_at": value.updated_at}
-    return record
-
-
-def token_usage_record(value: TokenUsage) -> dict[str, int]:
-    return {
-        "input_tokens": value.input_tokens,
-        "output_tokens": value.output_tokens,
-        "total_tokens": value.total_tokens,
-    }
-
-
-def model_usage_record(value: ModelUsage) -> dict[str, Any]:
-    return {
-        "model_name": value.model_name,
-        "request_count": value.request_count,
-        "token_usage": (
-            token_usage_record(value.token_usage) if value.token_usage is not None else None
-        ),
-        "unreported_request_count": value.unreported_request_count,
-    }
-
-
-def execution_stats_record(value: ExecutionStats) -> dict[str, Any]:
-    return {
-        "duration_ms": value.duration_ms,
-        "token_usage": (
-            token_usage_record(value.token_usage) if value.token_usage is not None else None
-        ),
-        "model_usage": [model_usage_record(item) for item in value.model_usage],
-        "unreported_request_count": value.unreported_request_count,
-        "prompt_versions": dict(value.prompt_versions),
-    }
-
-
-def pipeline_node_record(value: PipelineNodeRun) -> dict[str, Any]:
-    return {
-        "name": value.name,
-        "dependencies": list(value.dependencies),
-        "status": _node_status(value.status).value,
-        "errors": list(value.errors),
-        "warnings": list(value.warnings),
-        "stats": execution_stats_record(value.stats),
-        "timestamps": execution_timestamps_record(value.timestamps),
-        "output_summary": deepcopy(dict(value.output_summary)),
-    }
-
-
-def pipeline_run_record(value: PipelineRun) -> dict[str, Any]:
-    return {
-        "pipeline_name": value.pipeline_name,
-        "mode": value.mode,
-        "run_id": value.run_id,
-        "collection_id": value.collection_id,
-        "scope_type": value.scope_type,
-        "scope_id": value.scope_id,
-        "input_fingerprint": value.input_fingerprint,
-        "status": _run_status(value.status).value,
-        "current_node": value.current_node,
-        "progress_percent": value.progress_percent,
-        "progress_detail": (
-            deepcopy(dict(value.progress_detail))
-            if value.progress_detail is not None
-            else None
-        ),
-        "nodes": {node.name: pipeline_node_record(node) for node in value.nodes},
-        "errors": list(value.errors),
-        "warnings": list(value.warnings),
-        "stats": execution_stats_record(value.stats),
-        "timestamps": execution_timestamps_record(value.timestamps),
-        "context": deepcopy(dict(value.context)),
-        "resumed_from_run_id": value.resumed_from_run_id,
-    }

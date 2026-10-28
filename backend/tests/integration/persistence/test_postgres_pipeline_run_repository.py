@@ -5,6 +5,9 @@ from dataclasses import replace
 import pytest
 
 from repositories.pipeline_run_repository import (
+    ExecutionStats,
+    ModelUsage,
+    TokenUsage,
     PipelineRun,
     PipelineRunRepository,
     PipelineRunStatus,
@@ -118,6 +121,14 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
     source_node = queued.node("source_parsing").start(NOW).succeed(
         "2026-08-27T10:00:10+00:00",
         output_summary={"block_count": 12},
+        stats=ExecutionStats(
+            duration_ms=10000,
+            model_usage=(
+                ModelUsage("model-a", 2, TokenUsage(100, 20, 120), 1),
+                ModelUsage("model-b", 1, None, 1),
+            ),
+            prompt_versions={"source_parsing": "v1"},
+        ),
     )
     running = replace(
         queued.start(NOW).with_node(source_node).with_progress(
@@ -145,10 +156,10 @@ async def test_pipeline_history_does_not_reconstruct_full_diagnostics(
     runs = PipelineRunRepository(source_repository.session_factory)
     await runs.add_run(_run("history-only", "fingerprint-history"))
 
-    def reject_full_hydration(_row):
+    def reject_full_hydration(*_args, **_kwargs):
         pytest.fail("history must not reconstruct full pipeline diagnostics")
 
-    monkeypatch.setattr(module, "_to_run", reject_full_hydration)
+    monkeypatch.setattr(module, "PipelineRun", reject_full_hydration)
     summary, = await runs.list_runs(collection_id=COLLECTION_ID)
 
     assert summary.run_id == "history-only"

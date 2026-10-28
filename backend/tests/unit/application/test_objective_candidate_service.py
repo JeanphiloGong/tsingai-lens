@@ -21,7 +21,6 @@ from application.core.objectives.objective_candidate_service import (
 )
 from domain.core import PaperResearchMap, PreparedDocumentInput, ResearchObjective
 from domain.core.research_objective import (
-    ResearchObjective,
     PaperResearchRelationship,
     PaperResearchScope,
 )
@@ -1501,13 +1500,17 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
 
 
-def test_candidate_build_derives_objective_identity_and_lineage_from_relationships():
+@pytest.mark.parametrize("document_ids", [
+    ("paper-0", "paper-1", "paper-2"),
+    ("Paper-A", "paper-a", "paper-b"),
+])
+def test_candidate_build_derives_objective_identity_and_lineage_from_relationships(document_ids):
     skims = tuple(
         _paper_map(
-            document_id=f"paper-{index}",
+            document_id=document_id,
             relationship_id=f"relationship-{index}",
         )
-        for index in range(3)
+        for index, document_id in enumerate(document_ids)
     )
 
     facts = ObjectiveCandidateService().discover_candidate_facts(
@@ -1522,7 +1525,7 @@ def test_candidate_build_derives_objective_identity_and_lineage_from_relationshi
     assert objective.question == "How does laser power affect relative density?"
     assert objective.variables == ("laser power",)
     assert objective.outcomes == ("relative density",)
-    assert objective.seed_document_ids == ("paper-0", "paper-1", "paper-2")
+    assert objective.seed_document_ids == document_ids
     assert set(objective.source_relationship_ids) == {
         "relationship-0",
         "relationship-1",

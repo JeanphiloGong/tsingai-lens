@@ -9,6 +9,7 @@ from domain.core.research_objective import (
 
 from copy import deepcopy
 import asyncio
+from dataclasses import replace
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -231,6 +232,26 @@ def test_distinct_experiments_form_one_reading_question_without_rewriting_them(
         client.consume_last_trace()["prompt_version"]
         == "objective_question_formation.v2"
     )
+
+
+def test_reading_question_preserves_case_distinct_paper_selections(reading, proposal):
+    maps, texts = reading
+    renamed = replace(
+        maps[1], document_id="a",
+        studies=tuple(replace(study, document_id="a") for study in maps[1].studies),
+    )
+    renamed_texts = {
+        ("a" if document_id == "B" else document_id, source_ref): text
+        for (document_id, source_ref), text in texts.items()
+    }
+    proposal["proposals"][0]["papers"][1]["document_id"] = "a"
+    client, _ = model_client(proposal)
+
+    result = form(((maps[0], renamed, maps[2]), renamed_texts), client)
+
+    candidate = result.candidates[0]
+    assert candidate.objective.seed_document_ids == ("A", "a", "C")
+    assert tuple(paper.paper_map.document_id for paper in candidate.papers) == ("A", "a", "C")
 
 
 def test_background_selection_survives_without_becoming_an_experimental_seed(

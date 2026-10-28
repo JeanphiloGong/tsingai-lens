@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from domain.core.research_objective import (
-    ResearchObjective,
     _text,
     build_research_objective_id,
     normalize_objective_terms,
@@ -323,8 +322,10 @@ class ObjectiveCandidateService:
                 mechanisms=(),
                 constraints=constraints,
                 requested_comparator=None,
-                seed_document_ids=normalize_objective_terms(
-                    [p.paper_map.document_id for p in selections if p.role == "inspect"]
+                seed_document_ids=tuple(
+                    paper.paper_map.document_id
+                    for paper in selections
+                    if paper.role == "inspect"
                 ),
                 excluded_document_ids=(),
                 confidence=0,
@@ -875,9 +876,11 @@ class ObjectiveCandidateService:
             )
         ):
             return None, "Study relationships do not form one bounded objective scope."
-        seed_document_ids = self._unique_text_values(
-            relationship_inventory[relationship_id][0]
-            for relationship_id in relationship_ids
+        seed_document_ids = tuple(
+            dict.fromkeys(
+                relationship_inventory[relationship_id][0]
+                for relationship_id in relationship_ids
+            )
         )
         studies = tuple(
             relationship_inventory[relationship_id][1]
@@ -923,7 +926,7 @@ class ObjectiveCandidateService:
             outcome_keys.add(objective_outcome_key)
             outcomes.append(objective_outcome)
         confidence = self._objective_confidence(studies, relationships)
-        material_scope = normalize_objective_terms(
+        material_scope = tuple(
             self._shared_study_values(studies, "material_scope")
         )
         material_scope_was_missing = any(
@@ -948,8 +951,8 @@ class ObjectiveCandidateService:
                 "source anchor."
             )
         question = self._objective_question(variables, tuple(outcomes))
-        outcome_terms = normalize_objective_terms(outcomes)
-        constraints = normalize_objective_terms(
+        outcome_terms = tuple(outcomes)
+        constraints = tuple(
             self._shared_study_constraints(
                 studies,
                 excluded_axes=(*variables, *outcomes),
@@ -975,7 +978,7 @@ class ObjectiveCandidateService:
                     mechanisms=(),
                     constraints=constraints,
                     requested_comparator=None,
-                    seed_document_ids=normalize_objective_terms(seed_document_ids),
+                    seed_document_ids=seed_document_ids,
                     excluded_document_ids=(),
                     source_relationship_ids=relationship_ids,
                     confidence=confidence,
@@ -1917,17 +1920,6 @@ class ObjectiveCandidateService:
                 )
             )
         return tuple(dispositions)
-
-    @staticmethod
-    def _unique_text_values(values: Iterable[str]) -> list[str]:
-        result: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            text = str(value or "").strip()
-            if text and text not in seen:
-                seen.add(text)
-                result.append(text)
-        return result
 
     def _unique_axis_values(self, values: Iterable[Any]) -> list[str]:
         merged: list[str] = []

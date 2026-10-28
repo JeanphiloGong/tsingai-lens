@@ -4,44 +4,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import (
-    Any,
-    Mapping,
-)
+from typing import Any
 
-from domain.core.finding import (
-    EVIDENCE_ATTRIBUTION_SCOPES,
-    FINDING_ASSERTION_STRENGTHS,
-    FINDING_ORIGINS,
-    FINDING_SYNTHESIS_STATUSES,
-    PAPER_CONTRIBUTION_STATUSES,
-    Finding,
-    FindingMechanismRelation,
-    FindingPaperContribution,
-)
-from domain.core.finding import _certainty as finding_certainty
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _non_negative_int as finding_non_negative_int
-from domain.core.finding import _positive_int as finding_positive_int
+from domain.core.finding import Finding, FindingMechanismRelation, FindingPaperContribution
 from domain.core.finding import _stable_id as finding_stable_id
-from domain.core.finding import _strings as finding_strings
-from domain.core.finding import _text as finding_text
-from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    SCIENTIFIC_RESULT_DIRECTIONS,
-    ScientificAttribute,
-    ScientificContext,
-)
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
-from domain.evaluation.records import (
-    FindingCuration,
-    FindingFeedback,
-    _normalize_mapping,
-    _normalize_text,
-)
+from domain.core.scientific_fact import ScientificAttribute, ScientificContext
+from domain.evaluation.records import FindingCuration, FindingFeedback, _normalize_text
 from infra.persistence.postgres.models.evaluation import (
     FindingCurationRecord,
     FindingFeedbackRecord,
@@ -155,14 +123,93 @@ class FindingReviewRepository:
             row.analysis_version = curation.analysis_version
             row.finding_id = curation.finding_id
             row.curated_status = curation.curated_status
-            row.curated_finding = _curated_finding_payload(curation.curated_finding)
+            finding = curation.curated_finding
+            scientific_context = {}
+            for scope, attributes in (
+                ("material", finding.scientific_context.material),
+                ("sample", finding.scientific_context.sample),
+                ("process", finding.scientific_context.process),
+                ("test", finding.scientific_context.test),
+            ):
+                scientific_context[scope] = [
+                    {
+                        "name": attribute.name,
+                        "value": attribute.value,
+                        "unit": attribute.unit,
+                        **({"context_scope": attribute.context_scope} if attribute.context_scope != "unknown" else {}),
+                        **({"applies_to_outcomes": list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                    }
+                    for attribute in attributes
+                ]
+            row.curated_finding = {
+                "collection_id": finding.collection_id,
+                "objective_id": finding.objective_id,
+                "analysis_version": finding.analysis_version,
+                "finding_id": finding.finding_id,
+                "statement": finding.statement,
+                "factors": list(finding.factors),
+                "outcome": finding.outcome,
+                "direction": finding.direction,
+                "assertion_strength": finding.assertion_strength,
+                "attribution_scope": finding.attribution_scope,
+                "synthesis_status": finding.synthesis_status,
+                "certainty": finding.certainty,
+                "display_rank": finding.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+                    }
+                    for mechanism in finding.mechanisms
+                ],
+                "scientific_context": scientific_context,
+                "limitations": list(finding.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in finding.paper_contributions
+                ],
+                "origin": finding.origin,
+                "source_analysis_version": finding.source_analysis_version,
+                "parent_finding_id": finding.parent_finding_id,
+                "created_by_user_id": finding.created_by_user_id,
+                "created_by_tool_call_id": finding.created_by_tool_call_id,
+                "created_at": finding.created_at.isoformat() if finding.created_at else None,
+                **({"selection_ids": list(finding.selection_ids)} if finding.selection_ids else {}),
+                **(
+                    {"comparison_group_ids": list(finding.comparison_group_ids)}
+                    if finding.comparison_group_ids
+                    else {}
+                ),
+                **({"warnings": list(finding.warnings)} if finding.warnings else {}),
+            }
             row.note = curation.note
             row.reviewer = curation.reviewer
             row.updated_at = _datetime(curation.updated_at)
             if existing is None:
                 session.add(row)
             await session.flush()
-            return _curation(row)
+            return replace(
+                curation,
+                curated_finding=replace(finding, certainty=round(finding.certainty, 2)),
+                note=_normalize_text(row.note),
+                reviewer=_normalize_text(row.reviewer),
+                updated_at=_isoformat(row.updated_at),
+            )
 
     async def list_curations(
         self,
@@ -193,7 +240,92 @@ class FindingReviewRepository:
                     FindingCurationRecord.curation_id,
                 )
             )
-            return tuple(_curation(row) for row in rows)
+            records = []
+            for row in rows:
+                stored = row.curated_finding
+                context = stored.get("scientific_context") or {}
+                attributes_by_scope = {}
+                for scope in ("material", "sample", "process", "test"):
+                    attributes_by_scope[scope] = tuple(
+                        ScientificAttribute(
+                            name=item["name"],
+                            value=item["value"],
+                            unit=item.get("unit"),
+                            context_scope=item.get("context_scope", "unknown"),
+                            applies_to_outcomes=tuple(item.get("applies_to_outcomes", ())),
+                        )
+                        for item in context.get(scope, ())
+                    )
+                finding = Finding(
+                    collection_id=stored["collection_id"],
+                    objective_id=stored["objective_id"],
+                    analysis_version=stored["analysis_version"],
+                    finding_id=stored.get("finding_id") or finding_stable_id(
+                        "finding", stored["objective_id"], stored["analysis_version"],
+                        tuple(stored["factors"]), stored["outcome"],
+                        stored.get("supporting_evidence_ids"),
+                    ),
+                    statement=stored["statement"],
+                    factors=tuple(stored["factors"]),
+                    outcome=stored["outcome"],
+                    direction=stored["direction"],
+                    assertion_strength=stored["assertion_strength"],
+                    attribution_scope=stored["attribution_scope"],
+                    synthesis_status=stored["synthesis_status"],
+                    certainty=round(stored["certainty"], 2),
+                    display_rank=stored["display_rank"],
+                    mechanisms=tuple(
+                        FindingMechanismRelation(
+                            source_term=item["source_term"],
+                            relation_type=item["relation_type"],
+                            target_term=item["target_term"],
+                            direction=item.get("direction"),
+                            assertion_strength=item["assertion_strength"],
+                            supporting_evidence_ids=tuple(item.get("supporting_evidence_ids", ())),
+                        )
+                        for item in stored.get("mechanisms", ())
+                    ),
+                    scientific_context=ScientificContext(
+                        material=attributes_by_scope["material"],
+                        sample=attributes_by_scope["sample"],
+                        process=attributes_by_scope["process"],
+                        test=attributes_by_scope["test"],
+                    ),
+                    limitations=tuple(stored.get("limitations", ())),
+                    paper_contributions=tuple(
+                        FindingPaperContribution(
+                            document_id=item["document_id"],
+                            analysis_status=item["analysis_status"],
+                            supporting_evidence_ids=tuple(item.get("supporting_evidence_ids", ())),
+                            contradicting_evidence_ids=tuple(item.get("contradicting_evidence_ids", ())),
+                            context_evidence_ids=tuple(item.get("context_evidence_ids", ())),
+                            condition_boundary_evidence_ids=tuple(item.get("condition_boundary_evidence_ids", ())),
+                        )
+                        for item in stored.get("paper_contributions", ())
+                    ),
+                    origin=stored.get("origin", "system_generated"),
+                    source_analysis_version=stored.get("source_analysis_version"),
+                    parent_finding_id=stored.get("parent_finding_id"),
+                    created_by_user_id=stored.get("created_by_user_id"),
+                    created_by_tool_call_id=stored.get("created_by_tool_call_id"),
+                    created_at=_finding_creation_time(stored.get("created_at")),
+                    warnings=tuple(stored.get("warnings", ())),
+                    selection_ids=tuple(stored.get("selection_ids", ())),
+                    comparison_group_ids=tuple(stored.get("comparison_group_ids", ())),
+                )
+                records.append(FindingCuration(
+                    curation_id=row.curation_id,
+                    collection_id=row.collection_id,
+                    objective_id=row.objective_id,
+                    analysis_version=row.analysis_version,
+                    finding_id=row.finding_id,
+                    curated_status=row.curated_status,
+                    curated_finding=finding,
+                    note=_normalize_text(row.note),
+                    reviewer=_normalize_text(row.reviewer),
+                    updated_at=_isoformat(row.updated_at),
+                ))
+            return tuple(records)
 
 
 def _feedback_key(value) -> tuple[str, str, int, str]:
@@ -211,23 +343,6 @@ def _curation_key(value) -> tuple[str, str, int, str]:
         value.objective_id,
         value.analysis_version,
         value.finding_id,
-    )
-
-
-def _curation(row: FindingCurationRecord) -> FindingCuration:
-    return finding_curation_from_record(
-        {
-            "curation_id": row.curation_id,
-            "collection_id": row.collection_id,
-            "objective_id": row.objective_id,
-            "analysis_version": row.analysis_version,
-            "finding_id": row.finding_id,
-            "curated_status": row.curated_status,
-            "curated_finding": dict(row.curated_finding),
-            "note": row.note,
-            "reviewer": row.reviewer,
-            "updated_at": _isoformat(row.updated_at),
-        }
     )
 
 
@@ -281,224 +396,6 @@ def finding_feedback_record(value: FindingFeedback) -> dict[str, Any]:
             "created_at": value.created_at}
 
 
-def finding_curation_from_record(payload: Mapping[str, Any]) -> FindingCuration:
-    return FindingCuration(
-        curation_id=_normalize_text(payload.get("curation_id")) or "",
-        collection_id=_normalize_text(payload.get("collection_id")) or "",
-        objective_id=_normalize_text(payload.get("objective_id")) or "",
-        analysis_version=int(payload.get("analysis_version") or 0),
-        finding_id=_normalize_text(payload.get("finding_id")) or "",
-        curated_status=(_normalize_text(payload.get("curated_status")) or "").lower(),
-        curated_finding=Finding(
-            collection_id=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get("collection_id")
-            )
-            or "",
-            objective_id=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get("objective_id")
-            )
-            or "",
-            analysis_version=finding_positive_int(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "analysis_version"
-                )
-            ),
-            finding_id=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get("finding_id")
-            )
-            or finding_stable_id(
-                "finding",
-                _normalize_mapping(payload.get("curated_finding")).get("objective_id"),
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "analysis_version"
-                ),
-                finding_strings(
-                    _normalize_mapping(payload.get("curated_finding")).get("factors")
-                ),
-                finding_text(
-                    _normalize_mapping(payload.get("curated_finding")).get("outcome")
-                )
-                or "",
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "supporting_evidence_ids"
-                ),
-            ),
-            statement=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get("statement")
-            )
-            or "",
-            factors=finding_strings(
-                _normalize_mapping(payload.get("curated_finding")).get("factors")
-            ),
-            outcome=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get("outcome")
-            )
-            or "",
-            direction=finding_choice(
-                _normalize_mapping(payload.get("curated_finding")).get("direction"),
-                SCIENTIFIC_RESULT_DIRECTIONS,
-                "unknown",
-            ),
-            assertion_strength=finding_choice(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "assertion_strength"
-                ),
-                FINDING_ASSERTION_STRENGTHS,
-                "descriptive",
-            ),
-            attribution_scope=finding_choice(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "attribution_scope"
-                ),
-                EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-                "descriptive_only",
-            ),
-            synthesis_status=finding_choice(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "synthesis_status"
-                ),
-                FINDING_SYNTHESIS_STATUSES,
-                "insufficient_confirmation",
-            ),
-            certainty=finding_certainty(
-                _normalize_mapping(payload.get("curated_finding")).get("certainty")
-            ),
-            display_rank=finding_non_negative_int(
-                _normalize_mapping(payload.get("curated_finding")).get("display_rank")
-            ),
-            mechanisms=tuple(
-                (
-                    FindingMechanismRelation(
-                        source_term=finding_text(item.get("source_term")) or "",
-                        relation_type=finding_text(item.get("relation_type")) or "",
-                        target_term=finding_text(item.get("target_term")) or "",
-                        direction=finding_text(item.get("direction")),
-                        assertion_strength=finding_choice(
-                            item.get("assertion_strength"),
-                            FINDING_ASSERTION_STRENGTHS,
-                            "descriptive",
-                        ),
-                        supporting_evidence_ids=finding_strings(
-                            item.get("supporting_evidence_ids")
-                        ),
-                    )
-                    for item in tuple(
-                        (
-                            dict(item)
-                            for item in (
-                                _normalize_mapping(payload.get("curated_finding")).get(
-                                    "mechanisms"
-                                )
-                                if isinstance(
-                                    _normalize_mapping(
-                                        payload.get("curated_finding")
-                                    ).get("mechanisms"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(item, Mapping)
-                        )
-                    )
-                )
-            ),
-            scientific_context=_stored_scientific_context(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "scientific_context"
-                )
-            ),
-            limitations=finding_strings(
-                _normalize_mapping(payload.get("curated_finding")).get("limitations")
-            ),
-            paper_contributions=tuple(
-                (
-                    FindingPaperContribution(
-                        document_id=finding_text(item.get("document_id")) or "",
-                        analysis_status=finding_choice(
-                            item.get("analysis_status"),
-                            PAPER_CONTRIBUTION_STATUSES,
-                            "pending",
-                        ),
-                        supporting_evidence_ids=finding_strings(
-                            item.get("supporting_evidence_ids")
-                        ),
-                        contradicting_evidence_ids=finding_strings(
-                            item.get("contradicting_evidence_ids")
-                        ),
-                        context_evidence_ids=finding_strings(
-                            item.get("context_evidence_ids")
-                        ),
-                        condition_boundary_evidence_ids=finding_strings(
-                            item.get("condition_boundary_evidence_ids")
-                        ),
-                    )
-                    for item in tuple(
-                        (
-                            dict(item)
-                            for item in (
-                                _normalize_mapping(payload.get("curated_finding")).get(
-                                    "paper_contributions"
-                                )
-                                if isinstance(
-                                    _normalize_mapping(
-                                        payload.get("curated_finding")
-                                    ).get("paper_contributions"),
-                                    (list, tuple),
-                                )
-                                else ()
-                            )
-                            if isinstance(item, Mapping)
-                        )
-                    )
-                )
-            ),
-            origin=finding_choice(
-                _normalize_mapping(payload.get("curated_finding")).get("origin"),
-                FINDING_ORIGINS,
-                "system_generated",
-            ),
-            source_analysis_version=finding_positive_int(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "source_analysis_version"
-                )
-            )
-            or None,
-            parent_finding_id=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "parent_finding_id"
-                )
-            ),
-            created_by_user_id=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "created_by_user_id"
-                )
-            ),
-            created_by_tool_call_id=finding_text(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "created_by_tool_call_id"
-                )
-            ),
-            created_at=_finding_creation_time(
-                _normalize_mapping(payload.get("curated_finding")).get("created_at")
-            ),
-            warnings=finding_strings(
-                _normalize_mapping(payload.get("curated_finding")).get("warnings")
-            ),
-            selection_ids=finding_strings(
-                _normalize_mapping(payload.get("curated_finding")).get("selection_ids")
-            ),
-            comparison_group_ids=finding_strings(
-                _normalize_mapping(payload.get("curated_finding")).get(
-                    "comparison_group_ids"
-                )
-            ),
-        ),
-        note=_normalize_text(payload.get("note")),
-        reviewer=_normalize_text(payload.get("reviewer")),
-        updated_at=_normalize_text(payload.get("updated_at")) or "",
-    )
-
-
 def finding_curation_record(value: FindingCuration) -> dict[str, Any]:
     return {
         "curation_id": value.curation_id,
@@ -512,37 +409,6 @@ def finding_curation_record(value: FindingCuration) -> dict[str, Any]:
         "reviewer": value.reviewer,
         "updated_at": value.updated_at,
     }
-
-
-def _context_attributes(records: Any) -> tuple[ScientificAttribute, ...]:
-    return tuple(
-        ScientificAttribute(
-            name=scientific_text(item.get("name")) or "",
-            value=(
-                scientific_scalar(item.get("value"))
-                if scientific_scalar(item.get("value")) is not None
-                else ""
-            ),
-            unit=scientific_text(item.get("unit")),
-            context_scope=scientific_choice(
-                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
-            ),
-            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
-        )
-        for item in (records if isinstance(records, (list, tuple)) else ())
-        if isinstance(item, Mapping)
-    )
-
-
-def _stored_scientific_context(value: Any) -> ScientificContext:
-    if not isinstance(value, Mapping):
-        return ScientificContext()
-    return ScientificContext(
-        material=_context_attributes(value.get("material")),
-        sample=_context_attributes(value.get("sample")),
-        process=_context_attributes(value.get("process")),
-        test=_context_attributes(value.get("test")),
-    )
 
 
 def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:

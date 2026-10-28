@@ -4,9 +4,7 @@ from dataclasses import replace
 from typing import Mapping
 
 import pytest
-from application.core.objectives.analysis.experiment_query_service import (
-    finding_response,
-)
+
 from domain.core import Finding, ObjectiveEvidence
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,

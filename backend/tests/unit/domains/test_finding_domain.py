@@ -3,9 +3,6 @@ from __future__ import annotations
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
-from application.core.objectives.analysis.experiment_query_service import (
-    finding_response,
-)
 from domain.core import (
     Finding,
     FindingMechanismRelation,
@@ -175,13 +172,12 @@ def _finding(**overrides) -> Finding:
     return Finding(**values)
 
 
-def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
+def test_finding_represents_one_atomic_outcome_without_legacy_fields() -> None:
     finding = _finding()
-    record = finding_response(finding)
 
     assert finding.key == ("collection-1", "objective-1", 1, "finding-1")
-    assert record["factors"] == ["preheating"]
-    assert record["outcome"] == "ductility"
+    assert finding.factors == ("preheating",)
+    assert finding.outcome == "ductility"
     assert finding.support_scope == "paper"
     assert finding.direct_document_count == 1
     for removed in (
@@ -198,7 +194,7 @@ def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
         "context",
         "derivation",
     ):
-        assert removed not in record
+        assert not hasattr(finding, removed)
 
 
 def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> None:

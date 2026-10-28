@@ -5,9 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from application.core.objectives.analysis.experiment_query_service import (
-    finding_response,
-)
+
 from application.core.objectives.finding_summary import (
     FindingSummaryUnavailable,
     summarize_finding_evidence,
@@ -77,7 +75,139 @@ def review_input():
             },
         },
     ]
-    return finding_response(finding), evidence
+    return {
+        "collection_id": finding.collection_id,
+        "objective_id": finding.objective_id,
+        "analysis_version": finding.analysis_version,
+        "finding_id": finding.finding_id,
+        "statement": finding.statement,
+        "factors": list(finding.factors),
+        "outcome": finding.outcome,
+        "direction": finding.direction,
+        "assertion_strength": finding.assertion_strength,
+        "attribution_scope": finding.attribution_scope,
+        "synthesis_status": finding.synthesis_status,
+        "certainty": finding.certainty,
+        "display_rank": finding.display_rank,
+        "mechanisms": [
+            {
+                "source_term": mechanism.source_term,
+                "relation_type": mechanism.relation_type,
+                "target_term": mechanism.target_term,
+                "direction": mechanism.direction,
+                "assertion_strength": mechanism.assertion_strength,
+                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
+            }
+            for mechanism in finding.mechanisms
+        ],
+        "scientific_context": {
+            "material": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.material
+            ],
+            "sample": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.sample
+            ],
+            "process": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.process
+            ],
+            "test": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in finding.scientific_context.test
+            ],
+        },
+        "limitations": list(finding.limitations),
+        "paper_contributions": [
+            {
+                "document_id": contribution.document_id,
+                "analysis_status": contribution.analysis_status,
+                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
+                "contradicting_evidence_ids": list(
+                    contribution.contradicting_evidence_ids
+                ),
+                "context_evidence_ids": list(contribution.context_evidence_ids),
+                "condition_boundary_evidence_ids": list(
+                    contribution.condition_boundary_evidence_ids
+                ),
+            }
+            for contribution in finding.paper_contributions
+        ],
+        "origin": finding.origin,
+        "source_analysis_version": finding.source_analysis_version,
+        "parent_finding_id": finding.parent_finding_id,
+        "created_by_user_id": finding.created_by_user_id,
+        "created_by_tool_call_id": finding.created_by_tool_call_id,
+        "created_at": finding.created_at.isoformat() if finding.created_at else None,
+        **(
+            {"selection_ids": list(finding.selection_ids)}
+            if finding.selection_ids
+            else {}
+        ),
+        **(
+            {"comparison_group_ids": list(finding.comparison_group_ids)}
+            if finding.comparison_group_ids
+            else {}
+        ),
+        **({"warnings": list(finding.warnings)} if finding.warnings else {}),
+    }, evidence
 
 
 class ModelStub:

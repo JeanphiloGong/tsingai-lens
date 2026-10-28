@@ -896,7 +896,6 @@ async def _local_objective_bundle(
 ) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
         from application.core.objectives.analysis.experiment_query_service import (
-            finding_response,
             objective_evidence_response,
         )
         from application.evaluation import FindingFeedbackService  # noqa: PLC0415
@@ -1191,7 +1190,162 @@ async def _local_objective_bundle(
             }
             for item in paper_contributions
         ],
-        "findings": [finding_response(item) for item in findings],
+        "findings": [
+            {
+                "collection_id": item.collection_id,
+                "objective_id": item.objective_id,
+                "analysis_version": item.analysis_version,
+                "finding_id": item.finding_id,
+                "statement": item.statement,
+                "factors": list(item.factors),
+                "outcome": item.outcome,
+                "direction": item.direction,
+                "assertion_strength": item.assertion_strength,
+                "attribution_scope": item.attribution_scope,
+                "synthesis_status": item.synthesis_status,
+                "certainty": item.certainty,
+                "display_rank": item.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
+                    }
+                    for mechanism in item.mechanisms
+                ],
+                "scientific_context": {
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in item.scientific_context.test
+                    ],
+                },
+                "limitations": list(item.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in item.paper_contributions
+                ],
+                "origin": item.origin,
+                "source_analysis_version": item.source_analysis_version,
+                "parent_finding_id": item.parent_finding_id,
+                "created_by_user_id": item.created_by_user_id,
+                "created_by_tool_call_id": item.created_by_tool_call_id,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                **(
+                    {"selection_ids": list(item.selection_ids)}
+                    if item.selection_ids
+                    else {}
+                ),
+                **(
+                    {"comparison_group_ids": list(item.comparison_group_ids)}
+                    if item.comparison_group_ids
+                    else {}
+                ),
+                **({"warnings": list(item.warnings)} if item.warnings else {}),
+            }
+            for item in findings
+        ],
         "evidence": [objective_evidence_response(item) for item in published_evidence],
         "evidence_by_finding": evidence_by_finding,
         "feedback_by_finding": feedback_by_finding,

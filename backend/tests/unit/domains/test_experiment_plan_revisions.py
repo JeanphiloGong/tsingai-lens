@@ -117,3 +117,24 @@ def test_next_revision_is_direct_validated_and_copies_structured_content(monkeyp
             plan_id=plan.plan_id, title="Reviewed", content="Approved", status="draft",
             structured_plan=None, updated_by="reviewer", updated_at=plan.updated_at,
         )
+
+
+@pytest.mark.parametrize("status", [None, "", "DRAFT", " ready_for_review ", "invalid"])
+def test_plan_status_is_rejected_without_repair(status) -> None:
+    plan = ExperimentPlanRecord(**_plan_payload())
+    with pytest.raises(ValueError, match="status must be one of"):
+        plan.with_updates(
+            title=plan.title, content=plan.content, status=status,
+            updated_at=plan.updated_at,
+        )
+    with pytest.raises(ValueError, match="status must be one of"):
+        plan.next_revision(
+            plan_id="plan-v2", title=plan.title, content=plan.content, status=status,
+            structured_plan=None, updated_by="researcher-2", updated_at=plan.updated_at,
+        )
+
+
+@pytest.mark.parametrize("field", ["title", "content"])
+def test_plan_rejects_blank_required_text(field) -> None:
+    with pytest.raises(ValueError, match=f"{field} is required"):
+        ExperimentPlanRecord(**_plan_payload(**{field: "  "}))

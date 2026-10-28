@@ -33,6 +33,25 @@ class ExperimentPlanRecord:
     updated_by: str | None = None
 
     def __post_init__(self) -> None:
+        for name, value in (
+            ("plan_id", self.plan_id),
+            ("collection_id", self.collection_id),
+            ("objective_id", self.objective_id),
+            ("title", self.title),
+            ("content", self.content),
+        ):
+            text = value.strip()
+            if not text:
+                raise ValueError(f"{name} is required")
+            object.__setattr__(self, name, text)
+        if self.created_by is not None:
+            object.__setattr__(self, "created_by", self.created_by.strip() or None)
+        if self.updated_by is not None:
+            object.__setattr__(self, "updated_by", self.updated_by.strip() or None)
+        if self.status not in EXPERIMENT_PLAN_STATUSES:
+            raise ValueError(
+                "experiment plan status must be one of: draft, ready_for_review, archived"
+            )
         if (
             isinstance(self.plan_version, bool)
             or not isinstance(self.plan_version, int)
@@ -55,87 +74,57 @@ class ExperimentPlanRecord:
     def with_updates(
         self,
         *,
-        title: Any,
-        content: Any,
-        status: Any,
+        title: str,
+        content: str,
+        status: ExperimentPlanStatus,
         updated_at: str,
     ) -> "ExperimentPlanRecord":
         return replace(
             self,
-            title=_required_text(title, "title"),
-            content=_required_text(content, "content"),
-            status=normalize_experiment_plan_status(status),
-            updated_at=str(updated_at),
+            title=title,
+            content=content,
+            status=status,
+            updated_at=updated_at,
         )
 
     def next_revision(
         self,
         *,
-        plan_id: Any,
-        title: Any,
-        content: Any,
-        status: Any,
+        plan_id: str,
+        title: str,
+        content: str,
+        status: ExperimentPlanStatus,
         structured_plan: Mapping[str, Any] | None,
-        updated_by: Any,
+        updated_by: str,
         updated_at: str,
         source_links: tuple[Mapping[str, str], ...] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> "ExperimentPlanRecord":
         return replace(
             self,
-            plan_id=_required_text(plan_id, "plan_id"),
-            title=_required_text(title, "title"),
-            content=_required_text(content, "content"),
-            status=normalize_experiment_plan_status(status),
+            plan_id=plan_id,
+            title=title,
+            content=content,
+            status=status,
             plan_version=self.plan_version + 1,
             parent_plan_id=self.plan_id,
             structured_plan=(
                 deepcopy(dict(structured_plan))
-                if isinstance(structured_plan, Mapping)
-                else structured_plan
+                if structured_plan is not None
+                else None
             ),
-            updated_by=_optional_text(updated_by),
-            updated_at=str(updated_at),
+            updated_by=updated_by,
+            updated_at=updated_at,
             source_links=tuple(
-                _string_mapping(item)
+                dict(item)
                 for item in (self.source_links if source_links is None else source_links)
             ),
             metadata=dict(self.metadata if metadata is None else metadata),
         )
-
-def normalize_experiment_plan_status(value: Any) -> ExperimentPlanStatus:
-    status = str(value or "draft").strip().lower()
-    if status not in EXPERIMENT_PLAN_STATUSES:
-        raise ValueError(
-            "experiment plan status must be one of: draft, ready_for_review, archived"
-        )
-    return status  # type: ignore[return-value]
-
-
-def _required_text(value: Any, field_name: str) -> str:
-    text = _optional_text(value)
-    if not text:
-        raise ValueError(f"{field_name} is required")
-    return text
-
-
-def _optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
-
-
-def _string_mapping(value: Mapping[str, Any]) -> dict[str, str]:
-    return {
-        str(key): str(item)
-        for key, item in value.items()
-        if _optional_text(key) and _optional_text(item)
-    }
-
 
 __all__ = [
     "EXPERIMENT_PLAN_STATUSES",
     "ExperimentPlanRecord",
     "ExperimentPlanRevisionConflictError",
     "ExperimentPlanStatus",
-    "normalize_experiment_plan_status",
 ]

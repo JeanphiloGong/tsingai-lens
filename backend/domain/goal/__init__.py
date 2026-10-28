@@ -5,7 +5,6 @@ from domain.goal.experiment_plan import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
     ExperimentPlanStatus,
-    normalize_experiment_plan_status,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     "ExperimentPlanRecord",
     "ExperimentPlanRevisionConflictError",
     "ExperimentPlanStatus",
-    "normalize_experiment_plan_status",
 ]

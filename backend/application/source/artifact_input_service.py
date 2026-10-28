@@ -26,10 +26,10 @@ async def load_collection_inputs(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    documents = _records(
+    documents = tuple(
         source_document_payload(document) for document in source_documents
     )
-    text_units = _records(
+    text_units = tuple(
         source_text_unit_payload(text_unit)
         for document in source_documents
         for text_unit in document.text_units
@@ -44,7 +44,7 @@ async def load_blocks_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
+    return tuple(
         source_block_payload(block)
         for document in source_documents
         for block in document.blocks
@@ -58,7 +58,7 @@ async def load_table_rows_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
+    return tuple(
         source_table_row_payload(row)
         for document in source_documents
         for row in document.table_rows
@@ -72,7 +72,7 @@ async def load_table_cells_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
+    return tuple(
         source_table_cell_payload(cell)
         for document in source_documents
         for cell in document.table_cells
@@ -83,7 +83,7 @@ async def load_figures_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
-    return _records(
+    return tuple(
         source_figure_payload(figure)
         for figure in await source_artifact_repository.list_figures(collection_id)
     )
@@ -96,7 +96,7 @@ async def load_tables_artifact(
     source_documents = await _load_source_documents(
         collection_id, source_artifact_repository
     )
-    return _records(
+    return tuple(
         source_table_payload(table)
         for document in source_documents
         for table in document.tables
@@ -124,10 +124,6 @@ async def _load_source_documents(
     if not documents:
         raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
     return documents
-
-
-def _records(records: Iterable[Mapping[str, Any]]) -> tuple[SourceRecord, ...]:
-    return tuple(dict(record) for record in records)
 
 
 def build_document_records(

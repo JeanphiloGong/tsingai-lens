@@ -711,7 +711,15 @@ class ChatSessionService:
                     result,
                     warnings=(*result.warnings, "tool_failure_enqueue_failed"),
                 )
-        return self._turn_record(result, previous_count=len(previous_messages))
+        return {
+            "status": result.status.value,
+            "completion_reason": result.completion_reason.value if result.completion_reason else None,
+            "warnings": result.warnings,
+            "messages": result.messages[len(previous_messages):],
+            "pending_approval": result.pending_approval,
+            "error_code": result.error_code,
+            "execution_plan": result.execution_plan,
+        }
 
     async def stream_message_for_user(
         self,
@@ -785,10 +793,15 @@ class ChatSessionService:
                     emit(
                         {
                             "type": "turn",
-                            "turn": self._turn_record(
-                                result,
-                                previous_count=len(current_messages),
-                            ),
+                            "turn": {
+                                "status": result.status.value,
+                                "completion_reason": result.completion_reason.value if result.completion_reason else None,
+                                "warnings": result.warnings,
+                                "messages": result.messages[len(current_messages):],
+                                "pending_approval": result.pending_approval,
+                                "error_code": result.error_code,
+                                "execution_plan": result.execution_plan,
+                            },
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -1104,7 +1117,12 @@ class ChatSessionService:
         writer = asyncio.create_task(save_updates())
         try:
             arguments = {
-                "context": self._context(session), "previous_messages": previous_messages,
+                "context": AgentContext(
+                    session_id=session.session_id,
+                    user_id=session.user_id,
+                    collection_id=session.collection_id,
+                ),
+                "previous_messages": previous_messages,
                 "checkpoint": self._trajectory_checkpoint(session, on_saved=record_checkpoint),
                 "text_delta_callback": emit_text_delta, "progress_callback": emit_progress,
                 "response_started_callback": start_response,
@@ -1508,7 +1526,15 @@ class ChatSessionService:
                         run_result,
                         warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
                     )
-            return self._turn_record(run_result, previous_count=len(previous_messages))
+            return {
+                "status": run_result.status.value,
+                "completion_reason": run_result.completion_reason.value if run_result.completion_reason else None,
+                "warnings": run_result.warnings,
+                "messages": run_result.messages[len(previous_messages):],
+                "pending_approval": run_result.pending_approval,
+                "error_code": run_result.error_code,
+                "execution_plan": run_result.execution_plan,
+            }
 
         async with self.repository.session_execution(session_id):
             claimed = await self.repository.claim_approved_tool_call(
@@ -1541,10 +1567,15 @@ class ChatSessionService:
                     run_result,
                     warnings=(*run_result.warnings, "tool_failure_enqueue_failed"),
                 )
-        return self._turn_record(
-            run_result,
-            previous_count=len(previous_messages),
-        )
+        return {
+            "status": run_result.status.value,
+            "completion_reason": run_result.completion_reason.value if run_result.completion_reason else None,
+            "warnings": run_result.warnings,
+            "messages": run_result.messages[len(previous_messages):],
+            "pending_approval": run_result.pending_approval,
+            "error_code": run_result.error_code,
+            "execution_plan": run_result.execution_plan,
+        }
 
     def _trajectory_checkpoint(
         self,
@@ -1579,30 +1610,6 @@ class ChatSessionService:
                 await on_saved(messages)
 
         return save
-
-    @staticmethod
-    def _context(session: ChatSession) -> AgentContext:
-        return AgentContext(
-            session_id=session.session_id,
-            user_id=session.user_id,
-            collection_id=session.collection_id,
-        )
-
-    @staticmethod
-    def _turn_record(
-        result: AgentRunResult,
-        *,
-        previous_count: int,
-    ) -> dict[str, Any]:
-        return {
-            "status": result.status.value,
-            "completion_reason": result.completion_reason.value if result.completion_reason else None,
-            "warnings": result.warnings,
-            "messages": result.messages[previous_count:],
-            "pending_approval": result.pending_approval,
-            "error_code": result.error_code,
-            "execution_plan": result.execution_plan,
-        }
 
 
 __all__ = [

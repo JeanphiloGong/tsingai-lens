@@ -423,6 +423,38 @@ def _detail(
         ]
         question = prior_users[-1] if prior_users else ""
     coverage = asdict(latest.evidence_coverage) if latest else {}
+    analysis = None
+    if latest:
+        analysis = {
+            "problem_type": latest.problem_type,
+            "confidence": latest.confidence,
+            "suggested_target": latest.suggested_target,
+            "model": latest.model,
+            "result_id": latest.result_id,
+            "coverage_status": latest.evidence_coverage.coverage_status,
+        }
+        if hasattr(latest, "signal_type"):
+            analysis.update(
+                {
+                    "signal_type": latest.signal_type,
+                    "signal_id": latest.signal_id,
+                    "resolution": "unresolved_candidate",
+                }
+            )
+            if hasattr(latest, "trigger_message_id"):
+                analysis["trigger_message_id"] = latest.trigger_message_id
+            if hasattr(latest, "tool_call_id"):
+                analysis.update(
+                    {
+                        "tool_call_id": latest.tool_call_id,
+                        "result_message_id": latest.result_message_id,
+                        "tool_name": latest.tool_name,
+                        "error_code": latest.error_code,
+                    }
+                )
+        else:
+            analysis["signal_type"] = "chat_message_feedback"
+            analysis["feedback_id"] = latest.feedback_id
     return {
         "case_id": case.case_id,
         "collection_id": case.collection_id,
@@ -440,7 +472,23 @@ def _detail(
             for item in feedback
         ]
         + list(correction_items)
-        + list(_tool_failure_records(tool_failure_results)),
+        + [
+            {
+                "signal_type": result.signal_type,
+                "signal_id": result.signal_id,
+                "tool_call_id": result.tool_call_id,
+                "assistant_message_id": result.assistant_message_id,
+                "result_message_id": result.result_message_id,
+                "tool_name": result.tool_name,
+                "error_code": result.error_code,
+                "problem_type": result.problem_type,
+                "confidence": result.confidence,
+                "suggested_target": None,
+                "resolution": "unresolved_candidate",
+                "created_at": result.created_at,
+            }
+            for result in tool_failure_results
+        ],
         "question": question,
         "answer": (
             answer.content
@@ -463,7 +511,7 @@ def _detail(
         ),
         "gaps": coverage.get("gaps", case.context_snapshot.get("gaps", [])),
         "coverage_status": coverage.get("coverage_status", "unknown"),
-        "analysis": (_analysis_projection(latest) if latest else None),
+        "analysis": analysis,
         "annotation": (
             {
                 "annotation_id": annotation.annotation_id,
@@ -495,40 +543,6 @@ def _latest_result(results: tuple[Any, ...]) -> Any | None:
     return max(results, key=lambda item: (item.created_at, item.result_id), default=None)
 
 
-def _analysis_projection(result: Any) -> dict[str, Any]:
-    projection = {
-        "problem_type": result.problem_type,
-        "confidence": result.confidence,
-        "suggested_target": result.suggested_target,
-        "model": result.model,
-        "result_id": result.result_id,
-        "coverage_status": result.evidence_coverage.coverage_status,
-    }
-    if hasattr(result, "signal_type"):
-        projection.update(
-            {
-                "signal_type": result.signal_type,
-                "signal_id": result.signal_id,
-                "resolution": "unresolved_candidate",
-            }
-        )
-        if hasattr(result, "trigger_message_id"):
-            projection["trigger_message_id"] = result.trigger_message_id
-        if hasattr(result, "tool_call_id"):
-            projection.update(
-                {
-                    "tool_call_id": result.tool_call_id,
-                    "result_message_id": result.result_message_id,
-                    "tool_name": result.tool_name,
-                    "error_code": result.error_code,
-                }
-            )
-    else:
-        projection["signal_type"] = "chat_message_feedback"
-        projection["feedback_id"] = result.feedback_id
-    return projection
-
-
 def _correction_signal_records(
     results: tuple[Any, ...],
     *,
@@ -556,26 +570,6 @@ def _correction_signal_records(
             }
         )
     return tuple(records)
-
-
-def _tool_failure_records(results: tuple[Any, ...]) -> tuple[dict[str, Any], ...]:
-    return tuple(
-        {
-            "signal_type": result.signal_type,
-            "signal_id": result.signal_id,
-            "tool_call_id": result.tool_call_id,
-            "assistant_message_id": result.assistant_message_id,
-            "result_message_id": result.result_message_id,
-            "tool_name": result.tool_name,
-            "error_code": result.error_code,
-            "problem_type": result.problem_type,
-            "confidence": result.confidence,
-            "suggested_target": None,
-            "resolution": "unresolved_candidate",
-            "created_at": result.created_at,
-        }
-        for result in results
-    )
 
 
 def _case_source_refs(

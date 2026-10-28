@@ -23,9 +23,7 @@ from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
     order_routes_for_extraction,
 )
-from application.core.objectives.analysis.experiment_query_service import (
-    scientific_attribute_response,
-)
+
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.analysis.source_text import (
     NUMBER_PATTERN,
@@ -7059,7 +7057,21 @@ def _objective_document_state_payload(
         )
         context = {
             group: [
-                scientific_attribute_response(item)
+                {
+                    "name": item.name,
+                    "value": item.value,
+                    "unit": item.unit,
+                    **(
+                        {"context_scope": item.context_scope}
+                        if item.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(item.applies_to_outcomes)}
+                        if item.applies_to_outcomes
+                        else {}
+                    ),
+                }
                 for item in getattr(unit.scientific_context, group)[:4]
             ]
             for group in ("material", "sample", "process", "test")

@@ -17,9 +17,7 @@ from dataclasses import (
 from hashlib import sha1
 from typing import Any, Mapping
 
-from application.core.objectives.analysis.experiment_query_service import (
-    scientific_attribute_response,
-)
+
 from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.paper_experiment import (
     ExperimentalVariant,
@@ -1311,19 +1309,75 @@ def _context_record(
 ) -> dict[str, list[dict[str, Any]]]:
     return {
         "material": [
-            scientific_attribute_response(item)
+            {
+                "name": item.name,
+                "value": item.value,
+                "unit": item.unit,
+                **(
+                    {"context_scope": item.context_scope}
+                    if item.context_scope != "unknown"
+                    else {}
+                ),
+                **(
+                    {"applies_to_outcomes": list(item.applies_to_outcomes)}
+                    if item.applies_to_outcomes
+                    else {}
+                ),
+            }
             for item in (variant.subject_attributes if variant else ())
         ],
         "sample": [
-            scientific_attribute_response(item)
+            {
+                "name": item.name,
+                "value": item.value,
+                "unit": item.unit,
+                **(
+                    {"context_scope": item.context_scope}
+                    if item.context_scope != "unknown"
+                    else {}
+                ),
+                **(
+                    {"applies_to_outcomes": list(item.applies_to_outcomes)}
+                    if item.applies_to_outcomes
+                    else {}
+                ),
+            }
             for item in (variant.state if variant else ())
         ],
         "process": [
-            scientific_attribute_response(item)
+            {
+                "name": item.name,
+                "value": item.value,
+                "unit": item.unit,
+                **(
+                    {"context_scope": item.context_scope}
+                    if item.context_scope != "unknown"
+                    else {}
+                ),
+                **(
+                    {"applies_to_outcomes": list(item.applies_to_outcomes)}
+                    if item.applies_to_outcomes
+                    else {}
+                ),
+            }
             for item in (variant.intervention_attributes if variant else ())
         ],
         "test": [
-            scientific_attribute_response(item)
+            {
+                "name": item.name,
+                "value": item.value,
+                "unit": item.unit,
+                **(
+                    {"context_scope": item.context_scope}
+                    if item.context_scope != "unknown"
+                    else {}
+                ),
+                **(
+                    {"applies_to_outcomes": list(item.applies_to_outcomes)}
+                    if item.applies_to_outcomes
+                    else {}
+                ),
+            }
             for item in (test.parameters if test else ())
         ],
     }

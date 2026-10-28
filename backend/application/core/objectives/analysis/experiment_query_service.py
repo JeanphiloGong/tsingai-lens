@@ -11,8 +11,6 @@ from typing import Any
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
-from domain.core.research_objective import ObjectiveEvidence
-from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from repositories.comparison_group_repository import ComparisonGroupRepository
 from repositories.experiment_finding_repository import (
     ExperimentFindingRepository,
@@ -756,7 +754,25 @@ class ExperimentQueryService:
                         "variant_subject_attributes": json.dumps(
                             (
                                 [
-                                    scientific_attribute_response(item)
+                                    {
+                                        "name": item.name,
+                                        "value": item.value,
+                                        "unit": item.unit,
+                                        **(
+                                            {"context_scope": item.context_scope}
+                                            if item.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    item.applies_to_outcomes
+                                                )
+                                            }
+                                            if item.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
                                     for item in variant.subject_attributes
                                 ]
                                 if variant
@@ -768,7 +784,25 @@ class ExperimentQueryService:
                         "variant_intervention_attributes": json.dumps(
                             (
                                 [
-                                    scientific_attribute_response(item)
+                                    {
+                                        "name": item.name,
+                                        "value": item.value,
+                                        "unit": item.unit,
+                                        **(
+                                            {"context_scope": item.context_scope}
+                                            if item.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    item.applies_to_outcomes
+                                                )
+                                            }
+                                            if item.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
                                     for item in variant.intervention_attributes
                                 ]
                                 if variant
@@ -780,7 +814,25 @@ class ExperimentQueryService:
                         "variant_state": json.dumps(
                             (
                                 [
-                                    scientific_attribute_response(item)
+                                    {
+                                        "name": item.name,
+                                        "value": item.value,
+                                        "unit": item.unit,
+                                        **(
+                                            {"context_scope": item.context_scope}
+                                            if item.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    item.applies_to_outcomes
+                                                )
+                                            }
+                                            if item.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
                                     for item in variant.state
                                 ]
                                 if variant
@@ -840,7 +892,25 @@ class ExperimentQueryService:
                         "test_parameters": json.dumps(
                             (
                                 [
-                                    scientific_attribute_response(item)
+                                    {
+                                        "name": item.name,
+                                        "value": item.value,
+                                        "unit": item.unit,
+                                        **(
+                                            {"context_scope": item.context_scope}
+                                            if item.context_scope != "unknown"
+                                            else {}
+                                        ),
+                                        **(
+                                            {
+                                                "applies_to_outcomes": list(
+                                                    item.applies_to_outcomes
+                                                )
+                                            }
+                                            if item.applies_to_outcomes
+                                            else {}
+                                        ),
+                                    }
                                     for item in test.parameters
                                 ]
                                 if test
@@ -1028,112 +1098,3 @@ class ExperimentQueryService:
 
 
 __all__ = ["ExperimentAnalysisBundle", "ExperimentQueryService"]
-
-
-def scientific_attribute_response(value: ScientificAttribute) -> dict[str, Any]:
-    return {
-        "name": value.name,
-        "value": value.value,
-        "unit": value.unit,
-        **(
-            {"context_scope": value.context_scope}
-            if value.context_scope != "unknown"
-            else {}
-        ),
-        **(
-            {"applies_to_outcomes": list(value.applies_to_outcomes)}
-            if value.applies_to_outcomes
-            else {}
-        ),
-    }
-
-
-def _scientific_context_response(value: ScientificContext) -> dict[str, Any]:
-    return {
-        "material": [
-            scientific_attribute_response(attribute) for attribute in value.material
-        ],
-        "sample": [
-            scientific_attribute_response(attribute) for attribute in value.sample
-        ],
-        "process": [
-            scientific_attribute_response(attribute) for attribute in value.process
-        ],
-        "test": [scientific_attribute_response(attribute) for attribute in value.test],
-    }
-
-
-def objective_evidence_response(value: ObjectiveEvidence) -> dict[str, Any]:
-    return {
-        "collection_id": value.collection_id,
-        "objective_id": value.objective_id,
-        "analysis_version": value.analysis_version,
-        "evidence_id": value.evidence_id,
-        "document_id": value.document_id,
-        "source_kind": value.source_kind,
-        "source_ref": value.source_ref,
-        "source_excerpt": value.source_excerpt,
-        "page_numbers": list(value.page_numbers),
-        "evidence_role": value.evidence_role,
-        "selection_status": value.selection_status,
-        "selection_reason": value.selection_reason,
-        "evidence_status": value.evidence_status,
-        "evidence_status_reason": value.evidence_status_reason,
-        "changed_variables": [
-            {
-                "name": variable.name,
-                "baseline_value": variable.baseline_value,
-                "target_value": variable.target_value,
-                "unit": variable.unit,
-            }
-            for variable in value.changed_variables
-        ],
-        "comparison": (
-            {
-                "baseline_label": value.comparison.baseline_label,
-                "target_label": value.comparison.target_label,
-                "axis_names": list(value.comparison.axis_names),
-                "comparable": value.comparison.comparable,
-                "incomparability_reasons": list(
-                    value.comparison.incomparability_reasons
-                ),
-            }
-            if value.comparison
-            else None
-        ),
-        "reported_result": (
-            {
-                "outcome": value.reported_result.outcome,
-                "value": value.reported_result.value,
-                "baseline_value": value.reported_result.baseline_value,
-                "target_value": value.reported_result.target_value,
-                "unit": value.reported_result.unit,
-                "direction": value.reported_result.direction,
-                "result_text": value.reported_result.result_text,
-                "result_kind": value.reported_result.result_kind,
-            }
-            if value.reported_result
-            else None
-        ),
-        "attribution_scope": value.attribution_scope,
-        "scientific_context": _scientific_context_response(value.scientific_context),
-        "resolution_status": value.resolution_status,
-        "failure_reason": value.failure_reason,
-        "confidence": value.confidence,
-        "origin": value.origin,
-        "source_analysis_version": value.source_analysis_version,
-        "supersedes_evidence_id": value.supersedes_evidence_id,
-        "superseded_by_evidence_id": value.superseded_by_evidence_id,
-        "created_by_user_id": value.created_by_user_id,
-        "created_by_tool_call_id": value.created_by_tool_call_id,
-        "created_at": (
-            value.created_at.isoformat() if value.created_at is not None else None
-        ),
-        "authoring_note": value.authoring_note,
-        **({"warnings": list(value.warnings)} if value.warnings else {}),
-        **(
-            {"related_source_refs": [dict(item) for item in value.related_source_refs]}
-            if value.related_source_refs or value.related_source_refs_explicit
-            else {}
-        ),
-    }

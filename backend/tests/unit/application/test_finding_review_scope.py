@@ -1,3 +1,4 @@
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from domain.evaluation import FindingFeedback
@@ -8,7 +9,6 @@ from application.chat.capabilities.published_findings import InspectPublishedFin
 from application.chat.capabilities.contracts import CapabilityExecutionContext
 from dataclasses import replace
 from application.chat.context_builder import ChatContextBuilder
-from application.chat.tool_result_projection import tool_result_record
 import json
 
 
@@ -83,7 +83,22 @@ async def test_large_finding_evidence_is_paged_without_losing_complete_records()
         assert result.data["finding"] == finding
         assert ChatContextBuilder.estimate_tokens({
             "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(tool_result_record(result), ensure_ascii=True, separators=(",", ":")),
+            "content": json.dumps({
+                "tool_call_id": result.tool_call_id,
+                "status": result.status.value,
+                "data": deepcopy(dict(result.data)),
+                "resource_refs": [
+                    {
+                        "resource_type": item.resource_type,
+                        "resource_id": item.resource_id,
+                        "href": item.href,
+                    }
+                    for item in result.resource_refs
+                ],
+                "warnings": list(result.warnings),
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+            }, ensure_ascii=True, separators=(",", ":")),
         }) <= _context().max_result_tokens
         collected.extend(result.data["evidence"])
         next_offset = result.data["next_evidence_offset"]

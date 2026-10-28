@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from copy import deepcopy
+
+import json
+
+from dataclasses import asdict, replace
 
 import pytest
 
-from application.chat.tool_result_projection import tool_result_record
 from application.feedback.tool_failure_handler import ToolFailureAnalysisHandler
 from application.feedback.tool_failure_worker import ToolFailureAnalysisWorker
 from domain.chat import (
@@ -119,16 +122,40 @@ def _fixture():
         tool_call_id=call.tool_call_id, status=ToolResultStatus.FAILED,
         error_code="source_unavailable", error_message="The source is unavailable.",
     )
-    result_message = ChatMessage.from_tool_result(
-        message_id="tool-result-1", session_id=session.session_id,
-        result=result, created_at="2026-09-25T00:00:02+00:00",
+    result_message = ChatMessage(
+        message_id="tool-result-1",
+        session_id=session.session_id,
+        role="tool",
+        content=json.dumps(
+            asdict(result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
+        created_at="2026-09-25T00:00:02+00:00",
+        tool_call_id=result.tool_call_id,
+        tool_result=result,
     )
     answer = ChatMessage.assistant(
         message_id="answer-1", session_id=session.session_id,
         content="I could not inspect the source.", created_at="2026-09-25T00:00:03+00:00",
     )
     messages = (assistant, result_message, answer)
-    digest = tool_result_digest(tool_result_record(result))
+    digest = tool_result_digest({
+        "tool_call_id": result.tool_call_id,
+        "status": result.status.value,
+        "data": deepcopy(dict(result.data)),
+        "resource_refs": [
+            {
+                "resource_type": item.resource_type,
+                "resource_id": item.resource_id,
+                "href": item.href,
+            }
+            for item in result.resource_refs
+        ],
+        "warnings": list(result.warnings),
+        "error_code": result.error_code,
+        "error_message": result.error_message,
+    })
     job = AnalysisJob(
         job_id="job-tool-1", job_type=TOOL_FAILURE_JOB_TYPE, payload_version=1,
         payload={
@@ -167,11 +194,39 @@ async def test_handler_builds_independent_tool_failure_result():
 async def test_worker_cancels_when_result_is_no_longer_a_failure():
     session, messages, call, job = _fixture()
     successful = ChatToolResult(tool_call_id=call.tool_call_id, status="succeeded", data={"ok": True})
-    changed_messages = (messages[0], ChatMessage.from_tool_result(
-        message_id=messages[1].message_id, session_id=session.session_id,
-        result=successful, created_at=messages[1].created_at,
-    ), messages[2])
-    changed_digest = tool_result_digest(tool_result_record(successful))
+    changed_messages = (
+        messages[0],
+        ChatMessage(
+            message_id=messages[1].message_id,
+            session_id=session.session_id,
+            role="tool",
+            content=json.dumps(
+                asdict(successful),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at=messages[1].created_at,
+            tool_call_id=successful.tool_call_id,
+            tool_result=successful,
+        ),
+        messages[2],
+    )
+    changed_digest = tool_result_digest({
+        "tool_call_id": successful.tool_call_id,
+        "status": successful.status.value,
+        "data": deepcopy(dict(successful.data)),
+        "resource_refs": [
+            {
+                "resource_type": item.resource_type,
+                "resource_id": item.resource_id,
+                "href": item.href,
+            }
+            for item in successful.resource_refs
+        ],
+        "warnings": list(successful.warnings),
+        "error_code": successful.error_code,
+        "error_message": successful.error_message,
+    })
     changed_job = replace(
         job,
         payload={**job.payload, "result_digest": changed_digest},

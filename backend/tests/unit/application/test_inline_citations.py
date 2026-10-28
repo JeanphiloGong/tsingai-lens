@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
+import json
+
 from domain.chat import ChatMessage, ChatResourceRef, ChatToolCall, ChatToolRequest, ChatToolResult, ToolRisk
 
 from application.chat.inline_citations import format_inline_citations, format_message_citations
@@ -217,11 +221,18 @@ def test_historical_assistant_message_is_projected_with_its_source_context() -> 
         content="The value is supported by `tbl_doc_abc_table_3`.",
         created_at="2026-09-28T00:00:00Z",
     )
-    tool = ChatMessage.from_tool_result(
+    tool = ChatMessage(
         message_id="tool-1",
         session_id="session-1",
-        result=source,
+        role="tool",
+        content=json.dumps(
+            asdict(source),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-28T00:00:00Z",
+        tool_call_id=source.tool_call_id,
+        tool_result=source,
     )
     projected = format_message_citations((request, tool, assistant))[2].content
 

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
+import json
+
 from application.feedback.source_coverage import (
     ChatCoverageAudit,
     build_evidence_coverage,
@@ -63,11 +67,18 @@ def _trajectory(
         error_code=result_error,
         error_message="The Source read failed." if result_error else None,
     )
-    result_message = ChatMessage.from_tool_result(
+    result_message = ChatMessage(
         message_id="tool-result-1",
         session_id="session-1",
-        result=result,
+        role="tool",
+        content=json.dumps(
+            asdict(result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-25T00:00:02+00:00",
+        tool_call_id=result.tool_call_id,
+        tool_result=result,
     )
     answer = ChatMessage.assistant(
         message_id=answer_message_id,

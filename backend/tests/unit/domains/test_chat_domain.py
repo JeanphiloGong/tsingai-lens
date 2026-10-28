@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
+import json
+
+from dataclasses import asdict, replace
 
 import pytest
 
@@ -178,11 +180,18 @@ def test_tool_result_and_message_copy_mutable_input() -> None:
             ),
         ),
     )
-    message = ChatMessage.from_tool_result(
+    message = ChatMessage(
         message_id="msg-3",
         session_id="chat-1",
-        result=result,
+        role="tool",
+        content=json.dumps(
+            asdict(result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-08-19T00:00:00+00:00",
+        tool_call_id=result.tool_call_id,
+        tool_result=result,
     )
     payload["items"].append("paper-2")
 

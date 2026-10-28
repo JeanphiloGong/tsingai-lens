@@ -9,7 +9,7 @@ from repositories.collection_repository import (
     StoredCollection,
     StoredDocument,
 )
-from tests.support.repositories import MemoryCollectionRepository
+from repositories.collection_repository import CollectionRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -46,11 +46,12 @@ def _document(document_id: str = "doc_demo", sha256: str = "a" * 64) -> StoredDo
         stored_filename=f"{document_id}.pdf",
         storage_key=f"col_demo/input/{document_id}.pdf",
         created_at="2026-08-27T00:01:00+00:00",
+        updated_at="2026-08-27T00:01:00+00:00",
     )
 
 
-async def test_memory_collection_repository_round_trips_current_aggregate() -> None:
-    repository = MemoryCollectionRepository()
+async def test_collection_repository_round_trips_current_aggregate(*, postgres_session_factory) -> None:
+    repository = CollectionRepository(postgres_session_factory)
     collection = _collection()
     document = _document()
 
@@ -75,8 +76,8 @@ async def test_memory_collection_repository_round_trips_current_aggregate() -> N
     assert await repository.list_collections("user_other") == ()
 
 
-async def test_memory_collection_repository_rejects_duplicate_document_content() -> None:
-    repository = MemoryCollectionRepository()
+async def test_collection_repository_rejects_duplicate_document_content(*, postgres_session_factory) -> None:
+    repository = CollectionRepository(postgres_session_factory)
     collection = _collection()
     document = _document()
     await repository.add_collection(collection)
@@ -98,8 +99,8 @@ async def test_memory_collection_repository_rejects_duplicate_document_content()
     ).documents == (document,)
 
 
-async def test_memory_collection_delete_removes_aggregate() -> None:
-    repository = MemoryCollectionRepository()
+async def test_collection_delete_removes_aggregate(*, postgres_session_factory) -> None:
+    repository = CollectionRepository(postgres_session_factory)
     collection = _collection()
     await repository.add_collection(collection)
 
@@ -110,3 +111,10 @@ async def test_memory_collection_delete_removes_aggregate() -> None:
     assert (
         await repository.delete_collection(collection.collection.collection_id) is False
     )
+
+
+@pytest.fixture(autouse=True)
+async def collection_owner(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_user
+
+    await seed_user(postgres_session_factory, "user_demo")

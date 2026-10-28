@@ -1063,10 +1063,17 @@ class ChatSessionService:
             if emit:
                 emit({"type": "trajectory", "trajectory": await self.get_trajectory_for_user(session.session_id, session.user_id)})
 
+        # Finish the current database write before saving the terminal snapshot.
+        stop_updates = asyncio.Event()
+
         async def save_updates() -> None:
             heartbeat_at = loop.time()
             while True:
-                await asyncio.sleep(_SNAPSHOT_INTERVAL_SECONDS)
+                try:
+                    await asyncio.wait_for(stop_updates.wait(), _SNAPSHOT_INTERVAL_SECONDS)
+                    return
+                except asyncio.TimeoutError:
+                    pass
                 if loop.time() - heartbeat_at >= _HEARTBEAT_INTERVAL_SECONDS:
                     heartbeat_at = loop.time()
                     emit_progress({**snapshot.progress, "elapsed_ms": round((loop.time() - started_at) * 1000)})
@@ -1133,7 +1140,7 @@ class ChatSessionService:
                         ),
                     )
                     result = await self.runner.resume_after_tool_result(
-                        **{**arguments, "previous_messages": result.messages},
+                        **{**arguments, "previous_messages": await self.repository.read_messages(session.session_id)},
                         calls=tuple(result.tool_calls[:-1]) + (denied,),
                         results=tuple(result.tool_results),
                         tool_call=denied,
@@ -1157,7 +1164,7 @@ class ChatSessionService:
                 )
                 if automatic is None:
                     break
-                arguments["previous_messages"] = result.messages
+                arguments["previous_messages"] = await self.repository.read_messages(session.session_id)
                 result = await self.runner.resume_claimed_call(
                     **arguments,
                     claimed_call=automatic,
@@ -1225,7 +1232,7 @@ class ChatSessionService:
             update_snapshot(status="interrupted", error_code="chat_response_interrupted")
             raise
         finally:
-            writer.cancel()
+            stop_updates.set()
             await asyncio.gather(writer, return_exceptions=True)
             await flush_snapshot()
 

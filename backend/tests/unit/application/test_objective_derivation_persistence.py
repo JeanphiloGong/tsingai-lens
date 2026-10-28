@@ -27,7 +27,7 @@ from application.core.objectives.objective_authoring_service import (
     ObjectiveAuthoringService,
 )
 from domain.core import ResearchObjective
-from tests.support.repositories.objective_repository import MemoryObjectiveRepository
+from repositories.objective_repository import ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -345,8 +345,8 @@ async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call()
     assert service.calls[0]["derivation_basis"] == _lineage()
 
 
-async def test_derived_candidate_lineage_round_trips_through_memory_repository() -> None:
-    repository = MemoryObjectiveRepository()
+async def test_derived_candidate_lineage_round_trips_through_postgres_repository(*, postgres_session_factory) -> None:
+    repository = ObjectiveRepository(postgres_session_factory)
     objective = ResearchObjective(
         collection_id="col-1",
         objective_id="objective-derived",
@@ -382,8 +382,8 @@ async def test_derived_candidate_lineage_round_trips_through_memory_repository()
     assert restored.derivation_basis == tuple(_lineage())
 
 
-async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> None:
-    repository = MemoryObjectiveRepository()
+async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(*, postgres_session_factory) -> None:
+    repository = ObjectiveRepository(postgres_session_factory)
     first = ResearchObjective(
         collection_id="col-1",
         objective_id="objective-derived",
@@ -422,8 +422,8 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage() -> No
         )
 
 
-async def test_authored_candidate_retry_with_same_lineage_remains_idempotent() -> None:
-    repository = MemoryObjectiveRepository()
+async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(*, postgres_session_factory) -> None:
+    repository = ObjectiveRepository(postgres_session_factory)
     first = ResearchObjective(
         collection_id="col-1",
         objective_id="objective-derived",
@@ -460,7 +460,7 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent() -
     assert retried.rank == 1
 
 
-def _service(*, repository: MemoryObjectiveRepository) -> ObjectiveAuthoringService:
+def _service(*, repository: ObjectiveRepository) -> ObjectiveAuthoringService:
     return ObjectiveAuthoringService(
         collection_service=_CollectionService(),
         objective_repository=repository,
@@ -491,8 +491,8 @@ def _published_parent() -> ResearchObjective:
     )
 
 
-async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_published() -> None:
-    repository = MemoryObjectiveRepository()
+async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_published(*, postgres_session_factory) -> None:
+    repository = ObjectiveRepository(postgres_session_factory)
     await repository.create_authored_candidate(
         _published_parent(),
         created_by_user_id="user-1",
@@ -906,3 +906,10 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
     )
 
     assert first.objective_id != second.objective_id
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col-1")

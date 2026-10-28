@@ -7,20 +7,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from application.pipeline import PipelineRunService
-from tests.support.chat_repository import MemoryChatRepository
-from tests.support.experiment_plan_repository import (
-    InMemoryExperimentPlanRepository,
-)
-from tests.support.objective_review_repository import (
-    InMemoryObjectiveReviewRepository,
-)
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemoryObjectiveRepository,
-    MemoryPaperMapRepository,
-    MemoryPipelineRunRepository,
-    MemorySourceArtifactRepository,
-)
+from domain.core import DocumentProfile
+from domain.source import SourceDocument
+from repositories.chat_repository import ChatRepository
+from repositories.experiment_plan_repository import ExperimentPlanRepository
+from repositories.finding_review_repository import FindingReviewRepository
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.objective_repository import ObjectiveRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.pipeline_run_repository import PipelineRunRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 API_V1_PREFIX = "/api/v1"
 
@@ -52,6 +48,27 @@ class _ImmediateDocumentPreparationService:
         )
         if not created:
             return run
+        session_factory = self.collection_service.repository.session_factory
+        await SourceArtifactRepository(session_factory).replace_document(
+            collection_id,
+            SourceDocument(
+                document_id=document_id, document_order=0,
+                title=document.document.original_filename,
+                text=self.collection_service.object_store.read(
+                    document.storage_key, document.document.sha256,
+                ).decode("utf-8"),
+                metadata={"source_fingerprint": fingerprint},
+            ),
+        )
+        await DocumentProfileRepository(session_factory).replace(
+            collection_id,
+            DocumentProfile(
+                document_id=document_id, title=document.document.original_filename,
+                doc_type="experimental", profile_warnings=(), confidence=1.0,
+                source_fingerprint=fingerprint, profile_version="test-analysis",
+                profile_fingerprint=fingerprint,
+            ),
+        )
         await self.collection_service.update_document_preparation(
             collection_id,
             document_id,
@@ -74,7 +91,7 @@ class _ImmediateDocumentPreparationService:
 
 
 @pytest.fixture()
-def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
+def app_client(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
@@ -82,19 +99,19 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
 
     from main import create_app
 
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     with TestClient(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             pipeline_run_service=pipeline_run_service,
-            source_artifact_repository=MemorySourceArtifactRepository(),
-            document_profile_repository=MemoryDocumentProfileRepository(),
-            paper_map_repository=MemoryPaperMapRepository(),
-            objective_repository=MemoryObjectiveRepository(),
-            finding_review_repository=InMemoryObjectiveReviewRepository(),
-            experiment_plan_repository=InMemoryExperimentPlanRepository(),
-            chat_repository=MemoryChatRepository(),
+            source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+            document_profile_repository=DocumentProfileRepository(postgres_session_factory),
+            paper_map_repository=PaperMapRepository(postgres_session_factory),
+            objective_repository=ObjectiveRepository(postgres_session_factory),
+            finding_review_repository=FindingReviewRepository(postgres_session_factory),
+            experiment_plan_repository=ExperimentPlanRepository(postgres_session_factory),
+            chat_repository=ChatRepository(postgres_session_factory),
         )
     ) as client:
         client.app.state.document_preparation_service = (

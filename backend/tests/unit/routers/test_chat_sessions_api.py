@@ -33,11 +33,9 @@ from domain.chat import (
     ToolRisk,
 )
 from main import create_app
-from repositories.chat_repository import ChatSessionSummary
-from tests.support.repositories import (
-    MemoryObjectiveRepository,
-    MemoryPipelineRunRepository,
-)
+from repositories.chat_repository import ChatSessionSummary, ChatRepository
+from repositories.objective_repository import ObjectiveRepository
+from repositories.pipeline_run_repository import PipelineRunRepository
 
 
 class _Service:
@@ -423,11 +421,9 @@ class _AuthService:
         return {"user_id": "user-1", "email": "researcher@example.com"}
 
 
-def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
-    collection_service,
-) -> None:
+def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(collection_service, *, postgres_session_factory) -> None:
     service = _Service()
-    inert_pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    inert_pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     app = create_app(
         auth_session_service=_AuthService(),
         collection_service=collection_service,
@@ -435,7 +431,7 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
         source_artifact_repository=object(),
         document_profile_repository=object(),
         paper_map_repository=object(),
-        objective_repository=MemoryObjectiveRepository(),
+        objective_repository=ObjectiveRepository(postgres_session_factory),
         finding_review_repository=object(),
         experiment_plan_repository=object(),
         chat_session_service=service,
@@ -463,18 +459,16 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
     assert turn.json()["status"] == "completed"
 
 
-def test_chat_message_route_streams_text_then_the_persisted_turn(
-    collection_service,
-) -> None:
+def test_chat_message_route_streams_text_then_the_persisted_turn(collection_service, *, postgres_session_factory) -> None:
     service = _Service()
     app = create_app(
         auth_session_service=_AuthService(),
         collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
         source_artifact_repository=object(),
         document_profile_repository=object(),
         paper_map_repository=object(),
-        objective_repository=MemoryObjectiveRepository(),
+        objective_repository=ObjectiveRepository(postgres_session_factory),
         finding_review_repository=object(),
         experiment_plan_repository=object(),
         chat_session_service=service,
@@ -495,21 +489,23 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
     assert '"status":"completed"' in response.text
 
 
-def test_title_route_validates_input_and_hides_unowned_sessions(collection_service) -> None:
+def test_title_route_validates_input_and_hides_unowned_sessions(collection_service, *, postgres_session_factory) -> None:
     from application.chat import ModelTurn
     from tests.unit.application.test_chat_session_service import (
         _Model,
-        _Repository,
-        _service,
+            _service,
     )
-    repository = _Repository()
+    from tests.support.postgres import seed_collection
+    import asyncio
+    asyncio.run(seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",)))
+    repository = ChatRepository(postgres_session_factory)
     service = _service(_Model(ModelTurn(content="Answer")), repository)
     session = asyncio.run(service.create_session(collection_id="col-1", user_id="user-1"))
     app = create_app(
         auth_session_service=_AuthService(), collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
         source_artifact_repository=object(), document_profile_repository=object(),
-        paper_map_repository=object(), objective_repository=MemoryObjectiveRepository(),
+        paper_map_repository=object(), objective_repository=ObjectiveRepository(postgres_session_factory),
         finding_review_repository=object(), experiment_plan_repository=object(),
         chat_session_service=service,
     )

@@ -5,9 +5,16 @@ import pytest
 from application.source.collection_service import CollectionService
 from domain.chat.permissions import AUTO_ACTIONS
 from infra.persistence.file import FileCollectionWorkspace
-from tests.support.repositories import MemoryCollectionRepository
+from repositories.collection_repository import CollectionRepository
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+async def collection_owner(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_user
+
+    await seed_user(postgres_session_factory, "owner")
 
 
 @pytest.fixture
@@ -15,9 +22,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def test_collection_default_permission_round_trips_and_expands_all_actions(tmp_path) -> None:
+async def test_collection_default_permission_round_trips_and_expands_all_actions(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=MemoryCollectionRepository(),
+        repository=CollectionRepository(postgres_session_factory),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Agent settings", owner_user_id="owner")
@@ -39,9 +46,9 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
     ) == saved
 
 
-async def test_collection_default_permission_can_be_persistent(tmp_path) -> None:
+async def test_collection_default_permission_can_be_persistent(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=MemoryCollectionRepository(),
+        repository=CollectionRepository(postgres_session_factory),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Persistent Agent settings", owner_user_id="owner")
@@ -61,9 +68,9 @@ async def test_collection_default_permission_can_be_persistent(tmp_path) -> None
     ) == saved
 
 
-async def test_collection_default_permission_hides_collection_from_other_users(tmp_path) -> None:
+async def test_collection_default_permission_hides_collection_from_other_users(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=MemoryCollectionRepository(),
+        repository=CollectionRepository(postgres_session_factory),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Private settings", owner_user_id="owner")
@@ -74,9 +81,9 @@ async def test_collection_default_permission_hides_collection_from_other_users(t
         )
 
 
-async def test_collection_default_permission_rejects_stale_revision(tmp_path) -> None:
+async def test_collection_default_permission_rejects_stale_revision(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=MemoryCollectionRepository(),
+        repository=CollectionRepository(postgres_session_factory),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Concurrent settings", owner_user_id="owner")

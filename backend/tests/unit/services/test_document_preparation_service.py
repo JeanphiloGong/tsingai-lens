@@ -19,10 +19,9 @@ from application.source.reference_extraction_service import (
 from domain.core import DocumentProfile
 from domain.source import Document, SourceDocument
 from repositories.collection_repository import StoredDocument
-from tests.support.repositories import (
-    MemoryPipelineRunRepository,
-    MemorySourceArtifactRepository,
-)
+from tests.support.postgres import seed_collection
+from repositories.pipeline_run_repository import PipelineRunRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 from utils.logger import bind_request_id, clear_request_id, get_request_id
 
 pytestmark = pytest.mark.anyio
@@ -71,9 +70,8 @@ def test_document_preparation_version_covers_only_profile_triage() -> None:
     assert DOCUMENT_ANALYSIS_VERSION == DOCUMENT_PROFILE_PROMPT_VERSION
 
 
-async def test_queued_preparation_inherits_request_trace_without_argument_forwarding(
-    monkeypatch,
-) -> None:
+async def test_queued_preparation_inherits_request_trace_without_argument_forwarding(monkeypatch, *, postgres_session_factory) -> None:
+    await seed_collection(postgres_session_factory, "col_trace", document_ids=("doc_trace",))
     document = StoredDocument(
         document=Document(
             document_id="doc_trace",
@@ -95,8 +93,8 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
 
     service = DocumentPreparationService(
         collection_service=CollectionService(),
-        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
-        source_artifact_repository=MemorySourceArtifactRepository(),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
         document_profile_service=object(),
         max_concurrency=1,
     )
@@ -123,9 +121,10 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
     assert observed_request_ids == ["req_preparation_trace", "req_preparation_trace"]
 
 
-async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts() -> None:
+async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts(*, postgres_session_factory) -> None:
     collection_id = "col_restart"
     document_id = "doc_restart"
+    await seed_collection(postgres_session_factory, collection_id, document_ids=(document_id,))
     original = StoredDocument(
         document=Document(
             document_id=document_id,
@@ -164,7 +163,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
             )
             return self.document
 
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     task, created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
@@ -177,7 +176,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     service = DocumentPreparationService(
         collection_service=collection_service,
         pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=MemorySourceArtifactRepository(),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
         document_profile_service=object(),
         max_concurrency=1,
     )
@@ -205,9 +204,10 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     assert replacement["run_id"] != task["run_id"]
 
 
-async def test_restart_keeps_preparation_active_when_document_reset_fails() -> None:
+async def test_restart_keeps_preparation_active_when_document_reset_fails(*, postgres_session_factory) -> None:
     collection_id = "col_restart_retry"
     document_id = "doc_restart_retry"
+    await seed_collection(postgres_session_factory, collection_id, document_ids=(document_id,))
     document = StoredDocument(
         document=Document(
             document_id=document_id,
@@ -233,7 +233,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
         ) -> StoredDocument:
             raise OSError("database temporarily unavailable")
 
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     task, _created = await pipeline_run_service.get_or_create_document_run(
         collection_id=collection_id,
         document_id=document_id,
@@ -245,7 +245,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
     service = DocumentPreparationService(
         collection_service=collection_service,
         pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=MemorySourceArtifactRepository(),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
         document_profile_service=object(),
         max_concurrency=1,
     )
@@ -258,7 +258,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails() -> N
     assert still_active["finished_at"] is None
 
 
-async def test_profile_preparation_reuses_current_source_and_profile() -> None:
+async def test_profile_preparation_reuses_current_source_and_profile(*, postgres_session_factory) -> None:
     collection_id = "col_test"
     document_id = "doc_test"
     base_document = StoredDocument(
@@ -332,7 +332,8 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
     async def fail_if_parsed(**kwargs):
         raise AssertionError("the current SourceDocument should be reused")
 
-    sources = MemorySourceArtifactRepository()
+    sources = SourceArtifactRepository(postgres_session_factory)
+    await seed_collection(sources.session_factory, collection_id, document_ids=(document_id,))
     await sources.replace_document(
         collection_id,
         SourceDocument(
@@ -362,11 +363,10 @@ async def test_profile_preparation_reuses_current_source_and_profile() -> None:
     assert collection_service.document.document.status == "ready"
 
 
-async def test_reference_failure_keeps_source_preparation_ready_with_warning(
-    monkeypatch,
-) -> None:
+async def test_reference_failure_keeps_source_preparation_ready_with_warning(monkeypatch, *, postgres_session_factory) -> None:
     collection_id = "col_reference_warning"
     document_id = "doc_reference_warning"
+    await seed_collection(postgres_session_factory, collection_id, document_ids=(document_id,))
     document = StoredDocument(
         document=Document(
             document_id=document_id,
@@ -433,7 +433,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
     service = DocumentPreparationService(
         collection_service=CollectionService(),
         pipeline_run_service=RunService(),
-        source_artifact_repository=MemorySourceArtifactRepository(),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
         document_profile_service=ProfileService(),
         source_artifact_builder=None,
         max_concurrency=1,
@@ -452,7 +452,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
     ]
 
 
-async def test_document_preparation_does_not_build_paper_map_before_objective_selection() -> None:
+async def test_document_preparation_does_not_build_paper_map_before_objective_selection(*, postgres_session_factory) -> None:
     collection_id = "col_lazy_map"
     document_id = "doc_lazy_map"
     base_document = StoredDocument(
@@ -517,7 +517,8 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             )
 
     collection_service = CollectionService()
-    source_repository = MemorySourceArtifactRepository()
+    source_repository = SourceArtifactRepository(postgres_session_factory)
+    await seed_collection(source_repository.session_factory, collection_id, document_ids=(document_id,))
     await source_repository.replace_document(
         collection_id,
         SourceDocument(

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
 from repositories.document_profile_repository import _from_row
@@ -32,11 +33,8 @@ from tests.support.collection_service import (
     build_test_collection_service,
     build_test_source_import_service,
 )
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemorySourceArtifactRepository,
-)
-from tests.support.repositories.objective_repository import MemoryObjectiveRepository
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -52,6 +50,10 @@ async def _store_document_profiles(
     profiles: list[dict],
 ) -> None:
     for row in profiles:
+        await seed_collection(
+            document_profile_service.document_profile_repository.session_factory,
+            collection_id, document_ids=(row["document_id"],),
+        )
         await document_profile_service.document_profile_repository.replace(
             collection_id,
             _from_row(DocumentPreparationRow(document_id=row["document_id"], profile_json=row))
@@ -60,17 +62,18 @@ async def _store_document_profiles(
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
+        await seed_collection(repository.session_factory, collection_id, document_ids=(document.document_id,))
         await repository.replace_document(collection_id, document)
 
 
 @pytest.fixture()
-def document_services(tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    source_repository = MemorySourceArtifactRepository()
+def document_services(tmp_path, *, postgres_session_factory):
+    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    source_repository = SourceArtifactRepository(postgres_session_factory)
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
-        document_profile_repository=MemoryDocumentProfileRepository(),
+        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
     )
     document_markdown_service = DocumentMarkdownService(
         collection_service,
@@ -502,7 +505,7 @@ async def test_document_source_route_rejects_path_outside_collection(
         ),
         stored_filename="outside.pdf",
         storage_key="../outside.pdf",
-        created_at="2026-07-19T00:00:00+00:00",
+        created_at=record["created_at"],
     )
     await collection_service.repository.add_documents(
         collection_id,
@@ -548,7 +551,7 @@ async def test_document_source_route_rejects_another_collections_storage_key(
         ),
         stored_filename="paper-2.pdf",
         storage_key=storage_key,
-        created_at="2026-07-19T00:00:00+00:00",
+        created_at=first["created_at"],
     )
     await collection_service.repository.add_documents(
         first["collection_id"],

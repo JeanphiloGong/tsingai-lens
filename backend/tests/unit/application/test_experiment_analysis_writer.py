@@ -44,7 +44,7 @@ from repositories.objective_repository import (
 from repositories.paper_experiment_repository import (
     StoredPaperExperimentRevision,
 )
-from tests.support.repositories.objective_repository import MemoryObjectiveRepository
+from repositories.objective_repository import ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -692,16 +692,18 @@ async def test_abstention_revision_writes_no_placeholder_finding():
     assert len(analyses.graphs) == 1
 
 
-async def test_researcher_revises_limits_then_abstains_without_changing_source(
-    collection_service,
-):
+async def test_researcher_revises_limits_then_abstains_without_changing_source(collection_service, *, postgres_session_factory):
+    from tests.support.postgres import seed_collection, seed_user
+
+    await seed_user(postgres_session_factory, "researcher-1")
     collection = await collection_service.create_collection(
         "316L preheat and elongation",
         owner_user_id="researcher-1",
     )
     collection_id = collection["collection_id"]
+    await seed_collection(postgres_session_factory, collection_id, document_ids=("paper-a", "paper-b"))
     objective = replace(_objective(), collection_id=collection_id)
-    repository = MemoryObjectiveRepository()
+    repository = ObjectiveRepository(postgres_session_factory)
     await repository.replace(
         collection_id,
         ObjectiveFactSet(research_objectives=(objective,)),

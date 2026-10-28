@@ -1,56 +1,61 @@
 from __future__ import annotations
 
+import os
 import sys
-from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 import pytest
+from sqlalchemy import create_engine, insert
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from repositories.auth_repository import AuthSessionRecord, AuthUserRecord
+from infra.persistence.postgres.models.auth import AuthUser
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
-class MemoryAuthRepository:
-    def __init__(self) -> None:
-        self.users: dict[str, AuthUserRecord] = {}
-        self.user_ids_by_email: dict[str, str] = {}
-        self.sessions_by_token_hash: dict[str, AuthSessionRecord] = {}
+@pytest.fixture
+def postgres_sync_engine():
+    database_url = os.getenv("LENS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("LENS_TEST_DATABASE_URL is not configured")
+    url = make_url(database_url)
+    if url.drivername != "postgresql+psycopg" or not str(url.database).endswith("_test"):
+        pytest.fail("LENS_TEST_DATABASE_URL must use postgresql+psycopg and a *_test database")
 
-    async def read_user_by_email(self, email: str) -> AuthUserRecord | None:
-        user_id = self.user_ids_by_email.get(email.strip().lower())
-        return self.users.get(user_id) if user_id is not None else None
+    engine = create_engine(url)
+    config = Config(str(ROOT / "alembic.ini"))
+    reset_postgres_schema(engine)
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "head")
+        yield engine
+    finally:
+        reset_postgres_schema(engine)
+        engine.dispose()
 
-    async def read_user(self, user_id: str) -> AuthUserRecord | None:
-        return self.users.get(user_id)
 
-    async def add_user(self, user: AuthUserRecord) -> None:
-        email = user.email.strip().lower()
-        if email in self.user_ids_by_email:
-            raise ValueError("user email already exists")
-        user_id = user.user_id
-        self.users[user_id] = user
-        self.user_ids_by_email[email] = user_id
-
-    async def read_session_by_token_hash(
-        self,
-        token_hash: str,
-    ) -> AuthSessionRecord | None:
-        return self.sessions_by_token_hash.get(token_hash)
-
-    async def add_session(self, session: AuthSessionRecord, *, token_hash: str) -> None:
-        self.sessions_by_token_hash[token_hash] = session
-
-    async def revoke_session_by_token_hash(
-        self,
-        token_hash: str,
-        revoked_at: str,
-    ) -> None:
-        session = self.sessions_by_token_hash.get(token_hash)
-        if session is not None:
-            self.sessions_by_token_hash[token_hash] = replace(session, revoked_at=revoked_at)
+@pytest.fixture
+def postgres_session_factory(postgres_sync_engine):
+    # TestClient and asyncio.run may use different loops within the same test.
+    engine = create_async_engine(postgres_sync_engine.url, poolclass=NullPool)
+    with postgres_sync_engine.begin() as connection:
+        connection.execute(insert(AuthUser).values(
+            user_id="local-user", email="local-fixture@example.com",
+            password_hash="!", created_at=datetime.now(timezone.utc),
+        ))
+    try:
+        yield async_sessionmaker(engine)
+    finally:
+        engine.sync_engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -75,19 +80,20 @@ def _patch_domain_model_extractors(monkeypatch):
 
 
 @pytest.fixture
-def auth_session_service(tmp_path):
+def auth_session_service(postgres_session_factory):
     from application.auth import AuthSessionService
+    from repositories.auth_repository import AuthRepository
 
-    return AuthSessionService(MemoryAuthRepository())
+    return AuthSessionService(AuthRepository(postgres_session_factory))
 
 
 @pytest.fixture
-def collection_service(tmp_path, auth_session_service):
+def collection_service(tmp_path, postgres_session_factory):
     from application.source.collection_service import CollectionService
     from infra.persistence.file import FileCollectionWorkspace
-    from tests.support.repositories import MemoryCollectionRepository
+    from repositories.collection_repository import CollectionRepository
 
     return CollectionService(
-        repository=MemoryCollectionRepository(),
+        repository=CollectionRepository(postgres_session_factory),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )

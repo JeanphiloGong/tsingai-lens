@@ -69,7 +69,7 @@ The database preserves two different kinds of state:
 | Uploaded source files and extracted figure bytes | Object storage | Tables keep a storage key, SHA-256, media type, and size; bytes are not stored in PostgreSQL. |
 | Parser, model, and pipeline scratch | Local runtime paths | Disposable cache/output paths are not product read authorities. |
 | Schema changes | Alembic | Startup does not create, probe, or infer tables. |
-| Isolated service tests | Test doubles in `tests/support/repositories/` | They are not runtime storage; PostgreSQL integration tests exercise real persistence. |
+| Database-backed tests | Concrete repositories and a dedicated PostgreSQL test database | Service and persistence tests exercise the same SQL, constraints and transactions; no separate in-memory repositories are maintained. |
 
 The runtime composes one `AsyncEngine` and one `async_sessionmaker` in
 `main.py`. Each repository operation uses a short task-local `AsyncSession`;

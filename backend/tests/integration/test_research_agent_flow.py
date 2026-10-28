@@ -17,13 +17,11 @@ from application.chat.session_service import ChatSessionService
 from application.pipeline import PipelineRunService
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from main import create_app
-from tests.support.chat_repository import MemoryChatRepository
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemoryPipelineRunRepository,
-    MemorySourceArtifactRepository,
-)
+from repositories.chat_repository import ChatRepository
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.pipeline_run_repository import PipelineRunRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 from tests.unit.application.test_research_agent_runner import _Model
 
 pytestmark = pytest.mark.anyio
@@ -81,10 +79,7 @@ class _CandidateCapability:
         )
 
 
-async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
-    auth_session_service,
-    collection_service,
-) -> None:
+async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(auth_session_service, collection_service, *, postgres_session_factory) -> None:
     user = await auth_session_service.create_user(
         email="agent-flow@example.com",
         password="test-password",
@@ -100,8 +95,8 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     )
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
-    chat_repository = MemoryChatRepository()
-    source_artifact_repository = MemorySourceArtifactRepository()
+    chat_repository = ChatRepository(postgres_session_factory)
+    source_artifact_repository = SourceArtifactRepository(postgres_session_factory)
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(
@@ -142,10 +137,10 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     app = create_app(
         auth_session_service=auth_session_service,
         collection_service=collection_service,
-        pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+        pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
         source_artifact_repository=source_artifact_repository,
-        document_profile_repository=MemoryDocumentProfileRepository(),
-        paper_map_repository=MemoryPaperMapRepository(),
+        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
+        paper_map_repository=PaperMapRepository(postgres_session_factory),
         objective_repository=objective_repository,
         finding_review_repository=object(),
         experiment_plan_repository=object(),

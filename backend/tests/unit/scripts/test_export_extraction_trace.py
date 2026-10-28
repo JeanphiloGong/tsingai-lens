@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
 
@@ -11,14 +12,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from domain.core import DocumentProfile
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-)
 from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.research_objective import ObjectiveEvidence
 from domain.core.scientific_fact import ScientificContext
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 @pytest.fixture
@@ -104,12 +103,9 @@ class _ObjectiveRepository:
 
 
 @pytest.mark.anyio
-async def test_export_trace_writes_current_source_and_objective_views(
-    tmp_path,
-    monkeypatch,
-):
+async def test_export_trace_writes_current_source_and_objective_views(tmp_path, monkeypatch, *, postgres_session_factory):
     trace = _load_trace_module()
-    source_repository = MemorySourceArtifactRepository()
+    source_repository = SourceArtifactRepository(postgres_session_factory)
     source_document = source_documents_from_records(
         documents=[
             {
@@ -130,8 +126,9 @@ async def test_export_trace_writes_current_source_and_objective_views(
             }
         ],
     )[0]
+    await seed_collection(source_repository.session_factory, 'col-test', document_ids=(source_document.document_id,))
     await source_repository.replace_document("col-test", source_document)
-    profile_repository = MemoryDocumentProfileRepository()
+    profile_repository = DocumentProfileRepository(postgres_session_factory)
     await profile_repository.replace(
         "col-test",
         DocumentProfile(
@@ -161,7 +158,7 @@ async def test_export_trace_writes_current_source_and_objective_views(
     monkeypatch.setattr(
         trace,
         "PaperMapRepository",
-        lambda _sessions: MemoryPaperMapRepository(),
+        lambda _sessions: PaperMapRepository(postgres_session_factory),
     )
     monkeypatch.setattr(
         trace,

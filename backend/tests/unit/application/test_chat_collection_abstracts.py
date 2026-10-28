@@ -1,4 +1,5 @@
 from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.postgres import seed_collection
 import asyncio
 import json
 from pathlib import Path
@@ -17,14 +18,10 @@ from application.chat.capabilities.document_sources import (
     InspectDocumentSourcesToolRequest,
 )
 from application.chat.tool_result_projection import tool_result_record
-from domain.source.artifacts import (
-    SourceBlock,
-)
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-)
+from domain.source.artifacts import SourceBlock, SourceDocument
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 def document(text, heading="Paper title"):
@@ -205,7 +202,7 @@ def test_normal_pagination_is_not_a_warning():
     assert result.data["returned_paper_count"] == 8
 
 
-def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing():
+def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*, postgres_session_factory):
     fixture = Path(__file__).resolve().parents[2] / "fixtures" / "agent_p002" / "source_document.json"
     record = json.loads(fixture.read_text(encoding="utf-8"))
     source_document = source_documents_from_records(
@@ -233,11 +230,11 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing():
         get_collection_for_user=AsyncMock(return_value={"documents": records}),
         get_document=AsyncMock(return_value=records[1]),
     )
-    sources = MemorySourceArtifactRepository()
+    sources = SourceArtifactRepository(postgres_session_factory)
     browse = BrowseCollectionPapersCapability(
         collection_service=collection_service,
-        document_profile_repository=MemoryDocumentProfileRepository(),
-        paper_map_repository=MemoryPaperMapRepository(),
+        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
+        paper_map_repository=PaperMapRepository(postgres_session_factory),
         source_artifact_repository=sources,
     )
     inspect = InspectDocumentSourcesCapability(
@@ -249,6 +246,7 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing():
     )
 
     async def scenario():
+        await seed_collection(sources.session_factory, 'c', document_ids=(source_document.document_id,))
         await sources.replace_document("c", source_document)
         survey = await browse.execute(context, BrowseCollectionPapersToolRequest())
         assert [paper["source_status"] for paper in survey.data["papers"]] == ["available", "unavailable"]

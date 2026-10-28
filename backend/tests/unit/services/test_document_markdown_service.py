@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
 
@@ -17,7 +18,7 @@ from tests.support.collection_service import (
     build_test_collection_service,
     build_test_source_import_service,
 )
-from tests.support.repositories import MemorySourceArtifactRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -27,9 +28,9 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _build_markdown_service(tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    source_repository = MemorySourceArtifactRepository()
+def _build_markdown_service(tmp_path, *, postgres_session_factory):
+    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    source_repository = SourceArtifactRepository(postgres_session_factory)
     return collection_service, DocumentMarkdownService(
         collection_service,
         source_artifact_repository=source_repository,
@@ -38,11 +39,12 @@ def _build_markdown_service(tmp_path):
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
+        await seed_collection(repository.session_factory, collection_id, document_ids=(document.document_id,))
         await repository.replace_document(collection_id, document)
 
 
-async def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection("Markdown Collection")
     collection_id = collection["collection_id"]
     await _store_source_documents(
@@ -213,8 +215,8 @@ async def test_document_markdown_service_projects_source_blocks_and_tables(tmp_p
     assert source_map["tbl-1"]["table_id"] == "tbl-1"
 
 
-async def test_document_markdown_service_projects_figure_images(tmp_path):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_projects_figure_images(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Figure Markdown Collection"
     )
@@ -278,10 +280,8 @@ async def test_document_markdown_service_projects_figure_images(tmp_path):
     assert source_map["fig-1"]["figure_id"] == "fig-1"
 
 
-async def test_document_markdown_service_keeps_caption_when_figure_image_file_is_missing(
-    tmp_path,
-):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_keeps_caption_when_figure_image_file_is_missing(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Missing Figure Asset Collection"
     )
@@ -319,10 +319,8 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_file_is
     assert "**Figure.** Fig. 1. Microstructure after annealing." in payload["markdown"]
 
 
-async def test_document_markdown_service_keeps_caption_when_figure_image_is_missing(
-    tmp_path,
-):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_keeps_caption_when_figure_image_is_missing(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Figure Caption Collection"
     )
@@ -353,8 +351,8 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_is_miss
     assert "**Figure.** Fig. 1. Microstructure after annealing." in payload["markdown"]
 
 
-async def test_document_markdown_service_falls_back_to_document_text(tmp_path):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_falls_back_to_document_text(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Markdown Fallback Collection"
     )
@@ -379,8 +377,8 @@ async def test_document_markdown_service_falls_back_to_document_text(tmp_path):
     assert payload["warnings"] == ["block_structure_missing"]
 
 
-async def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Garbled Markdown Collection"
     )
@@ -446,10 +444,8 @@ async def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path):
     assert "blk-garbled-header" not in source_map
 
 
-async def test_document_markdown_service_keeps_readable_block_with_replacement_glyph(
-    tmp_path,
-):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_keeps_readable_block_with_replacement_glyph(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Readable Glyph Collection"
     )
@@ -504,8 +500,8 @@ async def test_document_markdown_service_keeps_readable_block_with_replacement_g
     assert "blk-readable-conclusion" in source_map
 
 
-async def test_document_markdown_service_uses_original_filename_for_display(tmp_path):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_uses_original_filename_for_display(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Stored Filename Collection"
     )
@@ -555,8 +551,8 @@ async def test_document_markdown_service_uses_original_filename_for_display(tmp_
     assert uploaded["stored_filename"] not in payload["markdown"]
 
 
-async def test_document_markdown_service_reports_not_ready(tmp_path):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_reports_not_ready(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Markdown Pending Collection"
     )
@@ -568,8 +564,8 @@ async def test_document_markdown_service_reports_not_ready(tmp_path):
         )
 
 
-async def test_document_markdown_service_reports_missing_document(tmp_path):
-    collection_service, markdown_service = _build_markdown_service(tmp_path)
+async def test_document_markdown_service_reports_missing_document(tmp_path, *, postgres_session_factory):
+    collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(
         "Markdown Missing Document"
     )

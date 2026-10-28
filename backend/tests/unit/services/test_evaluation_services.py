@@ -57,13 +57,18 @@ from domain.core.scientific_fact import (
     ScientificVariable,
 )
 from domain.evaluation import FindingCuration, FindingFeedback
+from domain.source import SourceBlock, SourceDocument
+from repositories.source_artifact_repository import SourceArtifactRepository
 from repositories.finding_review_repository import (
     finding_curation_from_record,
     finding_feedback_from_record,
 )
 from repositories.paper_map_repository import paper_map_from_payload
-from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
-from tests.support.repositories.objective_repository import MemoryObjectiveRepository
+from repositories.finding_review_repository import FindingReviewRepository
+from repositories.objective_repository import ObjectiveRepository
+from repositories.evaluation_repository import EvaluationRepository
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
+from sqlalchemy import select
 
 pytestmark = pytest.mark.anyio
 
@@ -105,100 +110,6 @@ class FakeCollectionService:
             "name": "Gold collection",
             "documents": list(self.documents_by_collection.get(collection_id, [])),
         }
-
-
-class FakeEvaluationRepository:
-    backend_name = "fake"
-
-    def __init__(self) -> None:
-        self.gold_set = None
-        self.gold_items = ()
-        self.snapshot = None
-        self.run = None
-
-    async def upsert_gold_set(self, gold_set, gold_items) -> None:
-        self.gold_set = gold_set
-        self.gold_items = gold_items
-
-    async def read_gold_set(self, gold_id: str):
-        if self.gold_set and self.gold_set.gold_id == gold_id:
-            return self.gold_set
-        return None
-
-    async def list_gold_items(self, gold_id: str):  # noqa: ARG002
-        return self.gold_items
-
-    async def upsert_prediction_snapshot(self, snapshot) -> None:
-        self.snapshot = snapshot
-
-    async def read_prediction_snapshot(self, snapshot_id: str):
-        if self.snapshot and self.snapshot.snapshot_id == snapshot_id:
-            return self.snapshot
-        return None
-
-    async def upsert_evaluation_run(self, run) -> None:
-        self.run = run
-
-    async def upsert_feedback(self, feedback):
-        self.feedback = (
-            feedback,
-            *(
-                item
-                for item in getattr(self, "feedback", ())
-                if item.feedback_id != feedback.feedback_id
-            ),
-        )
-        return feedback
-
-    async def upsert_curation(self, curation):
-        self.curations = (
-            curation,
-            *(
-                item
-                for item in getattr(self, "curations", ())
-                if item.curation_id != curation.curation_id
-            ),
-        )
-        return curation
-
-
-    async def list_curations(
-        self,
-        collection_id: str,
-        objective_id: str | None = None,
-        analysis_version: int | None = None,
-        finding_id: str | None = None,
-    ):
-        return tuple(
-            curation
-            for curation in getattr(self, "curations", ())
-            if curation.collection_id == collection_id
-            and (objective_id is None or curation.objective_id == objective_id)
-            and (
-                analysis_version is None
-                or curation.analysis_version == analysis_version
-            )
-            and (finding_id is None or curation.finding_id == finding_id)
-        )
-
-    async def list_feedback(
-        self,
-        collection_id: str,
-        objective_id: str | None = None,
-        analysis_version: int | None = None,
-        finding_id: str | None = None,
-    ):
-        return tuple(
-            feedback
-            for feedback in getattr(self, "feedback", ())
-            if feedback.collection_id == collection_id
-            and (objective_id is None or feedback.objective_id == objective_id)
-            and (
-                analysis_version is None
-                or feedback.analysis_version == analysis_version
-            )
-            and (finding_id is None or feedback.finding_id == finding_id)
-        )
 
 
 class _RecordedExperimentProjection:
@@ -270,8 +181,8 @@ class _RecordedExperimentProjection:
         return (self.contribution,)
 
 
-async def test_evaluation_gold_service_registers_gold_set_for_collection():
-    repository = FakeEvaluationRepository()
+async def test_evaluation_gold_service_registers_gold_set_for_collection(*, postgres_session_factory):
+    repository = EvaluationRepository(postgres_session_factory)
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
         evaluation_repository=repository,
@@ -291,13 +202,13 @@ async def test_evaluation_gold_service_registers_gold_set_for_collection():
         ],
     )
 
-    assert repository.gold_set == gold_set
-    assert repository.gold_items[0].gold_id == "gold-v1"
-    assert repository.gold_items[0].payload["value"] == 520
+    assert await repository.read_gold_set("gold-v1") == gold_set
+    assert (await repository.list_gold_items("gold-v1"))[0].gold_id == "gold-v1"
+    assert (await repository.list_gold_items("gold-v1"))[0].payload["value"] == 520
 
 
-async def test_evaluation_gold_service_accepts_collection_file_storage_key():
-    repository = FakeEvaluationRepository()
+async def test_evaluation_gold_service_accepts_collection_file_storage_key(*, postgres_session_factory):
+    repository = EvaluationRepository(postgres_session_factory)
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
         evaluation_repository=repository,
@@ -317,13 +228,13 @@ async def test_evaluation_gold_service_accepts_collection_file_storage_key():
         ],
     )
 
-    assert repository.gold_items[0].document_id == "col-gold/input/paper-1.pdf"
+    assert (await repository.list_gold_items("gold-by-storage-key"))[0].document_id == "col-gold/input/paper-1.pdf"
 
 
-async def test_evaluation_gold_service_rejects_missing_collection():
+async def test_evaluation_gold_service_rejects_missing_collection(*, postgres_session_factory):
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(existing=set()),
-        evaluation_repository=FakeEvaluationRepository(),
+        evaluation_repository=EvaluationRepository(postgres_session_factory),
     )
 
     with pytest.raises(FileNotFoundError):
@@ -334,10 +245,10 @@ async def test_evaluation_gold_service_rejects_missing_collection():
         )
 
 
-async def test_evaluation_gold_service_rejects_gold_item_outside_collection():
+async def test_evaluation_gold_service_rejects_gold_item_outside_collection(*, postgres_session_factory):
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
-        evaluation_repository=FakeEvaluationRepository(),
+        evaluation_repository=EvaluationRepository(postgres_session_factory),
     )
 
     with pytest.raises(ValueError, match="gold item document is not in collection"):
@@ -360,8 +271,8 @@ async def test_evaluation_gold_service_rejects_gold_item_outside_collection():
         )
 
 
-async def _published_objective_repository() -> MemoryObjectiveRepository:
-    repository = MemoryObjectiveRepository()
+async def _published_objective_repository(*, postgres_session_factory) -> ObjectiveRepository:
+    repository = ObjectiveRepository(postgres_session_factory)
     objective = ResearchObjective(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -547,17 +458,17 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
     return repository
 
 
-async def _finding_feedback_service() -> FindingFeedbackService:
+async def _finding_feedback_service(*, postgres_session_factory) -> FindingFeedbackService:
     return FindingFeedbackService(
-        review_repository=InMemoryObjectiveReviewRepository(),
-        objective_repository=await _published_objective_repository(),
+        review_repository=FindingReviewRepository(postgres_session_factory),
+        objective_repository=await _published_objective_repository(postgres_session_factory=postgres_session_factory),
     )
 
 
 def _prediction_snapshot_service(
-    objective_repository: MemoryObjectiveRepository,
-) -> tuple[EvaluationPredictionSnapshotService, FakeEvaluationRepository]:
-    evaluation_repository = FakeEvaluationRepository()
+    objective_repository: ObjectiveRepository,
+) -> tuple[EvaluationPredictionSnapshotService, EvaluationRepository]:
+    evaluation_repository = EvaluationRepository(objective_repository.session_factory)
     return (
         EvaluationPredictionSnapshotService(
             collection_service=FakeCollectionService(),
@@ -568,9 +479,9 @@ def _prediction_snapshot_service(
     )
 
 
-async def test_prediction_snapshot_exports_published_findings_with_exact_evidence() -> None:
+async def test_prediction_snapshot_exports_published_findings_with_exact_evidence(*, postgres_session_factory) -> None:
     service, evaluation_repository = _prediction_snapshot_service(
-        await _published_objective_repository()
+        await _published_objective_repository(postgres_session_factory=postgres_session_factory)
     )
 
     snapshot = await service.create_core_snapshot(
@@ -579,7 +490,7 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
         snapshot_id="snapshot-1",
     )
 
-    assert evaluation_repository.snapshot == snapshot
+    assert await evaluation_repository.read_prediction_snapshot(snapshot.snapshot_id) == snapshot
     assert snapshot.artifact_counts["published_objective_analyses"] == 1
     assert snapshot.artifact_counts["objective_findings"] == 1
     assert snapshot.artifact_counts["objective_evidence"] == 1
@@ -607,14 +518,17 @@ async def test_prediction_snapshot_exports_published_findings_with_exact_evidenc
     )
 
 
-async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> None:
-    repository = await _published_objective_repository()
+async def test_experiment_projection_drives_snapshot_and_feedback_reads(*, postgres_session_factory) -> None:
+    repository = await _published_objective_repository(postgres_session_factory=postgres_session_factory)
     analysis = await repository.read_analysis("col-gold", "obj-1", 1)
     assert analysis is not None
-    repository._analyses[("col-gold", "obj-1", 1)] = replace(
-        analysis,
-        scientific_record_source="experiment_graph",
-    )
+    async with postgres_session_factory.begin() as session:
+        row = await session.scalar(select(ObjectiveAnalysisRecord).where(
+            ObjectiveAnalysisRecord.collection_id == "col-gold",
+            ObjectiveAnalysisRecord.objective_id == "obj-1",
+            ObjectiveAnalysisRecord.analysis_version == 1,
+        ))
+        row.payload = {**row.payload, **{'scientific_record_source': 'experiment_graph'}}
     finding = await repository.read_finding("col-gold", "obj-1", 1, "finding-1")
     evidence, _ = await repository.list_evidence("col-gold", "obj-1", 1)
     contributions = await repository.list_contributions("col-gold", "obj-1", 1)
@@ -633,7 +547,7 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> Non
     repository.list_evidence = reject_legacy_read
     repository.list_contributions = reject_legacy_read
 
-    evaluation_repository = FakeEvaluationRepository()
+    evaluation_repository = EvaluationRepository(postgres_session_factory)
     snapshot_service = EvaluationPredictionSnapshotService(
         collection_service=FakeCollectionService(),
         objective_repository=repository,
@@ -641,7 +555,7 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> Non
         experiment_projection=projection,
     )
     feedback_service = FindingFeedbackService(
-        review_repository=InMemoryObjectiveReviewRepository(),
+        review_repository=FindingReviewRepository(postgres_session_factory),
         objective_repository=repository,
         experiment_projection=projection,
     )
@@ -659,16 +573,28 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads() -> Non
     assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
 
 
-async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_available() -> None:
-    repository = await _published_objective_repository()
+async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_available(*, postgres_session_factory) -> None:
+    repository = await _published_objective_repository(postgres_session_factory=postgres_session_factory)
     source = await repository.read_analysis("col-gold", "obj-1", 1)
     assert source is not None
-    repository._analyses[("col-gold", "obj-1", 1)] = replace(
-        source,
-        origin="human_authored",
-        scientific_record_source="authored_snapshot",
-        source_analysis_version=0,
+    from tests.support.postgres import seed_user
+
+    await seed_user(postgres_session_factory, "researcher-1")
+    evidence, _ = await repository.list_evidence("col-gold", "obj-1", 1)
+    findings, _ = await repository.list_findings("col-gold", "obj-1", 1)
+    contributions = await repository.list_contributions("col-gold", "obj-1", 1)
+    await repository.queue_analysis(
+        "col-gold", "obj-1", document_inputs=source.document_inputs,
+        pipeline_version="test.v1", model_name=None, prompt_versions={},
+        origin="human_authored", source_analysis_version=1,
         created_by_user_id="researcher-1",
+    )
+    await repository.claim_analysis("col-gold", "obj-1", 2)
+    await repository.publish_analysis(
+        "col-gold", "obj-1", 2,
+        contributions=tuple(replace(item, analysis_version=2) for item in contributions),
+        evidence_records=tuple(replace(item, analysis_version=2) for item in evidence),
+        findings=tuple(replace(item, analysis_version=2) for item in findings),
     )
 
     class RejectingProjection:
@@ -687,7 +613,7 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     snapshot_service, _ = _prediction_snapshot_service(repository)
     snapshot_service.experiment_projection = RejectingProjection()
     feedback_service = FindingFeedbackService(
-        review_repository=InMemoryObjectiveReviewRepository(),
+        review_repository=FindingReviewRepository(postgres_session_factory),
         objective_repository=repository,
         experiment_projection=RejectingProjection(),
     )
@@ -703,7 +629,7 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     assert dataset["items"][0]["evidence"][0]["evidence_id"] == "evidence-1"
 
 
-async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
+async def test_prediction_snapshot_rejects_unconfirmed_objective(*, postgres_session_factory) -> None:
     objective = ResearchObjective(
         collection_id="col-gold",
         objective_id="obj-candidate",
@@ -756,7 +682,8 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
             "confidence": 0.9,
         }
     )
-    repository = MemoryObjectiveRepository.from_facts(
+    repository = ObjectiveRepository(postgres_session_factory)
+    await repository.replace(
         "col-gold",
         ObjectiveFactSet(
             research_objectives_ready=True,
@@ -782,8 +709,8 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
         )
 
 
-async def test_finding_feedback_rejects_stale_analysis_version() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_feedback_rejects_stale_analysis_version(*, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
 
     with pytest.raises(ValueError, match="published analysis version"):
         await service.record_feedback(
@@ -796,8 +723,8 @@ async def test_finding_feedback_rejects_stale_analysis_version() -> None:
         )
 
 
-async def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_feedback_rejects_inconsistent_review_decisions(*, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
 
     with pytest.raises(ValueError, match="correct finding feedback cannot report"):
         await service.record_feedback(
@@ -819,8 +746,8 @@ async def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
         )
 
 
-async def test_finding_review_rejects_unknown_status_values() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_review_rejects_unknown_status_values(*, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
     published = await service.objective_repository.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
@@ -846,8 +773,8 @@ async def test_finding_review_rejects_unknown_status_values() -> None:
         )
 
 
-async def test_finding_curation_rejects_evidence_outside_published_finding() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_curation_rejects_evidence_outside_published_finding(*, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
     published = await service.objective_repository.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
@@ -866,8 +793,8 @@ async def test_finding_curation_rejects_evidence_outside_published_finding() -> 
         )
 
 
-async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
-    service = await _finding_feedback_service()
+async def test_latest_feedback_or_curation_controls_dataset_status(*, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
     candidate = (
         await service.export_dataset(collection_id="col-gold", objective_id="obj-1")
     )["items"][0]
@@ -935,8 +862,8 @@ async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
     assert curated["expert_target"] == finding_response(published)
 
 
-async def test_finding_feedback_export_contains_exact_source_text() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_feedback_export_contains_exact_source_text(*, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
     await service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -978,11 +905,8 @@ async def test_finding_feedback_export_contains_exact_source_text() -> None:
         ({"evidence_ids": ["evidence-replaced"]}, "source_evidence_ids_changed"),
     ],
 )
-async def test_finding_source_snapshot_detects_each_stale_dimension(
-    snapshot_change: dict,
-    expected_reason: str,
-) -> None:
-    service = await _finding_feedback_service()
+async def test_finding_source_snapshot_detects_each_stale_dimension(snapshot_change: dict, expected_reason: str, *, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
     await service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -1014,8 +938,8 @@ async def test_finding_source_snapshot_detects_each_stale_dimension(
     assert reasons == [expected_reason]
 
 
-async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() -> None:
-    service = await _finding_feedback_service()
+async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable(*, postgres_session_factory) -> None:
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
 
     validity, reasons = await service.source_snapshot_validity(
         collection_id="missing-collection",
@@ -1027,8 +951,8 @@ async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() ->
     assert reasons == ["source_dataset_unavailable"]
 
 
-async def test_only_training_ready_samples_include_training_messages() -> None:
-    candidate_service = await _finding_feedback_service()
+async def test_only_training_ready_samples_include_training_messages(*, postgres_session_factory) -> None:
+    candidate_service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
     candidate = (await candidate_service.export_dataset(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -1036,7 +960,7 @@ async def test_only_training_ready_samples_include_training_messages() -> None:
     assert candidate["dataset_use_status"] == "review_candidate"
     assert candidate["training_messages"] == []
 
-    rejected_service = await _finding_feedback_service()
+    rejected_service = candidate_service
     await rejected_service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -1055,9 +979,9 @@ async def test_only_training_ready_samples_include_training_messages() -> None:
 
 @pytest.mark.parametrize("entry", ("service", "agent"))
 async def test_typed_curation_preserves_published_finding_and_exports_expert_target(
-    entry,
+    entry, *, postgres_session_factory,
 ) -> None:
-    service = await _finding_feedback_service()
+    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
     published = await service.objective_repository.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
@@ -1080,7 +1004,7 @@ async def test_typed_curation_preserves_published_finding_and_exports_expert_tar
             curated_finding=candidate,
             reviewer="expert-1",
         )
-        assert curation.curated_finding is candidate
+        assert curation.curated_finding == candidate
     else:
         arguments = CurateFindingToolRequest(
             objective_id="obj-1",
@@ -1106,8 +1030,10 @@ async def test_typed_curation_preserves_published_finding_and_exports_expert_tar
             "col-gold", "expert-1"
         )
         assert result.data["curated_finding"] == finding_response(candidate)
-        curation = next(iter(service.review_repository.curations.values()))
-        assert curation.curated_finding is arguments._parsed_finding
+        (curation,) = await service.review_repository.list_curations(
+            "col-gold", "obj-1", 1, "finding-1"
+        )
+        assert curation.curated_finding == arguments._parsed_finding
     dataset = await service.export_dataset(
         collection_id="col-gold", objective_id="obj-1"
     )
@@ -1120,3 +1046,21 @@ async def test_typed_curation_preserves_published_finding_and_exports_expert_tar
     )
     assert dataset["items"][0]["expert_target"] == finding_response(candidate)
     assert dataset["items"][0]["system_prediction"] == finding_response(published)
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col-gold", document_ids=("doc-1",))
+    text = "At 500 C, tensile strength increased to 620 MPa."
+    await SourceArtifactRepository(postgres_session_factory).replace_document(
+        "col-gold",
+        SourceDocument(
+            document_id="doc-1", document_order=0, title="Temperature and strength", text=text,
+            blocks=(SourceBlock(
+                block_id="block-7", document_id="doc-1", block_type="paragraph",
+                text=text, block_order=0, page=7,
+            ),),
+        ),
+    )

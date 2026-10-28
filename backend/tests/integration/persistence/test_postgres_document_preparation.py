@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 from repositories.paper_map_repository import paper_map_from_payload
 
@@ -32,10 +33,7 @@ from tests.integration.persistence.test_postgres_source_artifacts import (
     COLLECTION_ID,
     _source,
 )
-from tests.support.repositories import (
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-)
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 pytestmark = pytest.mark.anyio
@@ -109,6 +107,7 @@ async def test_profiles_and_paper_maps_are_current_per_document(source_repositor
 async def test_profile_replacement_does_not_relabel_current_source(source_repository) -> None:
     profiles = DocumentProfileRepository(source_repository.session_factory)
     source = _source("doc_a", title="Current source")
+    await seed_collection(source_repository.session_factory, COLLECTION_ID, document_ids=(source.document_id,))
     await source_repository.replace_document(COLLECTION_ID, source)
     async with source_repository.session_factory() as session:
         row = await session.get(DocumentPreparationRow, "doc_a")
@@ -145,10 +144,7 @@ async def test_paper_map_requires_a_profile_in_the_shared_row(source_repository)
         await paper_maps.replace(COLLECTION_ID, _paper_map("doc_a"))
 
 
-async def test_postgres_restart_recovery_is_retryable_and_api_readable(
-    source_repository,
-    tmp_path,
-) -> None:
+async def test_postgres_restart_recovery_is_retryable_and_api_readable(source_repository, tmp_path, *, postgres_session_factory) -> None:
     collection_service = CollectionService(
         CollectionRepository(source_repository.session_factory),
         FileCollectionWorkspace(tmp_path / "collections"),
@@ -172,7 +168,7 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
     service = DocumentPreparationService(
         collection_service=collection_service,
         pipeline_run_service=pipeline_run_service,
-        source_artifact_repository=MemorySourceArtifactRepository(),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
         document_profile_service=object(),
         max_concurrency=1,
     )

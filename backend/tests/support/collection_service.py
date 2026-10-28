@@ -3,12 +3,12 @@ from pathlib import Path
 from application.source.collection_service import CollectionService
 from application.source.source_import_service import SourceImportService
 from infra.persistence.file import FileCollectionWorkspace
-from tests.support.repositories import MemoryCollectionRepository
+from repositories.collection_repository import CollectionRepository
 
 
-def build_test_collection_service(root_dir: Path) -> CollectionService:
+def build_test_collection_service(root_dir: Path, *, session_factory) -> CollectionService:
     return CollectionService(
-        repository=MemoryCollectionRepository(),
+        repository=CollectionRepository(session_factory),
         workspace=FileCollectionWorkspace(root_dir),
     )
 

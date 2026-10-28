@@ -1,3 +1,6 @@
+from repositories.chat_repository import ChatRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.postgres import seed_collection, read_tool_calls
 import copy
 import pytest
 
@@ -97,22 +100,22 @@ def anyio_backend():
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("mode", ["confirm", "auto"])
-async def test_replay_uses_service_permission_and_exact_approval(mode):
+async def test_replay_uses_service_permission_and_exact_approval(mode, *, postgres_session_factory):
     from application.chat import CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner, ToolSpec
     from application.chat.session_service import ChatSessionService
     from domain.chat import ToolRisk
     from scripts.evaluation.research_agent.run_scenarios import replay_case
-    from tests.support.chat_repository import MemoryChatRepository
-    from tests.unit.application.test_chat_session_service import _CollectionService, _SourceArtifactRepository, _WriteCapability, _Question
+    from repositories.chat_repository import ChatRepository
+    from tests.unit.application.test_chat_session_service import _CollectionService, _WriteCapability, _Question
     from tests.unit.application.test_research_agent_runner import _Model
     write = _WriteCapability()
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
-    repo = MemoryChatRepository()
+    repo = ChatRepository(postgres_session_factory)
     model = _Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Review"}),)),
                    ModelTurn(content="Saved"), ModelTurn(content="No tools needed."),
                    ModelTurn(content="No tools needed for the saved review."))
     service = ChatSessionService(repository=repo, collection_service=_CollectionService(),
-        source_artifact_repository=_SourceArtifactRepository(), runner=ResearchAgentRunner(
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory), runner=ResearchAgentRunner(
             model=model,
             capabilities=CapabilityRegistry((write,))))
     case = {"id": "S21", "collection_id": "col-1", "user_id": "user-1", "scientific_rubric": ["Check review"],
@@ -133,7 +136,7 @@ async def test_replay_uses_service_permission_and_exact_approval(mode):
         len(model.turns),
     )
     assert len(write.executed) == 1
-    calls = [call for call in repo.calls.values() if call.name == write.spec.name]
+    calls = [call for call in (await read_tool_calls(repo, result["session_id"])) if call.name == write.spec.name]
     assert [call.decision_basis for call in calls] == ["explicit" if mode == "confirm" else "scope_grant"]
     assert result["turns"][-1]["automatic_authorization_active"] is False
     assert result["scientific_review"] == "incomplete"
@@ -153,3 +156,8 @@ async def test_replay_records_session_setup_failure_without_aborting_batch():
     assert result["technical_result"] == "failed"
     assert result["session_id"] is None
     assert result["failures"] == ["exception_type:FileNotFoundError"]
+
+
+@pytest.fixture(autouse=True)
+async def research_collection(postgres_session_factory, anyio_backend):
+    await seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",))

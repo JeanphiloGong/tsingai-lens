@@ -29,42 +29,29 @@ def _valid_pdf_bytes() -> bytes:
     return payload.getvalue()
 
 
-def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
-    from tests.support.experiment_plan_repository import (
-        InMemoryExperimentPlanRepository,
-    )
-    from tests.support.objective_review_repository import (
-        InMemoryObjectiveReviewRepository,
-    )
-    from tests.support.repositories import (
-        MemoryDocumentProfileRepository,
-        MemoryPaperMapRepository,
-        MemorySourceArtifactRepository,
-    )
-    from tests.support.repositories.objective_repository import (
-        MemoryObjectiveRepository,
-    )
+def _app_repository_dependencies(auth_session_service, *, postgres_session_factory) -> dict[str, object]:
+    from repositories.experiment_plan_repository import ExperimentPlanRepository
+    from repositories.finding_review_repository import FindingReviewRepository
+    from repositories.document_profile_repository import DocumentProfileRepository
+    from repositories.paper_map_repository import PaperMapRepository
+    from repositories.source_artifact_repository import SourceArtifactRepository
+    from repositories.objective_repository import ObjectiveRepository
 
     return {
-        "source_artifact_repository": MemorySourceArtifactRepository(),
-        "document_profile_repository": MemoryDocumentProfileRepository(),
-        "paper_map_repository": MemoryPaperMapRepository(),
-        "objective_repository": MemoryObjectiveRepository(),
-        "finding_review_repository": InMemoryObjectiveReviewRepository(),
-        "experiment_plan_repository": InMemoryExperimentPlanRepository(),
+        "source_artifact_repository": SourceArtifactRepository(postgres_session_factory),
+        "document_profile_repository": DocumentProfileRepository(postgres_session_factory),
+        "paper_map_repository": PaperMapRepository(postgres_session_factory),
+        "objective_repository": ObjectiveRepository(postgres_session_factory),
+        "finding_review_repository": FindingReviewRepository(postgres_session_factory),
+        "experiment_plan_repository": ExperimentPlanRepository(postgres_session_factory),
         "chat_repository": object(),
     }
 
 
 @contextmanager
-def _build_client(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-) -> Iterator[TestClient]:
+def _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory) -> Iterator[TestClient]:
     from application.pipeline import PipelineRunService
-    from tests.support.repositories import MemoryPipelineRunRepository
+    from repositories.pipeline_run_repository import PipelineRunRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -76,8 +63,8 @@ def _build_client(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
-            **_app_repository_dependencies(auth_session_service),
+            pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+            **_app_repository_dependencies(auth_session_service, postgres_session_factory=postgres_session_factory),
         )
     ) as client:
         yield client
@@ -142,17 +129,12 @@ def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) ->
     engine.dispose.assert_called_once_with()
 
 
-def test_app_lifespan_composes_one_shared_collection_service(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-) -> None:
+def test_app_lifespan_composes_one_shared_collection_service(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory) -> None:
     from application.core.objectives.analysis.experiment_analysis_writer import (
         ExperimentAnalysisWriter,
     )
     from application.pipeline import PipelineRunService
-    from tests.support.repositories import MemoryPipelineRunRepository
+    from repositories.pipeline_run_repository import PipelineRunRepository
 
     monkeypatch.setattr("config.DATA_DIR", tmp_path)
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
@@ -162,9 +144,9 @@ def test_app_lifespan_composes_one_shared_collection_service(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
+            pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
             experiment_analysis_writer=Mock(spec=ExperimentAnalysisWriter),
-            **_app_repository_dependencies(auth_session_service),
+            **_app_repository_dependencies(auth_session_service, postgres_session_factory=postgres_session_factory),
         )
     ) as client:
         state = client.app.state
@@ -215,19 +197,14 @@ def test_app_lifespan_composes_one_shared_collection_service(
         }.issubset(capability_names)
 
 
-def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-) -> None:
+def test_app_lifespan_recovers_orphaned_work_before_serving_requests(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory) -> None:
     from application.core.objectives.analysis_service import ObjectiveAnalysisService
     from application.pipeline import PipelineRunService
     from application.source.document_preparation_service import (
         DocumentPreparationService,
     )
     from main import create_app
-    from tests.support.repositories import MemoryPipelineRunRepository
+    from repositories.pipeline_run_repository import PipelineRunRepository
 
     preparation_recovery = AsyncMock(return_value=0)
     analysis_recovery = AsyncMock(return_value=0)
@@ -248,44 +225,24 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
         create_app(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
-            pipeline_run_service=PipelineRunService(MemoryPipelineRunRepository()),
-            **_app_repository_dependencies(auth_session_service),
+            pipeline_run_service=PipelineRunService(PipelineRunRepository(postgres_session_factory)),
+            **_app_repository_dependencies(auth_session_service, postgres_session_factory=postgres_session_factory),
         )
     ):
         preparation_recovery.assert_awaited_once_with()
         analysis_recovery.assert_awaited_once_with()
 
 
-def test_collections_api_requires_login(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_collections_api_requires_login(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         response = client.get("/api/v1/collections")
 
         assert response.status_code == 401
         assert response.json()["detail"]["code"] == "authentication_required"
 
 
-def test_login_me_and_logout_flow(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_login_me_and_logout_flow(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         login = _login(client)
         assert login.status_code == 200
         assert login.json()["user"]["email"] == "admin@example.com"
@@ -301,18 +258,8 @@ def test_login_me_and_logout_flow(
         assert after_logout.status_code == 401
 
 
-def test_collection_list_is_scoped_to_authenticated_owner(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_collection_list_is_scoped_to_authenticated_owner(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         assert _login(client).status_code == 200
 
         created = client.post("/api/v1/collections", json={"name": "Admin papers"})
@@ -344,18 +291,8 @@ def test_collection_list_is_scoped_to_authenticated_owner(
         assert other_get.json()["detail"]["code"] == "collection_not_found"
 
 
-def test_public_static_data_mount_is_removed(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_public_static_data_mount_is_removed(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         leaked_path = tmp_path / "leak.txt"
         leaked_path.write_text("secret", encoding="utf-8")
 
@@ -364,18 +301,8 @@ def test_public_static_data_mount_is_removed(
         assert response.status_code == 404
 
 
-def test_collection_source_archive_downloads_selected_original_files(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_collection_source_archive_downloads_selected_original_files(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         assert _login(client).status_code == 200
         created = client.post(
             "/api/v1/collections",
@@ -409,18 +336,8 @@ def test_collection_source_archive_downloads_selected_original_files(
             assert archive.read(manifest["documents"][0]["archive_path"]) == source_pdf
 
 
-def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         assert _login(client).status_code == 200
         created = client.post(
             "/api/v1/collections",
@@ -448,18 +365,8 @@ def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
         assert documents.json()["items"] == []
 
 
-def test_collection_source_archive_is_scoped_to_authenticated_owner(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_collection_source_archive_is_scoped_to_authenticated_owner(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         assert _login(client).status_code == 200
         created = client.post(
             "/api/v1/collections",
@@ -493,19 +400,8 @@ def test_collection_source_archive_is_scoped_to_authenticated_owner(
         [f"doc_{index}" for index in range(101)],
     ],
 )
-def test_collection_source_archive_rejects_invalid_file_selection(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-    document_ids,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_collection_source_archive_rejects_invalid_file_selection(monkeypatch, tmp_path, auth_session_service, collection_service, document_ids, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         assert _login(client).status_code == 200
         created = client.post(
             "/api/v1/collections",
@@ -520,18 +416,8 @@ def test_collection_source_archive_rejects_invalid_file_selection(
         assert response.status_code == 422
 
 
-def test_collection_source_archive_returns_bounded_missing_file_error(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+def test_collection_source_archive_returns_bounded_missing_file_error(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         assert _login(client).status_code == 200
         created = client.post(
             "/api/v1/collections",
@@ -553,19 +439,9 @@ def test_collection_source_archive_returns_bounded_missing_file_error(
         }
 
 
-def test_collection_source_archive_returns_413_for_oversized_selection(
-    monkeypatch,
-    tmp_path,
-    auth_session_service,
-    collection_service,
-):
+def test_collection_source_archive_returns_413_for_oversized_selection(monkeypatch, tmp_path, auth_session_service, collection_service, *, postgres_session_factory):
     monkeypatch.setattr(source_archive_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 3)
-    with _build_client(
-        monkeypatch,
-        tmp_path,
-        auth_session_service,
-        collection_service,
-    ) as client:
+    with _build_client(monkeypatch, tmp_path, auth_session_service, collection_service, postgres_session_factory=postgres_session_factory) as client:
         assert _login(client).status_code == 200
         created = client.post(
             "/api/v1/collections",

@@ -18,10 +18,9 @@ from domain.source import (
 )
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from tests.support.repositories import (
-    MemoryCollectionRepository,
-    MemorySourceArtifactRepository,
-)
+from repositories.collection_repository import CollectionRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
+from tests.support.postgres import seed_collection
 
 pytestmark = pytest.mark.anyio
 
@@ -31,8 +30,8 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-async def _repository_with_pdf(payload: bytes) -> MemoryCollectionRepository:
-    repository = MemoryCollectionRepository()
+async def _repository_with_pdf(payload: bytes, *, postgres_session_factory) -> CollectionRepository:
+    repository = CollectionRepository(postgres_session_factory)
     collection = StoredCollection(
         collection=Collection(
             collection_id="col_demo",
@@ -66,9 +65,9 @@ async def _repository_with_pdf(payload: bytes) -> MemoryCollectionRepository:
     return repository
 
 
-async def test_collection_input_rows_use_collection_documents(tmp_path) -> None:
+async def test_collection_input_rows_use_collection_documents(tmp_path, *, postgres_session_factory) -> None:
     payload = b"%PDF-1.4\nregistered input\n"
-    repository = await _repository_with_pdf(payload)
+    repository = await _repository_with_pdf(payload, postgres_session_factory=postgres_session_factory)
 
     rows = await export_script._collection_input_rows(repository, "col_demo")
 
@@ -85,22 +84,22 @@ async def test_collection_input_rows_use_collection_documents(tmp_path) -> None:
     ]
 
 
-async def test_collection_input_rows_do_not_scan_input_directory(tmp_path) -> None:
+async def test_collection_input_rows_do_not_scan_input_directory(tmp_path, *, postgres_session_factory) -> None:
     input_dir = tmp_path / "collections" / "col_demo" / "input"
     input_dir.mkdir(parents=True)
     (input_dir / "unregistered.pdf").write_bytes(b"%PDF-1.4")
 
     assert await export_script._collection_input_rows(
-        MemoryCollectionRepository(), "col_demo"
+        CollectionRepository(postgres_session_factory), "col_demo"
     ) == []
 
 
-async def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path) -> None:
+async def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path, *, postgres_session_factory) -> None:
     collections_root = tmp_path / "collections"
     collection_dir = collections_root / "col_demo"
     collection_dir.mkdir(parents=True)
     payload = b"%PDF-1.4\nregistered input\n"
-    repository = await _repository_with_pdf(payload)
+    repository = await _repository_with_pdf(payload, postgres_session_factory=postgres_session_factory)
     FileObjectStore(collections_root).write(
         "col_demo/input/paper.pdf", payload, sha256(payload).hexdigest()
     )
@@ -118,7 +117,7 @@ async def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_pa
 
 
 async def test_existing_source_table_export_keeps_table_rows(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, *, postgres_session_factory
 ) -> None:
     document = SourceDocument(
         document_id="paper-1",
@@ -139,7 +138,8 @@ async def test_existing_source_table_export_keeps_table_rows(
             ),
         ),
     )
-    repository = MemorySourceArtifactRepository()
+    repository = SourceArtifactRepository(postgres_session_factory)
+    await seed_collection(postgres_session_factory, "col_demo", document_ids=("paper-1",))
     await repository.replace_document("col_demo", document)
     monkeypatch.setattr(
         export_script,

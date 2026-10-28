@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-from domain.core.research_objective import (
-    ResearchObjective,
-    build_research_objective_id,
-)
-
 import pytest
 
 from domain.core import ResearchObjective
-from tests.support.repositories.objective_repository import MemoryObjectiveRepository
+from domain.core.research_objective import build_research_objective_id
+from repositories.objective_repository import ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -29,8 +25,6 @@ def _authored_objective() -> ResearchObjective:
             mechanisms=(),
             constraints=(),
             requested_comparator=None,
-            parent_objective_id=None,
-            parent_analysis_version=None,
         ),
         question="How does laser power affect tensile strength?",
         material_scope=("Ti-6Al-4V",),
@@ -49,8 +43,8 @@ def _authored_objective() -> ResearchObjective:
     )
 
 
-async def test_authored_candidate_does_not_require_objective_discovery() -> None:
-    repository = MemoryObjectiveRepository()
+async def test_authored_candidate_does_not_require_objective_discovery(*, postgres_session_factory) -> None:
+    repository = ObjectiveRepository(postgres_session_factory)
     objective = _authored_objective()
 
     created = await repository.create_authored_candidate(
@@ -71,3 +65,10 @@ async def test_authored_candidate_does_not_require_objective_discovery() -> None
     assert record.created_at
     assert record.updated_at
     assert (await repository.list_objective_records("col-1")) == (record,)
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col-1", document_ids=("paper-1",))

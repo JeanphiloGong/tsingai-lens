@@ -29,12 +29,10 @@ from domain.core import DocumentProfile, PreparedDocumentInput, ResearchObjectiv
 from domain.source import Document
 from repositories.collection_repository import StoredDocument
 from repositories.objective_repository import ObjectiveAnalysis
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-)
-from tests.support.repositories.objective_repository import MemoryObjectiveRepository
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
+from repositories.objective_repository import ObjectiveRepository
 
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:
@@ -122,6 +120,7 @@ def build_research_objective_service(
     collection_service,
     **kwargs,
 ) -> ObjectiveExperimentAnalysisService:
+    session_factory = collection_service.repository.session_factory
     objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
         kwargs.setdefault("objective_source_screener", objective_judgments)
@@ -131,18 +130,18 @@ def build_research_objective_service(
             kwargs.get("document_profile_service"),
             "source_artifact_repository",
             None,
-        ) or MemorySourceArtifactRepository()
+        ) or SourceArtifactRepository(session_factory)
     document_profile_repository = kwargs.pop(
         "document_profile_repository",
-        MemoryDocumentProfileRepository(),
+        DocumentProfileRepository(session_factory),
     )
     paper_map_repository = kwargs.pop(
         "paper_map_repository",
-        MemoryPaperMapRepository(),
+        PaperMapRepository(session_factory),
     )
     objective_repository = kwargs.pop(
         "objective_repository",
-        MemoryObjectiveRepository(),
+        ObjectiveRepository(session_factory),
     )
     document_profile_service = kwargs.pop("document_profile_service", None)
     if document_profile_service is None:

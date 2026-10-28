@@ -34,11 +34,9 @@ from domain.source import (
     Document,
 )
 from repositories.collection_repository import StoredDocument
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemoryPaperMapRepository,
-    MemorySourceArtifactRepository,
-)
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.paper_map_repository import PaperMapRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 _LIVE = os.environ.get("LENS_RUN_LIVE_PROMPT_TESTS") == "1"
 _FIXTURE = (
@@ -62,11 +60,14 @@ class _EmptyObjectiveRepository:
         return ()
 
 
-async def _fixture_collection(collection_service):
+async def _fixture_collection(collection_service, *, postgres_session_factory):
+    from tests.support.postgres import seed_user
+
     user_id = "live-prompt-test-user"
+    await seed_user(postgres_session_factory, user_id)
     collection = await collection_service.create_collection(
         "P002 prompt behavior fixture",
-        "Isolated in-memory collection for the opt-in prompt check.",
+        "Isolated PostgreSQL collection for the opt-in prompt check.",
         owner_user_id=user_id,
     )
     record = json.loads(_FIXTURE.read_text(encoding="utf-8"))
@@ -91,7 +92,7 @@ async def _fixture_collection(collection_service):
         (stored_document,),
         updated_at=now,
     )
-    sources = MemorySourceArtifactRepository()
+    sources = SourceArtifactRepository(postgres_session_factory)
     await sources.replace_document(
         collection["collection_id"],
         source_documents_from_records(
@@ -107,9 +108,9 @@ async def _fixture_collection(collection_service):
     return user_id, collection["collection_id"], document_id, sources
 
 
-def _runner(*, client: AsyncOpenAI, collection_service, sources):
-    profiles = MemoryDocumentProfileRepository()
-    maps = MemoryPaperMapRepository()
+def _runner(*, client: AsyncOpenAI, collection_service, sources, postgres_session_factory):
+    profiles = DocumentProfileRepository(postgres_session_factory)
+    maps = PaperMapRepository(postgres_session_factory)
     objective_repository = _EmptyObjectiveRepository()
     handlers = (
         GetCollectionContextCapability(
@@ -157,28 +158,20 @@ def _runner(*, client: AsyncOpenAI, collection_service, sources):
     )
 
 
-async def test_live_agent_reads_source_when_profile_and_map_are_missing(
-    collection_service,
-):
+async def test_live_agent_reads_source_when_profile_and_map_are_missing(collection_service, *, postgres_session_factory):
     """A readable paper remains inspectable without optional navigation metadata."""
 
     required = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
-    user_id, collection_id, document_id, sources = await _fixture_collection(
-        collection_service
-    )
+    user_id, collection_id, document_id, sources = await _fixture_collection(collection_service, postgres_session_factory=postgres_session_factory)
     client = AsyncOpenAI(
         api_key=os.environ["LLM_API_KEY"],
         base_url=os.environ["LLM_BASE_URL"],
         timeout=60,
     )
     try:
-        result = await _runner(
-            client=client,
-            collection_service=collection_service,
-            sources=sources,
-        ).run_turn(
+        result = await _runner(client=client, collection_service=collection_service, sources=sources, postgres_session_factory=postgres_session_factory).run_turn(
             context=AgentContext(
                 session_id="live-prompt-session",
                 user_id=user_id,
@@ -220,17 +213,13 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
 
 
 @pytest.mark.parametrize("knowledge_scope", ["ordinary", "no_web", "supplied_only"])
-async def test_live_agent_respects_the_requested_knowledge_scope(
-    collection_service, knowledge_scope,
-):
+async def test_live_agent_respects_the_requested_knowledge_scope(collection_service, knowledge_scope, *, postgres_session_factory):
     """A trend supports arithmetic; explaining its mechanism needs allowed premises."""
 
     required = ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
-    user_id, collection_id, _document_id, sources = await _fixture_collection(
-        collection_service
-    )
+    user_id, collection_id, _document_id, sources = await _fixture_collection(collection_service, postgres_session_factory=postgres_session_factory)
     scope_instruction = {
         "ordinary": "",
         "no_web": "Do not search the web.",
@@ -246,9 +235,7 @@ async def test_live_agent_respects_the_requested_knowledge_scope(
         timeout=60,
     )
     try:
-        result = await _runner(
-            client=client, collection_service=collection_service, sources=sources,
-        ).run_turn(
+        result = await _runner(client=client, collection_service=collection_service, sources=sources, postgres_session_factory=postgres_session_factory).run_turn(
             context=AgentContext(
                 session_id=f"live-knowledge-{knowledge_scope}",
                 user_id=user_id,

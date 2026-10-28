@@ -35,11 +35,17 @@ Run commands from `backend/` with the existing development environment:
 .venv/bin/python -m pytest -q tests/unit/application/test_research_agent_runner.py
 ```
 
-For the complete suite, use `.venv/bin/python -m pytest -q tests`. PostgreSQL
-tests require `LENS_TEST_DATABASE_URL` to name a dedicated `*_test` database
+For the complete suite, use `.venv/bin/python -m pytest -q tests`. Database-backed
+service and repository tests require `LENS_TEST_DATABASE_URL` to name a dedicated `*_test` database
 using the `postgresql+psycopg` driver. They reset that database's schema and run
 migrations; never point them at development or production data. Without the
 test URL, PostgreSQL cases are skipped, which is not storage acceptance.
+Both unit and integration directories use the PostgreSQL fixtures in
+`tests/conftest.py`. Each test receives a migrated, isolated database schema;
+the fixtures reset only the explicitly configured test database. The async
+engine uses `NullPool` so synchronous API tests and asynchronous service calls
+can use their own event loops. Model and parser responses may remain deterministic
+test inputs; no reusable in-memory repositories are maintained.
 
 See [Objective Analysis Verification](objective-analysis-verification.md) for
 the four-paper flow, real P002 Source fixture, numeric table regressions, and

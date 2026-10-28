@@ -8,9 +8,7 @@ from application.goal.experiment_plan_service import (
 )
 from domain.goal import ExperimentPlanRecord
 from repositories.experiment_plan_repository import experiment_plan_from_record
-from tests.support.experiment_plan_repository import (
-    InMemoryExperimentPlanRepository,
-)
+from repositories.experiment_plan_repository import ExperimentPlanRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -31,13 +29,9 @@ class _FindingFeedbackService:
         return self.validity, reasons
 
 
-def _service(
-    repository: InMemoryExperimentPlanRepository | None = None,
-    *,
-    validity: str = "current",
-) -> ExperimentPlanService:
+def _service(repository: ExperimentPlanRepository | None=None, *, validity: str='current', postgres_session_factory) -> ExperimentPlanService:
     return ExperimentPlanService(
-        repository=repository or InMemoryExperimentPlanRepository(),
+        repository=repository or ExperimentPlanRepository(postgres_session_factory),
         finding_feedback_service=_FindingFeedbackService(validity),
     )
 
@@ -108,9 +102,9 @@ def _historical_plan() -> ExperimentPlanRecord:
     )
 
 
-async def test_manual_plan_creation_has_no_chat_provenance() -> None:
-    repository = InMemoryExperimentPlanRepository()
-    service = _service(repository)
+async def test_manual_plan_creation_has_no_chat_provenance(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository(postgres_session_factory)
+    service = _service(repository, postgres_session_factory=postgres_session_factory)
 
     draft = await service.create_plan(
         collection_id="col_1",
@@ -153,8 +147,8 @@ async def test_manual_plan_creation_has_no_chat_provenance() -> None:
     assert await service.list_plans("col_1", "objective_1") == (draft,)
 
 
-async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready() -> None:
-    service = _service()
+async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready(*, postgres_session_factory) -> None:
+    service = _service(postgres_session_factory=postgres_session_factory)
     draft = await service.create_plan(
         collection_id="col_1",
         objective_id="objective_1",
@@ -188,8 +182,8 @@ async def test_manual_plan_revision_preserves_history_and_marks_new_leaf_ready()
     assert await service.list_plans("col_1", "objective_1") == (updated,)
 
 
-async def test_agent_plan_persists_current_finding_sources_after_approval() -> None:
-    repository = InMemoryExperimentPlanRepository()
+async def test_agent_plan_persists_current_finding_sources_after_approval(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository(postgres_session_factory)
     feedback_service = _FindingFeedbackService()
     service = ExperimentPlanService(
         repository=repository,
@@ -251,9 +245,9 @@ async def test_agent_plan_persists_current_finding_sources_after_approval() -> N
     assert plan.updated_by == "expert-a"
 
 
-async def test_agent_plan_is_not_saved_when_finding_sources_are_stale() -> None:
-    repository = InMemoryExperimentPlanRepository()
-    service = _service(repository, validity="stale")
+async def test_agent_plan_is_not_saved_when_finding_sources_are_stale(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository(postgres_session_factory)
+    service = _service(repository, validity='stale', postgres_session_factory=postgres_session_factory)
 
     with pytest.raises(ValueError, match="research plan sources are stale"):
         await service.create_agent_plan(
@@ -288,12 +282,12 @@ async def test_agent_plan_is_not_saved_when_finding_sources_are_stale() -> None:
             created_by_tool_call_id="call-stale-plan",
         )
 
-    assert repository.plans == {}
+    assert await repository.list_plans("col_1", "objective_1") == ()
 
 
-async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis() -> None:
-    repository = InMemoryExperimentPlanRepository()
-    service = _service(repository)
+async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository(postgres_session_factory)
+    service = _service(repository, postgres_session_factory=postgres_session_factory)
     manual = await service.create_plan(
         collection_id="col_1",
         objective_id="objective_1",
@@ -348,9 +342,9 @@ async def test_agent_revision_uses_the_shared_version_service_and_replaces_basis
     assert await service.read_plan("col_1", "objective_1", manual.plan_id) == manual
 
 
-async def test_missing_plan_update_is_explicit() -> None:
+async def test_missing_plan_update_is_explicit(*, postgres_session_factory) -> None:
     with pytest.raises(ExperimentPlanNotFoundError):
-        await _service().update_plan(
+        await _service(postgres_session_factory=postgres_session_factory).update_plan(
             collection_id="col_1",
             objective_id="objective_1",
             plan_id="missing",
@@ -362,12 +356,12 @@ async def test_missing_plan_update_is_explicit() -> None:
         )
 
 
-async def test_historical_grounded_plan_remains_auditable_after_chat_cutover() -> None:
-    repository = InMemoryExperimentPlanRepository()
+async def test_historical_grounded_plan_remains_auditable_after_chat_cutover(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository(postgres_session_factory)
     historical = _historical_plan()
     await repository.upsert_plan(historical)
 
-    listed = await _service(repository).list_plans("col_1", "objective_1")
+    listed = await _service(repository, postgres_session_factory=postgres_session_factory).list_plans("col_1", "objective_1")
 
     assert listed[0].source_message_id == "msg_legacy"
     assert listed[0].source_links == historical.source_links
@@ -375,13 +369,13 @@ async def test_historical_grounded_plan_remains_auditable_after_chat_cutover() -
     assert listed[0].metadata["source_validity_reasons"] == []
 
 
-async def test_stale_historical_plan_cannot_be_promoted() -> None:
-    repository = InMemoryExperimentPlanRepository()
+async def test_stale_historical_plan_cannot_be_promoted(*, postgres_session_factory) -> None:
+    repository = ExperimentPlanRepository(postgres_session_factory)
     historical = _historical_plan()
     await repository.upsert_plan(historical)
 
     with pytest.raises(ValueError, match="historical source Findings are stale"):
-        await _service(repository, validity="stale").update_plan(
+        await _service(repository, validity='stale', postgres_session_factory=postgres_session_factory).update_plan(
             collection_id="col_1",
             objective_id="objective_1",
             plan_id=historical.plan_id,
@@ -391,3 +385,19 @@ async def test_stale_historical_plan_cannot_be_promoted() -> None:
             structured_plan=None,
             updated_by="expert-a",
         )
+
+
+@pytest.fixture(autouse=True)
+async def research_records(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_objective, seed_user
+
+    await seed_objective(postgres_session_factory, "col_1", "objective_1")
+    await seed_user(postgres_session_factory, "expert-a")
+    await seed_user(postgres_session_factory, "expert-b")
+    from repositories.chat_repository import ChatRepository
+    from domain.chat import ChatSession, ChatMessage
+    chat = ChatRepository(postgres_session_factory)
+    session = ChatSession.create(collection_id="col_1", user_id="user-1", session_id="chat_legacy", created_at="2026-07-13T00:00:00+00:00")
+    await chat.add_session(session)
+    message = ChatMessage.assistant(message_id="msg_legacy", session_id=session.session_id, content="Historical research plan.", created_at=session.created_at)
+    await chat.save_trajectory(session=session, messages=(message,), tool_calls=(), tool_results=())

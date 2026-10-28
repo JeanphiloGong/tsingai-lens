@@ -16,9 +16,16 @@ from application.core.objectives.paper_research_map_service import (
 )
 from application.pipeline import PipelineRunService
 from domain.core import ObjectiveFactSet, PreparedDocumentInput
-from tests.support.repositories import MemoryPipelineRunRepository
+from repositories.pipeline_run_repository import PipelineRunRepository
 
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+async def research_collection(postgres_session_factory, anyio_backend):
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col_a", document_ids=("doc_a", "doc_b"))
 
 
 @pytest.fixture
@@ -50,10 +57,8 @@ def _service(pipeline_run_service: PipelineRunService) -> ObjectiveDiscoveryServ
     )
 
 
-async def test_objective_discovery_reuses_one_active_run_and_executes_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+async def test_objective_discovery_reuses_one_active_run_and_executes_once(monkeypatch: pytest.MonkeyPatch, *, postgres_session_factory) -> None:
+    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     service = _service(pipeline_run_service)
     calls = 0
 
@@ -101,10 +106,8 @@ async def test_objective_discovery_reuses_one_active_run_and_executes_once(
     assert completed["current_node"] == "objectives_ready"
 
 
-async def test_objective_discovery_records_failure_and_allows_retry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+async def test_objective_discovery_records_failure_and_allows_retry(monkeypatch: pytest.MonkeyPatch, *, postgres_session_factory) -> None:
+    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     service = _service(pipeline_run_service)
 
     async def resolve_inputs(_collection_id, document_ids):
@@ -135,8 +138,8 @@ async def test_objective_discovery_records_failure_and_allows_retry(
     await asyncio.gather(*tuple(service._workers), return_exceptions=True)
 
 
-async def test_objective_discovery_progress_does_not_move_backwards() -> None:
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+async def test_objective_discovery_progress_does_not_move_backwards(*, postgres_session_factory) -> None:
+    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     service = _service(pipeline_run_service)
     run = await pipeline_run_service.create_run(
         "col_a",
@@ -176,8 +179,8 @@ async def test_objective_discovery_progress_does_not_move_backwards() -> None:
     assert aggregating["progress_percent"] >= mapped["progress_percent"]
 
 
-async def test_objective_discovery_restart_recovery_allows_retry() -> None:
-    pipeline_run_service = PipelineRunService(MemoryPipelineRunRepository())
+async def test_objective_discovery_restart_recovery_allows_retry(*, postgres_session_factory) -> None:
+    pipeline_run_service = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     service = _service(pipeline_run_service)
     active, _created = await pipeline_run_service.get_or_create_collection_run(
         collection_id="col_a",

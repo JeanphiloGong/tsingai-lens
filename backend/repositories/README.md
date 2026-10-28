@@ -60,9 +60,10 @@ The owning transaction commits or rolls back the complete publication event.
 Database connections, ORM tables, schema migrations and file storage stay in
 [the persistence infrastructure](../infra/persistence/README.md).
 
-Existing isolated service test doubles live only in `tests/support/repositories/`.
-They are not alternate runtime stores. Real persistence, locking, constraints
-and rollback behavior are checked against a separate PostgreSQL test database.
+Database-backed tests use these same repositories against a separate PostgreSQL
+test database. There is no maintained in-memory repository implementation.
+Fixtures create the required users, collections and documents before exercising
+service behavior, persistence, locking, constraints and rollback.
 
 The [ObjectStore contract](object_store.py) describes uploaded/extracted bytes,
 not database rows; its existing file implementation remains infrastructure.

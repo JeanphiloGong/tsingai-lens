@@ -13,9 +13,7 @@ from controllers.goal.experiment_plans import (
     ExperimentPlanCreateRequest,
     ExperimentPlanUpdateRequest,
 )
-from tests.support.experiment_plan_repository import (
-    InMemoryExperimentPlanRepository,
-)
+from repositories.experiment_plan_repository import ExperimentPlanRepository
 
 
 class _FindingFeedbackService:
@@ -49,9 +47,13 @@ def _request(
     )
 
 
-def test_experiment_plan_routes_create_list_and_update_manual_plan() -> None:
+def test_experiment_plan_routes_create_list_and_update_manual_plan(*, postgres_session_factory) -> None:
+    from tests.support.postgres import seed_objective, seed_user
+
+    asyncio.run(seed_objective(postgres_session_factory, "col_1", "objective_1"))
+    asyncio.run(seed_user(postgres_session_factory, "expert-a"))
     service = ExperimentPlanService(
-        repository=InMemoryExperimentPlanRepository(),
+        repository=ExperimentPlanRepository(postgres_session_factory),
         finding_feedback_service=_FindingFeedbackService(),
     )
     request = _request(service)
@@ -166,9 +168,9 @@ def test_experiment_plan_update_contract_allows_partial_patch() -> None:
     assert payload.structured_plan is None
 
 
-def test_experiment_plan_routes_hide_other_collection_from_non_owner() -> None:
+def test_experiment_plan_routes_hide_other_collection_from_non_owner(*, postgres_session_factory) -> None:
     service = ExperimentPlanService(
-        repository=InMemoryExperimentPlanRepository(),
+        repository=ExperimentPlanRepository(postgres_session_factory),
         finding_feedback_service=_FindingFeedbackService(),
     )
     request = _request(service, collection_service=_DenyCollectionService())

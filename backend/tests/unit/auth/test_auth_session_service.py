@@ -78,11 +78,12 @@ async def test_auth_session_service_persists_only_the_bearer_token_hash(
     )
     bearer_token = login["session_id"]
 
-    stored = next(iter(service.repository.sessions_by_token_hash.values()))
+    token_hash = sha256(bearer_token.encode("utf-8")).hexdigest()
+    stored = await service.repository.read_session_by_token_hash(token_hash)
 
     assert stored is not None
     assert stored.session_id != bearer_token
-    assert list(service.repository.sessions_by_token_hash) == [sha256(bearer_token.encode("utf-8")).hexdigest()]
+    assert await service.repository.read_session_by_token_hash(bearer_token) is None
 
 
 async def test_auth_session_service_rejects_expired_session(auth_session_service):

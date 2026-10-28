@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
 
@@ -11,13 +12,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from domain.core import DocumentProfile
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemorySourceArtifactRepository,
-)
 from domain.core.finding import Finding, FindingPaperContribution
 from domain.core.research_objective import ObjectiveEvidence
 from domain.core.scientific_fact import ScientificContext
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 
 @pytest.fixture
@@ -118,12 +117,9 @@ class _PublishedObjectiveRepository:
 
 
 @pytest.mark.anyio
-async def test_export_prediction_bundle_uses_current_published_results(
-    tmp_path,
-    monkeypatch,
-):
+async def test_export_prediction_bundle_uses_current_published_results(tmp_path, monkeypatch, *, postgres_session_factory):
     exporter = _load_exporter_module()
-    source_repository = MemorySourceArtifactRepository()
+    source_repository = SourceArtifactRepository(postgres_session_factory)
     source_document = source_documents_from_records(
         documents=[
             {
@@ -137,8 +133,9 @@ async def test_export_prediction_bundle_uses_current_published_results(
             }
         ]
     )[0]
+    await seed_collection(source_repository.session_factory, 'col-test', document_ids=(source_document.document_id,))
     await source_repository.replace_document("col-test", source_document)
-    profile_repository = MemoryDocumentProfileRepository()
+    profile_repository = DocumentProfileRepository(postgres_session_factory)
     await profile_repository.replace(
         "col-test",
         DocumentProfile(
@@ -330,10 +327,7 @@ def test_prediction_bundle_preserves_scalar_measurement_when_target_value_is_nul
 
 
 @pytest.mark.anyio
-async def test_export_prediction_bundle_allows_missing_current_artifacts(
-    tmp_path,
-    monkeypatch,
-):
+async def test_export_prediction_bundle_allows_missing_current_artifacts(tmp_path, monkeypatch, *, postgres_session_factory):
     exporter = _load_exporter_module()
     monkeypatch.setattr(
         exporter,
@@ -344,12 +338,12 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(
     monkeypatch.setattr(
         exporter,
         "SourceArtifactRepository",
-        lambda _sessions: MemorySourceArtifactRepository(),
+        lambda _sessions: SourceArtifactRepository(postgres_session_factory),
     )
     monkeypatch.setattr(
         exporter,
         "DocumentProfileRepository",
-        lambda _sessions: MemoryDocumentProfileRepository(),
+        lambda _sessions: DocumentProfileRepository(postgres_session_factory),
     )
     monkeypatch.setattr(
         exporter,

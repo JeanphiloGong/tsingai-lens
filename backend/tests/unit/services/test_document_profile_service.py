@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 from infra.source.artifact_bundle import source_documents_from_records
 
@@ -21,10 +22,8 @@ from tests.support.collection_service import (
     build_test_collection_service,
     build_test_source_import_service,
 )
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemorySourceArtifactRepository,
-)
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -34,12 +33,12 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _build_profile_service(tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
+def _build_profile_service(tmp_path, *, postgres_session_factory):
+    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     return collection_service, DocumentProfileService(
         collection_service,
-        source_artifact_repository=MemorySourceArtifactRepository(),
-        document_profile_repository=MemoryDocumentProfileRepository(),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
     )
 
 
@@ -58,6 +57,7 @@ async def _write_source_artifacts(
             blocks=blocks.to_dict(orient="records"),
     )
     for document in source_documents:
+        await seed_collection(profile_service.source_artifact_repository.session_factory, collection_id, document_ids=(document.document_id,))
         await profile_service.source_artifact_repository.replace_document(
             collection_id,
             document,
@@ -84,8 +84,8 @@ async def _build_profiles(
     )
 
 
-async def test_document_profile_service_builds_profiles_and_summary(tmp_path):
-    collection_service, profile_service = _build_profile_service(tmp_path)
+async def test_document_profile_service_builds_profiles_and_summary(tmp_path, *, postgres_session_factory):
+    collection_service, profile_service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
 
@@ -165,10 +165,8 @@ async def test_document_profile_service_builds_profiles_and_summary(tmp_path):
     assert len(stored) == 3
 
 
-async def test_document_profile_service_does_not_duplicate_source_filename(
-    tmp_path,
-):
-    collection_service, profile_service = _build_profile_service(tmp_path)
+async def test_document_profile_service_does_not_duplicate_source_filename(tmp_path, *, postgres_session_factory):
+    collection_service, profile_service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection("Profiled Collection")
     collection_id = collection["collection_id"]
     document_record = await build_test_source_import_service(collection_service).add_document(
@@ -214,8 +212,8 @@ async def test_document_profile_service_does_not_duplicate_source_filename(
     assert item["doc_type"] == "experimental"
 
 
-async def test_document_profile_service_combines_filters_before_paginating(tmp_path):
-    collection_service, profile_service = _build_profile_service(tmp_path)
+async def test_document_profile_service_combines_filters_before_paginating(tmp_path, *, postgres_session_factory):
+    collection_service, profile_service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection("Searchable Profiles")
     collection_id = collection["collection_id"]
     for row in (
@@ -244,6 +242,7 @@ async def test_document_profile_service_combines_filters_before_paginating(tmp_p
             "profile_warnings": [],
         },
     ):
+        await seed_collection(postgres_session_factory, collection_id, document_ids=(row["document_id"],))
         await profile_service.document_profile_repository.replace(
             collection_id,
             DocumentProfile(
@@ -270,16 +269,16 @@ async def test_document_profile_service_combines_filters_before_paginating(tmp_p
     assert filtered["summary"]["total_documents"] == 4
 
 
-async def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
+async def test_document_profile_service_short_circuits_insufficient_content(tmp_path, *, postgres_session_factory):
     class ExplodingExtractor:
         def extract_document_profile(self, payload):  # noqa: ANN001
             raise AssertionError("extract_document_profile should not be called")
 
-    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     profile_service = DocumentProfileService(
         collection_service,
-        source_artifact_repository=MemorySourceArtifactRepository(),
-        document_profile_repository=MemoryDocumentProfileRepository(),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
         document_profile_extractor=ExplodingExtractor(),
     )
     collection = await collection_service.create_collection("Sparse Profiles")
@@ -296,10 +295,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(tmp_
     assert item["profile_warnings"] == ["insufficient_content"]
 
 
-async def test_document_profile_service_continues_after_one_model_format_failure(
-    tmp_path,
-    caplog,
-):
+async def test_document_profile_service_continues_after_one_model_format_failure(tmp_path, caplog, *, postgres_session_factory):
     class OneFailedProfileExtractor:
         def __init__(self) -> None:
             self.last_trace = None
@@ -348,11 +344,11 @@ async def test_document_profile_service_continues_after_one_model_format_failure
             self.last_trace = None
             return trace
 
-    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     profile_service = DocumentProfileService(
         collection_service,
-        source_artifact_repository=MemorySourceArtifactRepository(),
-        document_profile_repository=MemoryDocumentProfileRepository(),
+        source_artifact_repository=SourceArtifactRepository(postgres_session_factory),
+        document_profile_repository=DocumentProfileRepository(postgres_session_factory),
         document_profile_extractor=OneFailedProfileExtractor(),
     )
     collection = await collection_service.create_collection("Partial Profiles")
@@ -399,11 +395,8 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     assert "paper content" not in failure_log
 
 
-async def test_document_profile_read_does_not_build_missing_profiles(
-    tmp_path,
-    monkeypatch,
-):
-    collection_service, profile_service = _build_profile_service(tmp_path)
+async def test_document_profile_read_does_not_build_missing_profiles(tmp_path, monkeypatch, *, postgres_session_factory):
+    collection_service, profile_service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection("Read Only Profiles")
     collection_id = collection["collection_id"]
 
@@ -416,8 +409,8 @@ async def test_document_profile_read_does_not_build_missing_profiles(
         await profile_service.read_document_profiles(collection_id)
 
 
-async def test_document_profile_service_round_trips_repository_storage_fields(tmp_path):
-    collection_service, profile_service = _build_profile_service(tmp_path)
+async def test_document_profile_service_round_trips_repository_storage_fields(tmp_path, *, postgres_session_factory):
+    collection_service, profile_service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection("Round Trip Profiles")
     collection_id = collection["collection_id"]
     documents = pd.DataFrame(
@@ -453,11 +446,12 @@ async def test_document_profile_service_round_trips_repository_storage_fields(tm
     assert isinstance(_profile_response(restored[0])["profile_warnings"], list)
 
 
-async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypatch):
-    collections, service = _build_profile_service(tmp_path)
+async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypatch, *, postgres_session_factory):
+    collections, service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collections.create_collection("Twenty papers")
     collection_id = collection["collection_id"]
     for index in range(20):
+        await seed_collection(service.source_artifact_repository.session_factory, collection_id, document_ids=(f'doc_{index}',))
         await service.source_artifact_repository.replace_document(
             collection_id,
             SourceDocument(
@@ -467,6 +461,7 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypa
                 text=f"Measured porosity {index}%.",
             ),
         )
+        await seed_collection(service.document_profile_repository.session_factory, collection_id, document_ids=(f'doc_{index}',))
         await service.document_profile_repository.replace(
             collection_id,
             DocumentProfile(
@@ -499,21 +494,18 @@ async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("has_other_source", [False, True])
-async def test_missing_content_preserves_not_ready_vs_not_found_without_hydration(
-    tmp_path,
-    monkeypatch,
-    has_other_source,
-):
+async def test_missing_content_preserves_not_ready_vs_not_found_without_hydration(tmp_path, monkeypatch, has_other_source, *, postgres_session_factory):
     from application.core.document_profiles.service import (
         DocumentContentNotReadyError,
         DocumentNotFoundError,
     )
 
-    collections, service = _build_profile_service(tmp_path)
+    collections, service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection_id = (await collections.create_collection("Missing source"))[
         "collection_id"
     ]
     if has_other_source:
+        await seed_collection(service.source_artifact_repository.session_factory, collection_id, document_ids=('other',))
         await service.source_artifact_repository.replace_document(
             collection_id,
             SourceDocument(
@@ -548,20 +540,15 @@ async def test_missing_content_preserves_not_ready_vs_not_found_without_hydratio
             "Parsed scientific title",
             "paper.pdf",
         ),
-        ({"title": "Metadata title"}, None, "Metadata title", None),
+        ({"title": "Metadata title"}, None, "Metadata title", "doc_a.txt"),
         ({"source_filename": "paper.pdf"}, "paper.pdf", None, "paper.pdf"),
-        ({}, "doc_a", None, None),
+        ({}, "doc_a", None, "doc_a.txt"),
     ],
 )
-async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(
-    tmp_path,
-    metadata,
-    title,
-    expected_title,
-    expected_filename,
-):
-    collections, service = _build_profile_service(tmp_path)
+async def test_typed_document_metadata_preserves_title_and_filename_fallbacks(tmp_path, metadata, title, expected_title, expected_filename, *, postgres_session_factory):
+    collections, service = _build_profile_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection_id = (await collections.create_collection("Metadata"))["collection_id"]
+    await seed_collection(service.source_artifact_repository.session_factory, collection_id, document_ids=('doc_a',))
     await service.source_artifact_repository.replace_document(
         collection_id,
         SourceDocument(

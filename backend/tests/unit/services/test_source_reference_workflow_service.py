@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 import pytest
 
@@ -9,7 +10,7 @@ from application.source.reference_workflow_service import (
     SourceReferenceWorkflowService,
 )
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
-from tests.support.repositories import MemorySourceArtifactRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -21,11 +22,12 @@ def anyio_backend() -> str:
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
+        await seed_collection(repository.session_factory, collection_id, document_ids=(document.document_id,))
         await repository.replace_document(collection_id, document)
 
 
-async def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
-    repository = MemorySourceArtifactRepository()
+async def test_source_reference_workflow_builds_and_persists_refs(tmp_path, *, postgres_session_factory):
+    repository = SourceArtifactRepository(postgres_session_factory)
     artifacts = assemble_source_documents(
         documents=(
             SourceDocument(
@@ -83,8 +85,8 @@ async def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
     assert restored.references.candidates[0].mention_count == 1
 
 
-async def test_source_reference_workflow_requires_source_artifacts(tmp_path):
-    repository = MemorySourceArtifactRepository()
+async def test_source_reference_workflow_requires_source_artifacts(tmp_path, *, postgres_session_factory):
+    repository = SourceArtifactRepository(postgres_session_factory)
     service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
     )

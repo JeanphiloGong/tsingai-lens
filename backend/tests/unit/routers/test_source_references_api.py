@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tests.support.postgres import seed_collection
 
 from types import SimpleNamespace
 
@@ -18,7 +19,7 @@ from application.source.reference_workflow_service import (
 from controllers.source import references as references_controller
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from tests.support.collection_service import build_test_collection_service
-from tests.support.repositories import MemorySourceArtifactRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -30,13 +31,14 @@ def anyio_backend() -> str:
 
 async def _store_source_documents(repository, collection_id, documents) -> None:
     for document in documents:
+        await seed_collection(repository.session_factory, collection_id, document_ids=(document.document_id,))
         await repository.replace_document(collection_id, document)
 
 
 @pytest.fixture()
-def source_reference_services(monkeypatch, tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    repository = MemorySourceArtifactRepository()
+def source_reference_services(monkeypatch, tmp_path, *, postgres_session_factory):
+    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    repository = SourceArtifactRepository(postgres_session_factory)
     workflow_service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
     )

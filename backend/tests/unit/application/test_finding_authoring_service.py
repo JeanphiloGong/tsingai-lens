@@ -31,7 +31,7 @@ from repositories.objective_repository import (
     ExecutionStats,
     ObjectiveAnalysis,
 )
-from tests.support.repositories.objective_repository import MemoryObjectiveRepository
+from repositories.objective_repository import ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -309,8 +309,10 @@ async def test_selection_version_rolls_back_and_marks_running_snapshot_failed():
     assert repository.failed["expected_status"] == "running"
 
 
-async def test_authored_publication_preserves_coverage_with_real_repository():
-    repository = MemoryObjectiveRepository()
+async def test_authored_publication_preserves_coverage_with_real_repository(*, postgres_session_factory):
+    from tests.support.postgres import seed_collection
+    await seed_collection(postgres_session_factory, "collection-1", document_ids=("paper-1", "paper-2", "paper-3"))
+    repository = ObjectiveRepository(postgres_session_factory)
     objective = replace(_objective(), active_analysis_version=None)
     await repository.replace(
         "collection-1", ObjectiveFactSet(research_objectives=(objective,))
@@ -355,7 +357,11 @@ async def test_authored_publication_preserves_coverage_with_real_repository():
     objective, source = await repository.publish_experiment_analysis(
         "collection-1", "objective-1", 1, contributions=coverage,
     )
-    transactions = _Transactions()
+    from infra.persistence.postgres.experiment_analysis_transaction import (
+        PostgresExperimentAnalysisTransactionFactory,
+    )
+
+    transactions = PostgresExperimentAnalysisTransactionFactory(postgres_session_factory)
     writer = _Writer()
     service = FindingAuthoringService(
         collection_service=_Collection(), objective_repository=repository,
@@ -386,4 +392,3 @@ async def test_authored_publication_preserves_coverage_with_real_repository():
     )
     assert await repository.list_contributions("collection-1", "objective-1", 1) == coverage
     assert "contributions" not in writer.call
-    assert transactions.events == ["begin", "commit"]

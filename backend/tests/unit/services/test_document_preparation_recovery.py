@@ -15,11 +15,9 @@ from application.source.document_preparation_service import DocumentPreparationS
 from domain.source import Document, SourceDocument
 from repositories.collection_repository import StoredDocument
 from tests.support.collection_service import build_test_collection_service
-from tests.support.repositories import (
-    MemoryDocumentProfileRepository,
-    MemoryPipelineRunRepository,
-    MemorySourceArtifactRepository,
-)
+from repositories.document_profile_repository import DocumentProfileRepository
+from repositories.pipeline_run_repository import PipelineRunRepository
+from repositories.source_artifact_repository import SourceArtifactRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -30,8 +28,8 @@ def anyio_backend():
 
 
 @pytest.fixture
-async def preparation(tmp_path):
-    collections = build_test_collection_service(tmp_path / "collections")
+async def preparation(tmp_path, *, postgres_session_factory):
+    collections = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     collection = await collections.create_collection("LPBF porosity research")
     collection_id = collection["collection_id"]
     document = StoredDocument(
@@ -45,18 +43,18 @@ async def preparation(tmp_path):
         ),
         stored_filename="paper.pdf",
         storage_key=f"{collection_id}/input/paper.pdf",
-        created_at="2026-09-09T00:00:00+00:00",
+        created_at=collection["created_at"],
     )
     await collections.repository.add_documents(
         collection_id,
         (document,),
         updated_at=document.created_at,
     )
-    sources = MemorySourceArtifactRepository()
+    sources = SourceArtifactRepository(postgres_session_factory)
     profiles = DocumentProfileService(
-        collections, sources, MemoryDocumentProfileRepository()
+        collections, sources, DocumentProfileRepository(postgres_session_factory)
     )
-    runs = PipelineRunService(MemoryPipelineRunRepository())
+    runs = PipelineRunService(PipelineRunRepository(postgres_session_factory))
     service = DocumentPreparationService(
         collection_service=collections,
         pipeline_run_service=runs,

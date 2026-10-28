@@ -6,9 +6,7 @@ import json
 from datetime import datetime
 from typing import Any, Literal
 
-from application.core.objectives.analysis.experiment_query_service import (
-    finding_response,
-)
+
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
@@ -290,7 +288,169 @@ async def create_finding_version(
             "abstention_note": result.analysis.abstention_note,
         },
         finding=(
-            finding_response(result.finding) if result.finding is not None else None
+            {
+                "collection_id": result.finding.collection_id,
+                "objective_id": result.finding.objective_id,
+                "analysis_version": result.finding.analysis_version,
+                "finding_id": result.finding.finding_id,
+                "statement": result.finding.statement,
+                "factors": list(result.finding.factors),
+                "outcome": result.finding.outcome,
+                "direction": result.finding.direction,
+                "assertion_strength": result.finding.assertion_strength,
+                "attribution_scope": result.finding.attribution_scope,
+                "synthesis_status": result.finding.synthesis_status,
+                "certainty": result.finding.certainty,
+                "display_rank": result.finding.display_rank,
+                "mechanisms": [
+                    {
+                        "source_term": mechanism.source_term,
+                        "relation_type": mechanism.relation_type,
+                        "target_term": mechanism.target_term,
+                        "direction": mechanism.direction,
+                        "assertion_strength": mechanism.assertion_strength,
+                        "supporting_evidence_ids": list(
+                            mechanism.supporting_evidence_ids
+                        ),
+                    }
+                    for mechanism in result.finding.mechanisms
+                ],
+                "scientific_context": {
+                    "material": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in result.finding.scientific_context.material
+                    ],
+                    "sample": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in result.finding.scientific_context.sample
+                    ],
+                    "process": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in result.finding.scientific_context.process
+                    ],
+                    "test": [
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
+                        for attribute in result.finding.scientific_context.test
+                    ],
+                },
+                "limitations": list(result.finding.limitations),
+                "paper_contributions": [
+                    {
+                        "document_id": contribution.document_id,
+                        "analysis_status": contribution.analysis_status,
+                        "supporting_evidence_ids": list(
+                            contribution.supporting_evidence_ids
+                        ),
+                        "contradicting_evidence_ids": list(
+                            contribution.contradicting_evidence_ids
+                        ),
+                        "context_evidence_ids": list(contribution.context_evidence_ids),
+                        "condition_boundary_evidence_ids": list(
+                            contribution.condition_boundary_evidence_ids
+                        ),
+                    }
+                    for contribution in result.finding.paper_contributions
+                ],
+                "origin": result.finding.origin,
+                "source_analysis_version": result.finding.source_analysis_version,
+                "parent_finding_id": result.finding.parent_finding_id,
+                "created_by_user_id": result.finding.created_by_user_id,
+                "created_by_tool_call_id": result.finding.created_by_tool_call_id,
+                "created_at": (
+                    result.finding.created_at.isoformat()
+                    if result.finding.created_at
+                    else None
+                ),
+                **(
+                    {"selection_ids": list(result.finding.selection_ids)}
+                    if result.finding.selection_ids
+                    else {}
+                ),
+                **(
+                    {"comparison_group_ids": list(result.finding.comparison_group_ids)}
+                    if result.finding.comparison_group_ids
+                    else {}
+                ),
+                **(
+                    {"warnings": list(result.finding.warnings)}
+                    if result.finding.warnings
+                    else {}
+                ),
+            }
+            if result.finding is not None
+            else None
         ),
         abstention_reason=result.analysis.abstention_reason,
     )

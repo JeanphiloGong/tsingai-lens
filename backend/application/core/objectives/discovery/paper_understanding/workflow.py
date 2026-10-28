@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from domain.core.research_objective import normalize_objective_terms
+
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
     StructuredResponseClient,
@@ -189,12 +191,18 @@ def _paper_map_response(
 ) -> StructuredPaperResearchMap:
     if isinstance(response, ExperimentalPaperMapModelOutput):
         payload = response.model_dump()
+        payload["confidence"] = round(payload["confidence"], 4)
+        payload["warnings"] = list(normalize_objective_terms(payload["warnings"]))
         for study in payload["studies"]:
+            study["material_scope"] = list(normalize_objective_terms(study["material_scope"]))
+            study["process_context"] = list(normalize_objective_terms(study["process_context"]))
+            study["confidence"] = round(study["confidence"], 4)
             for relationship in study["relationships"]:
                 factor_assertions = relationship.pop("factor_assertions")
-                relationship["varied_factors"] = [
-                    assertion["label"] for assertion in factor_assertions
-                ]
+                relationship["varied_factors"] = list(normalize_objective_terms(
+                    [assertion["label"] for assertion in factor_assertions]
+                ))
+                relationship["confidence"] = round(relationship["confidence"], 4)
                 source_labels = list(relationship.pop("source_labels"))
                 source_labels.extend(
                     source_label
@@ -206,36 +214,44 @@ def _paper_map_response(
                     source_units_by_label,
                 )
         for signal in payload["unresolved_signals"]:
+            signal["label"] = signal["label"].strip()
+            signal["material_scope"] = list(normalize_objective_terms(signal["material_scope"]))
+            signal["process_context"] = list(normalize_objective_terms(signal["process_context"]))
+            signal["confidence"] = round(signal["confidence"], 4)
             signal["source_unit_ids"] = _source_unit_ids_from_labels(
                 signal.pop("source_labels"),
                 source_units_by_label,
             )
         return StructuredPaperResearchMap.model_validate(payload)
 
+    review_synthesis = {
+        field_name: [
+            {
+                "content": item.content.strip(),
+                "material_scope": list(normalize_objective_terms(item.material_scope)),
+                "variables": list(normalize_objective_terms(item.variables)),
+                "outcomes": list(normalize_objective_terms(item.outcomes)),
+                "conditions": list(normalize_objective_terms(item.conditions)),
+                "source_unit_ids": _source_unit_ids_from_labels(item.source_labels, source_units_by_label),
+                "confidence": round(item.confidence, 4),
+            }
+            for item in getattr(response.review_synthesis, field_name)
+        ]
+        for field_name in ("synthesis_claims", "disputes", "evidence_gaps", "citation_leads")
+    }
     studies: list[dict[str, Any]] = []
     unresolved_signals: list[dict[str, Any]] = []
     study_keys: set[tuple[object, ...]] = set()
     signal_keys: set[tuple[object, ...]] = set()
     candidate_items = (
-        *response.review_synthesis.synthesis_claims,
-        *response.review_synthesis.disputes,
+        *review_synthesis["synthesis_claims"],
+        *review_synthesis["disputes"],
     )
     for item in candidate_items:
-        variables = tuple(
-            dict.fromkeys(value.strip() for value in item.variables if value.strip())
-        )
-        outcomes = tuple(
-            dict.fromkeys(value.strip() for value in item.outcomes if value.strip())
-        )
-        source_unit_ids = tuple(
-            _source_unit_ids_from_labels(
-                list(dict.fromkeys(item.source_labels)),
-                source_units_by_label,
-            )
-        )
-        material_scope = tuple(
-            dict.fromkeys(value.strip() for value in item.material_scope if value.strip())
-        )
+        variables = tuple(item["variables"])
+        outcomes = tuple(item["outcomes"])
+        source_unit_ids = tuple(item["source_unit_ids"])
+        material_scope = tuple(item["material_scope"])
         if variables and outcomes:
             study_key = (variables, outcomes, source_unit_ids, material_scope)
             if study_key in study_keys:
@@ -251,11 +267,11 @@ def _paper_map_response(
                             "varied_factors": list(variables),
                             "outcome": outcome,
                             "source_unit_ids": list(source_unit_ids),
-                            "confidence": item.confidence,
+                            "confidence": item["confidence"],
                         }
                         for outcome in outcomes
                     ],
-                    "confidence": item.confidence,
+                    "confidence": item["confidence"],
                 }
             )
             continue
@@ -279,7 +295,7 @@ def _paper_map_response(
                         "claim_scope": "synthesis",
                         "material_scope": list(material_scope),
                         "source_unit_ids": list(source_unit_ids),
-                        "confidence": item.confidence,
+                        "confidence": item["confidence"],
                     }
                 )
 
@@ -291,28 +307,11 @@ def _paper_map_response(
             "unresolved_signals": unresolved_signals[
                 :PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT
             ],
-            "review_synthesis": {
-                field_name: [
-                    {
-                        **item.model_dump(exclude={"source_labels"}),
-                        "source_unit_ids": _source_unit_ids_from_labels(
-                            item.source_labels,
-                            source_units_by_label,
-                        ),
-                    }
-                    for item in getattr(response.review_synthesis, field_name)
-                ]
-                for field_name in (
-                    "synthesis_claims",
-                    "disputes",
-                    "evidence_gaps",
-                    "citation_leads",
-                )
-            },
+            "review_synthesis": review_synthesis,
             "output_saturated": response.output_saturated or derived_saturated,
             "evidence_density": response.evidence_density,
-            "confidence": response.confidence,
-            "warnings": response.warnings,
+            "confidence": round(response.confidence, 4),
+            "warnings": list(normalize_objective_terms(response.warnings)),
         }
     )
 

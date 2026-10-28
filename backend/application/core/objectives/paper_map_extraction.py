@@ -5,7 +5,6 @@ from __future__ import annotations
 from domain.core.research_objective import (
     PaperResearchRelationship, PaperResearchSourceRef, ReviewKnowledgeItem,
     build_paper_research_relationship, build_paper_research_scope, build_paper_research_signal,
-    normalize_objective_terms, normalize_objective_confidence,
 )
 
 
@@ -28,6 +27,7 @@ from application.core.objectives.discovery.paper_understanding.paper_map_results
     StructuredPaperResearchMap,
     StructuredPaperResearchRelationship,
     StructuredPaperResearchScope,
+    StructuredPaperResearchSignal,
     StructuredReviewSynthesisMap,
 )
 from application.core.objectives.discovery.paper_understanding.workflow import (
@@ -501,17 +501,18 @@ class PaperMapExtractionService:
         studies: list[PaperResearchScope] = []
         signals = []
         for item in parsed.unresolved_signals:
-            signal_payload = item.model_dump()
-            signal_payload["claim_scope"] = self._claim_scope_for_document(
-                claim_scope=item.claim_scope,
-                experiment_label=item.experiment_label,
-                source_unit_ids=item.source_unit_ids,
-                payload=payload,
-                source_units=source_units,
+            item = item.model_copy(
+                update={"claim_scope": self._claim_scope_for_document(
+                    claim_scope=item.claim_scope,
+                    experiment_label=item.experiment_label,
+                    source_unit_ids=item.source_unit_ids,
+                    payload=payload,
+                    source_units=source_units,
+                )}
             )
             signals.append(
                 self._signal_from_window_result(
-                    signal_payload,
+                    item,
                     document_id=document_id,
                     source_units=source_units,
                 )
@@ -582,8 +583,8 @@ class PaperMapExtractionService:
                 studies=tuple(studies),
                 unresolved_signals=tuple(signals),
                 evidence_density=parsed.evidence_density,
-                confidence=normalize_objective_confidence(parsed.confidence),
-                warnings=normalize_objective_terms(parsed.warnings),
+                confidence=parsed.confidence,
+                warnings=tuple(parsed.warnings),
                 source_unit_coverage=source_unit_coverage,
                 review_synthesis=review_synthesis,
             ),
@@ -695,15 +696,15 @@ class PaperMapExtractionService:
             if resolved is None:
                 raise ValueError("paper research relationship contains an unknown Source-unit id")
             bound_relationships.append(build_paper_research_relationship(
-                document_id=document_id, varied_factors=normalize_objective_terms(relationship.varied_factors),
+                document_id=document_id, varied_factors=tuple(relationship.varied_factors),
                 outcome=relationship.outcome.strip(), source_refs=cls._source_refs_from_units(resolved),
-                confidence=normalize_objective_confidence(relationship.confidence),
+                confidence=relationship.confidence,
             ))
         return build_paper_research_scope(
             document_id=document_id, design_type=study.design_type, claim_scope=study.claim_scope,
-            experiment_label=study.experiment_label, material_scope=normalize_objective_terms(study.material_scope),
-            process_context=normalize_objective_terms(study.process_context), relationships=tuple(bound_relationships),
-            confidence=normalize_objective_confidence(study.confidence),
+            experiment_label=study.experiment_label, material_scope=tuple(study.material_scope),
+            process_context=tuple(study.process_context), relationships=tuple(bound_relationships),
+            confidence=study.confidence,
         )
 
     @staticmethod
@@ -773,10 +774,10 @@ class PaperMapExtractionService:
                 if resolved is None:
                     raise ValueError("review knowledge contains an unknown Source-unit id")
                 items.append(ReviewKnowledgeItem(
-                    content=item.content.strip(), material_scope=normalize_objective_terms(item.material_scope),
-                    variables=normalize_objective_terms(item.variables), outcomes=normalize_objective_terms(item.outcomes),
-                    conditions=normalize_objective_terms(item.conditions), source_refs=cls._source_refs_from_units(resolved),
-                    confidence=normalize_objective_confidence(item.confidence),
+                    content=item.content, material_scope=tuple(item.material_scope),
+                    variables=tuple(item.variables), outcomes=tuple(item.outcomes),
+                    conditions=tuple(item.conditions), source_refs=cls._source_refs_from_units(resolved),
+                    confidence=item.confidence,
                 ))
             groups[field_name] = tuple(items)
         return ReviewSynthesisMap(**groups)
@@ -784,30 +785,26 @@ class PaperMapExtractionService:
     @classmethod
     def _signal_from_window_result(
         cls,
-        signal: Mapping[str, Any],
+        signal: StructuredPaperResearchSignal,
         *,
         document_id: str,
         source_units: Mapping[str, Mapping[str, Any]],
     ) -> PaperResearchSignal:
-        source_unit_ids = signal.get("source_unit_ids")
-        if not isinstance(source_unit_ids, list):
-            raise ValueError("paper research signal requires Source-unit ids")
         resolved = cls._resolved_source_units(
-            source_unit_ids,
+            signal.source_unit_ids,
             source_units=source_units,
         )
         if resolved is None:
             raise ValueError(
                 "paper research signal contains an unknown Source-unit id"
             )
-        signal_type = str(signal.get("signal_type") or "").strip()
         return build_paper_research_signal(
-            document_id=document_id, signal_type=signal_type, label=str(signal.get("label") or "").strip(),
-            variable_role=str(signal.get("variable_role") or ("not_applicable" if signal_type == "outcome" else "uncertain")),
-            design_type=str(signal.get("design_type") or "uncertain"), claim_scope=str(signal.get("claim_scope") or "uncertain"),
-            experiment_label=signal.get("experiment_label"), material_scope=normalize_objective_terms(signal.get("material_scope")),
-            process_context=normalize_objective_terms(signal.get("process_context")), source_refs=cls._source_refs_from_units(resolved),
-            confidence=normalize_objective_confidence(signal.get("confidence")), reason=signal.get("reason"),
+            document_id=document_id, signal_type=signal.signal_type, label=signal.label,
+            variable_role=signal.variable_role,
+            design_type=signal.design_type, claim_scope=signal.claim_scope,
+            experiment_label=signal.experiment_label, material_scope=tuple(signal.material_scope),
+            process_context=tuple(signal.process_context), source_refs=cls._source_refs_from_units(resolved),
+            confidence=signal.confidence,
         )
 
     @staticmethod

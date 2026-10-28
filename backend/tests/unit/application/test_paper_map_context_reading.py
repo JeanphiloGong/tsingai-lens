@@ -417,6 +417,48 @@ def test_each_paper_map_response_is_processed_once_before_source_binding(monkeyp
     assert len(client.chat.completions.calls) + len(client.beta.chat.completions.calls) == 1
 
 
+def test_paper_map_binding_preserves_scope_identity_and_confidence():
+    response = {
+        "doc_role": "experimental",
+        "studies": [{
+            "design_type": "experimental", "claim_scope": "current_work",
+            "experiment_label": "LPBF power study",
+            "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"],
+            "process_context": [" LPBF ", "lpbf"],
+            "relationships": [{
+                "factor_assertions": [{"label": " laser power ", "role": "varied", "source_labels": ["S1"]}],
+                "outcome": " porosity ", "source_labels": ["S1"], "confidence": 0.876543,
+            }],
+            "confidence": 0.876543,
+        }],
+        "unresolved_signals": [{
+            "signal_type": "outcome", "label": " fatigue life ", "variable_role": "not_applicable",
+            "material_scope": [" Ti-6Al-4V ", "ti-6al-4v"], "source_labels": ["S1"], "confidence": 0.876543,
+        }],
+        "confidence": 0.876543, "warnings": [" supported ", "SUPPORTED"],
+    }
+    payload = {"document_id": "paper-ti", "window_id": "window-1", "source_units": [{
+        "source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1",
+        "content": "Laser power and porosity were reported.",
+    }]}
+    client = _FakeOpenAIClient(json.dumps(response))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+
+    parsed = reader.extract(payload)
+    paper_map, signals = PaperMapExtractionService()._resolve_window_result(document_id="paper-ti", payload=payload, parsed=parsed)
+
+    study = paper_map.studies[0]
+    assert study.study_id == "study_1f65d7cf7de93d0f9a8f6936"
+    assert study.relationships[0].relationship_id == "relationship_9ef0ac8f82103bf5a838b480"
+    assert signals[0].signal_id == "signal_c1d7b290a5c88427d24e7fdc"
+    assert study.material_scope == ("Ti-6Al-4V",)
+    assert study.process_context == ("LPBF",)
+    assert study.relationships[0].varied_factors == ("laser power",)
+    assert paper_map.warnings == ("supported",)
+    assert paper_map.confidence == study.confidence == study.relationships[0].confidence == signals[0].confidence == 0.8765
+    assert study.relationships[0].source_refs[0].source_ref == "block-1"
+
+
 @pytest.mark.parametrize("field,value", [("warnings", None), ("warnings", [17]), ("output_saturated", "false")])
 def test_budget_diagnostics_do_not_replace_invalid_fields(field, value):
     from pydantic import ValidationError

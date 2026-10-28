@@ -8,9 +8,7 @@ from hashlib import sha256
 from typing import Any, Literal
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
-from application.core.objectives.analysis.experiment_query_service import (
-    paper_experiment_revision_response,
-)
+
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
 )
@@ -762,7 +760,324 @@ class CreatePaperExperimentRevisionCapability:
             for item in result.revisions
         ]
         revisions = [
-            paper_experiment_revision_response(item.revision)
+            {
+                "experiment_id": item.revision.experiment_id,
+                "document_id": item.revision.document_id,
+                "experiment_version": item.revision.experiment_version,
+                "source_fingerprint": item.revision.source_fingerprint,
+                "label": item.revision.label,
+                "scope_description": item.revision.scope_description,
+                "design_type": item.revision.design_type,
+                "identity_status": item.revision.identity_status,
+                "binding_status": item.revision.binding_status,
+                "variants": [
+                    {
+                        "variant_key": item.variant_key,
+                        "variant_label": item.variant_label,
+                        "subject_attributes": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.subject_attributes
+                        ],
+                        "intervention_attributes": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.intervention_attributes
+                        ],
+                        "state": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.state
+                        ],
+                        "population_scope": (
+                            dict(item.population_scope)
+                            if item.population_scope is not None
+                            else None
+                        ),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                        "identity_specificity": item.identity_specificity,
+                        "missing_dimensions": list(item.missing_dimensions),
+                        "identity_evidence": list(item.identity_evidence),
+                    }
+                    for item in item.revision.variants
+                ],
+                "test_conditions": [
+                    {
+                        "test_key": item.test_key,
+                        "test_type": item.test_type,
+                        "parameters": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.parameters
+                        ],
+                        "population_scope": (
+                            dict(item.population_scope)
+                            if item.population_scope is not None
+                            else None
+                        ),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                        "protocol_specificity": item.protocol_specificity,
+                        "test_identity_status": item.test_identity_status,
+                        "protocol_completeness": item.protocol_completeness,
+                        "missing_parameters": list(item.missing_parameters),
+                        "method": item.method,
+                        "standard": item.standard,
+                        "outcome_scope": list(item.outcome_scope),
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "protocol_evidence": list(item.protocol_evidence),
+                    }
+                    for item in item.revision.test_conditions
+                ],
+                "measurements": [
+                    {
+                        "measurement_key": item.measurement_key,
+                        "outcome": item.outcome,
+                        "variant_key": item.variant_key,
+                        "test_key": item.test_key,
+                        "value": item.value,
+                        "unit": item.unit,
+                        "result_text": item.result_text,
+                        "statistics": dict(item.statistics),
+                        "measurement_scope": dict(item.measurement_scope),
+                        "result_kind": item.result_kind,
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "binding_status": item.binding_status,
+                        "notes": list(item.notes),
+                    }
+                    for item in item.revision.measurements
+                ],
+                "comparisons": [
+                    {
+                        "comparison_key": item.comparison_key,
+                        "baseline_variant_key": item.baseline_variant_key,
+                        "target_variant_key": item.target_variant_key,
+                        "outcome": item.outcome,
+                        "baseline_measurement_keys": list(
+                            item.baseline_measurement_keys
+                        ),
+                        "target_measurement_keys": list(item.target_measurement_keys),
+                        "changed_variables": [
+                            {
+                                "name": item.name,
+                                "baseline_value": item.baseline_value,
+                                "target_value": item.target_value,
+                                "unit": item.unit,
+                            }
+                            for item in item.changed_variables
+                        ],
+                        "matched_conditions": [
+                            {
+                                "name": item.name,
+                                "value": item.value,
+                                "unit": item.unit,
+                                **(
+                                    {"context_scope": item.context_scope}
+                                    if item.context_scope != "unknown"
+                                    else {}
+                                ),
+                                **(
+                                    {
+                                        "applies_to_outcomes": list(
+                                            item.applies_to_outcomes
+                                        )
+                                    }
+                                    if item.applies_to_outcomes
+                                    else {}
+                                ),
+                            }
+                            for item in item.matched_conditions
+                        ],
+                        "basis": item.basis,
+                        "direction": item.direction,
+                        "reported_statement": item.reported_statement,
+                        "attribution_scope": item.attribution_scope,
+                        "status": item.status,
+                        "reasons": list(item.reasons),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                        "binding_source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.binding_source_refs
+                        ],
+                        "relation_status": item.relation_status,
+                    }
+                    for item in item.revision.comparisons
+                ],
+                "reported_interpretations": [
+                    {
+                        "statement": item.statement,
+                        "kind": item.kind,
+                        "measurement_keys": list(item.measurement_keys),
+                        "comparison_keys": list(item.comparison_keys),
+                        "source_refs": [
+                            {
+                                "document_id": item.document_id,
+                                "source_fingerprint": item.source_fingerprint,
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                                "quote": item.quote,
+                            }
+                            for item in item.source_refs
+                        ],
+                    }
+                    for item in item.revision.reported_interpretations
+                ],
+                "source_refs": [
+                    {
+                        "document_id": item.document_id,
+                        "source_fingerprint": item.source_fingerprint,
+                        "source_kind": item.source_kind,
+                        "source_ref": item.source_ref,
+                        "quote": item.quote,
+                    }
+                    for item in item.revision.source_refs
+                ],
+                "unresolved_issues": [
+                    dict(item) for item in item.revision.unresolved_issues
+                ],
+            }
             for item in result.revisions
         ]
         return ChatToolResult(

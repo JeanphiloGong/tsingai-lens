@@ -945,6 +945,36 @@ def test_domain_model_extractors_uses_last_complete_json_after_model_reasoning()
     assert result.confidence == 0.9
 
 
+@pytest.mark.parametrize("confidence", [None, "0.6", True, -0.1, 1.1])
+def test_document_profile_rejects_invalid_confidence_with_bounded_attempts(confidence):
+    client = _FakeOpenAIClient(
+        json.dumps({"doc_type": "experimental", "confidence": confidence})
+    )
+    extractor = _document_profile_extractor(client)
+
+    with pytest.raises(DocumentProfileExtractionError):
+        extractor.extract_document_profile(
+            {
+                "title": "LPBF paper",
+                "abstract_or_lead_text": "Laser power versus porosity.",
+            }
+        )
+
+    assert len(client.chat.completions.calls) == 2
+    assert extractor.consume_last_trace()["trace_status"] == "failed"
+
+
+def test_document_profile_omitted_confidence_uses_contract_default():
+    client = _FakeOpenAIClient('{"doc_type":"uncertain"}')
+    result = _document_profile_extractor(client).extract_document_profile(
+        {"title": "LPBF paper"}
+    )
+
+    assert result.confidence == 0.0
+    assert result.profile_warnings == []
+    assert len(client.chat.completions.calls) == 1
+
+
 def test_document_profile_retry_includes_the_invalid_output_it_must_correct():
     client = _FakeOpenAIClient(
         [

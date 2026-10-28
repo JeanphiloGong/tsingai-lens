@@ -7,7 +7,7 @@ from time import perf_counter
 from typing import Any, Literal
 
 from openai import OpenAI, OpenAIError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
@@ -31,20 +31,13 @@ _TRACE_OUTPUT_PREVIEW_CHARS = 1000
 class DocumentProfileModelOutput(BaseModel):
     """Validated model output for coarse document triage."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     doc_type: Literal["experimental", "review", "mixed", "uncertain"] = "uncertain"
     profile_warnings: list[
         Literal["insufficient_content", "classification_uncertain"]
     ] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def _normalize_default_confidence(cls, value: object) -> object:
-        if value is not None:
-            return value
-        return cls.model_fields["confidence"].get_default(call_default_factory=True)
 
 
 DOCUMENT_PROFILE_PROMPT_VERSION = "document_profile.v1"

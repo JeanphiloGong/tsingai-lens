@@ -6,7 +6,6 @@ from domain.goal import (
     ExperimentPlanRecord,
     ExperimentPlanRevisionConflictError,
 )
-from repositories.experiment_plan_repository import experiment_plan_from_record
 from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
@@ -28,7 +27,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         "content": "Initial approved plan.",
         "status": "draft",
         "source_message_id": None,
-        "source_links": [],
+        "source_links": (),
         "metadata": {"source": "manual"},
         "created_by": "researcher-1",
         "created_at": "2026-09-07T00:00:00+00:00",
@@ -37,7 +36,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         "structured_plan": {"hypothesis": "Initial hypothesis"},
     }
     payload.update(overrides)
-    return experiment_plan_from_record(payload)
+    return ExperimentPlanRecord(**payload)
 
 
 async def test_append_preserves_history_and_lists_only_the_leaf_revision() -> None:

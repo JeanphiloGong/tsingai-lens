@@ -18,7 +18,6 @@ from domain.goal import (
 from repositories.auth_repository import AuthRepository, AuthUserRecord
 from repositories.experiment_plan_repository import (
     ExperimentPlanRepository,
-    experiment_plan_from_record,
 )
 from repositories.objective_repository import ObjectiveRepository
 from tests.integration.persistence.test_postgres_source_artifacts import COLLECTION_ID
@@ -88,7 +87,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         "content": "Initial approved plan.",
         "status": "draft",
         "source_message_id": None,
-        "source_links": [],
+        "source_links": (),
         "metadata": {"source": "manual"},
         "created_by": "user_source",
         "created_at": "2026-09-07T00:00:00+00:00",
@@ -100,7 +99,7 @@ def _plan(**overrides) -> ExperimentPlanRecord:
         },
     }
     payload.update(overrides)
-    return experiment_plan_from_record(payload)
+    return ExperimentPlanRecord(**payload)
 
 
 async def test_postgres_round_trips_structured_plan_and_revision_lineage(

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import json
 from datetime import datetime
 from typing import Any, Literal
 
 from application.core.objectives.analysis.experiment_query_service import (
     finding_response,
-    objective_analysis_response,
 )
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.core.research_objectives import (
@@ -230,7 +231,64 @@ async def create_finding_version(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return FindingAuthoringResponse(
-        analysis=objective_analysis_response(result.analysis),
+        analysis={
+            "collection_id": result.analysis.collection_id,
+            "objective_id": result.analysis.objective_id,
+            "analysis_version": result.analysis.analysis_version,
+            "document_inputs": [
+                {
+                    "document_id": document_input.document_id,
+                    "preparation_fingerprint": document_input.preparation_fingerprint,
+                }
+                for document_input in result.analysis.document_inputs
+            ],
+            "pipeline_version": result.analysis.pipeline_version,
+            "model_name": result.analysis.model_name,
+            "prompt_versions": dict(result.analysis.prompt_versions),
+            "stats": {
+                "duration_ms": result.analysis.stats.duration_ms,
+                "token_usage": (
+                    asdict(result.analysis.stats.token_usage)
+                    if result.analysis.stats.token_usage is not None
+                    else None
+                ),
+                "model_usage": [
+                    asdict(item) for item in result.analysis.stats.model_usage
+                ],
+                "unreported_request_count": result.analysis.stats.unreported_request_count,
+                "prompt_versions": dict(result.analysis.stats.prompt_versions),
+            },
+            "status": result.analysis.status,
+            "phase": result.analysis.phase,
+            "processed_document_count": result.analysis.processed_document_count,
+            "total_document_count": result.analysis.total_document_count,
+            "current_document_id": result.analysis.current_document_id,
+            "progress_message": result.analysis.progress_message,
+            "error_code": result.analysis.error_code,
+            "error_message": result.analysis.error_message,
+            "created_at": (
+                result.analysis.created_at.isoformat()
+                if result.analysis.created_at is not None
+                else None
+            ),
+            "started_at": (
+                result.analysis.started_at.isoformat()
+                if result.analysis.started_at is not None
+                else None
+            ),
+            "completed_at": (
+                result.analysis.completed_at.isoformat()
+                if result.analysis.completed_at is not None
+                else None
+            ),
+            "origin": result.analysis.origin,
+            "scientific_record_source": result.analysis.scientific_record_source,
+            "source_analysis_version": result.analysis.source_analysis_version,
+            "created_by_user_id": result.analysis.created_by_user_id,
+            "created_by_tool_call_id": result.analysis.created_by_tool_call_id,
+            "abstention_reason": result.analysis.abstention_reason,
+            "abstention_note": result.analysis.abstention_note,
+        },
         finding=(
             finding_response(result.finding) if result.finding is not None else None
         ),

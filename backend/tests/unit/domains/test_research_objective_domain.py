@@ -18,7 +18,6 @@ from typing import Mapping
 
 import pytest
 from application.core.objectives.analysis.experiment_query_service import (
-    objective_analysis_response,
     objective_evidence_response,
     paper_contribution_response,
 )
@@ -562,7 +561,59 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
 
 @pytest.mark.anyio
 async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
-    payload = objective_analysis_response(_analysis())
+    analysis = _analysis()
+    payload = {
+        "collection_id": analysis.collection_id,
+        "objective_id": analysis.objective_id,
+        "analysis_version": analysis.analysis_version,
+        "document_inputs": [
+            {
+                "document_id": document_input.document_id,
+                "preparation_fingerprint": document_input.preparation_fingerprint,
+            }
+            for document_input in analysis.document_inputs
+        ],
+        "pipeline_version": analysis.pipeline_version,
+        "model_name": analysis.model_name,
+        "prompt_versions": dict(analysis.prompt_versions),
+        "stats": {
+            "duration_ms": analysis.stats.duration_ms,
+            "token_usage": (
+                asdict(analysis.stats.token_usage)
+                if analysis.stats.token_usage is not None
+                else None
+            ),
+            "model_usage": [asdict(item) for item in analysis.stats.model_usage],
+            "unreported_request_count": analysis.stats.unreported_request_count,
+            "prompt_versions": dict(analysis.stats.prompt_versions),
+        },
+        "status": analysis.status,
+        "phase": analysis.phase,
+        "processed_document_count": analysis.processed_document_count,
+        "total_document_count": analysis.total_document_count,
+        "current_document_id": analysis.current_document_id,
+        "progress_message": analysis.progress_message,
+        "error_code": analysis.error_code,
+        "error_message": analysis.error_message,
+        "created_at": (
+            analysis.created_at.isoformat() if analysis.created_at is not None else None
+        ),
+        "started_at": (
+            analysis.started_at.isoformat() if analysis.started_at is not None else None
+        ),
+        "completed_at": (
+            analysis.completed_at.isoformat()
+            if analysis.completed_at is not None
+            else None
+        ),
+        "origin": analysis.origin,
+        "scientific_record_source": analysis.scientific_record_source,
+        "source_analysis_version": analysis.source_analysis_version,
+        "created_by_user_id": analysis.created_by_user_id,
+        "created_by_tool_call_id": analysis.created_by_tool_call_id,
+        "abstention_reason": analysis.abstention_reason,
+        "abstention_note": analysis.abstention_note,
+    }
     payload.pop("scientific_record_source")
     payload.update(
         {
@@ -668,16 +719,6 @@ def test_objective_analysis_records_exact_prepared_document_inputs() -> None:
     )
 
     assert analysis.document_inputs == document_inputs
-    assert objective_analysis_response(analysis)["document_inputs"] == [
-        {
-            "document_id": "paper-1",
-            "preparation_fingerprint": "fingerprint-1",
-        },
-        {
-            "document_id": "paper-2",
-            "preparation_fingerprint": "fingerprint-2",
-        },
-    ]
 
 
 def test_objective_analysis_rejects_document_count_that_differs_from_manifest() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 from domain.core.comparison_group import ComparisonGroup
@@ -20,7 +20,6 @@ from repositories.experiment_finding_repository import (
 from repositories.objective_experiment_selection_repository import (
     ObjectiveExperimentSelectionRepository,
 )
-from repositories.objective_repository import ObjectiveAnalysis
 from repositories.paper_experiment_repository import (
     PaperExperimentRepository,
     StoredPaperExperimentRevision,
@@ -1068,57 +1067,4 @@ def paper_contribution_response(value: PaperContribution) -> dict[str, Any]:
             }
             for source_ref in value.inspected_source_refs
         ],
-    }
-
-
-def objective_analysis_response(value: ObjectiveAnalysis) -> dict[str, Any]:
-    return {
-        "collection_id": value.collection_id,
-        "objective_id": value.objective_id,
-        "analysis_version": value.analysis_version,
-        "document_inputs": [
-            {
-                "document_id": document_input.document_id,
-                "preparation_fingerprint": document_input.preparation_fingerprint,
-            }
-            for document_input in value.document_inputs
-        ],
-        "pipeline_version": value.pipeline_version,
-        "model_name": value.model_name,
-        "prompt_versions": dict(value.prompt_versions),
-        "stats": {
-            "duration_ms": value.stats.duration_ms,
-            "token_usage": (
-                asdict(value.stats.token_usage)
-                if value.stats.token_usage is not None
-                else None
-            ),
-            "model_usage": [asdict(item) for item in value.stats.model_usage],
-            "unreported_request_count": value.stats.unreported_request_count,
-            "prompt_versions": dict(value.stats.prompt_versions),
-        },
-        "status": value.status,
-        "phase": value.phase,
-        "processed_document_count": value.processed_document_count,
-        "total_document_count": value.total_document_count,
-        "current_document_id": value.current_document_id,
-        "progress_message": value.progress_message,
-        "error_code": value.error_code,
-        "error_message": value.error_message,
-        "created_at": (
-            value.created_at.isoformat() if value.created_at is not None else None
-        ),
-        "started_at": (
-            value.started_at.isoformat() if value.started_at is not None else None
-        ),
-        "completed_at": (
-            value.completed_at.isoformat() if value.completed_at is not None else None
-        ),
-        "origin": value.origin,
-        "scientific_record_source": value.scientific_record_source,
-        "source_analysis_version": value.source_analysis_version,
-        "created_by_user_id": value.created_by_user_id,
-        "created_by_tool_call_id": value.created_by_tool_call_id,
-        "abstention_reason": value.abstention_reason,
-        "abstention_note": value.abstention_note,
     }

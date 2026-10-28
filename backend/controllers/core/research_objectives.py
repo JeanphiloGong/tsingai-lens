@@ -4,7 +4,6 @@ from dataclasses import asdict
 from typing import Literal
 
 from application.core.objectives.analysis.experiment_query_service import (
-    objective_analysis_response,
     paper_contribution_response,
 )
 from application.core.objectives.analysis_service import (
@@ -28,7 +27,6 @@ from controllers.core.research_objective_schemas import (
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
-from repositories.objective_repository import StoredObjective
 
 
 class DocumentSelectionRequest(BaseModel):
@@ -94,7 +92,14 @@ async def list_collection_objectives(
     )
     return PaginatedObjectiveListResponse(
         collection_id=collection_id,
-        objectives=[_objective_response_record(item) for item in page],
+        objectives=[
+            {
+                **asdict(item.objective),
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            }
+            for item in page
+        ],
         offset=offset,
         limit=limit,
         total=len(ranked_objectives),
@@ -174,7 +179,158 @@ async def start_collection_objective_analysis(
                 "analysis_version": exc.analysis_version,
             },
         ) from exc
-    return _to_objective_analysis_response(payload)
+    objective = payload["objective"]
+    active = payload.get("analysis")
+    published = payload.get("published_analysis")
+    return ObjectiveAnalysisResponse(
+        collection_id=payload["collection_id"],
+        objective={
+            **asdict(objective.objective),
+            "created_at": (
+                objective.created_at.isoformat() if objective.created_at else None
+            ),
+            "updated_at": (
+                objective.updated_at.isoformat() if objective.updated_at else None
+            ),
+        },
+        active_analysis=(
+            {
+                "collection_id": active.collection_id,
+                "objective_id": active.objective_id,
+                "analysis_version": active.analysis_version,
+                "document_inputs": [
+                    {
+                        "document_id": document_input.document_id,
+                        "preparation_fingerprint": document_input.preparation_fingerprint,
+                    }
+                    for document_input in active.document_inputs
+                ],
+                "pipeline_version": active.pipeline_version,
+                "model_name": active.model_name,
+                "prompt_versions": dict(active.prompt_versions),
+                "stats": {
+                    "duration_ms": active.stats.duration_ms,
+                    "token_usage": (
+                        asdict(active.stats.token_usage)
+                        if active.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [asdict(item) for item in active.stats.model_usage],
+                    "unreported_request_count": active.stats.unreported_request_count,
+                    "prompt_versions": dict(active.stats.prompt_versions),
+                },
+                "status": active.status,
+                "phase": active.phase,
+                "processed_document_count": active.processed_document_count,
+                "total_document_count": active.total_document_count,
+                "current_document_id": active.current_document_id,
+                "progress_message": active.progress_message,
+                "error_code": active.error_code,
+                "error_message": active.error_message,
+                "created_at": (
+                    active.created_at.isoformat()
+                    if active.created_at is not None
+                    else None
+                ),
+                "started_at": (
+                    active.started_at.isoformat()
+                    if active.started_at is not None
+                    else None
+                ),
+                "completed_at": (
+                    active.completed_at.isoformat()
+                    if active.completed_at is not None
+                    else None
+                ),
+                "origin": active.origin,
+                "scientific_record_source": active.scientific_record_source,
+                "source_analysis_version": active.source_analysis_version,
+                "created_by_user_id": active.created_by_user_id,
+                "created_by_tool_call_id": active.created_by_tool_call_id,
+                "abstention_reason": active.abstention_reason,
+                "abstention_note": active.abstention_note,
+            }
+            if active is not None
+            else None
+        ),
+        published_analysis=(
+            {
+                "collection_id": published.collection_id,
+                "objective_id": published.objective_id,
+                "analysis_version": published.analysis_version,
+                "document_inputs": [
+                    {
+                        "document_id": document_input.document_id,
+                        "preparation_fingerprint": document_input.preparation_fingerprint,
+                    }
+                    for document_input in published.document_inputs
+                ],
+                "pipeline_version": published.pipeline_version,
+                "model_name": published.model_name,
+                "prompt_versions": dict(published.prompt_versions),
+                "stats": {
+                    "duration_ms": published.stats.duration_ms,
+                    "token_usage": (
+                        asdict(published.stats.token_usage)
+                        if published.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in published.stats.model_usage
+                    ],
+                    "unreported_request_count": published.stats.unreported_request_count,
+                    "prompt_versions": dict(published.stats.prompt_versions),
+                },
+                "status": published.status,
+                "phase": published.phase,
+                "processed_document_count": published.processed_document_count,
+                "total_document_count": published.total_document_count,
+                "current_document_id": published.current_document_id,
+                "progress_message": published.progress_message,
+                "error_code": published.error_code,
+                "error_message": published.error_message,
+                "created_at": (
+                    published.created_at.isoformat()
+                    if published.created_at is not None
+                    else None
+                ),
+                "started_at": (
+                    published.started_at.isoformat()
+                    if published.started_at is not None
+                    else None
+                ),
+                "completed_at": (
+                    published.completed_at.isoformat()
+                    if published.completed_at is not None
+                    else None
+                ),
+                "origin": published.origin,
+                "scientific_record_source": published.scientific_record_source,
+                "source_analysis_version": published.source_analysis_version,
+                "created_by_user_id": published.created_by_user_id,
+                "created_by_tool_call_id": published.created_by_tool_call_id,
+                "abstention_reason": published.abstention_reason,
+                "abstention_note": published.abstention_note,
+            }
+            if published is not None
+            else None
+        ),
+        paper_contributions=[
+            item if isinstance(item, dict) else paper_contribution_response(item)
+            for item in payload.get("paper_contributions") or ()
+        ],
+        evidence_review=payload.get("evidence_review")
+        or {
+            "total_evidence_count": 0,
+            "result_count": 0,
+            "comparable_evidence_count": 0,
+            "gap_count": 0,
+            "omitted_gap_count": 0,
+            "status_counts": {},
+            "gaps": [],
+        },
+        warnings=payload.get("warnings") or [],
+    )
 
 
 @router.get(
@@ -215,7 +371,158 @@ async def get_collection_objective_analysis_state(
         )
     except FileNotFoundError as exc:
         raise _objective_not_found(collection_id, objective_id, exc) from exc
-    return _to_objective_analysis_response(payload)
+    objective = payload["objective"]
+    active = payload.get("analysis")
+    published = payload.get("published_analysis")
+    return ObjectiveAnalysisResponse(
+        collection_id=payload["collection_id"],
+        objective={
+            **asdict(objective.objective),
+            "created_at": (
+                objective.created_at.isoformat() if objective.created_at else None
+            ),
+            "updated_at": (
+                objective.updated_at.isoformat() if objective.updated_at else None
+            ),
+        },
+        active_analysis=(
+            {
+                "collection_id": active.collection_id,
+                "objective_id": active.objective_id,
+                "analysis_version": active.analysis_version,
+                "document_inputs": [
+                    {
+                        "document_id": document_input.document_id,
+                        "preparation_fingerprint": document_input.preparation_fingerprint,
+                    }
+                    for document_input in active.document_inputs
+                ],
+                "pipeline_version": active.pipeline_version,
+                "model_name": active.model_name,
+                "prompt_versions": dict(active.prompt_versions),
+                "stats": {
+                    "duration_ms": active.stats.duration_ms,
+                    "token_usage": (
+                        asdict(active.stats.token_usage)
+                        if active.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [asdict(item) for item in active.stats.model_usage],
+                    "unreported_request_count": active.stats.unreported_request_count,
+                    "prompt_versions": dict(active.stats.prompt_versions),
+                },
+                "status": active.status,
+                "phase": active.phase,
+                "processed_document_count": active.processed_document_count,
+                "total_document_count": active.total_document_count,
+                "current_document_id": active.current_document_id,
+                "progress_message": active.progress_message,
+                "error_code": active.error_code,
+                "error_message": active.error_message,
+                "created_at": (
+                    active.created_at.isoformat()
+                    if active.created_at is not None
+                    else None
+                ),
+                "started_at": (
+                    active.started_at.isoformat()
+                    if active.started_at is not None
+                    else None
+                ),
+                "completed_at": (
+                    active.completed_at.isoformat()
+                    if active.completed_at is not None
+                    else None
+                ),
+                "origin": active.origin,
+                "scientific_record_source": active.scientific_record_source,
+                "source_analysis_version": active.source_analysis_version,
+                "created_by_user_id": active.created_by_user_id,
+                "created_by_tool_call_id": active.created_by_tool_call_id,
+                "abstention_reason": active.abstention_reason,
+                "abstention_note": active.abstention_note,
+            }
+            if active is not None
+            else None
+        ),
+        published_analysis=(
+            {
+                "collection_id": published.collection_id,
+                "objective_id": published.objective_id,
+                "analysis_version": published.analysis_version,
+                "document_inputs": [
+                    {
+                        "document_id": document_input.document_id,
+                        "preparation_fingerprint": document_input.preparation_fingerprint,
+                    }
+                    for document_input in published.document_inputs
+                ],
+                "pipeline_version": published.pipeline_version,
+                "model_name": published.model_name,
+                "prompt_versions": dict(published.prompt_versions),
+                "stats": {
+                    "duration_ms": published.stats.duration_ms,
+                    "token_usage": (
+                        asdict(published.stats.token_usage)
+                        if published.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in published.stats.model_usage
+                    ],
+                    "unreported_request_count": published.stats.unreported_request_count,
+                    "prompt_versions": dict(published.stats.prompt_versions),
+                },
+                "status": published.status,
+                "phase": published.phase,
+                "processed_document_count": published.processed_document_count,
+                "total_document_count": published.total_document_count,
+                "current_document_id": published.current_document_id,
+                "progress_message": published.progress_message,
+                "error_code": published.error_code,
+                "error_message": published.error_message,
+                "created_at": (
+                    published.created_at.isoformat()
+                    if published.created_at is not None
+                    else None
+                ),
+                "started_at": (
+                    published.started_at.isoformat()
+                    if published.started_at is not None
+                    else None
+                ),
+                "completed_at": (
+                    published.completed_at.isoformat()
+                    if published.completed_at is not None
+                    else None
+                ),
+                "origin": published.origin,
+                "scientific_record_source": published.scientific_record_source,
+                "source_analysis_version": published.source_analysis_version,
+                "created_by_user_id": published.created_by_user_id,
+                "created_by_tool_call_id": published.created_by_tool_call_id,
+                "abstention_reason": published.abstention_reason,
+                "abstention_note": published.abstention_note,
+            }
+            if published is not None
+            else None
+        ),
+        paper_contributions=[
+            item if isinstance(item, dict) else paper_contribution_response(item)
+            for item in payload.get("paper_contributions") or ()
+        ],
+        evidence_review=payload.get("evidence_review")
+        or {
+            "total_evidence_count": 0,
+            "result_count": 0,
+            "comparable_evidence_count": 0,
+            "gap_count": 0,
+            "omitted_gap_count": 0,
+            "status_counts": {},
+            "gaps": [],
+        },
+        warnings=payload.get("warnings") or [],
+    )
 
 
 @router.get(
@@ -365,45 +672,6 @@ async def get_objective_evidence_map(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ObjectiveEvidenceMapResponse(**payload)
-
-
-def _objective_response_record(stored: StoredObjective) -> dict:
-    return {
-        **asdict(stored.objective),
-        "created_at": stored.created_at.isoformat() if stored.created_at else None,
-        "updated_at": stored.updated_at.isoformat() if stored.updated_at else None,
-    }
-
-
-def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
-    objective = payload["objective"]
-    active = payload.get("analysis")
-    published = payload.get("published_analysis")
-    return ObjectiveAnalysisResponse(
-        collection_id=payload["collection_id"],
-        objective=_objective_response_record(objective),
-        active_analysis=(
-            objective_analysis_response(active) if active is not None else None
-        ),
-        published_analysis=(
-            objective_analysis_response(published) if published is not None else None
-        ),
-        paper_contributions=[
-            item if isinstance(item, dict) else paper_contribution_response(item)
-            for item in payload.get("paper_contributions") or ()
-        ],
-        evidence_review=payload.get("evidence_review")
-        or {
-            "total_evidence_count": 0,
-            "result_count": 0,
-            "comparable_evidence_count": 0,
-            "gap_count": 0,
-            "omitted_gap_count": 0,
-            "status_counts": {},
-            "gaps": [],
-        },
-        warnings=payload.get("warnings") or [],
-    )
 
 
 def _objective_not_found(

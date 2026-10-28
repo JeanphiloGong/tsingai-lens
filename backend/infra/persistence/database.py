@@ -51,9 +51,3 @@ def build_database_engine(settings: DatabaseSettings) -> AsyncEngine:
         max_overflow=settings.database_max_overflow,
         pool_timeout=settings.database_pool_timeout,
     )
-
-
-def build_session_factory(
-    engine: AsyncEngine,
-) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine)

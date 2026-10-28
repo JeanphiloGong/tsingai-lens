@@ -21,7 +21,7 @@ from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -428,7 +428,7 @@ def build_plan_from_records(
 
 
 async def build_migration_plan(
-    session: AsyncSession,
+    db: AsyncSession,
     *,
     now: str | None = None,
 ) -> DatasetMigrationPlan:
@@ -441,17 +441,17 @@ async def build_migration_plan(
         FeedbackReviewDecisionRow,
     )
 
-    snapshots = await session.scalars(
+    snapshots = await db.scalars(
         select(FeedbackDatasetSnapshotRow).order_by(FeedbackDatasetSnapshotRow.dataset_id)
     )
-    cases = await session.scalars(select(FeedbackCaseRow).order_by(FeedbackCaseRow.case_id))
-    annotations = await session.scalars(
+    cases = await db.scalars(select(FeedbackCaseRow).order_by(FeedbackCaseRow.case_id))
+    annotations = await db.scalars(
         select(FeedbackAnnotationRow).order_by(
             FeedbackAnnotationRow.case_id,
             FeedbackAnnotationRow.version,
         )
     )
-    reviews = await session.scalars(
+    reviews = await db.scalars(
         select(FeedbackReviewDecisionRow).order_by(
             FeedbackReviewDecisionRow.case_id,
             FeedbackReviewDecisionRow.seq,
@@ -467,7 +467,7 @@ async def build_migration_plan(
 
 
 async def apply_plan(
-    session: AsyncSession,
+    db: AsyncSession,
     plan: DatasetMigrationPlan,
 ) -> dict[str, int]:
     """Insert the plan idempotently in the caller's transaction."""
@@ -487,9 +487,9 @@ async def apply_plan(
     }
     datasets_by_id = {item.dataset_id: item for item in plan.datasets}
     for spec in datasets_by_id.values():
-        row = await session.get(FeedbackDatasetRow, spec.dataset_id, with_for_update=True)
+        row = await db.get(FeedbackDatasetRow, spec.dataset_id, with_for_update=True)
         if row is None:
-            session.add(
+            db.add(
                 FeedbackDatasetRow(
                     dataset_id=spec.dataset_id,
                     collection_id=spec.collection_id,
@@ -506,10 +506,10 @@ async def apply_plan(
         else:
             counts["existing_datasets"] += 1
             _assert_dataset_identity(row, spec)
-    await session.flush()
+    await db.flush()
 
     for item in plan.items:
-        row = await session.scalar(
+        row = await db.scalar(
             select(FeedbackDatasetSampleRow)
             .where(
                 FeedbackDatasetSampleRow.dataset_id == item.dataset_id,
@@ -534,11 +534,11 @@ async def apply_plan(
                 confirmed_by=None,
                 confirmed_at=None,
             )
-            session.add(row)
-            await session.flush()
+            db.add(row)
+            await db.flush()
             counts["created_samples"] += 1
             if item.content is not None and item.revision_id is not None:
-                session.add(
+                db.add(
                     FeedbackSampleRevisionRow(
                         revision_id=item.revision_id,
                         sample_id=item.sample_id,
@@ -554,11 +554,11 @@ async def apply_plan(
                         created_at=_datetime(item.created_at),
                     )
                 )
-                await session.flush()
+                await db.flush()
                 row.current_revision_id = item.revision_id
                 row.status = "needs_confirmation"
                 row.missing_reasons = []
-                await session.flush()
+                await db.flush()
                 counts["created_revisions"] += 1
             continue
 
@@ -569,13 +569,13 @@ async def apply_plan(
             and item.content is not None
             and item.revision_id is not None
         ):
-            revision = await session.get(
+            revision = await db.get(
                 FeedbackSampleRevisionRow,
                 item.revision_id,
                 with_for_update=True,
             )
             if revision is None:
-                session.add(
+                db.add(
                     FeedbackSampleRevisionRow(
                         revision_id=item.revision_id,
                         sample_id=row.sample_id,
@@ -591,13 +591,13 @@ async def apply_plan(
                         created_at=_datetime(item.created_at),
                     )
                 )
-                await session.flush()
+                await db.flush()
                 counts["created_revisions"] += 1
             row.current_revision_id = item.revision_id
             row.status = "needs_confirmation"
             row.missing_reasons = []
             row.updated_at = _datetime(item.created_at)
-            await session.flush()
+            await db.flush()
     return counts
 
 
@@ -606,22 +606,22 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
     from infra.persistence.database import (
         DatabaseSettings,
         build_database_engine,
-        build_session_factory,
+        AsyncSessionLocal,
     )
     from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetMigrationRunRow
 
     del ENV_FILE_PATH  # Settings resolves the configured env file itself.
     engine = build_database_engine(DatabaseSettings())
-    session_factory = build_session_factory(engine)
+    AsyncSessionLocal.configure(bind=engine)
     mode = "apply" if apply else "dry_run"
     plan: DatasetMigrationPlan | None = None
     try:
-        async with session_factory.begin() as session:
-            plan = await build_migration_plan(session)
+        async with AsyncSessionLocal() as db, db.begin():
+            plan = await build_migration_plan(db)
             summary = plan.summary()
             if apply:
-                summary.update(await apply_plan(session, plan))
-            session.add(
+                summary.update(await apply_plan(db, plan))
+            db.add(
                 FeedbackDatasetMigrationRunRow(
                     run_id=plan.run_id,
                     migration_version=MIGRATION_VERSION,
@@ -632,7 +632,7 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
                     created_at=_datetime(datetime.now(timezone.utc).isoformat()),
                 )
             )
-            await session.flush()
+            await db.flush()
             summary["mode"] = mode
             return summary
     except Exception as exc:
@@ -640,8 +640,8 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
             # A failed run is useful evidence, but it must not share the
             # transaction that rolled back any partial data writes.
             try:
-                async with session_factory.begin() as session:
-                    session.add(
+                async with AsyncSessionLocal() as db, db.begin():
+                    db.add(
                         FeedbackDatasetMigrationRunRow(
                             run_id=plan.run_id,
                             migration_version=MIGRATION_VERSION,

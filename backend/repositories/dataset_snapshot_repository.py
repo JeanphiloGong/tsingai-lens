@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.persistence.database import AsyncSessionLocal
 

@@ -146,26 +146,26 @@ async def test_export_trace_writes_current_source_and_objective_views(tmp_path, 
         "build_database_engine",
         lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
-    monkeypatch.setattr(trace, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(trace.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         trace,
         "SourceArtifactRepository",
-        lambda _sessions: source_repository,
+        lambda: source_repository,
     )
     monkeypatch.setattr(
         trace,
         "DocumentProfileRepository",
-        lambda _sessions: profile_repository,
+        lambda: profile_repository,
     )
     monkeypatch.setattr(
         trace,
         "PaperMapRepository",
-        lambda _sessions: PaperMapRepository(),
+        lambda: PaperMapRepository(),
     )
     monkeypatch.setattr(
         trace,
         "ObjectiveRepository",
-        lambda _sessions: _ObjectiveRepository(),
+        lambda: _ObjectiveRepository(),
     )
 
     trace_dir = await trace.export_trace(

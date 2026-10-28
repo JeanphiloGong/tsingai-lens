@@ -146,9 +146,9 @@ async def test_existing_source_table_export_keeps_table_rows(
         "build_database_engine",
         lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
-    monkeypatch.setattr(export_script, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(export_script.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
-        export_script, "SourceArtifactRepository", lambda _sessions: repository
+        export_script, "SourceArtifactRepository", lambda: repository
     )
 
     frames = await export_script._load_existing_artifacts(

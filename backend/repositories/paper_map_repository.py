@@ -19,10 +19,8 @@ from domain.core.research_objective import (
 )
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.persistence.database import AsyncSessionLocal
-
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,

@@ -900,7 +900,7 @@ async def _local_objective_bundle(
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
             build_database_engine,
-            build_session_factory,
+            AsyncSessionLocal,
         )
         from repositories.finding_review_repository import (  # noqa: PLC0415
             FindingReviewRepository,
@@ -910,9 +910,9 @@ async def _local_objective_bundle(
         )
 
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
-            session_factory = build_session_factory(engine)
-            repository = ObjectiveRepository(session_factory)
+            repository = ObjectiveRepository()
             review_repository = FindingReviewRepository()
             feedback_service = FindingFeedbackService(
                 review_repository=review_repository,
@@ -1808,16 +1808,16 @@ async def _load_source_index(
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
             build_database_engine,
-            build_session_factory,
+            AsyncSessionLocal,
         )
         from repositories.source_artifact_repository import (  # noqa: PLC0415
             SourceArtifactRepository,
         )
 
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
-            documents = await SourceArtifactRepository(
-                ).read_collection_documents(collection_id)
+            documents = await SourceArtifactRepository().read_collection_documents(collection_id)
         finally:
             await engine.dispose()
     index: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -1862,7 +1862,7 @@ async def _resolve_manifest_document_ids(
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
             build_database_engine,
-            build_session_factory,
+            AsyncSessionLocal,
         )
         from infra.persistence.postgres.models.document import (  # noqa: PLC0415
             Document,
@@ -1872,9 +1872,10 @@ async def _resolve_manifest_document_ids(
         )
 
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
-            async with build_session_factory(engine)() as session:
-                rows = (await session.execute(
+            async with AsyncSessionLocal() as db:
+                rows = (await db.execute(
                     select(DocumentPreparationRow.document_id, Document.sha256)
                     .join(
                         Document,

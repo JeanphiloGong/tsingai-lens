@@ -21,7 +21,7 @@ if str(DEFAULT_BACKEND_ROOT) not in sys.path:
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
-    build_session_factory,
+    AsyncSessionLocal,
 )
 from infra.persistence.file.object_store import FileObjectStore
 from infra.source.config.source_parser_config import SourceParserConfig
@@ -111,12 +111,12 @@ async def main_async() -> None:
     artifact_dir = collection_dir / "output"
     if args.reparse_inputs:
         engine = build_database_engine(DatabaseSettings())
+        AsyncSessionLocal.configure(bind=engine)
         try:
             frames = await _reparse_collection_inputs(
                 backend_root=backend_root,
                 collection_dir=collection_dir,
-                collection_repository=CollectionRepository(
-                    ),
+                collection_repository=CollectionRepository(),
                 document_id=args.document_id,
                 limit=args.limit,
             )
@@ -162,9 +162,9 @@ async def _load_existing_artifacts(
 ) -> dict[str, pd.DataFrame]:
     collection_id = collection_dir.name
     engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=engine)
     try:
-        documents = await SourceArtifactRepository(
-            ).read_collection_documents(collection_id)
+        documents = await SourceArtifactRepository().read_collection_documents(collection_id)
     finally:
         await engine.dispose()
     if not documents:

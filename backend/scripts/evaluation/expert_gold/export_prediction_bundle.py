@@ -20,7 +20,7 @@ from infra.source.artifact_bundle import source_document_payload
 from infra.persistence.database import (  # noqa: E402
     DatabaseSettings,
     build_database_engine,
-    build_session_factory,
+    AsyncSessionLocal,
 )
 from repositories.document_profile_repository import (  # noqa: E402
     DocumentProfileRepository,
@@ -164,14 +164,13 @@ async def _load_artifacts(
     collection_id: str,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
     engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=engine)
     try:
-        sessions = build_session_factory(engine)
-        documents = await SourceArtifactRepository(
-            ).read_collection_documents(collection_id)
+        documents = await SourceArtifactRepository().read_collection_documents(collection_id)
         profiles = await DocumentProfileRepository().list_collection(
             collection_id
         )
-        objective_repository = ObjectiveRepository(sessions)
+        objective_repository = ObjectiveRepository()
         evidence: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
         for objective in await objective_repository.list_objectives(collection_id):

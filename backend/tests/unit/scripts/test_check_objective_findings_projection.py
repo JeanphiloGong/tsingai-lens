@@ -355,16 +355,16 @@ async def test_local_bundle_preserves_complete_evidence_across_findings(
     evaluation = __import__("application.evaluation", fromlist=["evaluation"])
     engine = SimpleNamespace(dispose=AsyncMock())
     monkeypatch.setattr(database, "build_database_engine", lambda _settings: engine)
-    monkeypatch.setattr(database, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(database.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         objective_repository,
         "ObjectiveRepository",
-        lambda _sessions: ObjectiveRepository(),
+        lambda: ObjectiveRepository(),
     )
     monkeypatch.setattr(
         review_repository,
         "FindingReviewRepository",
-        lambda _sessions: ReviewRepository(),
+        lambda: ReviewRepository(),
     )
     monkeypatch.setattr(
         evaluation,

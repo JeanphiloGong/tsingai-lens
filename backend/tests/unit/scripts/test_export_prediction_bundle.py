@@ -153,21 +153,21 @@ async def test_export_prediction_bundle_uses_current_published_results(tmp_path,
         "build_database_engine",
         lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
-    monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(exporter.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         exporter,
         "SourceArtifactRepository",
-        lambda _sessions: source_repository,
+        lambda: source_repository,
     )
     monkeypatch.setattr(
         exporter,
         "DocumentProfileRepository",
-        lambda _sessions: profile_repository,
+        lambda: profile_repository,
     )
     monkeypatch.setattr(
         exporter,
         "ObjectiveRepository",
-        lambda _sessions: _PublishedObjectiveRepository(),
+        lambda: _PublishedObjectiveRepository(),
     )
     output = tmp_path / "prediction.json"
 
@@ -336,21 +336,21 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(tmp_pat
         "build_database_engine",
         lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
-    monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(exporter.AsyncSessionLocal, "configure", lambda **_kwargs: None)
     monkeypatch.setattr(
         exporter,
         "SourceArtifactRepository",
-        lambda _sessions: SourceArtifactRepository(),
+        lambda: SourceArtifactRepository(),
     )
     monkeypatch.setattr(
         exporter,
         "DocumentProfileRepository",
-        lambda _sessions: DocumentProfileRepository(),
+        lambda: DocumentProfileRepository(),
     )
     monkeypatch.setattr(
         exporter,
         "ObjectiveRepository",
-        lambda _sessions: _PublishedObjectiveRepository(published=False),
+        lambda: _PublishedObjectiveRepository(published=False),
     )
     output = tmp_path / "empty.json"
 

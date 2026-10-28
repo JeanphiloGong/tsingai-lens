@@ -258,7 +258,7 @@ async def main_async() -> int:
     from infra.persistence.database import (  # noqa: PLC0415
         DatabaseSettings,
         build_database_engine,
-        build_session_factory,
+        AsyncSessionLocal,
     )
     from repositories.source_artifact_repository import (  # noqa: PLC0415
         SourceArtifactRepository,
@@ -266,6 +266,7 @@ async def main_async() -> int:
 
     fixture = json.loads(args.fixture.resolve().read_text(encoding="utf-8"))
     engine = build_database_engine(DatabaseSettings())
+    AsyncSessionLocal.configure(bind=engine)
     try:
         repository = SourceArtifactRepository()
         text_units = await repository.list_text_units(args.collection_id)

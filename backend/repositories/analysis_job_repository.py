@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.persistence.database import AsyncSessionLocal
 

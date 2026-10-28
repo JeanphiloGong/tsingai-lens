@@ -41,7 +41,7 @@ async def import_review_decisions(
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
             build_database_engine,
-            build_session_factory,
+            AsyncSessionLocal,
         )
         from repositories.finding_review_repository import (  # noqa: PLC0415
             FindingReviewRepository,
@@ -51,10 +51,11 @@ async def import_review_decisions(
         )
 
         engine = build_database_engine(DatabaseSettings())
-        session_factory = build_session_factory(engine)
+        AsyncSessionLocal.configure(bind=engine)
+
         feedback_service = FindingFeedbackService(
             review_repository=FindingReviewRepository(),
-            objective_repository=ObjectiveRepository(session_factory),
+            objective_repository=ObjectiveRepository(),
         )
     try:
         return await FindingReviewImportService(feedback_service).import_jsonl_file(

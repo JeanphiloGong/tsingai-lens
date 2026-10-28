@@ -23,7 +23,7 @@ pytestmark = pytest.mark.anyio
 async def test_auth_repository_round_trips_users_and_sessions(
     postgres_session_factory,
 ) -> None:
-    repository = AuthRepository(postgres_session_factory)
+    repository = AuthRepository()
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     token_hash = sha256(b"browser-session-token").hexdigest()
     user = AuthUserRecord(
@@ -53,7 +53,7 @@ async def test_auth_repository_round_trips_users_and_sessions(
 async def test_auth_repository_rejects_duplicate_email_and_token_hash(
     postgres_session_factory,
 ) -> None:
-    repository = AuthRepository(postgres_session_factory)
+    repository = AuthRepository()
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     first_user = AuthUserRecord(
         user_id="user_first", email="reader@example.com", display_name=None,
@@ -81,7 +81,7 @@ async def test_postgresql_enforces_auth_contract(
     monkeypatch,
     postgres_session_factory,
 ) -> None:
-    repository = AuthRepository(postgres_session_factory)
+    repository = AuthRepository()
     now = datetime(2026, 7, 19, tzinfo=timezone.utc)
     user = AuthUserRecord(
         user_id="user_constraints", email="constraints@example.com", display_name=None,
@@ -141,7 +141,7 @@ async def test_postgresql_enforces_auth_contract(
         assert logout.status_code == 200
         assert client.get("/api/v1/auth/me").status_code == 401
 
-    async with repository.session_factory() as database_session:
+    async with postgres_session_factory() as database_session:
         stored = await database_session.scalar(
             select(AuthSession).where(
                 AuthSession.token_hash

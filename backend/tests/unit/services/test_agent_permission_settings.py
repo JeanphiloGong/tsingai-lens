@@ -24,7 +24,7 @@ def anyio_backend() -> str:
 
 async def test_collection_default_permission_round_trips_and_expands_all_actions(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=CollectionRepository(postgres_session_factory),
+        repository=CollectionRepository(),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Agent settings", owner_user_id="owner")
@@ -48,7 +48,7 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
 
 async def test_collection_default_permission_can_be_persistent(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=CollectionRepository(postgres_session_factory),
+        repository=CollectionRepository(),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Persistent Agent settings", owner_user_id="owner")
@@ -70,7 +70,7 @@ async def test_collection_default_permission_can_be_persistent(tmp_path, *, post
 
 async def test_collection_default_permission_hides_collection_from_other_users(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=CollectionRepository(postgres_session_factory),
+        repository=CollectionRepository(),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Private settings", owner_user_id="owner")
@@ -83,7 +83,7 @@ async def test_collection_default_permission_hides_collection_from_other_users(t
 
 async def test_collection_default_permission_rejects_stale_revision(tmp_path, *, postgres_session_factory) -> None:
     service = CollectionService(
-        repository=CollectionRepository(postgres_session_factory),
+        repository=CollectionRepository(),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )
     collection = await service.create_collection("Concurrent settings", owner_user_id="owner")

@@ -59,7 +59,7 @@ async def seed_objective(session_factory, collection_id: str, objective_id: str)
 
 
 async def seed_user(session_factory, user_id: str) -> None:
-    users = AuthRepository(session_factory)
+    users = AuthRepository()
     if await users.read_user(user_id) is None:
         await users.add_user(AuthUserRecord(
             user_id=user_id, email=f"{user_id}@fixture.example.com",
@@ -77,7 +77,7 @@ async def seed_collection(
 ) -> None:
     now = datetime.now(timezone.utc).isoformat()
     await seed_user(session_factory, user_id)
-    collections = CollectionRepository(session_factory)
+    collections = CollectionRepository()
     stored = await collections.read_collection(collection_id)
     if stored is None:
         await collections.add_collection(StoredCollection(

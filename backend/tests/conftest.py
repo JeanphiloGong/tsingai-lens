@@ -55,6 +55,8 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
     try:
         factory = async_sessionmaker(engine, expire_on_commit=False)
         monkeypatch.setattr("repositories.feedback_dataset_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.collection_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.auth_repository.AsyncSessionLocal", factory)
         yield factory
     finally:
         engine.sync_engine.dispose()
@@ -86,7 +88,7 @@ def auth_session_service(postgres_session_factory):
     from application.auth import AuthSessionService
     from repositories.auth_repository import AuthRepository
 
-    return AuthSessionService(AuthRepository(postgres_session_factory))
+    return AuthSessionService(AuthRepository())
 
 
 @pytest.fixture
@@ -96,6 +98,6 @@ def collection_service(tmp_path, postgres_session_factory):
     from repositories.collection_repository import CollectionRepository
 
     return CollectionService(
-        repository=CollectionRepository(postgres_session_factory),
+        repository=CollectionRepository(),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )

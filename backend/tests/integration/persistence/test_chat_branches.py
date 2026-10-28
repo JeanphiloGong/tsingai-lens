@@ -74,12 +74,12 @@ class _Sources:
 
 @pytest.fixture
 async def branch_app(postgres_session_factory, tmp_path):
-    auth = AuthSessionService(AuthRepository(postgres_session_factory))
+    auth = AuthSessionService(AuthRepository())
     users, cookies = [], []
     for email in ("branch-owner@example.test", "branch-other@example.test"):
         users.append(await auth.create_user(email=email, password="synthetic-test-password"))
         cookies.append((await auth.login(email=email, password="synthetic-test-password"))["session_id"])
-    collections = CollectionRepository(postgres_session_factory)
+    collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(
             collection=Collection(

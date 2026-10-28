@@ -8,7 +8,7 @@ from repositories.collection_repository import CollectionRepository
 
 def build_test_collection_service(root_dir: Path, *, session_factory) -> CollectionService:
     return CollectionService(
-        repository=CollectionRepository(session_factory),
+        repository=CollectionRepository(),
         workspace=FileCollectionWorkspace(root_dir),
     )
 

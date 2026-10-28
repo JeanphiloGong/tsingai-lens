@@ -51,7 +51,7 @@ def _document(document_id: str = "doc_demo", sha256: str = "a" * 64) -> StoredDo
 
 
 async def test_collection_repository_round_trips_current_aggregate(*, postgres_session_factory) -> None:
-    repository = CollectionRepository(postgres_session_factory)
+    repository = CollectionRepository()
     collection = _collection()
     document = _document()
 
@@ -77,7 +77,7 @@ async def test_collection_repository_round_trips_current_aggregate(*, postgres_s
 
 
 async def test_collection_repository_rejects_duplicate_document_content(*, postgres_session_factory) -> None:
-    repository = CollectionRepository(postgres_session_factory)
+    repository = CollectionRepository()
     collection = _collection()
     document = _document()
     await repository.add_collection(collection)
@@ -100,7 +100,7 @@ async def test_collection_repository_rejects_duplicate_document_content(*, postg
 
 
 async def test_collection_delete_removes_aggregate(*, postgres_session_factory) -> None:
-    repository = CollectionRepository(postgres_session_factory)
+    repository = CollectionRepository()
     collection = _collection()
     await repository.add_collection(collection)
 

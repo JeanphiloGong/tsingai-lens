@@ -116,8 +116,7 @@ async def main_async() -> None:
                 backend_root=backend_root,
                 collection_dir=collection_dir,
                 collection_repository=CollectionRepository(
-                    build_session_factory(engine)
-                ),
+                    ),
                 document_id=args.document_id,
                 limit=args.limit,
             )

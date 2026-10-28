@@ -50,13 +50,13 @@ PATH = "/api/v1/chat-sessions/chat-1/messages/answer/feedback"
 
 @pytest.fixture
 async def feedback_app(postgres_session_factory, tmp_path):
-    auth = AuthSessionService(AuthRepository(postgres_session_factory))
+    auth = AuthSessionService(AuthRepository())
     users, cookies = [], []
     for email in ("feedback-owner@example.test", "feedback-other@example.test"):
         users.append(await auth.create_user(email=email, password="synthetic-test-password"))
         result = await auth.login(email=email, password="synthetic-test-password")
         cookies.append(result["session_id"])
-    collections = CollectionRepository(postgres_session_factory)
+    collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(
             collection=Collection(

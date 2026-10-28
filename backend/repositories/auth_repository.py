@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
 
@@ -33,14 +35,9 @@ class AuthSessionRecord:
 class AuthRepository:
     backend_name = "postgres"
 
-    def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession]
-    ) -> None:
-        self.session_factory = session_factory
-
     async def read_user_by_email(self, email: str) -> AuthUserRecord | None:
-        async with self.session_factory() as session:
-            user = await session.scalar(
+        async with AsyncSessionLocal() as db:
+            user = await db.scalar(
                 select(AuthUser).where(AuthUser.email == email.strip().lower())
             )
             if user is None:
@@ -54,8 +51,8 @@ class AuthRepository:
             )
 
     async def read_user(self, user_id: str) -> AuthUserRecord | None:
-        async with self.session_factory() as session:
-            user = await session.get(AuthUser, user_id)
+        async with AsyncSessionLocal() as db:
+            user = await db.get(AuthUser, user_id)
             if user is None:
                 return None
             return AuthUserRecord(
@@ -67,8 +64,8 @@ class AuthRepository:
             )
 
     async def add_user(self, user: AuthUserRecord) -> None:
-        async with self.session_factory.begin() as session:
-            session.add(
+        async with AsyncSessionLocal() as db, db.begin():
+            db.add(
                 AuthUser(
                     user_id=user.user_id,
                     email=user.email,
@@ -86,8 +83,8 @@ class AuthRepository:
         self,
         token_hash: str,
     ) -> AuthSessionRecord | None:
-        async with self.session_factory() as session:
-            auth_session = await session.scalar(
+        async with AsyncSessionLocal() as db:
+            auth_session = await db.scalar(
                 select(AuthSession).where(AuthSession.token_hash == token_hash)
             )
             if auth_session is None:
@@ -101,8 +98,8 @@ class AuthRepository:
             )
 
     async def add_session(self, session: AuthSessionRecord, *, token_hash: str) -> None:
-        async with self.session_factory.begin() as database_session:
-            database_session.add(
+        async with AsyncSessionLocal() as db, db.begin():
+            db.add(
                 AuthSession(
                     session_id=session.session_id,
                     user_id=session.user_id,
@@ -116,8 +113,8 @@ class AuthRepository:
     async def revoke_session_by_token_hash(
         self, token_hash: str, revoked_at: str
     ) -> None:
-        async with self.session_factory.begin() as session:
-            await session.execute(
+        async with AsyncSessionLocal() as db, db.begin():
+            await db.execute(
                 update(AuthSession)
                 .where(AuthSession.token_hash == token_hash)
                 .values(revoked_at=_datetime(revoked_at))

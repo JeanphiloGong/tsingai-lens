@@ -38,7 +38,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         "password_hash": "synthetic-password-hash",
         "created_at": "2026-08-19T00:00:00+00:00",
     }
-    await AuthRepository(postgres_session_factory).add_user(AuthUserRecord(**user))
+    await AuthRepository().add_user(AuthUserRecord(**user))
     collection = StoredCollection(
         collection=Collection(
             collection_id="col-chat",
@@ -50,7 +50,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         created_at="2026-08-19T00:00:00+00:00",
         updated_at="2026-08-19T00:00:00+00:00",
     )
-    await CollectionRepository(postgres_session_factory).add_collection(
+    await CollectionRepository().add_collection(
         collection
     )
     repository = ChatRepository(postgres_session_factory)

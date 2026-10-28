@@ -67,7 +67,7 @@ async def test_real_http_disconnect_resumes_on_another_worker_without_duplicate_
         source_artifact_repository=writer.source_artifact_repository,
         repository=ChatRepository(fixture.factory), runner=writer.runner,
     )
-    auth = AuthSessionService(AuthRepository(fixture.factory))
+    auth = AuthSessionService(AuthRepository())
     cookies = {SESSION_COOKIE_NAME: fixture.cookies[0]}
     try:
         async with _server(writer, auth) as first_url, _server(reader, auth) as second_url:

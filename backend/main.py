@@ -348,14 +348,14 @@ async def build_application_runtime(
 
         if overrides.auth_session_service is None:
             auth_session_service = AuthSessionService(
-                AuthRepository(session_factory)
+                AuthRepository()
             )
         else:
             auth_session_service = overrides.auth_session_service
         await auth_session_service.ensure_bootstrap_user()
 
         collection_service = overrides.collection_service or CollectionService(
-            repository=CollectionRepository(session_factory),
+            repository=CollectionRepository(),
             workspace=FileCollectionWorkspace(),
         )
         source_archive_service = SourceArchiveService(

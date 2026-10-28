@@ -39,7 +39,7 @@ COLLECTION_ID = "col_source"
 
 @pytest.fixture
 async def source_repository(postgres_session_factory):
-    await AuthRepository(postgres_session_factory).add_user(
+    await AuthRepository().add_user(
         AuthUserRecord(
             user_id="user_source",
             email="source@example.com",
@@ -48,7 +48,7 @@ async def source_repository(postgres_session_factory):
             created_at=datetime(2026, 8, 27, tzinfo=timezone.utc).isoformat(),
         )
     )
-    collections = CollectionRepository(postgres_session_factory)
+    collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(
             collection=Collection(

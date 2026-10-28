@@ -43,7 +43,7 @@ async def test_collection_service_requires_explicit_dependencies(*, postgres_ses
     with pytest.raises(TypeError, match="repository"):
         CollectionService()
     with pytest.raises(TypeError, match="workspace"):
-        CollectionService(repository=CollectionRepository(postgres_session_factory))
+        CollectionService(repository=CollectionRepository())
 
 
 def test_source_archive_operations_have_a_direct_owner() -> None:
@@ -145,7 +145,7 @@ async def test_collection_update_preserves_documents(tmp_path, *, postgres_sessi
 async def test_collection_agent_default_permission_is_owner_scoped(tmp_path, *, postgres_session_factory) -> None:
     service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
     from repositories.auth_repository import AuthRepository, AuthUserRecord
-    await AuthRepository(postgres_session_factory).add_user(AuthUserRecord("user-1", "owner@example.com", None, "!", datetime.now(timezone.utc).isoformat()))
+    await AuthRepository().add_user(AuthUserRecord("user-1", "owner@example.com", None, "!", datetime.now(timezone.utc).isoformat()))
     collection = await service.create_collection("Permission defaults", owner_user_id="user-1")
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 

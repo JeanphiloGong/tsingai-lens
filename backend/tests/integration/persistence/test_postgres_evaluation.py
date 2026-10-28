@@ -31,7 +31,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
     postgres_session_factory,
 ) -> None:
     sessions = postgres_session_factory
-    await AuthRepository(sessions).add_user(
+    await AuthRepository().add_user(
         AuthUserRecord(
             user_id="user-evaluation",
             email="evaluation@example.com",
@@ -40,7 +40,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
             created_at="2026-07-20T00:00:00+00:00",
         )
     )
-    collections = CollectionRepository(sessions)
+    collections = CollectionRepository()
     for collection_id in ("col-gold", "col-other"):
         await collections.add_collection(
             StoredCollection(
@@ -215,7 +215,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
             (),
         )
 
-    await AuthRepository(sessions).add_user(
+    await AuthRepository().add_user(
         AuthUserRecord(
             user_id="user-evaluation-cascade",
             email="evaluation-cascade@example.com",
@@ -224,7 +224,7 @@ async def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascad
             created_at=datetime(2026, 7, 20, tzinfo=timezone.utc).isoformat(),
         )
     )
-    collections = CollectionRepository(sessions)
+    collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(
             collection=Collection(

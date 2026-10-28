@@ -31,7 +31,7 @@ def anyio_backend() -> str:
 
 
 async def _repository_with_pdf(payload: bytes, *, postgres_session_factory) -> CollectionRepository:
-    repository = CollectionRepository(postgres_session_factory)
+    repository = CollectionRepository()
     collection = StoredCollection(
         collection=Collection(
             collection_id="col_demo",
@@ -90,7 +90,7 @@ async def test_collection_input_rows_do_not_scan_input_directory(tmp_path, *, po
     (input_dir / "unregistered.pdf").write_bytes(b"%PDF-1.4")
 
     assert await export_script._collection_input_rows(
-        CollectionRepository(postgres_session_factory), "col_demo"
+        CollectionRepository(), "col_demo"
     ) == []
 
 

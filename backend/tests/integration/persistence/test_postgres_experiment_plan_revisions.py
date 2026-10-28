@@ -66,7 +66,7 @@ async def experiment_plan_repository(source_repository):
         created_by_user_id="user_source",
         created_by_tool_call_id="call-plan-objective",
     )
-    await AuthRepository(source_repository.session_factory).add_user(
+    await AuthRepository().add_user(
         AuthUserRecord(
             user_id="user_reviewer",
             email="reviewer@example.com",

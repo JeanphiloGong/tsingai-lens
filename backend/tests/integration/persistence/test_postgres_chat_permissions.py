@@ -19,10 +19,10 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 async def permission_case(postgres_session_factory):
     now = datetime.now(timezone.utc).isoformat()
-    await AuthRepository(postgres_session_factory).add_user(AuthUserRecord(
+    await AuthRepository().add_user(AuthUserRecord(
         user_id="u", email="permission@example.com", display_name=None,
         password_hash="test-only", created_at=now))
-    await CollectionRepository(postgres_session_factory).add_collection(
+    await CollectionRepository().add_collection(
         StoredCollection(
             collection=Collection(
                 collection_id="c",

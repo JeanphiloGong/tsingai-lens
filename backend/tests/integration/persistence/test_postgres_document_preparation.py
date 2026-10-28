@@ -111,7 +111,7 @@ async def test_profile_replacement_does_not_relabel_current_source(source_reposi
         current_fingerprint = row.source_fingerprint
     stale_profile = replace(_profile("doc_a", "Previous profile"), source_fingerprint="old-source")
     await profiles.replace(COLLECTION_ID, stale_profile)
-    collection_repository = CollectionRepository(source_repository.session_factory)
+    collection_repository = CollectionRepository()
     collection = await collection_repository.read_collection(COLLECTION_ID)
     document = collection.documents[0]
     await collection_repository.update_document(
@@ -143,7 +143,7 @@ async def test_paper_map_requires_a_profile_in_the_shared_row(source_repository)
 
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(source_repository, tmp_path, *, postgres_session_factory) -> None:
     collection_service = CollectionService(
-        CollectionRepository(source_repository.session_factory),
+        CollectionRepository(),
         FileCollectionWorkspace(tmp_path / "collections"),
     )
     await collection_service.update_document_preparation(

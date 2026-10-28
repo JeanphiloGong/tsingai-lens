@@ -73,7 +73,7 @@ def _current_iso() -> str:
 
 @pytest.fixture
 async def feedback_chain(postgres_session_factory, tmp_path):
-    auth = AuthRepository(postgres_session_factory)
+    auth = AuthRepository()
     await auth.add_user(
         AuthUserRecord(
             user_id=USER_ID,
@@ -84,7 +84,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         )
     )
 
-    collections = CollectionRepository(postgres_session_factory)
+    collections = CollectionRepository()
     await collections.add_collection(
         StoredCollection(
             collection=Collection(

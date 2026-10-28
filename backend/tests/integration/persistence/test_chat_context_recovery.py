@@ -107,7 +107,7 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
             "usage": {"prompt_tokens": 120, "completion_tokens": 20, "total_tokens": 140},
         })
 
-    auth = AuthSessionService(AuthRepository(fixture.factory))
+    auth = AuthSessionService(AuthRepository())
     async with httpx.AsyncClient(transport=httpx.MockTransport(provider)) as provider_http:
         async with AsyncOpenAI(api_key="offline-test", base_url="https://provider.invalid/v1", http_client=provider_http) as client:
             fixture.service.runner = ResearchAgentRunner(model=OpenAIChatModel(client=client, model="offline-test"),

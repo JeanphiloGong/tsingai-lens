@@ -42,7 +42,7 @@ NOW = datetime(2026, 9, 24, tzinfo=timezone.utc)
 
 @pytest.fixture
 async def paper_experiment_repository(postgres_session_factory):
-    auth = AuthRepository(postgres_session_factory)
+    auth = AuthRepository()
     await auth.add_user(
         AuthUserRecord(
             user_id="experiment-owner",
@@ -52,7 +52,7 @@ async def paper_experiment_repository(postgres_session_factory):
             created_at=NOW,
         )
     )
-    collections = CollectionRepository(postgres_session_factory)
+    collections = CollectionRepository()
     collection = StoredCollection(
         collection=Collection(
             collection_id="experiment-collection",

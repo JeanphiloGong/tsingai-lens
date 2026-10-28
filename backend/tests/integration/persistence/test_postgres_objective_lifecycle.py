@@ -252,7 +252,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     app.include_router(router, prefix="/api/v1")
     app.state.finding_authoring_service = FindingAuthoringService(
         collection_service=CollectionService(
-            CollectionRepository(sessions), FileCollectionWorkspace(tmp_path)
+            CollectionRepository(), FileCollectionWorkspace(tmp_path)
         ),
         objective_repository=repository,
         experiment_query_service=query,

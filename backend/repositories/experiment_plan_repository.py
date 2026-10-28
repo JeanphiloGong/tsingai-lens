@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -314,24 +313,3 @@ def _isoformat(value: datetime) -> str:
 
 
 __all__ = ['ExperimentPlanRepository']
-
-
-def experiment_plan_record(plan: ExperimentPlanRecord) -> dict[str, Any]:
-    return {
-        "plan_id": plan.plan_id,
-        "collection_id": plan.collection_id,
-        "objective_id": plan.objective_id,
-        "title": plan.title,
-        "content": plan.content,
-        "status": plan.status,
-        "source_message_id": plan.source_message_id,
-        "source_links": [dict(link) for link in plan.source_links],
-        "metadata": dict(plan.metadata),
-        "created_by": plan.created_by,
-        "created_at": plan.created_at,
-        "updated_at": plan.updated_at,
-        "plan_version": plan.plan_version,
-        "parent_plan_id": plan.parent_plan_id,
-        "structured_plan": deepcopy(dict(plan.structured_plan)) if plan.structured_plan is not None else None,
-        "updated_by": plan.updated_by,
-    }

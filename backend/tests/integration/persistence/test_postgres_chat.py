@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
+import json
+
 import pytest
 
 from domain.chat import (
@@ -123,11 +127,18 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         ),),
         warnings=("Some papers still require researcher review.",),
     )
-    tool_message = ChatMessage.from_tool_result(
+    tool_message = ChatMessage(
         message_id="msg-3",
         session_id=chat.session_id,
-        result=read_result,
+        role="tool",
+        content=json.dumps(
+            asdict(read_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-08-19T00:00:05+00:00",
+        tool_call_id=read_result.tool_call_id,
+        tool_result=read_result,
     )
     final_message = ChatMessage.assistant(
         message_id="msg-4",
@@ -177,7 +188,6 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     )
     assert (await repository.read_session(chat.session_id)).title == "IN718 comparison"
     assert (await repository.list_sessions(user_id=chat.user_id, collection_id=chat.collection_id))[0].title == "IN718 comparison"
-
 
     write_message = ChatMessage.assistant_tool_calls(
         message_id="msg-5",
@@ -286,9 +296,55 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     )
     trajectory = (
         *(await repository.read_messages(chat.session_id)),
-        ChatMessage.from_tool_result(message_id="msg-write-result", session_id=chat.session_id, result=write_result, created_at="2026-08-19T00:01:04+00:00"),
-        ChatMessage.assistant_tool_calls(message_id="msg-batch", session_id=chat.session_id, content="", created_at="2026-08-19T00:02:00+00:00", tool_calls=tuple(call.to_request() for call in batch)),
-        *(ChatMessage.from_tool_result(message_id=f"msg-result-{index}", session_id=chat.session_id, result=result, created_at="2026-08-19T00:02:01+00:00") for index, result in enumerate(observations)),
+        ChatMessage(
+            message_id="msg-write-result",
+            session_id=chat.session_id,
+            role="tool",
+            content=json.dumps(
+                asdict(write_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-08-19T00:01:04+00:00",
+            tool_call_id=write_result.tool_call_id,
+            tool_result=write_result,
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="msg-batch",
+            session_id=chat.session_id,
+            content="",
+            created_at="2026-08-19T00:02:00+00:00",
+            tool_calls=tuple(
+                ChatToolRequest(
+                    tool_call_id=call.tool_call_id,
+                    name=call.name,
+                    arguments=call.arguments,
+                    position=call.position,
+                    decision_user_id=call.decision_user_id,
+                    decision_arguments_digest=call.decision_arguments_digest,
+                    decided_at=call.decided_at,
+                    decision_basis=call.decision_basis,
+                    authorization_revision=call.authorization_revision,
+                )
+                for call in batch
+            ),
+        ),
+        *(
+            ChatMessage(
+                message_id=f"msg-result-{index}",
+                session_id=chat.session_id,
+                role="tool",
+                content=json.dumps(
+                    asdict(result),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
+                created_at="2026-08-19T00:02:01+00:00",
+                tool_call_id=result.tool_call_id,
+                tool_result=result,
+            )
+            for index, result in enumerate(observations)
+        ),
     )
     await repository.save_trajectory(session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
     reloaded = await ChatRepository(postgres_session_factory).read_messages(chat.session_id)

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
+from domain.chat import ChatToolRequest
+
 import json
 from hashlib import sha256
 
@@ -38,12 +42,42 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
             **call.arguments, "content": content, "source_digest": sha256(content.encode()).hexdigest(),
             "content_truncated": False,
         })
-        history.extend((
-            ChatMessage.assistant_tool_calls(message_id=call.assistant_message_id, session_id=session.session_id,
-                                             content="", tool_calls=(call.to_request(),), created_at=NOW),
-            ChatMessage.from_tool_result(message_id=f"prior-result-{index}", session_id=session.session_id,
-                                         result=result, created_at=NOW),
-        ))
+        history.extend(
+            (
+                ChatMessage.assistant_tool_calls(
+                    message_id=call.assistant_message_id,
+                    session_id=session.session_id,
+                    content="",
+                    tool_calls=(
+                        ChatToolRequest(
+                            tool_call_id=call.tool_call_id,
+                            name=call.name,
+                            arguments=call.arguments,
+                            position=call.position,
+                            decision_user_id=call.decision_user_id,
+                            decision_arguments_digest=call.decision_arguments_digest,
+                            decided_at=call.decided_at,
+                            decision_basis=call.decision_basis,
+                            authorization_revision=call.authorization_revision,
+                        ),
+                    ),
+                    created_at=NOW,
+                ),
+                ChatMessage(
+                    message_id=f"prior-result-{index}",
+                    session_id=session.session_id,
+                    role="tool",
+                    content=json.dumps(
+                        asdict(result),
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ),
+                    created_at=NOW,
+                    tool_call_id=result.tool_call_id,
+                    tool_result=result,
+                ),
+            )
+        )
         calls.append(call)
         results.append(result)
     await fixture.repository.save_trajectory(session=session, messages=tuple(history),

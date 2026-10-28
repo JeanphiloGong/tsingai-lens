@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+
+from domain.chat import ChatToolRequest
+
 import asyncio
-from dataclasses import replace
+from dataclasses import asdict, replace
 from hashlib import sha256
 from types import SimpleNamespace
 from uuid import uuid4
@@ -121,14 +125,75 @@ async def branch_app(postgres_session_factory, tmp_path):
         heading_path="Methods", source_digest=sha256(QUOTE.encode()).hexdigest(),
     )
     messages = (
-        ChatMessage.user(message_id="create", session_id=chat.session_id, content="Create an objective candidate to compare LPBF tensile conditions.", created_at=NOW),
-        ChatMessage.assistant_tool_calls(message_id="request", session_id=chat.session_id, tool_calls=(call.to_request(),), content="", created_at=NOW),
-        ChatMessage.from_tool_result(message_id="result", session_id=chat.session_id, result=result, created_at=NOW),
-        ChatMessage.assistant(message_id="created", session_id=chat.session_id, content="The candidate objective was saved.", created_at=NOW),
-        ChatMessage.user(message_id="question", session_id=chat.session_id, content=QUESTION, created_at=NOW, source_contexts=(source,)),
-        ChatMessage.assistant(message_id="answer", session_id=chat.session_id, content=ANSWER, created_at=NOW),
-        ChatMessage.user(message_id="later", session_id=chat.session_id, content="What about specimen orientation?", created_at=NOW),
-        ChatMessage.assistant(message_id="later-answer", session_id=chat.session_id, content="Check the specimen orientation separately.", created_at=NOW),
+        ChatMessage.user(
+            message_id="create",
+            session_id=chat.session_id,
+            content="Create an objective candidate to compare LPBF tensile conditions.",
+            created_at=NOW,
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="request",
+            session_id=chat.session_id,
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id=call.tool_call_id,
+                    name=call.name,
+                    arguments=call.arguments,
+                    position=call.position,
+                    decision_user_id=call.decision_user_id,
+                    decision_arguments_digest=call.decision_arguments_digest,
+                    decided_at=call.decided_at,
+                    decision_basis=call.decision_basis,
+                    authorization_revision=call.authorization_revision,
+                ),
+            ),
+            content="",
+            created_at=NOW,
+        ),
+        ChatMessage(
+            message_id="result",
+            session_id=chat.session_id,
+            role="tool",
+            content=json.dumps(
+                asdict(result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at=NOW,
+            tool_call_id=result.tool_call_id,
+            tool_result=result,
+        ),
+        ChatMessage.assistant(
+            message_id="created",
+            session_id=chat.session_id,
+            content="The candidate objective was saved.",
+            created_at=NOW,
+        ),
+        ChatMessage.user(
+            message_id="question",
+            session_id=chat.session_id,
+            content=QUESTION,
+            created_at=NOW,
+            source_contexts=(source,),
+        ),
+        ChatMessage.assistant(
+            message_id="answer",
+            session_id=chat.session_id,
+            content=ANSWER,
+            created_at=NOW,
+        ),
+        ChatMessage.user(
+            message_id="later",
+            session_id=chat.session_id,
+            content="What about specimen orientation?",
+            created_at=NOW,
+        ),
+        ChatMessage.assistant(
+            message_id="later-answer",
+            session_id=chat.session_id,
+            content="Check the specimen orientation separately.",
+            created_at=NOW,
+        ),
     )
     await repository.save_trajectory(session=chat, messages=messages, tool_calls=(call,), tool_results=(result,))
     model = _Model(*(ModelTurn(content=ANSWER) for _ in range(8)))

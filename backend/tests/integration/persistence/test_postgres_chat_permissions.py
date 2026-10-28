@@ -1,3 +1,4 @@
+from domain.chat import ChatToolRequest
 import asyncio
 from datetime import datetime, timedelta, timezone
 
@@ -42,7 +43,17 @@ async def permission_case(postgres_session_factory):
     call = ChatToolCall.requested(tool_call_id="call", session_id="s", assistant_message_id="m",
         name="record_finding_feedback", arguments={}, risk=ToolRisk.WRITE).require_approval()
     message = ChatMessage.assistant_tool_calls(message_id="m", session_id="s", content="",
-        tool_calls=(call.to_request(),), created_at=now)
+        tool_calls=(ChatToolRequest(
+            tool_call_id=call.tool_call_id,
+            name=call.name,
+            arguments=call.arguments,
+            position=call.position,
+            decision_user_id=call.decision_user_id,
+            decision_arguments_digest=call.decision_arguments_digest,
+            decided_at=call.decided_at,
+            decision_basis=call.decision_basis,
+            authorization_revision=call.authorization_revision,
+        ),), created_at=now)
     await repo.save_trajectory(session=session, messages=(message,), tool_calls=(call,), tool_results=())
     return repo, call, grant, now
 

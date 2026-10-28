@@ -7,7 +7,7 @@ from time import perf_counter
 from typing import Any, TypeVar
 
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import tiktoken
 
 from application.core.structured_extraction.json_support import (
@@ -31,7 +31,7 @@ ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
 
 
 class TableMatrixRepairItemModelOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     row_index: int | None = None
     column: str | None = None
@@ -41,23 +41,12 @@ class TableMatrixRepairItemModelOutput(BaseModel):
 
 
 class TableMatrixRepairModelOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     repaired_table_matrix: list[list[str]] = Field(default_factory=list)
     repairs: list[TableMatrixRepairItemModelOutput] = Field(default_factory=list)
     confidence: float = 0.0
     warnings: list[str] = Field(default_factory=list)
-
-    @field_validator("repaired_table_matrix", "repairs", "warnings", mode="before")
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return [] if value is None else value
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def _normalize_default_confidence(cls, value: object) -> object:
-        return 0.0 if value is None else value
-
 
 PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v7"
 

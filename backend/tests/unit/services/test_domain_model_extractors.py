@@ -4424,11 +4424,22 @@ def test_objective_evidence_repair_prompt_requires_role_result_consistency():
     assert "A fixed control does not make the comparison incomparable" in repair_prompt
 
 
-def test_table_repair_normalizes_null_optional_output_containers():
-    client = _FakeOpenAIClient(
-        '{"repaired_table_matrix":null,"repairs":null,"warnings":null,"confidence":null}'
-    )
+@pytest.mark.parametrize("payload", [
+    {"repaired_table_matrix": None}, {"repairs": None}, {"warnings": None},
+    {"confidence": None}, {"confidence": "0.8"}, {"confidence": True},
+    {"repaired_table_matrix": [["Sample", 560]]}, {"repairs": [{"row_index": "1"}]},
+])
+def test_table_repair_rejects_invalid_output_types(payload):
+    client = _FakeOpenAIClient(json.dumps(payload))
 
+    with pytest.raises(ValidationError):
+        _paper_facts_extractor(client).repair_table_matrix({"source": {}})
+
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_table_repair_uses_defaults_only_for_omitted_fields():
+    client = _FakeOpenAIClient('{"repaired_table_matrix":[]}')
     repaired = _paper_facts_extractor(client).repair_table_matrix({"source": {}})
 
     assert repaired.model_dump() == {

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import hashlib
 import json
 from dataclasses import replace
@@ -15,7 +17,6 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder
-from application.chat.tool_result_projection import tool_result_record
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from domain.source import render_markdown_table
 from infra.source.artifact_bundle import source_table_payload
@@ -874,7 +875,22 @@ class InspectDocumentSourcesCapability:
     def _result_tokens(result: ChatToolResult) -> int:
         return ChatContextBuilder.estimate_tokens({
             "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(tool_result_record(result), ensure_ascii=True, separators=(",", ":")),
+            "content": json.dumps({
+                "tool_call_id": result.tool_call_id,
+                "status": result.status.value,
+                "data": deepcopy(dict(result.data)),
+                "resource_refs": [
+                    {
+                        "resource_type": item.resource_type,
+                        "resource_id": item.resource_id,
+                        "href": item.href,
+                    }
+                    for item in result.resource_refs
+                ],
+                "warnings": list(result.warnings),
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+            }, ensure_ascii=True, separators=(",", ":")),
         })
 
     @staticmethod

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import json
 from dataclasses import replace
 from typing import Annotated, Any, Mapping
@@ -13,7 +15,6 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from application.chat.context_builder import ChatContextBuilder
-from application.chat.tool_result_projection import tool_result_record
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 
 ObjectiveId = Annotated[str, Field(min_length=1, max_length=160)]
@@ -519,7 +520,22 @@ class InspectPublishedFindingCapability:
         budget = max(0, min(context.max_result_tokens, 12_000) - 256)
         while ChatContextBuilder.estimate_tokens({
             "role": "tool", "tool_call_id": result.tool_call_id,
-            "content": json.dumps(tool_result_record(result), ensure_ascii=True, separators=(",", ":")),
+            "content": json.dumps({
+                "tool_call_id": result.tool_call_id,
+                "status": result.status.value,
+                "data": deepcopy(dict(result.data)),
+                "resource_refs": [
+                    {
+                        "resource_type": item.resource_type,
+                        "resource_id": item.resource_id,
+                        "href": item.href,
+                    }
+                    for item in result.resource_refs
+                ],
+                "warnings": list(result.warnings),
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+            }, ensure_ascii=True, separators=(",", ":")),
         }) > budget:
             if not evidence_items:
                 return ChatToolResult(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
@@ -12,7 +14,6 @@ from typing import Any
 import tiktoken
 
 from application.chat.source_context_projection import source_context_record
-from application.chat.tool_result_projection import tool_result_record
 from domain.chat import ChatMessage, ChatMessageRole, ChatToolRequest, ChatToolResult
 
 
@@ -432,7 +433,22 @@ class ChatContextBuilder:
                     replace(
                         message,
                         content=json.dumps(
-                            tool_result_record(projected_result),
+                            {
+                                "tool_call_id": projected_result.tool_call_id,
+                                "status": projected_result.status.value,
+                                "data": deepcopy(dict(projected_result.data)),
+                                "resource_refs": [
+                                    {
+                                        "resource_type": item.resource_type,
+                                        "resource_id": item.resource_id,
+                                        "href": item.href,
+                                    }
+                                    for item in projected_result.resource_refs
+                                ],
+                                "warnings": list(projected_result.warnings),
+                                "error_code": projected_result.error_code,
+                                "error_message": projected_result.error_message,
+                            },
                             ensure_ascii=False,
                             separators=(",", ":"),
                         ),
@@ -475,7 +491,22 @@ class ChatContextBuilder:
                     replace(
                         message,
                         content=json.dumps(
-                            tool_result_record(minimal_result),
+                            {
+                                "tool_call_id": minimal_result.tool_call_id,
+                                "status": minimal_result.status.value,
+                                "data": deepcopy(dict(minimal_result.data)),
+                                "resource_refs": [
+                                    {
+                                        "resource_type": item.resource_type,
+                                        "resource_id": item.resource_id,
+                                        "href": item.href,
+                                    }
+                                    for item in minimal_result.resource_refs
+                                ],
+                                "warnings": list(minimal_result.warnings),
+                                "error_code": minimal_result.error_code,
+                                "error_message": minimal_result.error_message,
+                            },
                             ensure_ascii=False,
                             separators=(",", ":"),
                         ),

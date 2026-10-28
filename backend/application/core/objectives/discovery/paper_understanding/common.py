@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 
 PAPER_RESEARCH_MAP_WARNING_LIMIT = (2, 240)
 PAPER_RESEARCH_MAP_SCOPE_LIMIT = 4
@@ -29,15 +29,10 @@ def _normalize_list(value: object) -> object:
 
 
 def _normalize_warnings(value: object) -> object:
-    if value is None:
-        return []
-    if not isinstance(value, list):
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         return value
-    normalized: list[object] = []
+    normalized: list[str] = []
     for item in value[: PAPER_RESEARCH_MAP_WARNING_LIMIT[0]]:
-        if not isinstance(item, str):
-            normalized.append(item)
-            continue
         text = item.strip()
         if text:
             normalized.append(text[: PAPER_RESEARCH_MAP_WARNING_LIMIT[1]])
@@ -128,11 +123,4 @@ def _mark_bounded_output(
 
 
 class _PaperResearchMapResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    @field_validator("confidence", mode="before", check_fields=False)
-    @classmethod
-    def _normalize_default_confidence(cls, value: object) -> object:
-        if value is not None:
-            return value
-        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+    model_config = ConfigDict(extra="forbid", strict=True)

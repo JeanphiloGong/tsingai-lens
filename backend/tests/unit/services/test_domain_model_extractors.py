@@ -178,6 +178,16 @@ def test_paper_map_rejects_unknown_enum_values_instead_of_downgrading_them(
         response_model.model_validate({field_name: value})
 
 
+@pytest.mark.parametrize("confidence", [None, "0.6", True, -0.1, 1.1])
+def test_paper_map_rejects_invalid_confidence_at_extractor(confidence):
+    client = _FakeOpenAIClient(json.dumps({"confidence": confidence}))
+    with pytest.raises(ValidationError):
+        PaperResearchMapExtractor(_response_client(client)).extract(
+            {"document_id": "paper-1", "source_units": []}
+        )
+    assert len(client.chat.completions.calls) == 2
+
+
 def test_paper_map_factor_assertions_rebind_role_sources_into_relationship_lineage():
     client = _FakeOpenAIClient(
         json.dumps(

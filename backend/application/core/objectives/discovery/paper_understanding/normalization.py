@@ -75,8 +75,11 @@ def _downgrade_unresolved_relationships(value: object) -> object:
                 "label": outcome,
                 "variable_role": "not_applicable",
                 lineage_field: list(lineage_values),
-                "confidence": relationship.get("confidence", study.get("confidence")),
             }
+            if "confidence" in relationship:
+                signal["confidence"] = relationship["confidence"]
+            elif "confidence" in study:
+                signal["confidence"] = study["confidence"]
             for field_name in (
                 "experiment_label",
                 "design_type",

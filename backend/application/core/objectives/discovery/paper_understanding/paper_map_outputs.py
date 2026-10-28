@@ -15,7 +15,6 @@ from .common import (
     _REVIEW_CITATION_LEAD_LIMIT,
     _REVIEW_KNOWLEDGE_ITEM_LIMIT,
     _STUDY_CONTEXT_VALUE_CHARS,
-    _normalize_list,
     _normalize_warnings,
 )
 from .normalization import _downgrade_unresolved_relationships
@@ -29,11 +28,6 @@ class PaperMapFactorAssertionModelOutput(_PaperResearchMapResponse):
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
     ] = Field(min_length=1)
-
-    @field_validator("source_labels", mode="before")
-    @classmethod
-    def _normalize_source_labels(cls, value: object) -> object:
-        return _normalize_list(value)
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "PaperMapFactorAssertionModelOutput":
@@ -55,12 +49,7 @@ class PaperMapRelationshipModelOutput(_PaperResearchMapResponse):
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
     ] = Field(min_length=1)
-    confidence: float = 0.0
-
-    @field_validator("factor_assertions", "source_labels", mode="before")
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "PaperMapRelationshipModelOutput":
@@ -104,17 +93,7 @@ class PaperMapStudyModelOutput(_PaperResearchMapResponse):
         min_length=1,
         max_length=PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     )
-    confidence: float = 0.0
-
-    @field_validator(
-        "material_scope",
-        "process_context",
-        "relationships",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class PaperMapSignalModelOutput(_PaperResearchMapResponse):
@@ -153,17 +132,7 @@ class PaperMapSignalModelOutput(_PaperResearchMapResponse):
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
     ] = Field(min_length=1)
-    confidence: float = 0.0
-
-    @field_validator(
-        "material_scope",
-        "process_context",
-        "source_labels",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "PaperMapSignalModelOutput":
@@ -193,7 +162,7 @@ class ExperimentalPaperMapModelOutput(_PaperResearchMapResponse):
     )
     output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
-    confidence: float = 0.0
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     warnings: list[
         Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
     ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])
@@ -202,11 +171,6 @@ class ExperimentalPaperMapModelOutput(_PaperResearchMapResponse):
     @classmethod
     def _downgrade_unresolved_relationships(cls, value: object) -> object:
         return _downgrade_unresolved_relationships(value)
-
-    @field_validator("studies", "unresolved_signals", mode="before")
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
 
     @field_validator("warnings", mode="before")
     @classmethod
@@ -237,19 +201,7 @@ class ReviewMapKnowledgeItemModelOutput(_PaperResearchMapResponse):
     source_labels: list[
         Annotated[str, Field(pattern=r"^S[1-9][0-9]*$", max_length=8)]
     ] = Field(min_length=1)
-    confidence: float = 0.0
-
-    @field_validator(
-        "material_scope",
-        "variables",
-        "outcomes",
-        "conditions",
-        "source_labels",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "ReviewMapKnowledgeItemModelOutput":
@@ -277,17 +229,6 @@ class ReviewMapSynthesisModelOutput(_PaperResearchMapResponse):
         max_length=_REVIEW_CITATION_LEAD_LIMIT,
     )
 
-    @field_validator(
-        "synthesis_claims",
-        "disputes",
-        "evidence_gaps",
-        "citation_leads",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
-
 
 class ReviewPaperMapModelOutput(_PaperResearchMapResponse):
     """Review-author knowledge without duplicate study or signal output."""
@@ -298,7 +239,7 @@ class ReviewPaperMapModelOutput(_PaperResearchMapResponse):
     )
     output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
-    confidence: float = 0.0
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     warnings: list[
         Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
     ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])

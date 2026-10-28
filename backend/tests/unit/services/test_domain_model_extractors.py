@@ -3291,6 +3291,7 @@ def test_structured_objective_evidence_preserves_explicit_context_attributes():
 @pytest.mark.parametrize("response", [
     {"extractions": None},
     {"extractions": [{"evidence_role": "INVALID"}]},
+    {"extractions": [{"evidence_role": "current_experimental_evidence", "scientific_context": {"material": [{"name": "alloy", "value": "Ti-6Al-4V"}]}}]},
     {"extractions": [{"evidence_role": "condition_context", "confidence": None}]},
     {"extractions": [{"evidence_role": "condition_context", "confidence": "0.8"}]},
     {"extractions": [{"evidence_role": "condition_context", "scientific_context": {"material": ["Ti-6Al-4V"]}}]},

@@ -1114,7 +1114,8 @@ def _normalize_objective_evidence_payload(payload: Any) -> Any:
             normalized_extraction["evidence_role"] = "direct_result"
             changed = True
         if (
-            normalized_extraction.get("evidence_role") in _DIRECT_RESULT_ROUTE_ROLES
+            normalized_extraction.get("evidence_role")
+            in {"direct_result", "contradictory_result"}
             and normalized_extraction.get("reported_result") is None
             and not variables
             and normalized_extraction.get("comparison") is None

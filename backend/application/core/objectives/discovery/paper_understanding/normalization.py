@@ -19,7 +19,10 @@ def _downgrade_unresolved_relationships(value: object) -> object:
     downgraded_signals: list[dict[str, object]] = []
     changed = False
     for study in studies:
-        if not isinstance(study, Mapping):
+        if not isinstance(study, Mapping) or set(study) - {
+            "experiment_label", "design_type", "claim_scope", "material_scope",
+            "process_context", "relationships", "confidence",
+        }:
             retained_studies.append(study)
             continue
         relationships = study.get("relationships")

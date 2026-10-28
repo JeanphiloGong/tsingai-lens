@@ -394,6 +394,40 @@ def test_scientific_downgrade_does_not_hide_malformed_relationship(relationship)
     assert len(client.chat.completions.calls) == 2
 
 @pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+@pytest.mark.parametrize("extra_fields", [
+    {"signal_type": "outcome"},
+    {"label": "fatigue life"},
+    {"variable_role": "not_applicable"},
+    {"source_labels": ["S1"]},
+])
+def test_paper_map_downgrade_preserves_unknown_study_field_rejections(
+    extraction_mode, extra_fields,
+):
+    from pydantic import ValidationError
+
+    response = {"studies": [{
+        "material_scope": ["Ti-6Al-4V"],
+        "relationships": [{
+            "factor_assertions": [], "outcome": "porosity", "source_labels": ["S1"],
+        }],
+        **extra_fields,
+    }]}
+    client = _FakeOpenAIClient(json.dumps(response), parsed=response)
+    reader = PaperResearchMapExtractor(StructuredResponseClient(
+        client=client, model="fake-model", extraction_mode=extraction_mode,
+    ))
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        reader.extract({"document_id": "paper-ti", "source_units": [{
+            "source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1",
+            "content": "Ti-6Al-4V porosity was measured; its varied factor is unresolved.",
+        }]})
+
+    assert len(client.chat.completions.calls) == 2
+    assert len(client.beta.chat.completions.calls) == (extraction_mode == "provider_parse")
+
+
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
 def test_each_paper_map_response_is_processed_once_before_source_binding(monkeypatch, extraction_mode):
     from application.core.objectives.discovery.paper_understanding import paper_map_outputs
 

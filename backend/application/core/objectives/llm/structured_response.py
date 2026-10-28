@@ -443,27 +443,20 @@ class StructuredResponseClient:
                 payload = load_json_payload(extract_json_object(raw_content))
                 if normalize_response_payload is not None:
                     payload = normalize_response_payload(payload)
-                try:
-                    parsed = self._validate_response_payload(
-                        payload,
-                        response_model=response_model,
-                        postprocess_response=postprocess_response,
+                parsed = response_model.model_validate(payload)
+                if postprocess_response is not None:
+                    processed = postprocess_response(parsed)
+                    if processed is not None:
+                        parsed = processed
+                attempts.append(
+                    self._build_attempt_trace(
+                        attempt=attempt + 1,
+                        finish_reason=finish_reason,
+                        raw_content=raw_content,
                     )
-                    attempts.append(
-                        self._build_attempt_trace(
-                            attempt=attempt + 1,
-                            finish_reason=finish_reason,
-                            raw_content=raw_content,
-                        )
-                    )
-                    self._last_attempts.set(tuple(attempts))
-                    return parsed, raw_content
-                except ValidationError:
-                    if isinstance(payload, dict):
-                        extra_keys = set(payload) - set(response_model.model_fields)
-                        if extra_keys - {"confidence"}:
-                            raise
-                    raise
+                )
+                self._last_attempts.set(tuple(attempts))
+                return parsed, raw_content
             except StructuredOutputSaturatedError as exc:
                 attempts.append(
                     self._build_attempt_trace(
@@ -523,36 +516,6 @@ class StructuredResponseClient:
             "include markdown. Correct these validation errors: "
             f"{repair_detail}"
         )
-
-    @staticmethod
-    def _validate_response_payload(
-        payload: Any,
-        *,
-        response_model: type[BaseModel],
-        postprocess_response: Callable[[BaseModel], BaseModel | None] | None,
-    ) -> BaseModel:
-        def postprocess(parsed: BaseModel) -> BaseModel:
-            if postprocess_response is None:
-                return parsed
-            processed = postprocess_response(parsed)
-            return processed if processed is not None else parsed
-
-        try:
-            return postprocess(response_model.model_validate(payload))
-        except ValidationError:
-            if not isinstance(payload, dict):
-                raise
-            extra_keys = set(payload) - set(response_model.model_fields)
-            if extra_keys - {"confidence"}:
-                raise
-            filtered_payload = {
-                key: value
-                for key, value in payload.items()
-                if key in response_model.model_fields
-            }
-            if filtered_payload == payload:
-                raise
-            return postprocess(response_model.model_validate(filtered_payload))
 
     def _parse_provider_structured_response(
         self,

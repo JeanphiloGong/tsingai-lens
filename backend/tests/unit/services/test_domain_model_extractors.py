@@ -2689,6 +2689,64 @@ def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
     assert len(client.chat.completions.calls) == 2
 
 
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+def test_objective_paper_frame_rejects_extra_confidence_in_both_parse_modes(extraction_mode):
+    response = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": [],
+        "confidence": 0.9,
+    }
+    client = _FakeOpenAIClient(json.dumps(response), parsed=response)
+    extractor = StructuredResponseClient(
+        client=client, model="fake-model", extraction_mode=extraction_mode,
+    )
+    payload = {
+        "objective": {"question": "How does laser power affect porosity?"},
+        "source_units": [{"source_unit_id": "results-1", "source_kind": "section", "source_ref": "results", "text": "Ti-6Al-4V porosity changed with laser power."}],
+    }
+
+    with pytest.raises(ValidationError, match="confidence"):
+        ObjectiveSourceScreener(extractor).screen_batch(payload)
+
+    assert len(client.beta.chat.completions.calls) == (extraction_mode == "provider_parse")
+    assert len(client.chat.completions.calls) == 2
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "failed"
+    assert len(trace["attempts"]) == 2
+    assert all(attempt["error_type"] == "ValidationError" for attempt in trace["attempts"])
+    assert all('"confidence": 0.9' in attempt["response_preview"] for attempt in trace["attempts"])
+
+
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+def test_objective_paper_frame_accepts_model_correction_of_extra_confidence(extraction_mode):
+    corrected = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_labels": ["S1"],
+        "excluded_source_labels": [],
+    }
+    invalid = {**corrected, "confidence": 0.9}
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(corrected)], parsed=invalid)
+    extractor = StructuredResponseClient(
+        client=client, model="fake-model", extraction_mode=extraction_mode,
+    )
+
+    frame = ObjectiveSourceScreener(extractor).screen_batch({
+        "objective": {"question": "How does laser power affect porosity?"},
+        "source_units": [{"source_unit_id": "results-1", "source_kind": "section", "source_ref": "results", "text": "Ti-6Al-4V porosity changed with laser power."}],
+    })
+
+    assert frame.relevant_source_unit_ids == ["results-1"]
+    assert frame.source_accounting_origin == "model"
+    assert len(client.chat.completions.calls) == 2
+    trace = extractor.consume_last_trace()
+    assert trace["trace_status"] == "available"
+    assert trace["attempts"][0]["error_type"] == "ValidationError"
+    assert "error_type" not in trace["attempts"][1]
+
+
 def test_provider_parsed_objective_paper_frame_repairs_omission(
     monkeypatch,
 ):

@@ -145,9 +145,17 @@ class CollectionRepository:
             row = await session.get(Collection, collection_id)
             if row is None:
                 return None
-            return _to_collection(
-                row,
-                await _documents_for_collection(session, collection_id),
+            return StoredCollection(
+                collection=CollectionAggregate(
+                    collection_id=row.collection_id,
+                    owner_user_id=row.owner_user_id,
+                    name=row.name,
+                    description=row.description,
+                    status=row.status,
+                ),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                documents=await load_collection_documents(session, collection_id),
             )
 
     async def collection_belongs_to_user(
@@ -177,7 +185,31 @@ class CollectionRepository:
                     Document.document_id == document_id,
                 )
             )).one_or_none()
-            return _to_document(*row) if row is not None else None
+            if row is None:
+                return None
+            document, preparation = row
+            profile = dict(preparation.profile_json or {}) if preparation else {}
+            source_fingerprint = preparation.source_fingerprint if preparation else None
+            profile_fingerprint = profile.get("profile_fingerprint")
+            return StoredDocument(
+                document=DocumentAggregate(
+                    document_id=document.document_id,
+                    original_filename=document.original_filename,
+                    sha256=document.sha256,
+                    media_type=document.media_type,
+                    status=document.status,
+                    size_bytes=document.size_bytes,
+                    parser_version=preparation.parser_version if preparation else None,
+                    document_analysis_version=profile.get("profile_version"),
+                    source_fingerprint=source_fingerprint,
+                    profile_fingerprint=profile_fingerprint,
+                    preparation_fingerprint=profile_fingerprint or source_fingerprint,
+                ),
+                stored_filename=document.stored_filename,
+                storage_key=document.storage_key,
+                created_at=_iso(document.created_at),
+                updated_at=_iso(document.updated_at),
+            )
 
     async def update_collection(self, record: StoredCollection) -> bool:
         async with self.session_factory.begin() as session:
@@ -264,7 +296,20 @@ class CollectionRepository:
                 )
             ) + 1
             session.add_all(
-                _document_row(collection_id, item, next_order + position)
+                Document(
+                    document_id=item.document.document_id,
+                    collection_id=collection_id,
+                    original_filename=item.document.original_filename,
+                    stored_filename=item.stored_filename,
+                    storage_key=item.storage_key,
+                    sha256=item.document.sha256,
+                    media_type=item.document.media_type,
+                    status=item.document.status,
+                    size_bytes=item.document.size_bytes,
+                    document_order=next_order + position,
+                    created_at=_datetime(item.created_at),
+                    updated_at=_datetime(item.updated_at or item.created_at),
+                )
                 for position, item in enumerate(documents)
             )
             collection.status = "uploaded"
@@ -295,78 +340,7 @@ class CollectionRepository:
             return True
 
 
-def _to_collection(
-    row: Collection,
-    documents: tuple[StoredDocument, ...],
-) -> StoredCollection:
-    return StoredCollection(
-        collection=CollectionAggregate(
-            collection_id=row.collection_id,
-            owner_user_id=row.owner_user_id,
-            name=row.name,
-            description=row.description,
-            status=row.status,
-        ),
-        created_at=_iso(row.created_at),
-        updated_at=_iso(row.updated_at),
-        documents=documents,
-    )
-
-
-def _document_row(
-    collection_id: str,
-    record: StoredDocument,
-    document_order: int,
-) -> Document:
-    return Document(
-        document_id=record.document.document_id,
-        collection_id=collection_id,
-        original_filename=record.document.original_filename,
-        stored_filename=record.stored_filename,
-        storage_key=record.storage_key,
-        sha256=record.document.sha256,
-        media_type=record.document.media_type,
-        status=record.document.status,
-        size_bytes=record.document.size_bytes,
-        document_order=document_order,
-        created_at=_datetime(record.created_at),
-        updated_at=_datetime(record.updated_at or record.created_at),
-    )
-
-
-def _to_document(
-    row: Document,
-    preparation_row: DocumentPreparationRow | None = None,
-) -> StoredDocument:
-    profile_payload = dict(preparation_row.profile_json or {}) if preparation_row else {}
-    source_fingerprint = preparation_row.source_fingerprint if preparation_row else None
-    profile_fingerprint = profile_payload.get("profile_fingerprint")
-    return StoredDocument(
-        document=DocumentAggregate(
-            document_id=row.document_id,
-            original_filename=row.original_filename,
-            sha256=row.sha256,
-            media_type=row.media_type,
-            status=row.status,
-            size_bytes=row.size_bytes,
-            parser_version=preparation_row.parser_version if preparation_row else None,
-            document_analysis_version=profile_payload.get("profile_version"),
-            source_fingerprint=source_fingerprint,
-            profile_fingerprint=profile_fingerprint,
-            # A fully prepared document uses the profile fingerprint as its
-            # preparation identity.  Source-only fixtures and documents that are
-            # still between parsing and profile generation retain a usable
-            # source identity until the profile artifact is available.
-            preparation_fingerprint=profile_fingerprint or source_fingerprint,
-        ),
-        stored_filename=row.stored_filename,
-        storage_key=row.storage_key,
-        created_at=_iso(row.created_at),
-        updated_at=_iso(row.updated_at),
-    )
-
-
-async def _documents_for_collection(
+async def load_collection_documents(
     session: AsyncSession,
     collection_id: str,
 ) -> tuple[StoredDocument, ...]:
@@ -379,7 +353,32 @@ async def _documents_for_collection(
         .where(Document.collection_id == collection_id)
         .order_by(Document.document_order)
     )
-    return tuple(_to_document(*row) for row in rows)
+    documents = []
+    for document, preparation in rows:
+        profile = dict(preparation.profile_json or {}) if preparation else {}
+        source_fingerprint = preparation.source_fingerprint if preparation else None
+        profile_fingerprint = profile.get("profile_fingerprint")
+        documents.append(StoredDocument(
+            document=DocumentAggregate(
+                document_id=document.document_id,
+                original_filename=document.original_filename,
+                sha256=document.sha256,
+                media_type=document.media_type,
+                status=document.status,
+                size_bytes=document.size_bytes,
+                parser_version=preparation.parser_version if preparation else None,
+                document_analysis_version=profile.get("profile_version"),
+                source_fingerprint=source_fingerprint,
+                profile_fingerprint=profile_fingerprint,
+                # The source identity remains usable until profiling completes.
+                preparation_fingerprint=profile_fingerprint or source_fingerprint,
+            ),
+            stored_filename=document.stored_filename,
+            storage_key=document.storage_key,
+            created_at=_iso(document.created_at),
+            updated_at=_iso(document.updated_at),
+        ))
+    return tuple(documents)
 
 
 def _datetime(value: Any) -> datetime:

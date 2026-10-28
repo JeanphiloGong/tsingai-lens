@@ -46,53 +46,6 @@ class ExperimentAnalysisBundle:
     findings: tuple[Finding, ...]
     revisions: tuple[StoredPaperExperimentRevision, ...]
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "selections": [
-                {
-                    "selection_id": item.selection_id,
-                    "objective_id": item.objective_id,
-                    "analysis_version": item.analysis_version,
-                    "experiment_id": item.experiment_id,
-                    "experiment_version": item.experiment_version,
-                    "outcome": item.outcome,
-                    "measurement_keys": list(item.measurement_keys),
-                    "comparison_keys": list(item.comparison_keys),
-                    "missing_context": list(item.missing_context),
-                    "reasons": list(item.reasons),
-                }
-                for item in self.selections
-            ],
-            "comparison_groups": [
-                {
-                    "group_id": item.group_id,
-                    "objective_id": item.objective_id,
-                    "analysis_version": item.analysis_version,
-                    "outcome": item.outcome,
-                    "comparison_target": item.comparison_target,
-                    "comparison_basis": list(item.comparison_basis),
-                    "members": [
-                        {
-                            "selection_id": item.selection_id,
-                            "role": item.role,
-                            "comparability": item.comparability,
-                            "reason": item.reason,
-                        }
-                        for item in item.members
-                    ],
-                    "normalizations": [dict(item) for item in item.normalizations],
-                    "status": item.status,
-                    "limitations": list(item.limitations),
-                }
-                for item in self.groups
-            ],
-            "findings": [finding_response(item) for item in self.findings],
-            "experiments": [
-                paper_experiment_revision_response(item.revision)
-                for item in self.revisions
-            ],
-        }
-
 
 class ExperimentQueryService:
     """Assemble one immutable analysis view and expose lossless exports."""
@@ -209,7 +162,51 @@ class ExperimentQueryService:
             "objective_id": objective_id,
             "analysis_version": analysis_version,
             "projection_version": "paper-experiment-analysis.v1",
-            **bundle.to_record(),
+            **{
+                "selections": [
+                    {
+                        "selection_id": item.selection_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "experiment_id": item.experiment_id,
+                        "experiment_version": item.experiment_version,
+                        "outcome": item.outcome,
+                        "measurement_keys": list(item.measurement_keys),
+                        "comparison_keys": list(item.comparison_keys),
+                        "missing_context": list(item.missing_context),
+                        "reasons": list(item.reasons),
+                    }
+                    for item in bundle.selections
+                ],
+                "comparison_groups": [
+                    {
+                        "group_id": item.group_id,
+                        "objective_id": item.objective_id,
+                        "analysis_version": item.analysis_version,
+                        "outcome": item.outcome,
+                        "comparison_target": item.comparison_target,
+                        "comparison_basis": list(item.comparison_basis),
+                        "members": [
+                            {
+                                "selection_id": item.selection_id,
+                                "role": item.role,
+                                "comparability": item.comparability,
+                                "reason": item.reason,
+                            }
+                            for item in item.members
+                        ],
+                        "normalizations": [dict(item) for item in item.normalizations],
+                        "status": item.status,
+                        "limitations": list(item.limitations),
+                    }
+                    for item in bundle.groups
+                ],
+                "findings": [finding_response(item) for item in bundle.findings],
+                "experiments": [
+                    paper_experiment_revision_response(item.revision)
+                    for item in bundle.revisions
+                ],
+            },
         }
 
     async def export_csv(

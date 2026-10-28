@@ -7,7 +7,6 @@ from application.goal.experiment_plan_service import (
     ExperimentPlanService,
 )
 from domain.goal import ExperimentPlanRecord
-from repositories.experiment_plan_repository import experiment_plan_from_record
 from repositories.experiment_plan_repository import ExperimentPlanRepository
 
 pytestmark = pytest.mark.anyio
@@ -68,8 +67,8 @@ def _structured_plan(hypothesis: str) -> dict:
 
 
 def _historical_plan() -> ExperimentPlanRecord:
-    return experiment_plan_from_record(
-        {
+    return ExperimentPlanRecord(
+        **        {
             "plan_id": "exp_historical",
             "collection_id": "col_1",
             "objective_id": "objective_1",
@@ -83,13 +82,13 @@ def _historical_plan() -> ExperimentPlanRecord:
             ),
             "status": "draft",
             "source_message_id": "msg_legacy",
-            "source_links": [
+            "source_links": (
                 {
                     "kind": "evidence",
                     "label": "Source 1",
                     "href": "/collections/col_1/documents/paper-a?evidence_id=ev_1",
-                }
-            ],
+                },
+            ),
             "metadata": {
                 "source": "goal_copilot",
                 "review_gate": "reviewed_findings",

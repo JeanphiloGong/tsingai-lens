@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchScope,
+    PaperResearchRelationship,
+    PaperResearchSourceRef,
+    build_paper_research_scope_id,
+)
+
 from typing import Mapping
 
 
 from domain.core.research_objective import normalize_objective_terms
 
-from repositories.paper_map_repository import paper_map_from_payload
 
 from types import SimpleNamespace
 
@@ -98,14 +104,13 @@ def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
             "stainless steel."
         ),
     }
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "paper-scanning-review",
-            "doc_role": "review",
-            "studies": [],
-            "evidence_density": "medium",
-            "confidence": 0.9,
-        }
+    paper_map = PaperResearchMap(
+        document_id="paper-scanning-review",
+        doc_role="review",
+        studies=(),
+        evidence_density="medium",
+        confidence=0.9,
+        warnings=(),
     )
     frame = source_screening._aggregate_objective_paper_frame_batches(
         objective_id=objective.objective_id,
@@ -781,31 +786,57 @@ def test_paper_map_relationship_lineage_is_attached_to_objective_frame() -> None
             "source_relationship_ids": ["relationship-scan-strength"],
         }
     )
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "paper-1",
-            "doc_role": "experimental",
-            "evidence_density": "medium",
-            "studies": [
-                {
-                    "document_id": "paper-1",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": ["316L stainless steel"],
-                    "process_context": ["LPBF"],
-                    "relationships": [
-                        {
-                            "relationship_id": "relationship-scan-strength",
-                            "varied_factors": ["scan strategy"],
-                            "outcome": "yield strength",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "result-1"}
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
+    paper_map = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=build_paper_research_scope_id(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label=None,
+                    material_scope=("316L stainless steel",),
+                    process_context=("LPBF",),
+                    relationships=(
+                        PaperResearchRelationship(
+                            relationship_id="relationship-scan-strength",
+                            varied_factors=("scan strategy",),
+                            outcome="yield strength",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="result-1"
+                                ),
+                            ),
+                            confidence=0.0,
+                        ),
+                    ),
+                ),
+                document_id="paper-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=("316L stainless steel",),
+                process_context=("LPBF",),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id="relationship-scan-strength",
+                        varied_factors=("scan strategy",),
+                        outcome="yield strength",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="result-1"
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        evidence_density="medium",
+        confidence=0.0,
+        warnings=(),
     )
     source_unit = {
         "source_unit_id": "unit-result-1",
@@ -920,14 +951,13 @@ def test_experimental_paper_role_is_not_downgraded_by_frame_judgment():
             "outcomes": ["relative density"],
         }
     )
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "paper-experimental",
-            "doc_role": "experimental",
-            "studies": [],
-            "evidence_density": "medium",
-            "confidence": 0.8,
-        }
+    paper_map = PaperResearchMap(
+        document_id="paper-experimental",
+        doc_role="experimental",
+        studies=(),
+        evidence_density="medium",
+        confidence=0.8,
+        warnings=(),
     )
     source_unit = {
         "source_unit_id": "result-unit",

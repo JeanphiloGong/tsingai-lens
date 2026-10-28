@@ -3,10 +3,6 @@ from __future__ import annotations
 import pytest
 
 from domain.goal import ExperimentPlanRecord
-from repositories.experiment_plan_repository import (
-    experiment_plan_from_record,
-    experiment_plan_record,
-)
 
 
 def _plan_payload(**overrides):
@@ -18,7 +14,7 @@ def _plan_payload(**overrides):
         "content": "Compare an expert-approved laser-power matrix.",
         "status": "draft",
         "source_message_id": None,
-        "source_links": [],
+        "source_links": (),
         "metadata": {"source": "manual"},
         "created_by": "researcher-1",
         "created_at": "2026-09-07T00:00:00+00:00",
@@ -29,7 +25,7 @@ def _plan_payload(**overrides):
 
 
 def test_legacy_plan_defaults_to_an_unstructured_first_revision() -> None:
-    plan = experiment_plan_from_record(_plan_payload())
+    plan = ExperimentPlanRecord(**_plan_payload())
 
     assert plan.plan_version == 1
     assert plan.parent_plan_id is None
@@ -37,7 +33,7 @@ def test_legacy_plan_defaults_to_an_unstructured_first_revision() -> None:
     assert plan.updated_by is None
 
 
-def test_structured_plan_round_trip_preserves_the_approved_payload() -> None:
+def test_structured_plan_preserves_the_approved_payload() -> None:
     structured_plan = {
         "hypothesis": "Higher laser power may reduce porosity.",
         "variables": [
@@ -53,25 +49,24 @@ def test_structured_plan_round_trip_preserves_the_approved_payload() -> None:
         "controls": ["powder batch", "layer thickness"],
         "replicates": 3,
     }
-    plan = experiment_plan_from_record(
-        _plan_payload(
+    plan = ExperimentPlanRecord(
+        **        _plan_payload(
             structured_plan=structured_plan,
             updated_by="researcher-1",
         )
     )
 
     assert plan.structured_plan == structured_plan
-    assert experiment_plan_record(plan)["structured_plan"] == structured_plan
-    assert experiment_plan_record(plan)["updated_by"] == "researcher-1"
+    assert plan.updated_by == "researcher-1"
 
 
 def test_later_revision_requires_an_immediate_parent_and_actor() -> None:
     with pytest.raises(ValueError, match="parent_plan_id"):
-        experiment_plan_from_record(_plan_payload(plan_version=2))
+        ExperimentPlanRecord(**_plan_payload(plan_version=2))
 
     with pytest.raises(ValueError, match="updated_by"):
-        experiment_plan_from_record(
-            _plan_payload(
+        ExperimentPlanRecord(
+        **            _plan_payload(
                 plan_id="plan-v2",
                 plan_version=2,
                 parent_plan_id="plan-v1",
@@ -81,18 +76,18 @@ def test_later_revision_requires_an_immediate_parent_and_actor() -> None:
 
 def test_first_revision_cannot_point_to_a_parent() -> None:
     with pytest.raises(ValueError, match="first revision"):
-        experiment_plan_from_record(
-            _plan_payload(parent_plan_id="another-plan")
+        ExperimentPlanRecord(
+        **            _plan_payload(parent_plan_id="another-plan")
         )
 
 
 def test_plan_version_rejects_non_integral_values() -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        experiment_plan_from_record(_plan_payload(plan_version=1.5))
+        ExperimentPlanRecord(**_plan_payload(plan_version=1.5))
 
 
 def test_next_revision_is_direct_validated_and_copies_structured_content(monkeypatch) -> None:
-    plan = experiment_plan_from_record(_plan_payload())
+    plan = ExperimentPlanRecord(**_plan_payload())
     structured = {"variables": [{"name": "laser power", "levels": [100, 200]}]}
 
     def reject_serialization(_self):

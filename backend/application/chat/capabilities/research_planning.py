@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from hashlib import sha256
 from typing import Any
 from urllib.parse import urlencode
@@ -20,7 +21,6 @@ from application.goal.research_plan_contract import (
     ResearchPlanVariable,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from repositories.experiment_plan_repository import experiment_plan_record
 
 
 class ProposeResearchPlanToolRequest(ResearchPlanStructure):
@@ -153,7 +153,27 @@ class InspectResearchPlansCapability:
                 context.collection_id,
                 arguments.objective_id,
             )
-            records = [experiment_plan_record(item) for item in plans]
+            records = [
+                {
+                    "plan_id": item.plan_id,
+                    "collection_id": item.collection_id,
+                    "objective_id": item.objective_id,
+                    "title": item.title,
+                    "content": item.content,
+                    "status": item.status,
+                    "source_message_id": item.source_message_id,
+                    "source_links": [dict(link) for link in item.source_links],
+                    "metadata": dict(item.metadata),
+                    "created_by": item.created_by,
+                    "created_at": item.created_at,
+                    "updated_at": item.updated_at,
+                    "plan_version": item.plan_version,
+                    "parent_plan_id": item.parent_plan_id,
+                    "structured_plan": deepcopy(dict(item.structured_plan)) if item.structured_plan is not None else None,
+                    "updated_by": item.updated_by,
+                }
+                for item in plans
+            ]
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status="succeeded",
@@ -185,7 +205,24 @@ class InspectResearchPlansCapability:
                 error_code="research_plan_not_found",
                 error_message="The requested research-plan revision was not found.",
             )
-        record = experiment_plan_record(plan)
+        record = {
+            "plan_id": plan.plan_id,
+            "collection_id": plan.collection_id,
+            "objective_id": plan.objective_id,
+            "title": plan.title,
+            "content": plan.content,
+            "status": plan.status,
+            "source_message_id": plan.source_message_id,
+            "source_links": [dict(link) for link in plan.source_links],
+            "metadata": dict(plan.metadata),
+            "created_by": plan.created_by,
+            "created_at": plan.created_at,
+            "updated_at": plan.updated_at,
+            "plan_version": plan.plan_version,
+            "parent_plan_id": plan.parent_plan_id,
+            "structured_plan": deepcopy(dict(plan.structured_plan)) if plan.structured_plan is not None else None,
+            "updated_by": plan.updated_by,
+        }
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
             status="succeeded",
@@ -683,7 +720,24 @@ def _saved_plan_result(
     current: ChatToolResult,
     plan: Any,
 ) -> ChatToolResult:
-    record = experiment_plan_record(plan)
+    record = {
+        "plan_id": plan.plan_id,
+        "collection_id": plan.collection_id,
+        "objective_id": plan.objective_id,
+        "title": plan.title,
+        "content": plan.content,
+        "status": plan.status,
+        "source_message_id": plan.source_message_id,
+        "source_links": [dict(link) for link in plan.source_links],
+        "metadata": dict(plan.metadata),
+        "created_by": plan.created_by,
+        "created_at": plan.created_at,
+        "updated_at": plan.updated_at,
+        "plan_version": plan.plan_version,
+        "parent_plan_id": plan.parent_plan_id,
+        "structured_plan": deepcopy(dict(plan.structured_plan)) if plan.structured_plan is not None else None,
+        "updated_by": plan.updated_by,
+    }
     refs = [_plan_ref(context.collection_id, objective_id, record)]
     refs.extend(
         ref for ref in current.resource_refs if ref.resource_type != "research_plan_draft"

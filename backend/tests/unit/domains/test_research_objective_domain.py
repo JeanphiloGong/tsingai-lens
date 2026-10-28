@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchMap,
+    PaperResearchSignal,
+    PaperResearchSourceRef,
+    PaperSourceUnitCoverage,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
+    build_paper_research_scope,
+    build_paper_research_relationship,
+    build_paper_research_signal,
+)
+
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Mapping
@@ -79,58 +91,51 @@ from repositories.objective_repository import (
     ObjectiveRepository,
     _evidence_status_counts,
 )
-from repositories.paper_map_repository import (
-    _review_item,
-    coverage_from_payload,
-    coverage_payload,
-    paper_map_from_payload,
-    paper_map_payload,
-    research_scope_from_payload,
-    research_scope_payload,
-    research_signal_from_payload,
-    research_signal_payload,
-    review_synthesis_payload,
-)
 
 
 @pytest.mark.parametrize(
     "variable_role",
     ["varied", "compared", "modeled", "fixed", "context", "uncertain"],
 )
-def test_paper_research_variable_signal_round_trips_scientific_role(
+def test_paper_research_variable_signal_retains_scientific_role(
     variable_role: str,
 ) -> None:
-    signal = research_signal_from_payload(
-        {
-            "document_id": "paper-1",
-            "signal_type": "variable",
-            "label": "processing speed",
-            "variable_role": variable_role,
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "source_refs": [
-                {"source_kind": "block", "source_ref": "methods-1"}
-            ],
-        }
+    signal = build_paper_research_signal(
+        document_id="paper-1",
+        signal_type="variable",
+        label="processing speed",
+        variable_role=variable_role,
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        source_refs=(
+            PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+        ),
+        confidence=0.0,
+        reason=None,
     )
 
     assert signal.variable_role == variable_role
-    assert research_signal_from_payload(research_signal_payload(signal)) == signal
 
 
 def test_paper_research_outcome_signal_has_no_factor_role() -> None:
-    signal = research_signal_from_payload(
-        {
-            "document_id": "paper-1",
-            "signal_type": "outcome",
-            "label": "relative density",
-            "variable_role": "not_applicable",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "source_refs": [
-                {"source_kind": "block", "source_ref": "results-1"}
-            ],
-        }
+    signal = build_paper_research_signal(
+        document_id="paper-1",
+        signal_type="outcome",
+        label="relative density",
+        variable_role="not_applicable",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        source_refs=(
+            PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+        ),
+        confidence=0.0,
+        reason=None,
     )
 
     assert signal.variable_role == "not_applicable"
@@ -145,47 +150,50 @@ def test_paper_research_signal_rejects_role_type_mismatch(
     variable_role: str,
 ) -> None:
     with pytest.raises(ValueError, match="variable role"):
-        research_signal_from_payload(
-            {
-                "document_id": "paper-1",
-                "signal_type": signal_type,
-                "label": "research axis",
-                "variable_role": variable_role,
-                "source_refs": [
-                    {"source_kind": "block", "source_ref": "source-1"}
-                ],
-            }
+        build_paper_research_signal(
+            document_id="paper-1",
+            signal_type=signal_type,
+            label="research axis",
+            variable_role=variable_role,
+            design_type="uncertain",
+            claim_scope="uncertain",
+            experiment_label=None,
+            material_scope=(),
+            process_context=(),
+            source_refs=(
+                PaperResearchSourceRef(source_kind="block", source_ref="source-1"),
+            ),
+            confidence=0.0,
+            reason=None,
         )
 
 
-def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> None:
-    item = _review_item(
-        {
-            "content": "Reported porosity trends disagree across scan strategies.",
-            "material_scope": ["Ti-6Al-4V"],
-            "variables": ["scan strategy"],
-            "outcomes": ["porosity"],
-            "conditions": ["laser powder bed fusion"],
-            "source_refs": [
-                {"source_kind": "block", "source_ref": "review-conclusion"}
-            ],
-            "confidence": 0.82,
-        }
+def test_review_synthesis_map_retains_source_linked_research_judgments() -> None:
+    item = ReviewKnowledgeItem(
+        content="Reported porosity trends disagree across scan strategies.",
+        material_scope=("Ti-6Al-4V",),
+        variables=("scan strategy",),
+        outcomes=("porosity",),
+        conditions=("laser powder bed fusion",),
+        source_refs=(
+            PaperResearchSourceRef(source_kind="block", source_ref="review-conclusion"),
+        ),
+        confidence=0.82,
     )
-    skim = paper_map_from_payload(
-        {
-            "document_id": "review-paper",
-            "doc_role": "review",
-            "review_synthesis": review_synthesis_payload(ReviewSynthesisMap(disputes=(item,))),
-            "input_fingerprint": "map-input-v1",
-            "map_version": "paper-map.v1",
-            "generated_at": "2026-09-08T09:00:00+00:00",
-        }
+    skim = PaperResearchMap(
+        document_id="review-paper",
+        doc_role="review",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        review_synthesis=ReviewSynthesisMap(disputes=(item,)),
+        input_fingerprint="map-input-v1",
+        map_version="paper-map.v1",
+        generated_at="2026-09-08T09:00:00+00:00",
     )
 
-    restored = paper_map_from_payload(paper_map_payload(skim))
-
-    assert restored == skim
+    restored = skim
     assert restored.review_synthesis.disputes == (item,)
     assert restored.review_synthesis.citation_leads == ()
     assert restored.input_fingerprint == "map-input-v1"
@@ -195,84 +203,89 @@ def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> 
 
 def test_non_review_paper_rejects_review_synthesis_map() -> None:
     with pytest.raises(ValueError, match="review synthesis requires a review paper"):
-        paper_map_from_payload(
-            {
-                "document_id": "experimental-paper",
-                "doc_role": "experimental",
-                "review_synthesis": {
-                    "evidence_gaps": [
-                        {
-                            "content": "More validation is needed.",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "block-1"}
-                            ],
-                        }
-                    ]
-                },
-            }
+        PaperResearchMap(
+            document_id="experimental-paper",
+            doc_role="experimental",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+            review_synthesis=ReviewSynthesisMap(
+                synthesis_claims=(),
+                disputes=(),
+                evidence_gaps=(
+                    ReviewKnowledgeItem(
+                        content="More validation is needed.",
+                        material_scope=(),
+                        variables=(),
+                        outcomes=(),
+                        conditions=(),
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-1"
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                citation_leads=(),
+            ),
         )
 
 
 def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
-    no_signal = coverage_from_payload(
-        {
-            "source_unit_id": "results-1-source-1",
-            "window_id": "results-1",
-            "source_kind": "block",
-            "source_ref": "block-1",
-            "status": "no_study_signal",
-            "reason": "The unit contains only general background.",
-        }
+    no_signal = PaperSourceUnitCoverage(
+        source_unit_id="results-1-source-1",
+        window_id="results-1",
+        source_kind="block",
+        source_ref="block-1",
+        status="no_study_signal",
+        reason="The unit contains only general background.",
     )
 
     assert no_signal.status is PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
-    assert coverage_from_payload(coverage_payload(no_signal)) == no_signal
 
     with pytest.raises(ValueError, match="requires a reason"):
-        coverage_from_payload(
-            {
-                **coverage_payload(no_signal),
-                "reason": None,
-            }
-        )
+        replace(no_signal, reason=None)
 
     with pytest.raises(ValueError, match="cannot have a reason"):
-        coverage_from_payload(
-            {
-                **coverage_payload(no_signal),
-                "status": "relationship_emitted",
-            }
-        )
+        replace(no_signal, status='relationship_emitted')
 
 
 def test_paper_map_retains_unique_source_unit_coverage() -> None:
-    coverage = coverage_from_payload(
-        {
-            "source_unit_id": "methods-1-source-1",
-            "window_id": "methods-1",
-            "source_kind": "block",
-            "source_ref": "block-1",
-            "status": "extraction_failed",
-            "reason": "The window extraction failed validation.",
-        }
+    coverage = PaperSourceUnitCoverage(
+        source_unit_id="methods-1-source-1",
+        window_id="methods-1",
+        source_kind="block",
+        source_ref="block-1",
+        status="extraction_failed",
+        reason="The window extraction failed validation.",
     )
-    skim = paper_map_from_payload(
-        {
-            "document_id": "paper-1",
-            "source_unit_coverage": [coverage_payload(coverage)],
-        }
+    skim = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        source_unit_coverage=(coverage,),
     )
 
     assert skim.source_unit_coverage == (coverage,)
     assert skim.coverage_complete is False
-    assert paper_map_from_payload(paper_map_payload(skim)) == skim
 
     with pytest.raises(ValueError, match="coverage ids must be unique"):
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "source_unit_coverage": [coverage_payload(coverage), coverage_payload(coverage)],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+            source_unit_coverage=(
+                coverage,
+                coverage,
+            ),
         )
 
 
@@ -547,7 +560,8 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
     assert published.published_analysis_version == 1
 
 
-def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
+@pytest.mark.anyio
+async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
     payload = objective_analysis_response(_analysis())
     payload.pop("scientific_record_source")
     payload.update(
@@ -559,9 +573,12 @@ def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> No
         }
     )
 
-    authored = ObjectiveRepository._analysis_from_row(
-        ObjectiveAnalysisRecord(payload=payload)
-    )
+    from unittest.mock import AsyncMock, MagicMock
+    session = AsyncMock()
+    session.get.return_value = ObjectiveAnalysisRecord(payload=payload)
+    factory = MagicMock()
+    factory.return_value.__aenter__.return_value = session
+    authored = await ObjectiveRepository(factory).read_analysis("collection-1", "objective-1", 2)
 
     assert authored.scientific_record_source == "authored_snapshot"
 
@@ -1407,61 +1424,79 @@ def test_normalizers_remain_stable() -> None:
     assert normalize_objective_confidence(float("nan")) == 0.0
 
 
-def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
-    skim = paper_map_from_payload(
-        {
-            "document_id": "paper-1",
-            "studies": [
-                {
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "experiment_label": "LPBF process-window study",
-                    "material_scope": ["316L"],
-                    "process_context": ["LPBF"],
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power", "hatch spacing"],
-                            "outcome": "relative density",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "methods-1"},
-                                {"source_kind": "table", "source_ref": "table-2"},
-                            ],
-                            "confidence": 0.88,
-                        },
-                        {
-                            "varied_factors": ["laser power", "hatch spacing"],
-                            "outcome": "yield strength",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "methods-1"},
-                                {"source_kind": "block", "source_ref": "results-3"},
-                            ],
-                            "confidence": 0.84,
-                        },
-                    ],
-                    "confidence": 0.88,
-                }
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-1",
-                    "signal_type": "outcome",
-                    "label": "surface roughness",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "experiment_label": "surface study",
-                    "material_scope": ["316L"],
-                    "process_context": ["LPBF"],
-                    "source_refs": [
-                        {"source_kind": "table", "source_ref": "table-4"}
-                    ],
-                    "confidence": 0.71,
-                    "reason": "No source-supported changed variable was identified.",
-                }
-            ],
-        }
+def test_paper_research_map_retains_scope_and_unresolved_signals() -> None:
+    skim = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(
+            build_paper_research_scope(
+                document_id="paper-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="LPBF process-window study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="paper-1",
+                        varied_factors=(
+                            "laser power",
+                            "hatch spacing",
+                        ),
+                        outcome="relative density",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="methods-1"
+                            ),
+                            PaperResearchSourceRef(
+                                source_kind="table", source_ref="table-2"
+                            ),
+                        ),
+                        confidence=0.88,
+                    ),
+                    build_paper_research_relationship(
+                        document_id="paper-1",
+                        varied_factors=(
+                            "laser power",
+                            "hatch spacing",
+                        ),
+                        outcome="yield strength",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="methods-1"
+                            ),
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="results-3"
+                            ),
+                        ),
+                        confidence=0.84,
+                    ),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            PaperResearchSignal(
+                signal_id="signal-1",
+                signal_type="outcome",
+                label="surface roughness",
+                variable_role="not_applicable",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="surface study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="table", source_ref="table-4"),
+                ),
+                confidence=0.71,
+                reason="No source-supported changed variable was identified.",
+            ),
+        ),
     )
-
-    record = paper_map_payload(skim)
 
     study = skim.studies[0]
     assert len(study.relationships) == 2
@@ -1470,43 +1505,43 @@ def test_paper_research_map_round_trips_scope_and_unresolved_signals() -> None:
         "relative density",
         "yield strength",
     }
-    assert record["studies"][0]["material_scope"] == ["316L"]
-    assert record["studies"][0]["process_context"] == ["LPBF"]
-    assert record["studies"][0]["relationships"][0]["source_refs"] == [
-        {"source_kind": "block", "source_ref": "methods-1"},
-        {"source_kind": "table", "source_ref": "table-2"},
-    ]
-    assert record["unresolved_signals"][0]["signal_type"] == "outcome"
-    assert record["unresolved_signals"][0]["design_type"] == "experimental"
-    assert record["unresolved_signals"][0]["claim_scope"] == "current_work"
-    assert record["unresolved_signals"][0]["experiment_label"] == "surface study"
-    assert paper_map_from_payload(record) == skim
+    assert study.material_scope == ("316L",)
+    assert study.process_context == ("LPBF",)
+    assert skim.unresolved_signals[0].signal_type == "outcome"
+    assert skim.unresolved_signals[0].experiment_label == "surface study"
 
 
 def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None:
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "paper-1",
-            "studies": [
-                {
-                    "material_scope": ["Ti-6Al-4V"],
-                    "process_context": ["laser powder bed fusion"],
-                    "sample_context": ["vertical tensile coupons"],
-                    "test_context": ["ASTM E8 tensile test"],
-                    "comparator": "as-built reference",
-                    "fixed_conditions": ["strain rate = 0.001 /s"],
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power"],
-                            "outcome": "porosity",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "abstract"}
-                            ],
-                        }
-                    ],
-                }
-            ],
-        }
+    paper_map = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(
+            build_paper_research_scope(
+                document_id="paper-1",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=("Ti-6Al-4V",),
+                process_context=("laser powder bed fusion",),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="paper-1",
+                        varied_factors=("laser power",),
+                        outcome="porosity",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="abstract"
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
     )
 
     scope = paper_map.studies[0]
@@ -1514,7 +1549,7 @@ def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None
     assert not hasattr(scope, "test_context")
     assert not hasattr(scope, "comparator")
     assert not hasattr(scope, "fixed_conditions")
-    assert set(paper_map_payload(paper_map)["studies"][0]) == {
+    assert set(asdict(scope)) == {
         "study_id",
         "document_id",
         "design_type",
@@ -1528,188 +1563,376 @@ def test_pre_objective_paper_map_does_not_represent_experiment_context() -> None
 
 
 def test_paper_research_signal_identity_uses_only_preliminary_scope() -> None:
-    payload = {
-        "signal_type": "outcome",
-        "label": "yield strength",
-        "design_type": "experimental",
-        "claim_scope": "current_work",
-        "experiment_label": "tensile study",
-        "material_scope": ["316L"],
-        "process_context": ["LPBF"],
-        "sample_context": ["vertical coupons"],
-        "test_context": ["ASTM E8"],
-        "comparator": "as-built reference",
-        "fixed_conditions": ["strain rate = 0.001 /s"],
-        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
-        "confidence": 0.8,
-    }
 
-    base = paper_map_from_payload(
-        {"document_id": "paper-1", "unresolved_signals": [payload]}
+    base = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-1",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="tensile study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
-    other_test = paper_map_from_payload(
-        {
-            "document_id": "paper-1",
-            "unresolved_signals": [{**payload, "test_context": ["nanoindentation"]}],
-        }
+    other_test = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-1",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label="tensile study",
+                material_scope=("316L",),
+                process_context=("LPBF",),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
 
     assert base.signal_id == other_test.signal_id
     with pytest.raises(ValueError, match="design type"):
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "unresolved_signals": [{**payload, "design_type": "invalid"}],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+            unresolved_signals=(
+                build_paper_research_signal(
+                    document_id="paper-1",
+                    signal_type="outcome",
+                    label="yield strength",
+                    variable_role="not_applicable",
+                    design_type="invalid",
+                    claim_scope="current_work",
+                    experiment_label="tensile study",
+                    material_scope=("316L",),
+                    process_context=("LPBF",),
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="results-1"
+                        ),
+                    ),
+                    confidence=0.8,
+                    reason=None,
+                ),
+            ),
         )
     with pytest.raises(ValueError, match="claim scope"):
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "unresolved_signals": [{**payload, "claim_scope": "invalid"}],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+            unresolved_signals=(
+                build_paper_research_signal(
+                    document_id="paper-1",
+                    signal_type="outcome",
+                    label="yield strength",
+                    variable_role="not_applicable",
+                    design_type="experimental",
+                    claim_scope="invalid",
+                    experiment_label="tensile study",
+                    material_scope=("316L",),
+                    process_context=("LPBF",),
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="results-1"
+                        ),
+                    ),
+                    confidence=0.8,
+                    reason=None,
+                ),
+            ),
         )
 
 
 def test_paper_study_signal_identity_is_scoped_to_its_document() -> None:
-    signal = {
-        "signal_type": "outcome",
-        "label": "yield strength",
-        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
-    }
 
-    first = paper_map_from_payload(
-        {"document_id": "paper-1", "unresolved_signals": [signal]}
+    first = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-1",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
-    second = paper_map_from_payload(
-        {"document_id": "paper-2", "unresolved_signals": [signal]}
+    second = PaperResearchMap(
+        document_id="paper-2",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="paper-2",
+                signal_type="outcome",
+                label="yield strength",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+                reason=None,
+            ),
+        ),
     ).unresolved_signals[0]
 
     assert first.signal_id != second.signal_id
 
 
 def test_paper_study_and_relationship_ids_are_backend_derived_and_stable() -> None:
-    payload = {
-        "document_id": "paper-1",
-        "design_type": "experimental",
-        "claim_scope": "current_work",
-        "experiment_label": "density experiment",
-        "material_scope": ["316L"],
-        "process_context": ["LPBF"],
-        "relationships": [
-            {
-                "varied_factors": ["laser power"],
-                "outcome": "relative density",
-                "source_refs": [
-                    {"source_kind": "block", "source_ref": "methods-1"},
-                    {"source_kind": "block", "source_ref": "results-1"},
-                ],
-                "confidence": 0.88,
-            }
-        ],
-        "confidence": 0.88,
-    }
 
-    study = research_scope_from_payload(payload)
-    same_study = research_scope_from_payload(payload)
-    different_source = research_scope_from_payload(
-        {
-            **payload,
-            "relationships": [
-                {
-                    **payload["relationships"][0],
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "methods-1"},
-                        {"source_kind": "block", "source_ref": "results-2"},
-                    ],
-                }
-            ],
-        }
+    study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="density experiment",
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        confidence=0.88,
+    )
+    same_study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="density experiment",
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        confidence=0.88,
+    )
+    different_source = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="density experiment",
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="methods-1"),
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-2"),
+                ),
+                confidence=0.88,
+            ),
+        ),
+        confidence=0.88,
     )
 
     assert study.study_id.startswith("study_")
     assert study.relationships[0].relationship_id.startswith("relationship_")
     assert same_study.study_id == study.study_id
     assert different_source.study_id != study.study_id
-    assert research_scope_from_payload(research_scope_payload(study)) == study
 
 
 def test_relationship_identity_includes_its_parent_study_boundary() -> None:
-    shared_relationship = {
-        "varied_factors": ["laser power"],
-        "outcome": "yield strength",
-        "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
-    }
-    tensile_study = research_scope_from_payload(
-        {
-            "document_id": "paper-1",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "experiment_label": "tensile experiment",
-            "test_context": ["ASTM E8 tensile test"],
-            "relationships": [shared_relationship],
-        }
+    tensile_study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="tensile experiment",
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="yield strength",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="table", source_ref="table-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
-    hardness_study = research_scope_from_payload(
-        {
-            "document_id": "paper-1",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "experiment_label": "hardness experiment",
-            "test_context": ["Vickers microhardness test"],
-            "relationships": [shared_relationship],
-        }
+    hardness_study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="hardness experiment",
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="yield strength",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="table", source_ref="table-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
 
     assert (
         tensile_study.relationships[0].relationship_id
         != hardness_study.relationships[0].relationship_id
     )
-    paper_map_from_payload(
-        {
-            "document_id": "paper-1",
-            "studies": [
-                research_scope_payload(tensile_study),
-                research_scope_payload(hardness_study),
-            ],
-        }
+    PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(
+            tensile_study,
+            hardness_study,
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
     )
 
 
 def test_paper_study_owns_nested_relationship_identity() -> None:
-    relationship = {
-        "varied_factors": ["laser power"],
-        "outcome": "relative density",
-        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
-    }
 
-    expected = research_scope_from_payload(
-        {"document_id": "paper-1", "relationships": [relationship]}
+    expected = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="uncertain",
+        claim_scope="uncertain",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
-    attempted_override = research_scope_from_payload(
-        {
-            "document_id": "paper-1",
-            "relationships": [{**relationship, "document_id": "paper-2"}],
-        }
+    attempted_override = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="uncertain",
+        claim_scope="uncertain",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("laser power",),
+                outcome="relative density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
 
     assert attempted_override.relationships == expected.relationships
 
 
 def test_paper_map_rejects_study_owned_by_another_document() -> None:
-    study = research_scope_from_payload(
-        {
-            "document_id": "paper-2",
-            "relationships": [
-                {
-                    "varied_factors": ["laser power"],
-                    "outcome": "density",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "results-1"}
-                    ],
-                }
-            ],
-        }
+    study = build_paper_research_scope(
+        document_id="paper-2",
+        design_type="uncertain",
+        claim_scope="uncertain",
+        experiment_label=None,
+        material_scope=(),
+        process_context=(),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-2",
+                varied_factors=("laser power",),
+                outcome="density",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
 
     with pytest.raises(ValueError, match="another document|document"):
@@ -1728,34 +1951,39 @@ def _accounted_study_skim(
     *,
     relationships: list[tuple[list[str], str]],
 ) -> PaperResearchMap:
-    return paper_map_from_payload(
-        {
-            "document_id": document_id,
-            "studies": [
-                {
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "relationships": [
-                        {
-                            "varied_factors": factors,
-                            "outcome": outcome,
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": f"{document_id}-{position}",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                        for position, (factors, outcome) in enumerate(
-                            relationships,
-                            start=1,
-                        )
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-        }
+    return PaperResearchMap(
+        document_id=document_id,
+        doc_role="uncertain",
+        studies=(
+            build_paper_research_scope(
+                document_id=document_id,
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                relationships=tuple(
+                    build_paper_research_relationship(
+                        document_id=document_id,
+                        varied_factors=tuple(factors),
+                        outcome=outcome,
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                "block", f"{document_id}-{position}"
+                            ),
+                        ),
+                        confidence=0.9,
+                    )
+                    for position, (factors, outcome) in enumerate(
+                        relationships, start=1
+                    )
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
     )
 
 
@@ -1956,3 +2184,8 @@ def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separatel
     }
     assert density_objective.source_relationship_ids == (density_id,)
     assert strength_objective.source_relationship_ids == (strength_id,)
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"

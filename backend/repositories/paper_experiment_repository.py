@@ -20,14 +20,9 @@ from domain.core.paper_experiment import (
     SourceReference,
 )
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
     ScientificAttribute,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 from infra.persistence.postgres.models.paper_experiment import (
     ExperimentalVariantRow,
     ExperimentComparisonMeasurementRow,
@@ -131,7 +126,7 @@ class PaperExperimentRepository:
                     PaperExperimentRow.experiment_version == experiment_version,
                 )
             )
-            return await _stored_revision(session, row) if row is not None else None
+            return await load_experiment_revision(session, row) if row is not None else None
 
     async def read_revision_by_id(
         self,
@@ -143,7 +138,7 @@ class PaperExperimentRepository:
             self.session_factory, transaction, write=False
         ) as session:
             row = await session.get(PaperExperimentRow, revision_id)
-            return await _stored_revision(session, row) if row is not None else None
+            return await load_experiment_revision(session, row) if row is not None else None
 
     async def read_latest_revision(
         self,
@@ -172,7 +167,7 @@ class PaperExperimentRepository:
                 .order_by(PaperExperimentRow.experiment_version.desc())
                 .limit(1)
             )
-            return await _stored_revision(session, row) if row is not None else None
+            return await load_experiment_revision(session, row) if row is not None else None
 
     async def list_latest_for_document(
         self,
@@ -201,7 +196,7 @@ class PaperExperimentRepository:
                 seen.add(row.experiment_id)
                 latest_rows.append(row)
             return tuple(
-                [await _stored_revision(session, row) for row in latest_rows]
+                [await load_experiment_revision(session, row) for row in latest_rows]
             )
 
 
@@ -224,7 +219,7 @@ async def _add_revision(
         )
     )
     if existing is not None:
-        stored = await _stored_revision(session, existing)
+        stored = await load_experiment_revision(session, existing)
         if stored.revision == validated:
             return stored
         raise PaperExperimentRevisionConflictError(
@@ -267,7 +262,7 @@ async def _add_revision(
                 "paper experiment revision identity already exists"
             ) from exc
         raise
-    return await _stored_revision(session, row)
+    return await load_experiment_revision(session, row)
 
 
 async def _add_components(
@@ -283,15 +278,58 @@ async def _add_components(
                 variant_key=item.variant_key,
                 variant_label=item.variant_label,
                 subject_attributes_json=[
-                    _scientific_attribute_payload(value)
+                    {
+                        "name": value.name,
+                        "value": value.value,
+                        "unit": value.unit,
+                        **(
+                            {"context_scope": value.context_scope}
+                            if value.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+                            if value.applies_to_outcomes
+                            else {}
+                        ),
+                    }
                     for value in item.subject_attributes
                 ],
                 intervention_attributes_json=[
-                    _scientific_attribute_payload(value)
+                    {
+                        "name": value.name,
+                        "value": value.value,
+                        "unit": value.unit,
+                        **(
+                            {"context_scope": value.context_scope}
+                            if value.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+                            if value.applies_to_outcomes
+                            else {}
+                        ),
+                    }
                     for value in item.intervention_attributes
                 ],
                 state_json=[
-                    _scientific_attribute_payload(value) for value in item.state
+                    {
+                        "name": value.name,
+                        "value": value.value,
+                        "unit": value.unit,
+                        **(
+                            {"context_scope": value.context_scope}
+                            if value.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+                            if value.applies_to_outcomes
+                            else {}
+                        ),
+                    }
+                    for value in item.state
                 ],
                 population_scope_json=(
                     dict(item.population_scope)
@@ -335,7 +373,22 @@ async def _add_components(
                 test_key=item.test_key,
                 test_type=item.test_type,
                 parameters_json=[
-                    _scientific_attribute_payload(value) for value in item.parameters
+                    {
+                        "name": value.name,
+                        "value": value.value,
+                        "unit": value.unit,
+                        **(
+                            {"context_scope": value.context_scope}
+                            if value.context_scope != "unknown"
+                            else {}
+                        ),
+                        **(
+                            {"applies_to_outcomes": list(value.applies_to_outcomes)}
+                            if value.applies_to_outcomes
+                            else {}
+                        ),
+                    }
+                    for value in item.parameters
                 ],
                 population_scope_json=(
                     dict(item.population_scope)
@@ -440,7 +493,21 @@ async def _add_components(
                 for value in item.changed_variables
             ],
             matched_conditions_json=[
-                _scientific_attribute_payload(value)
+                {
+                    "name": value.name,
+                    "value": value.value,
+                    "unit": value.unit,
+                    **(
+                        {"context_scope": value.context_scope}
+                        if value.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(value.applies_to_outcomes)}
+                        if value.applies_to_outcomes
+                        else {}
+                    ),
+                }
                 for value in item.matched_conditions
             ],
             basis=item.basis,
@@ -518,7 +585,7 @@ async def _add_components(
     )
 
 
-async def _stored_revision(
+async def load_experiment_revision(
     session: AsyncSession,
     row: PaperExperimentRow,
 ) -> StoredPaperExperimentRevision:
@@ -597,13 +664,49 @@ async def _stored_revision(
                     ExperimentalVariant(
                         variant_key=_text(item.variant_key or None),
                         variant_label=_text(item.variant_label),
-                        subject_attributes=_attributes(
-                            list(item.subject_attributes_json)
+                        subject_attributes=tuple(
+                            (
+                                ScientificAttribute(
+                                    name=item["name"],
+                                    value=item["value"],
+                                    unit=item.get("unit"),
+                                    context_scope=item.get("context_scope", "unknown"),
+                                    applies_to_outcomes=tuple(
+                                        item.get("applies_to_outcomes", ())
+                                    ),
+                                )
+                                for item in list(item.subject_attributes_json) or ()
+                            )
                         ),
-                        intervention_attributes=_attributes(
-                            list(item.intervention_attributes_json)
+                        intervention_attributes=tuple(
+                            (
+                                ScientificAttribute(
+                                    name=item["name"],
+                                    value=item["value"],
+                                    unit=item.get("unit"),
+                                    context_scope=item.get("context_scope", "unknown"),
+                                    applies_to_outcomes=tuple(
+                                        item.get("applies_to_outcomes", ())
+                                    ),
+                                )
+                                for item in list(item.intervention_attributes_json)
+                                or ()
+                            )
                         ),
-                        state=_attributes(list(item.state_json)),
+                        state=tuple(
+                            (
+                                ScientificAttribute(
+                                    name=item["name"],
+                                    value=item["value"],
+                                    unit=item.get("unit"),
+                                    context_scope=item.get("context_scope", "unknown"),
+                                    applies_to_outcomes=tuple(
+                                        item.get("applies_to_outcomes", ())
+                                    ),
+                                )
+                                for item in list(item.state_json) or ()
+                            )
+                        ),
                         population_scope=(
                             _mapping(item.population_scope_json)
                             if item.population_scope_json is not None
@@ -654,7 +757,20 @@ async def _stored_revision(
                     ExperimentTestCondition(
                         test_key=_text(item.test_key or None),
                         test_type=_text(item.test_type or None),
-                        parameters=_attributes(list(item.parameters_json)),
+                        parameters=tuple(
+                            (
+                                ScientificAttribute(
+                                    name=item["name"],
+                                    value=item["value"],
+                                    unit=item.get("unit"),
+                                    context_scope=item.get("context_scope", "unknown"),
+                                    applies_to_outcomes=tuple(
+                                        item.get("applies_to_outcomes", ())
+                                    ),
+                                )
+                                for item in list(item.parameters_json) or ()
+                            )
+                        ),
                         population_scope=(
                             _mapping(item.population_scope_json)
                             if item.population_scope_json is not None
@@ -775,9 +891,30 @@ async def _stored_revision(
                             )
                             or None
                         ),
-                        changed_variables=_variables(list(item.changed_variables_json)),
-                        matched_conditions=_attributes(
-                            list(item.matched_conditions_json)
+                        changed_variables=tuple(
+                            (
+                                ScientificVariable(
+                                    name=item["name"],
+                                    baseline_value=item.get("baseline_value"),
+                                    target_value=item.get("target_value"),
+                                    unit=item.get("unit"),
+                                )
+                                for item in list(item.changed_variables_json) or ()
+                            )
+                        ),
+                        matched_conditions=tuple(
+                            (
+                                ScientificAttribute(
+                                    name=item["name"],
+                                    value=item["value"],
+                                    unit=item.get("unit"),
+                                    context_scope=item.get("context_scope", "unknown"),
+                                    applies_to_outcomes=tuple(
+                                        item.get("applies_to_outcomes", ())
+                                    ),
+                                )
+                                for item in list(item.matched_conditions_json) or ()
+                            )
                         ),
                         basis=_text(item.basis) or "reported",
                         direction=_text(item.direction) or "unknown",
@@ -921,58 +1058,3 @@ def _strings(value: Any) -> tuple[str, ...]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ScientificAttribute(
-            name=scientific_text(item.get("name")) or "",
-            value=(
-                scientific_scalar(item.get("value"))
-                if scientific_scalar(item.get("value")) is not None
-                else ""
-            ),
-            unit=scientific_text(item.get("unit")),
-            context_scope=scientific_choice(
-                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
-            ),
-            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
-        )
-        for item in value
-        if isinstance(item, Mapping)
-    )
-
-
-def _variables(value: Any) -> tuple[ScientificVariable, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ScientificVariable(
-            name=scientific_text(item.get("name")) or "",
-            baseline_value=scientific_scalar(item.get("baseline_value")),
-            target_value=scientific_scalar(item.get("target_value")),
-            unit=scientific_text(item.get("unit")),
-        )
-        for item in value
-        if isinstance(item, Mapping)
-    )
-
-
-def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:
-    return {
-        "name": value.name,
-        "value": value.value,
-        "unit": value.unit,
-        **(
-            {"context_scope": value.context_scope}
-            if value.context_scope != "unknown"
-            else {}
-        ),
-        **(
-            {"applies_to_outcomes": list(value.applies_to_outcomes)}
-            if value.applies_to_outcomes
-            else {}
-        ),
-    }

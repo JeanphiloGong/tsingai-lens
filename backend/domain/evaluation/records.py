@@ -209,12 +209,6 @@ def _normalize_mapping(value: Any) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
-def _normalize_optional_mapping(value: Any) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    return _normalize_mapping(value)
-
-
 def _normalize_mapping_sequence(value: Any) -> tuple[dict[str, Any], ...]:
     if value is None:
         return ()
@@ -248,24 +242,3 @@ def _normalize_text_tuple(value: Any) -> tuple[str, ...]:
         )
     except TypeError:
         return ()
-
-
-def _normalize_int_mapping(value: Any) -> dict[str, int]:
-    if not isinstance(value, Mapping):
-        return {}
-    normalized: dict[str, int] = {}
-    for key, item in value.items():
-        try:
-            normalized[str(key)] = int(item)
-        except (TypeError, ValueError):
-            normalized[str(key)] = 0
-    return normalized
-
-
-def _normalize_optional_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None

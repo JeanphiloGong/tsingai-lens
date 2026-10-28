@@ -111,7 +111,7 @@ def _sample() -> DatasetSample:
         current_revision_id="revision-1",
         confirmed_revision_id=None,
         generation=1,
-        source_digest=source_digest_for_case(_case().to_record()),
+        source_digest=source_digest_for_case(_case()),
         active_job_id=None,
         missing_reasons=(),
         created_at="2026-09-29T00:00:00+00:00",

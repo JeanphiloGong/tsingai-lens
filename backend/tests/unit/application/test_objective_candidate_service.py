@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from domain.core.research_objective import PaperResearchSignal, PaperSourceUnitCoverage
 
-from repositories.paper_map_repository import (
-    paper_map_payload,
-    research_scope_payload,
-    paper_map_from_payload,
+from domain.core.research_objective import (
+    PaperResearchSourceRef,
 )
+
 
 from itertools import permutations
 from typing import Any
@@ -967,73 +968,67 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
         factors=("laser power",),
         outcome="relative density",
     )
-    background_study = research_scope_payload(_paper_map(
-        document_id="paper-accounting",
-        relationship_id="relationship-rejected",
-        factors=("scan speed",),
-        outcome="surface roughness",
-        claim_scope="background",
-    ).studies[0])
-    skim = paper_map_from_payload(
-        {
-            **paper_map_payload(current_work_skim),
-            "studies": [
-                research_scope_payload(current_work_skim.studies[0]),
-                {
-                    **background_study,
-                    "study_id": "study-paper-accounting-background",
-                },
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-unresolved",
-                    "signal_type": "outcome",
-                    "label": "melt-pool morphology",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "source_refs": [
-                        {
-                            "source_kind": "figure",
-                            "source_ref": "figure-unresolved",
-                        }
-                    ],
-                    "confidence": 0.72,
-                    "reason": "No defensible varied factor was extracted.",
-                }
-            ],
-            "source_unit_coverage": [
-                {
-                    "source_unit_id": "unit-relationship",
-                    "window_id": "window-relationship",
-                    "source_kind": "block",
-                    "source_ref": "block-relationship",
-                    "status": "relationship_emitted",
-                },
-                {
-                    "source_unit_id": "unit-unresolved",
-                    "window_id": "window-unresolved",
-                    "source_kind": "figure",
-                    "source_ref": "figure-unresolved",
-                    "status": "unresolved_signal_emitted",
-                },
-                {
-                    "source_unit_id": "unit-no-signal",
-                    "window_id": "window-no-signal",
-                    "source_kind": "block",
-                    "source_ref": "block-no-signal",
-                    "status": "no_study_signal",
-                    "reason": "The Source unit contains no study signal.",
-                },
-                {
-                    "source_unit_id": "unit-failed",
-                    "window_id": "window-failed",
-                    "source_kind": "table",
-                    "source_ref": "table-failed",
-                    "status": "extraction_failed",
-                    "reason": "The extraction response was invalid.",
-                },
-            ],
-        }
+    background_study = _paper_map(document_id='paper-accounting', relationship_id='relationship-rejected', factors=('scan speed',), outcome='surface roughness', claim_scope='background').studies[0]
+    skim = replace(
+        current_work_skim,
+        studies=(
+            current_work_skim.studies[0],
+            replace(background_study, study_id="study-paper-accounting-background"),
+        ),
+        unresolved_signals=(
+            PaperResearchSignal(
+                signal_id="signal-unresolved",
+                signal_type="outcome",
+                label="melt-pool morphology",
+                variable_role="not_applicable",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(
+                        source_kind="figure", source_ref="figure-unresolved"
+                    ),
+                ),
+                confidence=0.72,
+                reason="No defensible varied factor was extracted.",
+            ),
+        ),
+        source_unit_coverage=(
+            PaperSourceUnitCoverage(
+                source_unit_id="unit-relationship",
+                window_id="window-relationship",
+                source_kind="block",
+                source_ref="block-relationship",
+                status="relationship_emitted",
+                reason=None,
+            ),
+            PaperSourceUnitCoverage(
+                source_unit_id="unit-unresolved",
+                window_id="window-unresolved",
+                source_kind="figure",
+                source_ref="figure-unresolved",
+                status="unresolved_signal_emitted",
+                reason=None,
+            ),
+            PaperSourceUnitCoverage(
+                source_unit_id="unit-no-signal",
+                window_id="window-no-signal",
+                source_kind="block",
+                source_ref="block-no-signal",
+                status="no_study_signal",
+                reason="The Source unit contains no study signal.",
+            ),
+            PaperSourceUnitCoverage(
+                source_unit_id="unit-failed",
+                window_id="window-failed",
+                source_kind="table",
+                source_ref="table-failed",
+                status="extraction_failed",
+                reason="The extraction response was invalid.",
+            ),
+        ),
     )
     caplog.set_level(
         "INFO",
@@ -2576,38 +2571,54 @@ def _paper_map(
     relationship_confidence: float = 0.9,
     extra_relationships: tuple[dict[str, Any], ...] = (),
 ) -> PaperResearchMap:
-    return paper_map_from_payload(
-        {
-            "document_id": document_id,
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": f"study-{document_id}",
-                    "design_type": design_type,
-                    "claim_scope": claim_scope,
-                    "experiment_label": f"experiment {document_id}",
-                    "material_scope": list(material_scope),
-                    "process_context": list(process_context),
-                    "relationships": [
-                        {
-                            "relationship_id": relationship_id,
-                            "varied_factors": list(factors),
-                            "outcome": outcome,
-                            "source_refs": [
-                                {
-                                    "source_kind": source_kind,
-                                    "source_ref": f"{document_id}-results",
-                                }
-                            ],
-                            "confidence": relationship_confidence,
-                        },
-                        *extra_relationships,
-                    ],
-                    "confidence": study_confidence,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.91,
-            "warnings": [],
-        }
+    return PaperResearchMap(
+        document_id=document_id,
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=f"study-{document_id}",
+                document_id=document_id,
+                design_type=design_type,
+                claim_scope=claim_scope,
+                experiment_label=f"experiment {document_id}",
+                material_scope=material_scope,
+                process_context=process_context,
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=relationship_id,
+                        varied_factors=factors,
+                        outcome=outcome,
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind=source_kind,
+                                source_ref=f"{document_id}-results",
+                            ),
+                        ),
+                        confidence=relationship_confidence,
+                    ),
+                    *(
+                        PaperResearchRelationship(
+                            relationship_id=extra_item.get("relationship_id", None),
+                            varied_factors=tuple(extra_item.get("varied_factors", ())),
+                            outcome=extra_item.get("outcome", ""),
+                            source_refs=tuple(
+                                (
+                                    PaperResearchSourceRef(
+                                        source_kind=item.get("source_kind", ""),
+                                        source_ref=item.get("source_ref", ""),
+                                    )
+                                    for item in extra_item.get("source_refs", ())
+                                )
+                            ),
+                            confidence=extra_item.get("confidence", 0.0),
+                        )
+                        for extra_item in extra_relationships
+                    ),
+                ),
+                confidence=study_confidence,
+            ),
+        ),
+        evidence_density="high",
+        confidence=0.91,
+        warnings=(),
     )

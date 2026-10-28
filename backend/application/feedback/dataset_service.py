@@ -193,7 +193,7 @@ class FeedbackDatasetService:
                 raise FileNotFoundError(f"feedback case not found: {case_id}")
             if case.status == "withdrawn":
                 raise FeedbackDatasetError("source_case_withdrawn")
-            source_digest = source_digest_for_case(case.to_record())
+            source_digest = source_digest_for_case(case)
             sample_id = f"sample_{uuid4().hex[:32]}"
             generation = 1
             job_id = f"job_{uuid4().hex[:32]}"
@@ -340,7 +340,7 @@ class FeedbackDatasetService:
             raise FeedbackDatasetError("sample_source_case_missing")
         if case.status == "withdrawn":
             raise FeedbackDatasetError("sample_source_case_withdrawn")
-        if source_digest_for_case(case.to_record()) != sample.source_digest:
+        if source_digest_for_case(case) != sample.source_digest:
             raise FeedbackDatasetConflict("sample_source_stale")
         snapshot = case.context_snapshot
         prior_provenance = current.provenance if current else {}
@@ -426,7 +426,7 @@ class FeedbackDatasetService:
             raise FeedbackDatasetError("sample_source_case_missing")
         if case.status == "withdrawn":
             raise FeedbackDatasetError("sample_source_case_withdrawn")
-        if source_digest_for_case(case.to_record()) != sample.source_digest:
+        if source_digest_for_case(case) != sample.source_digest:
             raise FeedbackDatasetConflict("sample_source_stale")
         now = datetime.now(timezone.utc).isoformat()
         try:
@@ -475,7 +475,7 @@ class FeedbackDatasetService:
                 raise FeedbackDatasetError("sample_source_case_missing")
             if case.status == "withdrawn":
                 raise FeedbackDatasetError("sample_source_case_withdrawn")
-            source_digest = source_digest_for_case(case.to_record())
+            source_digest = source_digest_for_case(case)
 
         job: AnalysisJob | None = None
         if action in {"rebuild", "retry"}:

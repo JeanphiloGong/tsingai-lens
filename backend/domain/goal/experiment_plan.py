@@ -124,20 +124,6 @@ def _optional_text(value: Any) -> str | None:
     return text or None
 
 
-def _positive_int(value: Any, field_name: str) -> int:
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be a positive integer")
-    if isinstance(value, int):
-        number = value
-    elif isinstance(value, str) and value.strip().isdigit():
-        number = int(value.strip())
-    else:
-        raise ValueError(f"{field_name} must be a positive integer")
-    if number < 1:
-        raise ValueError(f"{field_name} must be a positive integer")
-    return number
-
-
 def _string_mapping(value: Mapping[str, Any]) -> dict[str, str]:
     return {
         str(key): str(item)

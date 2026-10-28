@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
+from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.review_decision import ReviewDecision
 from domain.feedback.tool_failure import ToolFailureAnalysisResult
@@ -39,7 +40,39 @@ class FeedbackCaseRepository:
         async with self.session_factory.begin() as session:
             row = await _save_result_row(session, result)
             await session.flush()
-            return _result(row)
+            return AnalysisResult(
+                result_id=row.result_id,
+                job_id=row.job_id,
+                feedback_id=row.feedback_id,
+                session_id=row.session_id,
+                collection_id=row.collection_id,
+                anchor_message_id=row.anchor_message_id,
+                problem_type=row.problem_type,
+                confidence=float(row.confidence),
+                related_message_ids=tuple(row.related_message_ids or ()),
+                suggested_evidence=tuple(row.suggested_evidence or ()),
+                suggested_target=row.suggested_target,
+                evidence_coverage=EvidenceCoverage(
+                    requested_scope=tuple(
+                        (row.evidence_coverage or {}).get("requested_scope") or ()
+                    ),
+                    inspected_sources=tuple(
+                        (row.evidence_coverage or {}).get("inspected_sources") or ()
+                    ),
+                    omitted_candidates=tuple(
+                        (row.evidence_coverage or {}).get("omitted_candidates") or ()
+                    ),
+                    claim_support=tuple(
+                        (row.evidence_coverage or {}).get("claim_support") or ()
+                    ),
+                    gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
+                    coverage_status=(row.evidence_coverage or {}).get("coverage_status")
+                    or "unknown",
+                ),
+                model=row.model,
+                input_digest=row.input_digest,
+                created_at=_iso(row.created_at),
+            )
 
     async def upsert_case_from_analysis(
         self,
@@ -98,7 +131,23 @@ class FeedbackCaseRepository:
                 row.updated_at = timestamp
             await session.flush()
             await enqueue_case_samples(session, row, now=timestamp)
-            return _case(row)
+            return FeedbackCase(
+                case_id=row.case_id,
+                collection_id=row.collection_id,
+                session_id=row.session_id,
+                anchor_message_id=row.anchor_message_id,
+                source_signal_ids=tuple(row.source_signal_ids or ()),
+                analysis_result_ids=tuple(row.analysis_result_ids or ()),
+                context_snapshot=deepcopy(row.context_snapshot or {}),
+                status=row.status,
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                annotation_digest=row.annotation_digest,
+                signal_analysis_result_ids=tuple(row.signal_analysis_result_ids or ()),
+                tool_failure_analysis_result_ids=tuple(
+                    row.tool_failure_analysis_result_ids or ()
+                ),
+            )
 
     async def save_correction_signal_analysis_result(
         self, result: CorrectionSignalAnalysisResult
@@ -106,7 +155,41 @@ class FeedbackCaseRepository:
         async with self.session_factory.begin() as session:
             row = await _save_correction_result_row(session, result)
             await session.flush()
-            return _correction_result(row)
+            return CorrectionSignalAnalysisResult(
+                result_id=row.result_id,
+                job_id=row.job_id,
+                signal_id=row.signal_id,
+                signal_type=row.signal_type,
+                session_id=row.session_id,
+                collection_id=row.collection_id,
+                anchor_message_id=row.anchor_message_id,
+                trigger_message_id=row.trigger_message_id,
+                problem_type=row.problem_type,
+                confidence=float(row.confidence),
+                related_message_ids=tuple(row.related_message_ids or ()),
+                suggested_evidence=tuple(row.suggested_evidence or ()),
+                suggested_target=row.suggested_target,
+                evidence_coverage=EvidenceCoverage(
+                    requested_scope=tuple(
+                        (row.evidence_coverage or {}).get("requested_scope") or ()
+                    ),
+                    inspected_sources=tuple(
+                        (row.evidence_coverage or {}).get("inspected_sources") or ()
+                    ),
+                    omitted_candidates=tuple(
+                        (row.evidence_coverage or {}).get("omitted_candidates") or ()
+                    ),
+                    claim_support=tuple(
+                        (row.evidence_coverage or {}).get("claim_support") or ()
+                    ),
+                    gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
+                    coverage_status=(row.evidence_coverage or {}).get("coverage_status")
+                    or "unknown",
+                ),
+                model=row.model,
+                input_digest=row.input_digest,
+                created_at=_iso(row.created_at),
+            )
 
     async def upsert_case_from_correction_signal(
         self,
@@ -172,7 +255,23 @@ class FeedbackCaseRepository:
                 row.updated_at = timestamp
             await session.flush()
             await enqueue_case_samples(session, row, now=timestamp)
-            return _case(row)
+            return FeedbackCase(
+                case_id=row.case_id,
+                collection_id=row.collection_id,
+                session_id=row.session_id,
+                anchor_message_id=row.anchor_message_id,
+                source_signal_ids=tuple(row.source_signal_ids or ()),
+                analysis_result_ids=tuple(row.analysis_result_ids or ()),
+                context_snapshot=deepcopy(row.context_snapshot or {}),
+                status=row.status,
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                annotation_digest=row.annotation_digest,
+                signal_analysis_result_ids=tuple(row.signal_analysis_result_ids or ()),
+                tool_failure_analysis_result_ids=tuple(
+                    row.tool_failure_analysis_result_ids or ()
+                ),
+            )
 
     async def save_tool_failure_analysis_result(
         self, result: ToolFailureAnalysisResult
@@ -180,7 +279,44 @@ class FeedbackCaseRepository:
         async with self.session_factory.begin() as session:
             row = await _save_tool_failure_result_row(session, result)
             await session.flush()
-            return _tool_failure_result(row)
+            return ToolFailureAnalysisResult(
+                result_id=row.result_id,
+                job_id=row.job_id,
+                signal_id=row.signal_id,
+                signal_type=row.signal_type,
+                session_id=row.session_id,
+                collection_id=row.collection_id,
+                tool_call_id=row.tool_call_id,
+                assistant_message_id=row.assistant_message_id,
+                result_message_id=row.result_message_id,
+                tool_name=row.tool_name,
+                error_code=row.error_code,
+                problem_type=row.problem_type,
+                confidence=float(row.confidence),
+                related_message_ids=tuple(row.related_message_ids or ()),
+                suggested_evidence=tuple(row.suggested_evidence or ()),
+                suggested_target=row.suggested_target,
+                evidence_coverage=EvidenceCoverage(
+                    requested_scope=tuple(
+                        (row.evidence_coverage or {}).get("requested_scope") or ()
+                    ),
+                    inspected_sources=tuple(
+                        (row.evidence_coverage or {}).get("inspected_sources") or ()
+                    ),
+                    omitted_candidates=tuple(
+                        (row.evidence_coverage or {}).get("omitted_candidates") or ()
+                    ),
+                    claim_support=tuple(
+                        (row.evidence_coverage or {}).get("claim_support") or ()
+                    ),
+                    gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
+                    coverage_status=(row.evidence_coverage or {}).get("coverage_status")
+                    or "unknown",
+                ),
+                model=row.model,
+                input_digest=row.input_digest,
+                created_at=_iso(row.created_at),
+            )
 
     async def upsert_case_from_tool_failure(
         self,
@@ -247,12 +383,50 @@ class FeedbackCaseRepository:
                 row.updated_at = timestamp
             await session.flush()
             await enqueue_case_samples(session, row, now=timestamp)
-            return _case(row)
+            return FeedbackCase(
+                case_id=row.case_id,
+                collection_id=row.collection_id,
+                session_id=row.session_id,
+                anchor_message_id=row.anchor_message_id,
+                source_signal_ids=tuple(row.source_signal_ids or ()),
+                analysis_result_ids=tuple(row.analysis_result_ids or ()),
+                context_snapshot=deepcopy(row.context_snapshot or {}),
+                status=row.status,
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                annotation_digest=row.annotation_digest,
+                signal_analysis_result_ids=tuple(row.signal_analysis_result_ids or ()),
+                tool_failure_analysis_result_ids=tuple(
+                    row.tool_failure_analysis_result_ids or ()
+                ),
+            )
 
     async def read_case(self, case_id: str) -> FeedbackCase | None:
         async with self.session_factory() as session:
             row = await session.get(FeedbackCaseRow, case_id)
-            return _case(row) if row is not None else None
+            return (
+                FeedbackCase(
+                    case_id=row.case_id,
+                    collection_id=row.collection_id,
+                    session_id=row.session_id,
+                    anchor_message_id=row.anchor_message_id,
+                    source_signal_ids=tuple(row.source_signal_ids or ()),
+                    analysis_result_ids=tuple(row.analysis_result_ids or ()),
+                    context_snapshot=deepcopy(row.context_snapshot or {}),
+                    status=row.status,
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    annotation_digest=row.annotation_digest,
+                    signal_analysis_result_ids=tuple(
+                        row.signal_analysis_result_ids or ()
+                    ),
+                    tool_failure_analysis_result_ids=tuple(
+                        row.tool_failure_analysis_result_ids or ()
+                    ),
+                )
+                if row is not None
+                else None
+            )
 
     async def read_analysis_results(
         self, result_ids: tuple[str, ...]
@@ -266,7 +440,45 @@ class FeedbackCaseRepository:
                     FeedbackAnalysisResultRow.result_id.in_(ids)
                 )
             )
-            by_id = {row.result_id: _result(row) for row in rows}
+            by_id = {
+                row.result_id: AnalysisResult(
+                    result_id=row.result_id,
+                    job_id=row.job_id,
+                    feedback_id=row.feedback_id,
+                    session_id=row.session_id,
+                    collection_id=row.collection_id,
+                    anchor_message_id=row.anchor_message_id,
+                    problem_type=row.problem_type,
+                    confidence=float(row.confidence),
+                    related_message_ids=tuple(row.related_message_ids or ()),
+                    suggested_evidence=tuple(row.suggested_evidence or ()),
+                    suggested_target=row.suggested_target,
+                    evidence_coverage=EvidenceCoverage(
+                        requested_scope=tuple(
+                            (row.evidence_coverage or {}).get("requested_scope") or ()
+                        ),
+                        inspected_sources=tuple(
+                            (row.evidence_coverage or {}).get("inspected_sources") or ()
+                        ),
+                        omitted_candidates=tuple(
+                            (row.evidence_coverage or {}).get("omitted_candidates")
+                            or ()
+                        ),
+                        claim_support=tuple(
+                            (row.evidence_coverage or {}).get("claim_support") or ()
+                        ),
+                        gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
+                        coverage_status=(row.evidence_coverage or {}).get(
+                            "coverage_status"
+                        )
+                        or "unknown",
+                    ),
+                    model=row.model,
+                    input_digest=row.input_digest,
+                    created_at=_iso(row.created_at),
+                )
+                for row in rows
+            }
             return tuple(by_id[value] for value in ids if value in by_id)
 
     async def read_correction_signal_analysis_results(
@@ -281,7 +493,47 @@ class FeedbackCaseRepository:
                     FeedbackSignalAnalysisResultRow.result_id.in_(ids)
                 )
             )
-            by_id = {row.result_id: _correction_result(row) for row in rows}
+            by_id = {
+                row.result_id: CorrectionSignalAnalysisResult(
+                    result_id=row.result_id,
+                    job_id=row.job_id,
+                    signal_id=row.signal_id,
+                    signal_type=row.signal_type,
+                    session_id=row.session_id,
+                    collection_id=row.collection_id,
+                    anchor_message_id=row.anchor_message_id,
+                    trigger_message_id=row.trigger_message_id,
+                    problem_type=row.problem_type,
+                    confidence=float(row.confidence),
+                    related_message_ids=tuple(row.related_message_ids or ()),
+                    suggested_evidence=tuple(row.suggested_evidence or ()),
+                    suggested_target=row.suggested_target,
+                    evidence_coverage=EvidenceCoverage(
+                        requested_scope=tuple(
+                            (row.evidence_coverage or {}).get("requested_scope") or ()
+                        ),
+                        inspected_sources=tuple(
+                            (row.evidence_coverage or {}).get("inspected_sources") or ()
+                        ),
+                        omitted_candidates=tuple(
+                            (row.evidence_coverage or {}).get("omitted_candidates")
+                            or ()
+                        ),
+                        claim_support=tuple(
+                            (row.evidence_coverage or {}).get("claim_support") or ()
+                        ),
+                        gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
+                        coverage_status=(row.evidence_coverage or {}).get(
+                            "coverage_status"
+                        )
+                        or "unknown",
+                    ),
+                    model=row.model,
+                    input_digest=row.input_digest,
+                    created_at=_iso(row.created_at),
+                )
+                for row in rows
+            }
             return tuple(by_id[value] for value in ids if value in by_id)
 
     async def read_tool_failure_analysis_results(
@@ -296,7 +548,50 @@ class FeedbackCaseRepository:
                     ToolFailureAnalysisResultRow.result_id.in_(ids)
                 )
             )
-            by_id = {row.result_id: _tool_failure_result(row) for row in rows}
+            by_id = {
+                row.result_id: ToolFailureAnalysisResult(
+                    result_id=row.result_id,
+                    job_id=row.job_id,
+                    signal_id=row.signal_id,
+                    signal_type=row.signal_type,
+                    session_id=row.session_id,
+                    collection_id=row.collection_id,
+                    tool_call_id=row.tool_call_id,
+                    assistant_message_id=row.assistant_message_id,
+                    result_message_id=row.result_message_id,
+                    tool_name=row.tool_name,
+                    error_code=row.error_code,
+                    problem_type=row.problem_type,
+                    confidence=float(row.confidence),
+                    related_message_ids=tuple(row.related_message_ids or ()),
+                    suggested_evidence=tuple(row.suggested_evidence or ()),
+                    suggested_target=row.suggested_target,
+                    evidence_coverage=EvidenceCoverage(
+                        requested_scope=tuple(
+                            (row.evidence_coverage or {}).get("requested_scope") or ()
+                        ),
+                        inspected_sources=tuple(
+                            (row.evidence_coverage or {}).get("inspected_sources") or ()
+                        ),
+                        omitted_candidates=tuple(
+                            (row.evidence_coverage or {}).get("omitted_candidates")
+                            or ()
+                        ),
+                        claim_support=tuple(
+                            (row.evidence_coverage or {}).get("claim_support") or ()
+                        ),
+                        gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
+                        coverage_status=(row.evidence_coverage or {}).get(
+                            "coverage_status"
+                        )
+                        or "unknown",
+                    ),
+                    model=row.model,
+                    input_digest=row.input_digest,
+                    created_at=_iso(row.created_at),
+                )
+                for row in rows
+            }
             return tuple(by_id[value] for value in ids if value in by_id)
 
     async def list_cases(
@@ -388,7 +683,28 @@ class FeedbackCaseRepository:
                     )
                 ]
             rows = rows[offset:] if limit is None else rows[offset : offset + limit]
-            return tuple(_case(row) for row in rows)
+            return tuple(
+                FeedbackCase(
+                    case_id=row.case_id,
+                    collection_id=row.collection_id,
+                    session_id=row.session_id,
+                    anchor_message_id=row.anchor_message_id,
+                    source_signal_ids=tuple(row.source_signal_ids or ()),
+                    analysis_result_ids=tuple(row.analysis_result_ids or ()),
+                    context_snapshot=deepcopy(row.context_snapshot or {}),
+                    status=row.status,
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    annotation_digest=row.annotation_digest,
+                    signal_analysis_result_ids=tuple(
+                        row.signal_analysis_result_ids or ()
+                    ),
+                    tool_failure_analysis_result_ids=tuple(
+                        row.tool_failure_analysis_result_ids or ()
+                    ),
+                )
+                for row in rows
+            )
 
     async def read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
         async with self.session_factory() as session:
@@ -398,7 +714,25 @@ class FeedbackCaseRepository:
                 .order_by(FeedbackAnnotationRow.version.desc())
                 .limit(1)
             )
-            return _annotation(row) if row is not None else None
+            return (
+                FeedbackAnnotation(
+                    annotation_id=row.annotation_id,
+                    case_id=row.case_id,
+                    version=row.version,
+                    problem_type=row.problem_type,
+                    severity=row.severity,
+                    target=row.target,
+                    support_source_refs=tuple(row.support_source_refs or ()),
+                    dataset_uses=tuple(row.dataset_uses or ()),
+                    reason=row.reason,
+                    annotation_digest=row.annotation_digest,
+                    created_by=row.created_by,
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                )
+                if row is not None
+                else None
+            )
 
     async def save_annotation(
         self,
@@ -432,7 +766,21 @@ class FeedbackCaseRepository:
                 .limit(1)
             )
             if current is not None and current.annotation_digest == annotation.annotation_digest:
-                return _annotation(current)
+                return FeedbackAnnotation(
+                    annotation_id=current.annotation_id,
+                    case_id=current.case_id,
+                    version=current.version,
+                    problem_type=current.problem_type,
+                    severity=current.severity,
+                    target=current.target,
+                    support_source_refs=tuple(current.support_source_refs or ()),
+                    dataset_uses=tuple(current.dataset_uses or ()),
+                    reason=current.reason,
+                    annotation_digest=current.annotation_digest,
+                    created_by=current.created_by,
+                    created_at=_iso(current.created_at),
+                    updated_at=_iso(current.updated_at),
+                )
             expected_version = (current.version + 1) if current is not None else 1
             if annotation.version != expected_version:
                 raise ValueError("annotation_version_conflict")
@@ -457,7 +805,21 @@ class FeedbackCaseRepository:
             case.updated_at = timestamp
             await session.flush()
             await enqueue_case_samples(session, case, now=timestamp)
-            return _annotation(row)
+            return FeedbackAnnotation(
+                annotation_id=row.annotation_id,
+                case_id=row.case_id,
+                version=row.version,
+                problem_type=row.problem_type,
+                severity=row.severity,
+                target=row.target,
+                support_source_refs=tuple(row.support_source_refs or ()),
+                dataset_uses=tuple(row.dataset_uses or ()),
+                reason=row.reason,
+                annotation_digest=row.annotation_digest,
+                created_by=row.created_by,
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+            )
 
     async def read_review_decisions(self, case_id: str) -> tuple[ReviewDecision, ...]:
         async with self.session_factory() as session:
@@ -466,7 +828,19 @@ class FeedbackCaseRepository:
                 .where(FeedbackReviewDecisionRow.case_id == case_id)
                 .order_by(FeedbackReviewDecisionRow.seq)
             )
-            return tuple(_review_decision(row) for row in rows)
+            return tuple(
+                ReviewDecision(
+                    decision_id=row.decision_id,
+                    case_id=row.case_id,
+                    annotation_digest=row.annotation_digest,
+                    decision=row.decision,
+                    reason=row.reason,
+                    created_by=row.created_by,
+                    seq=row.seq,
+                    created_at=_iso(row.created_at),
+                )
+                for row in rows
+            )
 
     async def append_review_decision(
         self,
@@ -503,7 +877,16 @@ class FeedbackCaseRepository:
                 )
                 if not same_identity:
                     raise ValueError("review_decision_identity_conflict")
-                return _review_decision(existing_decision)
+                return ReviewDecision(
+                    decision_id=existing_decision.decision_id,
+                    case_id=existing_decision.case_id,
+                    annotation_digest=existing_decision.annotation_digest,
+                    decision=existing_decision.decision,
+                    reason=existing_decision.reason,
+                    created_by=existing_decision.created_by,
+                    seq=existing_decision.seq,
+                    created_at=_iso(existing_decision.created_at),
+                )
             annotation = await session.scalar(
                 select(FeedbackAnnotationRow)
                 .where(
@@ -555,7 +938,16 @@ class FeedbackCaseRepository:
             }[decision.decision]
             case.updated_at = timestamp
             await session.flush()
-            return _review_decision(row)
+            return ReviewDecision(
+                decision_id=row.decision_id,
+                case_id=row.case_id,
+                annotation_digest=row.annotation_digest,
+                decision=row.decision,
+                reason=row.reason,
+                created_by=row.created_by,
+                seq=row.seq,
+                created_at=_iso(row.created_at),
+            )
 
 
 async def _save_result_row(
@@ -786,153 +1178,6 @@ async def _save_tool_failure_result_row(
     row.input_digest = result.input_digest
     row.created_at = _datetime(result.created_at)
     return row
-
-
-def _result(row: FeedbackAnalysisResultRow) -> AnalysisResult:
-    from domain.feedback.evidence_coverage import EvidenceCoverage
-
-    return AnalysisResult(
-        result_id=row.result_id,
-        job_id=row.job_id,
-        feedback_id=row.feedback_id,
-        session_id=row.session_id,
-        collection_id=row.collection_id,
-        anchor_message_id=row.anchor_message_id,
-        problem_type=row.problem_type,
-        confidence=float(row.confidence),
-        related_message_ids=tuple(row.related_message_ids or ()),
-        suggested_evidence=tuple(row.suggested_evidence or ()),
-        suggested_target=row.suggested_target,
-        evidence_coverage=EvidenceCoverage(
-            requested_scope=tuple((row.evidence_coverage or {}).get("requested_scope") or ()),
-            inspected_sources=tuple((row.evidence_coverage or {}).get("inspected_sources") or ()),
-            omitted_candidates=tuple((row.evidence_coverage or {}).get("omitted_candidates") or ()),
-            claim_support=tuple((row.evidence_coverage or {}).get("claim_support") or ()),
-            gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
-            coverage_status=(row.evidence_coverage or {}).get("coverage_status") or "unknown",
-        ),
-        model=row.model,
-        input_digest=row.input_digest,
-        created_at=_iso(row.created_at),
-    )
-
-
-def _correction_result(
-    row: FeedbackSignalAnalysisResultRow,
-) -> CorrectionSignalAnalysisResult:
-    from domain.feedback.evidence_coverage import EvidenceCoverage
-
-    return CorrectionSignalAnalysisResult(
-        result_id=row.result_id,
-        job_id=row.job_id,
-        signal_id=row.signal_id,
-        signal_type=row.signal_type,
-        session_id=row.session_id,
-        collection_id=row.collection_id,
-        anchor_message_id=row.anchor_message_id,
-        trigger_message_id=row.trigger_message_id,
-        problem_type=row.problem_type,
-        confidence=float(row.confidence),
-        related_message_ids=tuple(row.related_message_ids or ()),
-        suggested_evidence=tuple(row.suggested_evidence or ()),
-        suggested_target=row.suggested_target,
-        evidence_coverage=EvidenceCoverage(
-            requested_scope=tuple((row.evidence_coverage or {}).get("requested_scope") or ()),
-            inspected_sources=tuple((row.evidence_coverage or {}).get("inspected_sources") or ()),
-            omitted_candidates=tuple((row.evidence_coverage or {}).get("omitted_candidates") or ()),
-            claim_support=tuple((row.evidence_coverage or {}).get("claim_support") or ()),
-            gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
-            coverage_status=(row.evidence_coverage or {}).get("coverage_status") or "unknown",
-        ),
-        model=row.model,
-        input_digest=row.input_digest,
-        created_at=_iso(row.created_at),
-    )
-
-
-def _tool_failure_result(row: ToolFailureAnalysisResultRow) -> ToolFailureAnalysisResult:
-    from domain.feedback.evidence_coverage import EvidenceCoverage
-
-    return ToolFailureAnalysisResult(
-        result_id=row.result_id,
-        job_id=row.job_id,
-        signal_id=row.signal_id,
-        signal_type=row.signal_type,
-        session_id=row.session_id,
-        collection_id=row.collection_id,
-        tool_call_id=row.tool_call_id,
-        assistant_message_id=row.assistant_message_id,
-        result_message_id=row.result_message_id,
-        tool_name=row.tool_name,
-        error_code=row.error_code,
-        problem_type=row.problem_type,
-        confidence=float(row.confidence),
-        related_message_ids=tuple(row.related_message_ids or ()),
-        suggested_evidence=tuple(row.suggested_evidence or ()),
-        suggested_target=row.suggested_target,
-        evidence_coverage=EvidenceCoverage(
-            requested_scope=tuple((row.evidence_coverage or {}).get("requested_scope") or ()),
-            inspected_sources=tuple((row.evidence_coverage or {}).get("inspected_sources") or ()),
-            omitted_candidates=tuple((row.evidence_coverage or {}).get("omitted_candidates") or ()),
-            claim_support=tuple((row.evidence_coverage or {}).get("claim_support") or ()),
-            gaps=tuple((row.evidence_coverage or {}).get("gaps") or ()),
-            coverage_status=(row.evidence_coverage or {}).get("coverage_status") or "unknown",
-        ),
-        model=row.model,
-        input_digest=row.input_digest,
-        created_at=_iso(row.created_at),
-    )
-
-
-def _case(row: FeedbackCaseRow) -> FeedbackCase:
-    return FeedbackCase(
-        case_id=row.case_id,
-        collection_id=row.collection_id,
-        session_id=row.session_id,
-        anchor_message_id=row.anchor_message_id,
-        source_signal_ids=tuple(row.source_signal_ids or ()),
-        analysis_result_ids=tuple(row.analysis_result_ids or ()),
-        context_snapshot=deepcopy(row.context_snapshot or {}),
-        status=row.status,
-        created_at=_iso(row.created_at),
-        updated_at=_iso(row.updated_at),
-        annotation_digest=row.annotation_digest,
-        signal_analysis_result_ids=tuple(row.signal_analysis_result_ids or ()),
-        tool_failure_analysis_result_ids=tuple(
-            row.tool_failure_analysis_result_ids or ()
-        ),
-    )
-
-
-def _annotation(row: FeedbackAnnotationRow) -> FeedbackAnnotation:
-    return FeedbackAnnotation(
-        annotation_id=row.annotation_id,
-        case_id=row.case_id,
-        version=row.version,
-        problem_type=row.problem_type,
-        severity=row.severity,
-        target=row.target,
-        support_source_refs=tuple(row.support_source_refs or ()),
-        dataset_uses=tuple(row.dataset_uses or ()),
-        reason=row.reason,
-        annotation_digest=row.annotation_digest,
-        created_by=row.created_by,
-        created_at=_iso(row.created_at),
-        updated_at=_iso(row.updated_at),
-    )
-
-
-def _review_decision(row: FeedbackReviewDecisionRow) -> ReviewDecision:
-    return ReviewDecision(
-        decision_id=row.decision_id,
-        case_id=row.case_id,
-        annotation_digest=row.annotation_digest,
-        decision=row.decision,
-        reason=row.reason,
-        created_by=row.created_by,
-        seq=row.seq,
-        created_at=_iso(row.created_at),
-    )
 
 
 def _merge_context_snapshot(

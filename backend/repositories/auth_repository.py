@@ -43,12 +43,28 @@ class AuthRepository:
             user = await session.scalar(
                 select(AuthUser).where(AuthUser.email == email.strip().lower())
             )
-            return _user_record(user) if user is not None else None
+            if user is None:
+                return None
+            return AuthUserRecord(
+                user_id=user.user_id,
+                email=user.email,
+                display_name=user.display_name,
+                password_hash=user.password_hash,
+                created_at=_iso(user.created_at),
+            )
 
     async def read_user(self, user_id: str) -> AuthUserRecord | None:
         async with self.session_factory() as session:
             user = await session.get(AuthUser, user_id)
-            return _user_record(user) if user is not None else None
+            if user is None:
+                return None
+            return AuthUserRecord(
+                user_id=user.user_id,
+                email=user.email,
+                display_name=user.display_name,
+                password_hash=user.password_hash,
+                created_at=_iso(user.created_at),
+            )
 
     async def add_user(self, user: AuthUserRecord) -> None:
         async with self.session_factory.begin() as session:
@@ -106,16 +122,6 @@ class AuthRepository:
                 .where(AuthSession.token_hash == token_hash)
                 .values(revoked_at=_datetime(revoked_at))
             )
-
-
-def _user_record(user: AuthUser) -> AuthUserRecord:
-    return AuthUserRecord(
-        user_id=user.user_id,
-        email=user.email,
-        display_name=user.display_name,
-        password_hash=user.password_hash,
-        created_at=_iso(user.created_at),
-    )
 
 
 def _datetime(value: Any) -> datetime:

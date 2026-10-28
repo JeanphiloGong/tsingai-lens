@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchScope,
+    PaperResearchRelationship,
+    PaperResearchSourceRef,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
+)
+
 from domain.core.research_objective import ResearchObjective, normalize_objective_terms
 
-from repositories.paper_map_repository import paper_map_from_payload
 
 from dataclasses import replace
 from types import SimpleNamespace
@@ -52,37 +59,44 @@ def _experimental_map(
 ) -> PaperResearchMap:
     studies = []
     if map_status == "sufficient":
-        studies = [
-            {
-                "study_id": f"study-{document_id}",
-                "design_type": "experimental",
-                "claim_scope": "current_work",
-                "material_scope": [material],
-                "relationships": [
-                    {
-                        "relationship_id": f"rel-{document_id}",
-                        "varied_factors": [factor],
-                        "outcome": outcome,
-                        "source_refs": [
-                            {"source_kind": "block", "source_ref": "block-1"}
-                        ],
-                        "confidence": 0.8,
-                    }
-                ],
-            }
-        ]
-    return paper_map_from_payload(
-        {
-            "document_id": document_id,
-            "doc_role": "experimental",
-            "studies": studies,
-            "map_status": map_status,
-            "map_limitations": (
-                ["High-level Sources did not establish the target outcome."]
-                if map_status != "sufficient"
-                else []
+        studies = (
+            PaperResearchScope(
+                study_id=f"study-{document_id}",
+                document_id=document_id,
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(material,),
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=f"rel-{document_id}",
+                        varied_factors=(factor,),
+                        outcome=outcome,
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-1"
+                            ),
+                        ),
+                        confidence=0.8,
+                    ),
+                ),
+                confidence=0.0,
             ),
-        }
+        )
+    return PaperResearchMap(
+        document_id=document_id,
+        doc_role="experimental",
+        studies=tuple(studies),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        map_status=map_status,
+        map_limitations=tuple(
+            ["High-level Sources did not establish the target outcome."]
+            if map_status != "sufficient"
+            else []
+        ),
     )
 
 
@@ -165,26 +179,34 @@ def test_scope_preview_does_not_truncate_a_131_paper_collection() -> None:
 
 
 def test_review_citation_lead_is_navigation_for_inspection_not_recommended_scope() -> None:
-    review = paper_map_from_payload(
-        {
-            "document_id": "review-1",
-            "doc_role": "review",
-            "map_status": "sufficient",
-            "review_synthesis": {
-                "citation_leads": [
-                    {
-                        "content": "Smith et al. varied laser power and measured elongation.",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "variables": ["laser power"],
-                        "outcomes": ["elongation"],
-                        "source_refs": [
-                            {"source_kind": "block", "source_ref": "block-9"}
-                        ],
-                        "confidence": 0.9,
-                    }
-                ]
-            },
-        }
+    review = PaperResearchMap(
+        document_id="review-1",
+        doc_role="review",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        map_status="sufficient",
+        review_synthesis=ReviewSynthesisMap(
+            synthesis_claims=(),
+            disputes=(),
+            evidence_gaps=(),
+            citation_leads=(
+                ReviewKnowledgeItem(
+                    content="Smith et al. varied laser power and measured elongation.",
+                    material_scope=("Ti-6Al-4V",),
+                    variables=("laser power",),
+                    outcomes=("elongation",),
+                    conditions=(),
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="block-9"
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+        ),
     )
 
     preview = screen_objective_scope(

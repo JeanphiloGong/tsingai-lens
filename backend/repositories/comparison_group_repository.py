@@ -53,7 +53,7 @@ class ComparisonGroupRepository:
                     ComparisonGroupRow.group_id == group_id,
                 )
             )
-            return await _group_record(session, row) if row is not None else None
+            return await load_comparison_group(session, row) if row is not None else None
 
     async def list_groups(
         self,
@@ -77,7 +77,7 @@ class ComparisonGroupRepository:
                     .order_by(ComparisonGroupRow.group_id)
                 )
             )
-            return tuple([await _group_record(session, row) for row in rows])
+            return tuple([await load_comparison_group(session, row) for row in rows])
 
 
 async def _add_group(
@@ -92,7 +92,7 @@ async def _add_group(
         )
     )
     if existing is not None:
-        restored = await _group_record(session, existing)
+        restored = await load_comparison_group(session, existing)
         if restored == group:
             return restored
         raise ValueError("comparison group identity already exists")
@@ -171,7 +171,7 @@ async def _validate_group_context(
         raise ValueError("comparison group requires included selections from multiple experiments")
 
 
-async def _group_record(
+async def load_comparison_group(
     session: AsyncSession,
     row: ComparisonGroupRow,
 ) -> ComparisonGroup:

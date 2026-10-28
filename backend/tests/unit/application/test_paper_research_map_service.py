@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchRelationship,
+    PaperResearchSourceRef,
+    build_paper_research_scope,
+    build_paper_research_scope_id,
+    build_paper_research_relationship,
+)
+
 from infra.source.artifact_bundle import source_documents_from_records
 
 
-from repositories.paper_map_repository import (
-    paper_map_payload,
-    research_scope_payload,
-    source_ref_payload,
-    research_scope_from_payload,
-    paper_map_from_payload,
-)
 
 import json
 from threading import Lock
@@ -70,7 +71,9 @@ class _WindowExtractor:
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
-    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+    def extract(
+        self, payload: dict[str, Any], *, before_request=None
+    ) -> StructuredPaperResearchMap:
         if before_request is not None:
             before_request()
         self.payloads.append(payload)
@@ -310,25 +313,33 @@ def _build_skims(
 
 
 def test_paper_map_record_keeps_only_the_stable_source_link():
-    skim = paper_map_from_payload({"document_id": "paper-1"})
+    skim = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+    )
 
-    record = paper_map_payload(skim)
-
-    assert record["document_id"] == "paper-1"
-    assert "title" not in record
-    assert "source_filename" not in record
+    assert skim.document_id == "paper-1"
+    assert not hasattr(skim, "title")
+    assert not hasattr(skim, "source_filename")
 
 
 def test_paper_map_record_preserves_explicit_map_insufficiency():
-    skim = paper_map_from_payload(
-        {
-            "document_id": "paper-1",
-            "map_status": "insufficient_map",
-            "map_limitations": ["missing_outcome"],
-        }
+    skim = PaperResearchMap(
+        document_id="paper-1",
+        doc_role="uncertain",
+        studies=(),
+        evidence_density="unknown",
+        confidence=0.0,
+        warnings=(),
+        map_status="insufficient_map",
+        map_limitations=("missing_outcome",),
     )
 
-    restored = paper_map_from_payload(paper_map_payload(skim))
+    restored = skim
 
     assert restored.map_status == "insufficient_map"
     assert restored.map_limitations == ("missing_outcome",)
@@ -405,7 +416,10 @@ def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
     )
 
     class DuplicateStudyExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+
+        def extract(
+            self, payload: dict[str, Any], *, before_request=None
+        ) -> StructuredPaperResearchMap:
             if before_request is not None:
                 before_request()
             parsed = super().extract(payload)
@@ -524,7 +538,9 @@ def test_independent_windows_run_concurrently_and_merge_in_source_order(monkeypa
         def estimate_prompt_tokens(self, payload):
             return 20_000 if len(payload["source_units"]) > 4 else 1_000
 
-        def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+        def extract(
+            self, payload: dict[str, Any], *, before_request=None
+        ) -> StructuredPaperResearchMap:
             if before_request is not None:
                 before_request()
             with self._lock:
@@ -1306,9 +1322,7 @@ def test_complete_window_candidate_keeps_its_stable_source_reference():
     skim = _build_skims(artifacts, tree, _WindowExtractor())[0]
 
     relationship = skim.studies[0].relationships[0]
-    assert [source_ref_payload(ref) for ref in relationship.source_refs] == [
-        {"source_kind": "block", "source_ref": "result-candidate"}
-    ]
+    assert relationship.source_refs == (PaperResearchSourceRef("block", "result-candidate"),)
 
 
 @pytest.mark.parametrize(
@@ -1548,7 +1562,10 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
     )
 
     class ReviewExtractor(_WindowExtractor):
-        def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+
+        def extract(
+            self, payload: dict[str, Any], *, before_request=None
+        ) -> StructuredPaperResearchMap:
             if before_request is not None:
                 before_request()
             self.payloads.append(payload)
@@ -1718,63 +1735,68 @@ def test_equivalent_candidates_from_multiple_windows_are_consolidated_once():
 def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    {
-                        "document_id": "paper-1",
-                        "experiment_label": "Ti-6Al-4V heat-treatment experiment",
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["heat treatment at 920 C"],
-                        "relationships": [
-                            {
-                                "varied_factors": ["heat treatment temperature"],
-                                "outcome": "grain size",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "block",
-                                        "source_ref": "results-grain-size",
-                                    }
-                                ],
-                                "confidence": 0.9,
-                            }
-                        ],
-                        "confidence": 0.9,
-                    }
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label="Ti-6Al-4V heat-treatment experiment",
+                    material_scope=("Ti-6Al-4V",),
+                    process_context=("heat treatment at 920 C",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("heat treatment temperature",),
+                            outcome="grain size",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="results-grain-size"
+                                ),
+                            ),
+                            confidence=0.9,
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    {
-                        "document_id": "paper-1",
-                        "experiment_label": "Ti-6Al-4V heat-treatment experiment",
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["heat treatment at 920 C"],
-                        "relationships": [
-                            {
-                                "varied_factors": ["heat treatment temperature"],
-                                "outcome": "alpha phase fraction",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "table",
-                                        "source_ref": "phase-fraction-table",
-                                    }
-                                ],
-                                "confidence": 0.85,
-                            }
-                        ],
-                        "confidence": 0.85,
-                    }
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label="Ti-6Al-4V heat-treatment experiment",
+                    material_scope=("Ti-6Al-4V",),
+                    process_context=("heat treatment at 920 C",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("heat treatment temperature",),
+                            outcome="alpha phase fraction",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="table",
+                                    source_ref="phase-fraction-table",
+                                ),
+                            ),
+                            confidence=0.85,
+                        ),
+                    ),
+                    confidence=0.85,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
     ]
 
@@ -1793,63 +1815,67 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
 def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    {
-                        "document_id": "paper-1",
-                        "experiment_label": "Ti-6Al-4V heat-treatment experiment",
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["heat treatment"],
-                        "relationships": [
-                            {
-                                "varied_factors": ["heat treatment temperature"],
-                                "outcome": "grain size",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "block",
-                                        "source_ref": "abstract-claim",
-                                    }
-                                ],
-                                "confidence": 0.8,
-                            }
-                        ],
-                        "confidence": 0.8,
-                    }
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label="Ti-6Al-4V heat-treatment experiment",
+                    material_scope=("Ti-6Al-4V",),
+                    process_context=("heat treatment",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("heat treatment temperature",),
+                            outcome="grain size",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="abstract-claim"
+                                ),
+                            ),
+                            confidence=0.8,
+                        ),
+                    ),
+                    confidence=0.8,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    {
-                        "document_id": "paper-1",
-                        "experiment_label": None,
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "material_scope": ["Ti-6Al-4V"],
-                        "process_context": ["heat treatment"],
-                        "relationships": [
-                            {
-                                "varied_factors": ["heat treatment temperature"],
-                                "outcome": "grain size",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "block",
-                                        "source_ref": "results-claim",
-                                    }
-                                ],
-                                "confidence": 0.9,
-                            }
-                        ],
-                        "confidence": 0.9,
-                    }
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label=None,
+                    material_scope=("Ti-6Al-4V",),
+                    process_context=("heat treatment",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("heat treatment temperature",),
+                            outcome="grain size",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="results-claim"
+                                ),
+                            ),
+                            confidence=0.9,
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
     ]
 
@@ -1871,22 +1897,36 @@ def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
 def test_different_experiment_labels_keep_equal_relationship_axes_separate():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    {
-                        **_study(
-                            varied_factors=["heat treatment temperature"],
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label=experiment_label,
+                    material_scope=("Ti-6Al-4V",),
+                    process_context=("heat treatment",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("heat treatment temperature",),
                             outcome="grain size",
-                            material_scope=["Ti-6Al-4V"],
-                            process_context=["heat treatment"],
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="study-source"
+                                ),
+                            ),
                             confidence=0.9,
                         ),
-                        "experiment_label": experiment_label,
-                    }
-                ],
-            }
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         )
         for experiment_label in ("experiment A", "experiment B")
     ]
@@ -1903,25 +1943,27 @@ def test_different_experiment_labels_keep_equal_relationship_axes_separate():
 def test_merged_relationship_identity_keeps_its_final_study_boundary():
     def merge_for_experiment(experiment_kind: str) -> PaperResearchScope:
         studies = tuple(
-            research_scope_from_payload(
-                {
-                    "document_id": "paper-1",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "experiment_label": f"{experiment_kind} experiment",
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power"],
-                            "outcome": "yield strength",
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": source_ref,
-                                }
-                            ],
-                        }
-                    ],
-                }
+            build_paper_research_scope(
+                document_id="paper-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=f"{experiment_kind} experiment",
+                material_scope=(),
+                process_context=(),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="paper-1",
+                        varied_factors=("laser power",),
+                        outcome="yield strength",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref=source_ref
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                confidence=0.0,
             )
             for source_ref in ("methods-1", "results-1")
         )
@@ -1940,61 +1982,127 @@ def test_merged_relationship_identity_keeps_its_final_study_boundary():
 def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids():
     """Repeated model aliases for one Source fact must not invalidate the paper map."""
 
-    existing = research_scope_from_payload(
-        {
-            "document_id": "paper-1",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "experiment_label": "experiment-1",
-            "material_scope": ["316L stainless steel"],
-            "process_context": ["LPBF"],
-            "relationships": [
-                {
-                    "relationship_id": "relationship-laser-power-1",
-                    "varied_factors": ["laser power"],
-                    "outcome": "porosity",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "results-1"}
-                    ],
-                },
-                {
-                    "relationship_id": "relationship-laser-power-2",
-                    "varied_factors": ["laser power"],
-                    "outcome": "Porosity",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "results-1"}
-                    ],
-                },
-            ],
-        }
+    existing = PaperResearchScope(
+        study_id=build_paper_research_scope_id(
+            document_id="paper-1",
+            design_type="experimental",
+            claim_scope="current_work",
+            experiment_label="experiment-1",
+            material_scope=("316L stainless steel",),
+            process_context=("LPBF",),
+            relationships=(
+                PaperResearchRelationship(
+                    relationship_id="relationship-laser-power-1",
+                    varied_factors=("laser power",),
+                    outcome="porosity",
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="results-1"
+                        ),
+                    ),
+                    confidence=0.0,
+                ),
+                PaperResearchRelationship(
+                    relationship_id="relationship-laser-power-2",
+                    varied_factors=("laser power",),
+                    outcome="Porosity",
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="results-1"
+                        ),
+                    ),
+                    confidence=0.0,
+                ),
+            ),
+        ),
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="experiment-1",
+        material_scope=("316L stainless steel",),
+        process_context=("LPBF",),
+        relationships=(
+            PaperResearchRelationship(
+                relationship_id="relationship-laser-power-1",
+                varied_factors=("laser power",),
+                outcome="porosity",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+            PaperResearchRelationship(
+                relationship_id="relationship-laser-power-2",
+                varied_factors=("laser power",),
+                outcome="Porosity",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
-    duplicate = research_scope_from_payload(
-        {
-            "document_id": "paper-1",
-            "design_type": "experimental",
-            "claim_scope": "current_work",
-            "experiment_label": "experiment-1",
-            "material_scope": ["316L stainless steel"],
-            "process_context": ["LPBF"],
-            "relationships": [
-                {
-                    "relationship_id": "relationship-scan-speed",
-                    "varied_factors": ["scanning speed"],
-                    "outcome": "porosity",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "results-1"}
-                    ],
-                },
-                {
-                    "relationship_id": "relationship-laser-power-alias",
-                    "varied_factors": ["laser-power"],
-                    "outcome": "porosity",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "results-1"}
-                    ],
-                },
-            ],
-        }
+    duplicate = PaperResearchScope(
+        study_id=build_paper_research_scope_id(
+            document_id="paper-1",
+            design_type="experimental",
+            claim_scope="current_work",
+            experiment_label="experiment-1",
+            material_scope=("316L stainless steel",),
+            process_context=("LPBF",),
+            relationships=(
+                PaperResearchRelationship(
+                    relationship_id="relationship-scan-speed",
+                    varied_factors=("scanning speed",),
+                    outcome="porosity",
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="results-1"
+                        ),
+                    ),
+                    confidence=0.0,
+                ),
+                PaperResearchRelationship(
+                    relationship_id="relationship-laser-power-alias",
+                    varied_factors=("laser-power",),
+                    outcome="porosity",
+                    source_refs=(
+                        PaperResearchSourceRef(
+                            source_kind="block", source_ref="results-1"
+                        ),
+                    ),
+                    confidence=0.0,
+                ),
+            ),
+        ),
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope="current_work",
+        experiment_label="experiment-1",
+        material_scope=("316L stainless steel",),
+        process_context=("LPBF",),
+        relationships=(
+            PaperResearchRelationship(
+                relationship_id="relationship-scan-speed",
+                varied_factors=("scanning speed",),
+                outcome="porosity",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+            PaperResearchRelationship(
+                relationship_id="relationship-laser-power-alias",
+                varied_factors=("laser-power",),
+                outcome="porosity",
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="results-1"),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        confidence=0.0,
     )
 
     merged = PaperMapAggregator._merge_studies(
@@ -2031,31 +2139,67 @@ def test_candidates_with_different_variable_outcome_links_are_not_merged():
 def test_same_axes_with_incompatible_process_context_are_not_merged():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    _study(
-                        varied_factors=["scan speed"],
-                        outcome="porosity",
-                        process_context=["LPBF"],
-                        confidence=0.9,
-                    )
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label="experiment-1",
+                    material_scope=("316L stainless steel",),
+                    process_context=("LPBF",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("scan speed",),
+                            outcome="porosity",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="study-source"
+                                ),
+                            ),
+                            confidence=0.9,
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    _study(
-                        varied_factors=["scan speed"],
-                        outcome="porosity",
-                        process_context=["directed energy deposition"],
-                        confidence=0.9,
-                    )
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label="experiment-1",
+                    material_scope=("316L stainless steel",),
+                    process_context=("directed energy deposition",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("scan speed",),
+                            outcome="porosity",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="study-source"
+                                ),
+                            ),
+                            confidence=0.9,
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
     ]
 
@@ -2071,31 +2215,67 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
 def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    _study(
-                        varied_factors=["scan speed"],
-                        outcome="porosity",
-                        material_scope=["316L stainless steel", "Inconel 718"],
-                        confidence=0.9,
-                    )
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label="experiment-1",
+                    material_scope=("316L stainless steel", "Inconel 718"),
+                    process_context=("LPBF",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("scan speed",),
+                            outcome="porosity",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="study-source"
+                                ),
+                            ),
+                            confidence=0.9,
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    _study(
-                        varied_factors=["scan speed"],
-                        outcome="porosity",
-                        material_scope=["316L stainless steel", "Ti-6Al-4V"],
-                        confidence=0.9,
-                    )
-                ],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label="experiment-1",
+                    material_scope=("316L stainless steel", "Ti-6Al-4V"),
+                    process_context=("LPBF",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("scan speed",),
+                            outcome="porosity",
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block", source_ref="study-source"
+                                ),
+                            ),
+                            confidence=0.9,
+                        ),
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
     ]
 
@@ -2111,65 +2291,69 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
 def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    {
-                        **_study(
-                            varied_factors=["scan speed"],
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label=None,
+                    material_scope=("316L stainless steel",),
+                    process_context=("LPBF",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("scan speed",),
                             outcome="porosity",
-                            material_scope=["316L stainless steel"],
-                            process_context=["LPBF"],
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block",
+                                    source_ref="experiment-a-results",
+                                ),
+                            ),
                             confidence=0.9,
                         ),
-                        "experiment_label": None,
-                        "relationships": [
-                            {
-                                "varied_factors": ["scan speed"],
-                                "outcome": "porosity",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "block",
-                                        "source_ref": "experiment-a-results",
-                                    }
-                                ],
-                                "confidence": 0.9,
-                            }
-                        ],
-                    }
-                ],
-            }
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "studies": [
-                    {
-                        **_study(
-                            varied_factors=["scan speed"],
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(
+                build_paper_research_scope(
+                    document_id="paper-1",
+                    design_type="experimental",
+                    claim_scope="current_work",
+                    experiment_label=None,
+                    material_scope=("316L stainless steel",),
+                    process_context=("LPBF",),
+                    relationships=(
+                        build_paper_research_relationship(
+                            document_id="paper-1",
+                            varied_factors=("scan speed",),
                             outcome="porosity",
-                            material_scope=["316L stainless steel"],
-                            process_context=["LPBF"],
+                            source_refs=(
+                                PaperResearchSourceRef(
+                                    source_kind="block",
+                                    source_ref="experiment-b-results",
+                                ),
+                            ),
                             confidence=0.9,
                         ),
-                        "experiment_label": None,
-                        "relationships": [
-                            {
-                                "varied_factors": ["scan speed"],
-                                "outcome": "porosity",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "block",
-                                        "source_ref": "experiment-b-results",
-                                    }
-                                ],
-                                "confidence": 0.9,
-                            }
-                        ],
-                    }
-                ],
-            }
+                    ),
+                    confidence=0.9,
+                ),
+            ),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
     ]
 
@@ -2185,11 +2369,13 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
 def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload(
-            {
-                "document_id": "paper-1",
-                "warnings": [f"warning-{position}"],
-            }
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="uncertain",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(f"warning-{position}",),
         )
         for position in range(4)
     ]
@@ -2206,9 +2392,21 @@ def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
 def test_document_profile_owns_the_paper_role_across_windows():
     service = PaperResearchMapService()
     window_skims = [
-        paper_map_from_payload({"document_id": "paper-1", "doc_role": "review"}),
-        paper_map_from_payload(
-            {"document_id": "paper-1", "doc_role": "experimental"}
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="review",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
+        ),
+        PaperResearchMap(
+            document_id="paper-1",
+            doc_role="experimental",
+            studies=(),
+            evidence_density="unknown",
+            confidence=0.0,
+            warnings=(),
         ),
     ]
 
@@ -2234,27 +2432,39 @@ def test_document_profile_bounds_study_claim_scope(
     input_scope: str,
     expected_scope: str,
 ):
-    study = research_scope_from_payload(
-        {
-            **_study(
-                varied_factors=["reheating condition"],
+    study = build_paper_research_scope(
+        document_id="paper-1",
+        design_type="experimental",
+        claim_scope=input_scope,
+        experiment_label="experiment-1",
+        material_scope=("316L stainless steel",),
+        process_context=("LPBF",),
+        relationships=(
+            build_paper_research_relationship(
+                document_id="paper-1",
+                varied_factors=("reheating condition",),
                 outcome="martensite fraction",
+                source_refs=(
+                    PaperResearchSourceRef(
+                        source_kind="block", source_ref="study-source"
+                    ),
+                ),
                 confidence=0.9,
             ),
-            "document_id": "paper-1",
-            "claim_scope": input_scope,
-        }
+        ),
+        confidence=0.9,
     )
 
     skim = PaperMapAggregator().consolidate_window_maps(
         "paper-1",
         [
-            paper_map_from_payload(
-                {
-                    "document_id": "paper-1",
-                    "doc_role": profile_doc_type,
-                    "studies": [research_scope_payload(study)],
-                }
+            PaperResearchMap(
+                document_id="paper-1",
+                doc_role=profile_doc_type,
+                studies=(study,),
+                evidence_density="unknown",
+                confidence=0.0,
+                warnings=(),
             )
         ],
         profile=SimpleNamespace(doc_type=profile_doc_type),

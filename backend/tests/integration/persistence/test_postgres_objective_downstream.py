@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Mapping
 
 import pytest
@@ -34,8 +35,6 @@ from domain.evaluation import FindingCuration, FindingFeedback
 from infra.persistence.postgres.models.experiment_finding import ExperimentFindingRow
 from repositories.finding_review_repository import (
     FindingReviewRepository,
-    finding_curation_from_record,
-    finding_feedback_from_record,
 )
 from tests.integration.persistence.test_postgres_objective_lifecycle import (
     COLLECTION_ID,
@@ -232,38 +231,37 @@ async def test_finding_review_round_trips_published_analysis_identity(
     finding = _finding(analysis.analysis_version)
 
     feedback = await reviews.upsert_feedback(
-        finding_feedback_from_record(
-            {
-                "feedback_id": "feedback-1",
-                "collection_id": COLLECTION_ID,
-                "objective_id": OBJECTIVE_ID,
-                "analysis_version": analysis.analysis_version,
-                "finding_id": finding.finding_id,
-                "review_status": "correct",
-                "issue_type": "none",
-                "reviewer": "expert-1",
-                "created_at": "2026-08-27T00:00:00+00:00",
-            }
+        FindingFeedback(
+            feedback_id="feedback-1",
+            collection_id=COLLECTION_ID,
+            objective_id=OBJECTIVE_ID,
+            analysis_version=analysis.analysis_version,
+            finding_id=finding.finding_id,
+            review_status="correct",
+            issue_type="none",
+            reviewer="expert-1",
+            created_at="2026-08-27T00:00:00+00:00",
+            note=None,
         )
     )
     curation = await reviews.upsert_curation(
-        finding_curation_from_record(
-            {
-                "curation_id": "curation-1",
-                "collection_id": COLLECTION_ID,
-                "objective_id": OBJECTIVE_ID,
-                "analysis_version": analysis.analysis_version,
-                "finding_id": finding.finding_id,
-                "curated_status": "limited",
-                "curated_finding": {
-                    **finding_response(finding),
-                    "statement": (
-                        "Higher laser power was associated with strength only "
-                        "within the reported process windows."
-                    ),
-                },
-                "updated_at": "2026-08-27T00:00:00+00:00",
-            }
+        FindingCuration(
+            curation_id="curation-1",
+            collection_id=COLLECTION_ID,
+            objective_id=OBJECTIVE_ID,
+            analysis_version=analysis.analysis_version,
+            finding_id=finding.finding_id,
+            curated_status="limited",
+            curated_finding=replace(
+                finding,
+                statement=(
+                    "Higher laser power was associated with strength only "
+                    "within the reported process windows."
+                ),
+            ),
+            updated_at="2026-08-27T00:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
 
@@ -416,18 +414,17 @@ async def test_finding_review_accepts_experiment_backed_finding_row(
 
     reviews = FindingReviewRepository(objective_repository.session_factory)
     feedback = await reviews.upsert_feedback(
-        finding_feedback_from_record(
-            {
-                "feedback_id": "experiment-feedback-1",
-                "collection_id": COLLECTION_ID,
-                "objective_id": OBJECTIVE_ID,
-                "analysis_version": analysis.analysis_version,
-                "finding_id": finding.finding_id,
-                "review_status": "correct",
-                "issue_type": "none",
-                "reviewer": "experiment-reviewer",
-                "created_at": "2026-08-27T00:00:00+00:00",
-            }
+        FindingFeedback(
+            feedback_id="experiment-feedback-1",
+            collection_id=COLLECTION_ID,
+            objective_id=OBJECTIVE_ID,
+            analysis_version=analysis.analysis_version,
+            finding_id=finding.finding_id,
+            review_status="correct",
+            issue_type="none",
+            reviewer="experiment-reviewer",
+            created_at="2026-08-27T00:00:00+00:00",
+            note=None,
         )
     )
     assert feedback.finding_id == finding.finding_id

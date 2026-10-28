@@ -61,7 +61,7 @@ class ObjectiveExperimentSelectionRepository:
                     ObjectiveExperimentSelectionRow.selection_id == selection_id,
                 )
             )
-            return await _selection_record(session, row) if row is not None else None
+            return await load_experiment_selection(session, row) if row is not None else None
 
     async def list_selections(
         self,
@@ -87,7 +87,7 @@ class ObjectiveExperimentSelectionRepository:
                 )
             )
             return tuple(
-                [await _selection_record(session, row) for row in rows]
+                [await load_experiment_selection(session, row) for row in rows]
             )
 
 
@@ -109,7 +109,7 @@ async def _add_selection(
         )
     )
     if existing is not None:
-        restored = await _selection_record(session, existing)
+        restored = await load_experiment_selection(session, existing)
         if restored == selection:
             return restored
         raise ValueError("selection identity already belongs to another record")
@@ -205,7 +205,7 @@ async def _validate_analysis(
         raise ValueError("selection analysis snapshot was not found")
 
 
-async def _selection_record(
+async def load_experiment_selection(
     session: AsyncSession,
     row: ObjectiveExperimentSelectionRow,
 ) -> ObjectiveExperimentSelection:

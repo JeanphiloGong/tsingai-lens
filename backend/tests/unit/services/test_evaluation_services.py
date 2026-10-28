@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchScope,
+    PaperResearchRelationship,
+    PaperResearchSourceRef,
+)
+
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -59,11 +65,6 @@ from domain.core.scientific_fact import (
 from domain.evaluation import FindingCuration, FindingFeedback
 from domain.source import SourceBlock, SourceDocument
 from repositories.source_artifact_repository import SourceArtifactRepository
-from repositories.finding_review_repository import (
-    finding_curation_from_record,
-    finding_feedback_from_record,
-)
-from repositories.paper_map_repository import paper_map_from_payload
 from repositories.finding_review_repository import FindingReviewRepository
 from repositories.objective_repository import ObjectiveRepository
 from repositories.evaluation_repository import EvaluationRepository
@@ -292,38 +293,37 @@ async def _published_objective_repository(*, postgres_session_factory) -> Object
         ),
         rank=1,
     )
-    skim = paper_map_from_payload(
-        {
-            "document_id": "doc-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": list(objective.material_scope),
-                    "relationships": [
-                        {
-                            "relationship_id": (
-                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+    skim = PaperResearchMap(
+        document_id="doc-1",
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=_TEMPERATURE_STRENGTH_STUDY_ID,
+                document_id="doc-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=objective.material_scope,
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        varied_factors=objective.variables,
+                        outcome=objective.outcomes[0],
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-7"
                             ),
-                            "varied_factors": list(objective.variables),
-                            "outcome": objective.outcomes[0],
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": "block-7",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="high",
+        confidence=0.9,
+        warnings=(),
     )
     await repository.replace(
         "col-gold",
@@ -649,38 +649,37 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective(*, postgres_ses
         ),
         rank=1,
     )
-    skim = paper_map_from_payload(
-        {
-            "document_id": "doc-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "material_scope": list(objective.material_scope),
-                    "relationships": [
-                        {
-                            "relationship_id": (
-                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+    skim = PaperResearchMap(
+        document_id="doc-1",
+        doc_role="experimental",
+        studies=(
+            PaperResearchScope(
+                study_id=_TEMPERATURE_STRENGTH_STUDY_ID,
+                document_id="doc-1",
+                design_type="experimental",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=objective.material_scope,
+                process_context=(),
+                relationships=(
+                    PaperResearchRelationship(
+                        relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        varied_factors=objective.variables,
+                        outcome=objective.outcomes[0],
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="block-7"
                             ),
-                            "varied_factors": list(objective.variables),
-                            "outcome": objective.outcomes[0],
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": "block-7",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.9,
+            ),
+        ),
+        evidence_density="high",
+        confidence=0.9,
+        warnings=(),
     )
     repository = ObjectiveRepository(postgres_session_factory)
     await repository.replace(
@@ -812,25 +811,25 @@ async def test_latest_feedback_or_curation_controls_dataset_status(*, postgres_s
         "finding_id": "finding-1",
     }
     await service.review_repository.upsert_curation(
-        finding_curation_from_record(
-            {
-                "curation_id": "curation-1",
-                **identity,
-                "curated_status": "limited",
-                "curated_finding": finding_response(published),
-                "updated_at": "2026-08-02T10:00:00+00:00",
-            }
+        FindingCuration(
+            curation_id="curation-1",
+            **identity,
+            curated_status="limited",
+            curated_finding=published,
+            updated_at="2026-08-02T10:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
     await service.review_repository.upsert_feedback(
-        finding_feedback_from_record(
-            {
-                "feedback_id": "feedback-1",
-                **identity,
-                "review_status": "incorrect",
-                "issue_type": "overclaim",
-                "created_at": "2026-08-02T11:00:00+00:00",
-            }
+        FindingFeedback(
+            feedback_id="feedback-1",
+            **identity,
+            review_status="incorrect",
+            issue_type="overclaim",
+            created_at="2026-08-02T11:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
 
@@ -843,14 +842,14 @@ async def test_latest_feedback_or_curation_controls_dataset_status(*, postgres_s
     assert rejected["training_messages"] == []
 
     await service.review_repository.upsert_curation(
-        finding_curation_from_record(
-            {
-                "curation_id": "curation-1",
-                **identity,
-                "curated_status": "limited",
-                "curated_finding": finding_response(published),
-                "updated_at": "2026-08-02T12:00:00+00:00",
-            }
+        FindingCuration(
+            curation_id="curation-1",
+            **identity,
+            curated_status="limited",
+            curated_finding=published,
+            updated_at="2026-08-02T12:00:00+00:00",
+            note=None,
+            reviewer=None,
         )
     )
 

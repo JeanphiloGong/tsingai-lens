@@ -1,7 +1,6 @@
 from __future__ import annotations
 from tests.support.postgres import seed_collection
 
-from repositories.paper_map_repository import paper_map_from_payload
 
 from dataclasses import replace
 
@@ -49,20 +48,18 @@ def _profile(document_id: str, title: str) -> DocumentProfile:
 
 
 def _paper_map(document_id: str, limitation: str = "") -> PaperResearchMap:
-    return paper_map_from_payload(
-        {
-            "document_id": document_id,
-            "doc_role": "primary_experiment",
-            "studies": [],
-            "evidence_density": "medium",
-            "confidence": 0.8,
-            "warnings": [],
-            "map_status": "insufficient_map" if limitation else "sufficient",
-            "map_limitations": [limitation] if limitation else [],
-            "input_fingerprint": f"input-{document_id}-{limitation or 'complete'}",
-            "map_version": "paper-map.v1",
-            "generated_at": "2026-09-08T09:00:00+00:00",
-        }
+    return PaperResearchMap(
+        document_id=document_id,
+        doc_role="primary_experiment",
+        studies=(),
+        evidence_density="medium",
+        confidence=0.8,
+        warnings=(),
+        map_status="insufficient_map" if limitation else "sufficient",
+        map_limitations=tuple([limitation] if limitation else []),
+        input_fingerprint=f"input-{document_id}-{limitation or 'complete'}",
+        map_version="paper-map.v1",
+        generated_at="2026-09-08T09:00:00+00:00",
     )
 
 

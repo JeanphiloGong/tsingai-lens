@@ -52,9 +52,6 @@ from domain.evaluation import (
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from repositories.finding_review_repository import (
-    finding_feedback_from_record,
-)
 from repositories.objective_repository import (
     ExecutionStats,
     ObjectiveAnalysis,
@@ -432,13 +429,13 @@ class _Service:
         )
 
     async def record_feedback(self, **kwargs):
-        return finding_feedback_from_record(
-            {
-                "feedback_id": "feedback-1",
-                **kwargs,
-                "created_at": "2026-07-22T00:00:00+00:00",
-            }
-        )
+        return FindingFeedback(**{
+            "note": None,
+            "reviewer": None,
+            "feedback_id": "feedback-1",
+            **kwargs,
+            "created_at": "2026-07-22T00:00:00+00:00",
+        })
 
     async def list_feedback(self, **kwargs):
         if kwargs["analysis_version"] != 1:

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from domain.core.research_objective import (
+    PaperResearchSourceRef,
+    build_paper_research_scope,
+    build_paper_research_relationship,
+    build_paper_research_signal,
+)
+
 from infra.source.artifact_bundle import source_documents_from_records
 
-from repositories.paper_map_repository import paper_map_from_payload
 
 import json
 from pathlib import Path
@@ -57,7 +63,9 @@ class _MultiAxisExtractor:
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
-    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+    def extract(
+        self, payload: dict[str, Any], *, before_request=None
+    ) -> StructuredPaperResearchMap:
         if before_request is not None:
             before_request()
         self.payloads.append(payload)
@@ -120,7 +128,10 @@ class _MultiAxisExtractor:
 
 
 class _BoundedExpansionExtractor(_MultiAxisExtractor):
-    def extract(self, payload: dict[str, Any], *, before_request=None) -> StructuredPaperResearchMap:
+
+    def extract(
+        self, payload: dict[str, Any], *, before_request=None
+    ) -> StructuredPaperResearchMap:
         if before_request is not None:
             before_request()
         parsed = super().extract(payload)
@@ -417,39 +428,54 @@ def test_tc4_concrete_result_resolves_cross_source_broad_scope_and_stops_reading
 
 
 def test_tc4_specific_unlinked_signal_remains_visible_without_blocking_discovery():
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "tc4-paper",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "claim_scope": "current_work",
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power"],
-                            "outcome": "porosity",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "results"}
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                }
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_type": "outcome",
-                    "label": "residual stress",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "abstract"}
-                    ],
-                    "confidence": 0.8,
-                }
-            ],
-            "evidence_density": "medium",
-            "confidence": 0.8,
-            "warnings": [],
-        }
+    paper_map = PaperResearchMap(
+        document_id="tc4-paper",
+        doc_role="experimental",
+        studies=(
+            build_paper_research_scope(
+                document_id="tc4-paper",
+                design_type="uncertain",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="tc4-paper",
+                        varied_factors=("laser power",),
+                        outcome="porosity",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="results"
+                            ),
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        evidence_density="medium",
+        confidence=0.8,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="tc4-paper",
+                signal_type="outcome",
+                label="residual stress",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="abstract"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     )
 
     filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
@@ -468,38 +494,54 @@ def test_tc4_specific_unlinked_signal_remains_visible_without_blocking_discovery
 
 
 def test_tc4_broad_family_signal_matches_expanded_specific_relationship():
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "tc4-paper",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "claim_scope": "current_work",
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power"],
-                            "outcome": "yield strength",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "results"}
-                            ],
-                        }
-                    ],
-                }
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_type": "outcome",
-                    "label": "mechanical property anisotropy",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "abstract"}
-                    ],
-                    "confidence": 0.8,
-                }
-            ],
-            "evidence_density": "medium",
-            "confidence": 0.8,
-            "warnings": [],
-        }
+    paper_map = PaperResearchMap(
+        document_id="tc4-paper",
+        doc_role="experimental",
+        studies=(
+            build_paper_research_scope(
+                document_id="tc4-paper",
+                design_type="uncertain",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="tc4-paper",
+                        varied_factors=("laser power",),
+                        outcome="yield strength",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="results"
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        evidence_density="medium",
+        confidence=0.8,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="tc4-paper",
+                signal_type="outcome",
+                label="mechanical property anisotropy",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="abstract"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     )
 
     filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
@@ -509,38 +551,54 @@ def test_tc4_broad_family_signal_matches_expanded_specific_relationship():
 
 
 def test_tc4_microstructure_family_signal_matches_observed_martensite_axis():
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "tc4-paper",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "claim_scope": "current_work",
-                    "relationships": [
-                        {
-                            "varied_factors": ["heat treatment"],
-                            "outcome": "martensite lamellae thickness",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "results"}
-                            ],
-                        }
-                    ],
-                }
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_type": "outcome",
-                    "label": "microstructural anisotropy",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "abstract"}
-                    ],
-                    "confidence": 0.8,
-                }
-            ],
-            "evidence_density": "medium",
-            "confidence": 0.8,
-            "warnings": [],
-        }
+    paper_map = PaperResearchMap(
+        document_id="tc4-paper",
+        doc_role="experimental",
+        studies=(
+            build_paper_research_scope(
+                document_id="tc4-paper",
+                design_type="uncertain",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="tc4-paper",
+                        varied_factors=("heat treatment",),
+                        outcome="martensite lamellae thickness",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="results"
+                            ),
+                        ),
+                        confidence=0.0,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        evidence_density="medium",
+        confidence=0.8,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="tc4-paper",
+                signal_type="outcome",
+                label="microstructural anisotropy",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="abstract"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     )
 
     filtered = PaperMapAggregator().drop_signals_resolved_by_relationships(
@@ -598,52 +656,76 @@ def test_tc4_later_expansion_reads_methods_after_finding_a_specific_outcome():
 
 
 def test_tc4_background_relationship_is_not_unclear_ownership():
-    paper_map = paper_map_from_payload(
-        {
-            "document_id": "tc4-paper",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "claim_scope": "current_work",
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power"],
-                            "outcome": "yield strength",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "abstract"}
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                },
-                {
-                    "claim_scope": "background",
-                    "relationships": [
-                        {
-                            "varied_factors": ["energy density"],
-                            "outcome": "porosity",
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "introduction"}
-                            ],
-                            "confidence": 0.8,
-                        }
-                    ],
-                },
-            ],
-                "unresolved_signals": [
-                    {
-                        "signal_type": "outcome",
-                        "label": "microstructure",
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "abstract"}
-                    ],
-                    "confidence": 0.8,
-                }
-            ],
-            "evidence_density": "medium",
-            "confidence": 0.8,
-            "warnings": [],
-        }
+    paper_map = PaperResearchMap(
+        document_id="tc4-paper",
+        doc_role="experimental",
+        studies=(
+            build_paper_research_scope(
+                document_id="tc4-paper",
+                design_type="uncertain",
+                claim_scope="current_work",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="tc4-paper",
+                        varied_factors=("laser power",),
+                        outcome="yield strength",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="abstract"
+                            ),
+                        ),
+                        confidence=0.9,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+            build_paper_research_scope(
+                document_id="tc4-paper",
+                design_type="uncertain",
+                claim_scope="background",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                relationships=(
+                    build_paper_research_relationship(
+                        document_id="tc4-paper",
+                        varied_factors=("energy density",),
+                        outcome="porosity",
+                        source_refs=(
+                            PaperResearchSourceRef(
+                                source_kind="block", source_ref="introduction"
+                            ),
+                        ),
+                        confidence=0.8,
+                    ),
+                ),
+                confidence=0.0,
+            ),
+        ),
+        evidence_density="medium",
+        confidence=0.8,
+        warnings=(),
+        unresolved_signals=(
+            build_paper_research_signal(
+                document_id="tc4-paper",
+                signal_type="outcome",
+                label="microstructure",
+                variable_role="not_applicable",
+                design_type="uncertain",
+                claim_scope="uncertain",
+                experiment_label=None,
+                material_scope=(),
+                process_context=(),
+                source_refs=(
+                    PaperResearchSourceRef(source_kind="block", source_ref="abstract"),
+                ),
+                confidence=0.8,
+                reason=None,
+            ),
+        ),
     )
 
     assessment = PaperMapAggregator().assess(

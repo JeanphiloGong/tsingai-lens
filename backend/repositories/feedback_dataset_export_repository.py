@@ -272,7 +272,7 @@ async def _read_current_members(
     for sample, _revision_row, case in rows:
         if case.status == "withdrawn":
             raise DatasetExportConflict("sample_source_stale")
-        if source_digest_for_case(_case_record(case)) != sample.source_digest:
+        if source_digest_for_case(case) != sample.source_digest:
             raise DatasetExportConflict("sample_source_stale")
     return tuple(
         ExportMember(
@@ -374,21 +374,6 @@ def _member(value: dict[str, Any]) -> ExportMember:
     )
 
 
-def _case_record(row: FeedbackCaseRow) -> dict[str, Any]:
-    return {
-        "case_id": row.case_id,
-        "collection_id": row.collection_id,
-        "session_id": row.session_id,
-        "anchor_message_id": row.anchor_message_id,
-        "source_signal_ids": list(row.source_signal_ids or ()),
-        "analysis_result_ids": list(row.analysis_result_ids or ()),
-        "signal_analysis_result_ids": list(row.signal_analysis_result_ids or ()),
-        "tool_failure_analysis_result_ids": list(
-            row.tool_failure_analysis_result_ids or ()
-        ),
-        "context_snapshot": row.context_snapshot or {},
-        "annotation_digest": row.annotation_digest,
-    }
 
 
 def _issue(value: dict[str, Any]) -> ExportIssue:

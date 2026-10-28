@@ -5,6 +5,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 import pytest
@@ -135,7 +136,13 @@ def run(probe, scenario, payload, *, finish_reason="stop"):
         reasoning_effort=None,
         timeout_s=30,
     )
-    return probe.run_proposal(scenario, runtime, client), requests
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "scenarios.json"
+        path.write_text(json.dumps({"scenarios": [scenario]}), encoding="utf-8")
+        _, paper_maps = probe.load_scenarios(path)
+    return probe.run_proposal(
+        scenario, runtime, client, paper_maps=paper_maps[scenario["scenario_id"]]
+    ), requests
 
 
 def test_core_probe_preserves_reading_scope_original_sources_and_joint_factors(
@@ -188,6 +195,7 @@ def test_baseline_serializes_nonempty_objectives_without_domain_record_helper(
         {"papers": []},
         SimpleNamespace(model="test-model", reasoning_effort=None),
         object(),
+        paper_maps=(),
     )
 
     assert result["objectives"][0]["objective_id"] == "objective-1"

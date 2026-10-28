@@ -24,9 +24,6 @@ from domain.core.paper_experiment import (
 from domain.core.scientific_fact import (
     ScientificContext,
 )
-from infra.persistence.postgres.experiment_analysis_transaction import (
-    PostgresExperimentAnalysisTransactionFactory,
-)
 from repositories.comparison_group_repository import (
     ComparisonGroupRepository,
 )
@@ -210,12 +207,12 @@ async def test_complete_analysis_graph_commits_once_and_is_idempotent(
         ),
         created_by="test-agent",
     )
-    repository = ExperimentAnalysisRepository(
-        database.AsyncSessionLocal
-    )
+    repository = ExperimentAnalysisRepository()
 
-    first = await repository.write_graph(graph)
-    second = await repository.write_graph(graph)
+    async with database.AsyncSessionLocal() as db, db.begin():
+        first = await repository.write_graph(db, graph)
+    async with database.AsyncSessionLocal() as db, db.begin():
+        second = await repository.write_graph(db, graph)
 
     assert second == first
     assert len(first.revisions) == 2
@@ -257,43 +254,30 @@ async def test_failed_cross_paper_finding_rolls_back_the_entire_analysis_graph(
         with_group=False,
     )
     session_factory = database.AsyncSessionLocal
-    repository = ExperimentAnalysisRepository(session_factory)
+    repository = ExperimentAnalysisRepository()
 
     with pytest.raises(ValueError, match="requires a comparison group"):
-        await repository.write_graph(
-            ExperimentAnalysisWrite(
-                collection_id=COLLECTION_ID,
-                objective_id=OBJECTIVE_ID,
-                analysis_version=analysis.analysis_version,
-                revisions=(revision_a, revision_b),
-                selections=(selection_a, selection_b),
-                groups=(),
-                findings=(invalid_finding,),
-                created_by="test-agent",
-            )
-        )
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await repository.write_graph(db, ExperimentAnalysisWrite(collection_id=COLLECTION_ID, objective_id=OBJECTIVE_ID, analysis_version=analysis.analysis_version, revisions=(revision_a, revision_b), selections=(selection_a, selection_b), groups=(), findings=(invalid_finding,), created_by='test-agent'))
 
-    experiments = PaperExperimentRepository(session_factory)
-    selections = ObjectiveExperimentSelectionRepository(session_factory)
-    groups = ComparisonGroupRepository(session_factory)
-    findings = ExperimentFindingRepository(session_factory)
-    assert await experiments.read_latest_revision("experiment-a") is None
-    assert await experiments.read_latest_revision("experiment-b") is None
-    assert await selections.list_selections(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await groups.list_groups(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await findings.list_findings(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
+    groups = ComparisonGroupRepository()
+    findings = ExperimentFindingRepository()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, 'experiment-a') is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, 'experiment-b') is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await selections.list_selections(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await groups.list_groups(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await findings.list_findings(db,
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+        ) == ()
 
 
 async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
@@ -337,34 +321,28 @@ async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
         created_by="test-agent",
     )
     session_factory = database.AsyncSessionLocal
-    repository = ExperimentAnalysisRepository(session_factory)
-    transaction_factory = PostgresExperimentAnalysisTransactionFactory(
-        session_factory
-    )
+    repository = ExperimentAnalysisRepository()
 
     with pytest.raises(RuntimeError, match="objective publication failed"):
-        async with transaction_factory.begin() as transaction:
-            await repository.write_graph(graph, transaction=transaction)
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await repository.write_graph(db, graph)
             raise RuntimeError("objective publication failed")
 
-    experiments = PaperExperimentRepository(session_factory)
-    selections = ObjectiveExperimentSelectionRepository(session_factory)
-    groups = ComparisonGroupRepository(session_factory)
-    findings = ExperimentFindingRepository(session_factory)
-    assert await experiments.read_latest_revision("experiment-a") is None
-    assert await experiments.read_latest_revision("experiment-b") is None
-    assert await selections.list_selections(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await groups.list_groups(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await findings.list_findings(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
+    groups = ComparisonGroupRepository()
+    findings = ExperimentFindingRepository()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, 'experiment-a') is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, 'experiment-b') is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await selections.list_selections(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await groups.list_groups(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await findings.list_findings(db,
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+        ) == ()

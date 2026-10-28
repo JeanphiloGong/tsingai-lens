@@ -12,9 +12,7 @@ from application.core.objectives.analysis.experiment_query_service import (
 )
 from application.source.collection_service import CollectionService
 from domain.core.finding import Finding
-from infra.persistence.postgres.experiment_analysis_transaction import (
-    PostgresExperimentAnalysisTransactionFactory,
-)
+from infra.persistence.database import AsyncSessionLocal
 from repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_ABSTENTION_REASONS,
     ObjectiveAnalysis,
@@ -38,13 +36,12 @@ class FindingAuthoringService:
         objective_repository: ObjectiveRepository,
         experiment_query_service: ExperimentQueryService,
         experiment_analysis_writer: ExperimentAnalysisWriter,
-        experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory | None = None,
+
     ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
         self.experiment_query_service = experiment_query_service
         self.experiment_analysis_writer = experiment_analysis_writer
-        self.experiment_analysis_transaction_factory = experiment_analysis_transaction_factory
 
     async def create_selection_version(
         self,
@@ -76,10 +73,6 @@ class FindingAuthoringService:
                 raise ValueError(
                     "abstention requires an explanation and no experiment selections or parent"
                 )
-        if self.experiment_analysis_transaction_factory is None:
-            raise RuntimeError(
-                "Finding authoring requires a shared analysis transaction"
-            )
         await self.collection_service.get_collection_for_user(
             collection_id, created_by_user_id
         )
@@ -142,7 +135,7 @@ class FindingAuthoringService:
         if claimed is None:
             raise ValueError("Finding analysis snapshot could not be claimed")
         try:
-            async with self.experiment_analysis_transaction_factory.begin() as transaction:
+            async with AsyncSessionLocal() as db, db.begin():
                 result = await self.experiment_analysis_writer.write_selection_finding_revision(
                     collection_id=collection_id,
                     objective=objective,
@@ -152,9 +145,10 @@ class FindingAuthoringService:
                     created_by=created_by_user_id,
                     parent_finding_id=parent_finding_id,
                     limitations=limitations,
-                    transaction=transaction,
+                    db=db,
                 )
                 await self.objective_repository.publish_experiment_analysis(
+                    db,
                     collection_id,
                     objective_id,
                     claimed.analysis_version,
@@ -162,7 +156,6 @@ class FindingAuthoringService:
                         replace(item, analysis_version=claimed.analysis_version)
                         for item in coverage
                     ),
-                    transaction=transaction,
                     abstention_reason=abstention_reason,
                     abstention_note=(
                         "\n".join(limitations) if abstention_reason else None

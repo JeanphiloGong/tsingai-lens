@@ -637,6 +637,7 @@ class FakeObjectiveRepository:
 
     async def publish_experiment_analysis(
         self,
+        db,
         collection_id,
         objective_id,
         analysis_version,
@@ -644,9 +645,8 @@ class FakeObjectiveRepository:
         contributions=(),
         abstention_reason=None,
         abstention_note=None,
-        transaction=None,
     ):
-        self.published_transaction = transaction
+        self.published_transaction = db
         analysis = self.analyses[analysis_version].succeed(
             abstention_reason=abstention_reason,
             abstention_note=abstention_note,
@@ -866,9 +866,18 @@ class NativeRecordingExperimentAnalysisWriter:
         pytest.fail("native writer path must not call the legacy write method")
 
 
-class RecordingAnalysisTransactionFactory:
+class RecordingDatabaseSession:
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
     def __init__(self) -> None:
-        self.handle = object()
+        self.handle = self
         self.events: list[str] = []
 
     @asynccontextmanager
@@ -888,7 +897,6 @@ def _service(
     repository=None,
     analyzer=None,
     experiment_analysis_writer=None,
-    experiment_analysis_transaction_factory=None,
     experiment_compatibility_projection=None,
 ):
     repository = repository or FakeObjectiveRepository()
@@ -905,7 +913,6 @@ def _service(
         objective_input_service=inputs,
         document_profile_service=inputs.document_profile_service,
         experiment_analysis_writer=experiment_analysis_writer,
-        experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
         experiment_compatibility_projection=experiment_compatibility_projection,
     )
     return service, repository, analyzer
@@ -1156,12 +1163,12 @@ async def test_native_experiment_writer_publishes_without_legacy_publication() -
     assert writer.calls[0]["analysis"].analysis_version == 1
 
 
-async def test_experiment_publication_commits_one_shared_transaction() -> None:
-    transaction_factory = RecordingAnalysisTransactionFactory()
+async def test_experiment_publication_commits_one_shared_transaction(monkeypatch) -> None:
+    transaction_factory = RecordingDatabaseSession()
+    monkeypatch.setattr("application.core.objectives.analysis_service.AsyncSessionLocal", transaction_factory)
     writer = NativeRecordingExperimentAnalysisWriter()
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transaction_factory,
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
@@ -1169,18 +1176,18 @@ async def test_experiment_publication_commits_one_shared_transaction() -> None:
 
     assert result["analysis"].status == "succeeded"
     assert transaction_factory.events == ["begin", "commit"]
-    assert writer.calls[0]["transaction"] is transaction_factory.handle
+    assert writer.calls[0]["db"] is transaction_factory.handle
     assert repository.published_transaction is transaction_factory.handle
 
 
-async def test_experiment_publication_rolls_back_when_writer_fails() -> None:
-    transaction_factory = RecordingAnalysisTransactionFactory()
+async def test_experiment_publication_rolls_back_when_writer_fails(monkeypatch) -> None:
+    transaction_factory = RecordingDatabaseSession()
+    monkeypatch.setattr("application.core.objectives.analysis_service.AsyncSessionLocal", transaction_factory)
     writer = NativeRecordingExperimentAnalysisWriter(
         error=RuntimeError("experiment write failed")
     )
     service, repository, _analyzer = _service(
         experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transaction_factory,
     )
 
     await service.queue_analysis("collection-1", "objective-1", _DOCUMENT_IDS)
@@ -1188,7 +1195,7 @@ async def test_experiment_publication_rolls_back_when_writer_fails() -> None:
 
     assert result["analysis"].status == "failed"
     assert transaction_factory.events == ["begin", "rollback"]
-    assert writer.calls[0]["transaction"] is transaction_factory.handle
+    assert writer.calls[0]["db"] is transaction_factory.handle
     assert repository.experiment_published_calls == 0
     assert repository.published_transaction is None
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import json
 from dataclasses import dataclass
 from hashlib import sha256
@@ -22,9 +21,7 @@ from application.core.objectives.analysis.paper_experiment_extraction import (
     build_source_bundle,
 )
 from application.source.collection_service import CollectionService
-from infra.persistence.postgres.experiment_analysis_transaction import (
-    PostgresExperimentAnalysisTransactionFactory,
-)
+from infra.persistence.database import AsyncSessionLocal
 from infra.source.artifact_bundle import source_table_payload
 from repositories.source_artifact_repository import SourceArtifactRepository
 
@@ -130,12 +127,11 @@ class PaperExperimentAuthoringService:
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
         experiment_analysis_writer: ExperimentAnalysisWriter,
-        experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory | None = None,
+
     ) -> None:
         self.collection_service = collection_service
         self.source_artifact_repository = source_artifact_repository
         self.experiment_analysis_writer = experiment_analysis_writer
-        self.experiment_analysis_transaction_factory = experiment_analysis_transaction_factory
 
     async def prepare(
         self,
@@ -215,10 +211,6 @@ class PaperExperimentAuthoringService:
         collection_id: str,
         created_by: str,
     ) -> ExperimentAnalysisWriteResult:
-        if self.experiment_analysis_transaction_factory is None:
-            raise RuntimeError(
-                "PaperExperiment authoring requires an atomic revision transaction"
-            )
         if prepared.collection_id != collection_id:
             raise ValueError("prepared paper experiment belongs to another collection")
         await self.collection_service.get_collection_for_user(collection_id, created_by)
@@ -245,11 +237,11 @@ class PaperExperimentAuthoringService:
             raise PaperExperimentSourceChangedError(
                 "prepared paper experiment Source content changed; review it again"
             )
-        async with self.experiment_analysis_transaction_factory.begin() as transaction:
+        async with AsyncSessionLocal() as db, db.begin():
             return await self.experiment_analysis_writer.write_paper_experiment_revisions(
                 experiment_outputs=(prepared.output,),
                 created_by=created_by,
-                transaction=transaction,
+                db=db,
             )
 
 

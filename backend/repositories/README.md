@@ -53,15 +53,22 @@ actual input boundary. Domain objects retain ownership, revision and state rules
 
 ## Runtime and Test Boundaries
 
-`main.py` injects one `async_sessionmaker` into concrete repository instances.
-There is one runtime implementation per database repository. No separate
-repository Protocol, base class, backend selector or compatibility import path
-is maintained.
+`infra.persistence.database.AsyncSessionLocal` is the native SQLAlchemy session
+factory. `main.py` creates its engine and binds the factory during startup;
+importing the application does not create an engine. Repository constructors do
+not accept a session factory. There is one runtime implementation per database
+repository, without a separate Protocol, base class or compatibility import.
 
-Each operation opens a task-local session. Cooperating publication writes reuse
-an explicit `AsyncSession` from
-[the publication transaction](../infra/persistence/postgres/experiment_analysis_transaction.py).
-The owning transaction commits or rolls back the complete publication event.
+Standalone reads use `async with AsyncSessionLocal() as db:`. Standalone writes
+use `async with AsyncSessionLocal() as db, db.begin():`. Each operation creates
+a task-local session and constructs its result before that session closes.
+
+Cooperating experiment operations accept a required `db: AsyncSession`. The
+application operation opens the shared transaction and passes that same `db`
+through the writer, graph repositories and Objective publication. Suboperations
+may flush but never commit or open a second session. A failure rolls back the
+complete publication event. Transaction-level advisory locks and the system
+dataset savepoint retain their original scope.
 Database connections, ORM tables, schema migrations and file storage stay in
 [the persistence infrastructure](../infra/persistence/README.md).
 

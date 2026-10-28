@@ -62,8 +62,7 @@ async def experiment_plan_repository(source_repository):
         created_by_tool_call_id="call-plan-objective",
     )
     await ObjectiveRepository(
-        database.AsyncSessionLocal
-    ).create_authored_candidate(
+        ).create_authored_candidate(
         objective,
         created_by_user_id="user_source",
         created_by_tool_call_id="call-plan-objective",

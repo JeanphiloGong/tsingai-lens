@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
@@ -97,9 +99,18 @@ class _Collection:
 
 
 class _Transactions:
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
     def __init__(self):
         self.events = []
-        self.handle = object()
+        self.handle = self
 
     @asynccontextmanager
     async def begin(self):
@@ -152,8 +163,8 @@ class _Repository:
             ),
         )
 
-    async def publish_experiment_analysis(self, *args, **kwargs):
-        self.published = kwargs
+    async def publish_experiment_analysis(self, db, *args, **kwargs):
+        self.published = {"db": db, **kwargs}
         if self.fail_publish:
             raise RuntimeError("publish failed")
         return _objective(), _analysis(2, "succeeded")
@@ -187,15 +198,12 @@ class _Writer:
 
 
 @pytest.mark.anyio
-async def test_selection_version_copies_contributions_and_uses_one_transaction():
+async def test_selection_version_copies_contributions_and_uses_one_transaction(monkeypatch, ):
     repository = _Repository()
     transactions = _Transactions()
     writer = _Writer()
-    service = FindingAuthoringService(
-        collection_service=_Collection(), objective_repository=repository,
-        experiment_query_service=_Query(), experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transactions,
-    )
+    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
+    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
 
     result = await service.create_selection_version(
         collection_id="collection-1", objective_id="objective-1",
@@ -204,24 +212,19 @@ async def test_selection_version_copies_contributions_and_uses_one_transaction()
     )
 
     assert transactions.events == ["begin", "commit"]
-    assert writer.call["transaction"] is transactions.handle
+    assert writer.call["db"] is transactions.handle
     assert writer.call["selections"][0].selection_id == "selection-1"
-    assert repository.published["transaction"] is transactions.handle
+    assert repository.published["db"] is transactions.handle
     assert repository.published["contributions"][0].analysis_version == 2
     assert "contributions" not in writer.call
     assert result.finding is not None
 
 
-async def test_selection_revision_preserves_parent_and_expert_limitations():
+async def test_selection_revision_preserves_parent_and_expert_limitations(monkeypatch, ):
     writer = _Writer()
     repository = _Repository()
-    service = FindingAuthoringService(
-        collection_service=_Collection(),
-        objective_repository=repository,
-        experiment_query_service=_Query(),
-        experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=_Transactions(),
-    )
+    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", _Transactions())
+    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
     await service.create_selection_version(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -235,16 +238,11 @@ async def test_selection_revision_preserves_parent_and_expert_limitations():
     assert writer.call["limitations"] == ("Only tested conditions.",)
 
 
-async def test_abstention_publishes_explanation_and_coverage_without_finding():
+async def test_abstention_publishes_explanation_and_coverage_without_finding(monkeypatch, ):
     repository = _Repository()
     transactions = _Transactions()
-    service = FindingAuthoringService(
-        collection_service=_Collection(),
-        objective_repository=repository,
-        experiment_query_service=_Query(),
-        experiment_analysis_writer=_Writer(),
-        experiment_analysis_transaction_factory=transactions,
-    )
+    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
+    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=_Writer())
     result = await service.create_selection_version(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -264,17 +262,12 @@ async def test_abstention_publishes_explanation_and_coverage_without_finding():
     assert repository.published["contributions"][0].analysis_version == 2
 
 
-async def test_unknown_parent_is_rejected_before_creating_a_revision():
+async def test_unknown_parent_is_rejected_before_creating_a_revision(monkeypatch, ):
     repository = _Repository()
     writer = _Writer()
     transactions = _Transactions()
-    service = FindingAuthoringService(
-        collection_service=_Collection(),
-        objective_repository=repository,
-        experiment_query_service=_Query(),
-        experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transactions,
-    )
+    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
+    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
     with pytest.raises(ValueError, match="parent Finding"):
         await service.create_selection_version(
             collection_id="collection-1",
@@ -289,14 +282,11 @@ async def test_unknown_parent_is_rejected_before_creating_a_revision():
 
 
 @pytest.mark.anyio
-async def test_selection_version_rolls_back_and_marks_running_snapshot_failed():
+async def test_selection_version_rolls_back_and_marks_running_snapshot_failed(monkeypatch, ):
     repository = _Repository(fail_publish=True)
     transactions = _Transactions()
-    service = FindingAuthoringService(
-        collection_service=_Collection(), objective_repository=repository,
-        experiment_query_service=_Query(), experiment_analysis_writer=_Writer(),
-        experiment_analysis_transaction_factory=transactions,
-    )
+    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", transactions)
+    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=_Writer())
 
     with pytest.raises(RuntimeError, match="publish failed"):
         await service.create_selection_version(
@@ -309,10 +299,10 @@ async def test_selection_version_rolls_back_and_marks_running_snapshot_failed():
     assert repository.failed["expected_status"] == "running"
 
 
-async def test_authored_publication_preserves_coverage_with_real_repository(*, postgres_session_factory):
+async def test_authored_publication_preserves_coverage_with_real_repository(monkeypatch, *, postgres_session_factory):
     from tests.support.postgres import seed_collection
     await seed_collection(postgres_session_factory, "collection-1", document_ids=("paper-1", "paper-2", "paper-3"))
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     objective = replace(_objective(), active_analysis_version=None)
     await repository.replace(
         "collection-1", ObjectiveFactSet(research_objectives=(objective,))
@@ -354,20 +344,12 @@ async def test_authored_publication_preserves_coverage_with_real_repository(*, p
             ("paper-3", "failed", "Source extraction failed"),
         )
     )
-    objective, source = await repository.publish_experiment_analysis(
-        "collection-1", "objective-1", 1, contributions=coverage,
-    )
-    from infra.persistence.postgres.experiment_analysis_transaction import (
-        PostgresExperimentAnalysisTransactionFactory,
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        objective, source = await repository.publish_experiment_analysis(db, 'collection-1', 'objective-1', 1, contributions=coverage)
 
-    transactions = PostgresExperimentAnalysisTransactionFactory(postgres_session_factory)
     writer = _Writer()
-    service = FindingAuthoringService(
-        collection_service=_Collection(), objective_repository=repository,
-        experiment_query_service=_Query(), experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transactions,
-    )
+    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", database.AsyncSessionLocal)
+    service = FindingAuthoringService(collection_service=_Collection(), objective_repository=repository, experiment_query_service=_Query(), experiment_analysis_writer=writer)
     await service.create_selection_version(
         collection_id="collection-1", objective_id="objective-1",
         source_analysis_version=1, selection_ids=("selection-1",),

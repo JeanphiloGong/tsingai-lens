@@ -5,7 +5,7 @@ from __future__ import annotations
 from domain.core.comparison_group import ComparisonGroupMember
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.core.comparison_group import ComparisonGroup
 from infra.persistence.postgres.models.comparison_group import (
@@ -16,87 +16,71 @@ from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 from infra.persistence.postgres.models.objective_experiment_selection import (
     ObjectiveExperimentSelectionRow,
 )
-from infra.persistence.postgres.transaction import database_session_scope
 
 
 class ComparisonGroupRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def add_group(
         self,
+        db: AsyncSession,
         collection_id: str,
         group: ComparisonGroup,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> ComparisonGroup:
-        async with database_session_scope(
-            self.session_factory, transaction, write=True
-        ) as session:
-            return await _add_group(session, collection_id, group)
+        return await _add_group(db, collection_id, group)
 
     async def read_group(
         self,
+        db: AsyncSession,
         collection_id: str,
         group_id: str,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> ComparisonGroup | None:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            row = await session.scalar(
-                select(ComparisonGroupRow).where(
-                    ComparisonGroupRow.collection_id == collection_id,
-                    ComparisonGroupRow.group_id == group_id,
-                )
+        row = await db.scalar(
+            select(ComparisonGroupRow).where(
+                ComparisonGroupRow.collection_id == collection_id,
+                ComparisonGroupRow.group_id == group_id,
             )
-            return await load_comparison_group(session, row) if row is not None else None
+        )
+        return await load_comparison_group(db, row) if row is not None else None
 
     async def list_groups(
         self,
+        db: AsyncSession,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> tuple[ComparisonGroup, ...]:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            rows = tuple(
-                await session.scalars(
-                    select(ComparisonGroupRow)
-                    .where(
-                        ComparisonGroupRow.collection_id == collection_id,
-                        ComparisonGroupRow.objective_id == objective_id,
-                        ComparisonGroupRow.analysis_version == analysis_version,
-                    )
-                    .order_by(ComparisonGroupRow.group_id)
+        rows = tuple(
+            await db.scalars(
+                select(ComparisonGroupRow)
+                .where(
+                    ComparisonGroupRow.collection_id == collection_id,
+                    ComparisonGroupRow.objective_id == objective_id,
+                    ComparisonGroupRow.analysis_version == analysis_version,
                 )
+                .order_by(ComparisonGroupRow.group_id)
             )
-            return tuple([await load_comparison_group(session, row) for row in rows])
+        )
+        return tuple([await load_comparison_group(db, row) for row in rows])
 
 
 async def _add_group(
-    session: AsyncSession,
+    db: AsyncSession,
     collection_id: str,
     group: ComparisonGroup,
 ) -> ComparisonGroup:
-    existing = await session.scalar(
+    existing = await db.scalar(
         select(ComparisonGroupRow).where(
             ComparisonGroupRow.group_id == group.group_id,
             ComparisonGroupRow.collection_id == collection_id,
         )
     )
     if existing is not None:
-        restored = await load_comparison_group(session, existing)
+        restored = await load_comparison_group(db, existing)
         if restored == group:
             return restored
         raise ValueError("comparison group identity already exists")
-    await _validate_group_context(session, collection_id, group)
+    await _validate_group_context(db, collection_id, group)
     row = ComparisonGroupRow(
         group_id=group.group_id,
         collection_id=collection_id,
@@ -109,10 +93,10 @@ async def _add_group(
         status=group.status,
         limitations_json=list(group.limitations),
     )
-    session.add(row)
+    db.add(row)
     # The member rows reference the group's natural key. Flush the parent first.
-    await session.flush()
-    session.add_all(
+    await db.flush()
+    db.add_all(
         ComparisonGroupMemberRow(
             group_id=group.group_id,
             selection_id=item.selection_id,
@@ -122,16 +106,16 @@ async def _add_group(
         )
         for item in group.members
     )
-    await session.flush()
+    await db.flush()
     return group
 
 
 async def _validate_group_context(
-    session: AsyncSession,
+    db: AsyncSession,
     collection_id: str,
     group: ComparisonGroup,
 ) -> None:
-    analysis = await session.scalar(
+    analysis = await db.scalar(
         select(ObjectiveAnalysisRecord).where(
             ObjectiveAnalysisRecord.collection_id == collection_id,
             ObjectiveAnalysisRecord.objective_id == group.objective_id,
@@ -143,7 +127,7 @@ async def _validate_group_context(
     if len(group.members) < 2:
         raise ValueError("cross-paper comparison group requires at least two selections")
     selection_rows = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ObjectiveExperimentSelectionRow).where(
                 ObjectiveExperimentSelectionRow.collection_id == collection_id,
                 ObjectiveExperimentSelectionRow.selection_id.in_(
@@ -172,11 +156,11 @@ async def _validate_group_context(
 
 
 async def load_comparison_group(
-    session: AsyncSession,
+    db: AsyncSession,
     row: ComparisonGroupRow,
 ) -> ComparisonGroup:
     members = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ComparisonGroupMemberRow)
             .where(ComparisonGroupMemberRow.group_id == row.group_id)
             .order_by(ComparisonGroupMemberRow.id)

@@ -27,7 +27,7 @@ class _Selections:
     def __init__(self, values):
         self.values = values
 
-    async def read_selection(self, collection_id, selection_id):
+    async def read_selection(self, db, collection_id, selection_id):
         return self.values.get(selection_id)
 
 
@@ -35,7 +35,7 @@ class _Groups:
     def __init__(self, values):
         self.values = values
 
-    async def read_group(self, collection_id, group_id):
+    async def read_group(self, db, collection_id, group_id):
         return self.values.get(group_id)
 
 
@@ -43,7 +43,7 @@ class _Findings:
     def __init__(self):
         self.items = []
 
-    async def add_finding(self, finding):
+    async def add_finding(self, db, finding):
         self.items.append(finding)
         return finding
 
@@ -102,12 +102,7 @@ async def test_publisher_requires_group_for_cross_paper_finding() -> None:
     )
 
     with pytest.raises(ValueError, match="ComparisonGroup"):
-        await publisher.publish(
-            _finding(
-                selection_ids=("selection-1", "selection-2"),
-                synthesis_status="agreement",
-            )
-        )
+        await publisher.publish(_finding(selection_ids=('selection-1', 'selection-2'), synthesis_status='agreement'), db=object())
     assert findings.items == []
 
 
@@ -119,7 +114,7 @@ async def test_publisher_persists_single_study_selection_without_group() -> None
         findings,
     )
 
-    published = await publisher.publish(_finding())
+    published = await publisher.publish(_finding(), db=object())
 
     assert published.finding.selection_ids == ("selection-1",)
     assert published.groups == ()

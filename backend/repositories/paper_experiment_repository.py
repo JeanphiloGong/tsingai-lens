@@ -32,10 +32,9 @@ from infra.persistence.postgres.models.paper_experiment import (
     PaperExperimentRow,
     ReportedInterpretationRow,
 )
-from infra.persistence.postgres.transaction import database_session_scope
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class PaperExperimentRevisionConflictError(ValueError):
@@ -54,17 +53,10 @@ class StoredPaperExperimentRevision:
 class PaperExperimentRepository:
     backend_name = "postgresql"
 
-    def __init__(
-        self,
-        session_factory: async_sessionmaker[AsyncSession],
-    ) -> None:
-        self.session_factory = session_factory
-
     async def lock_document(
         self,
+        db: AsyncSession,
         document_id: str,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> None:
         """Serialize experiment identity resolution for one source document.
 
@@ -74,134 +66,106 @@ class PaperExperimentRepository:
         writers a deterministic document-level lock order.
         """
 
-        if transaction is None:
-            return
         normalized = str(document_id).strip()
         if not normalized:
             raise ValueError("paper experiment document lock requires document_id")
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            await session.execute(
-                select(
-                    func.pg_advisory_xact_lock(
-                        func.hashtextextended(
-                            f"paper-experiment-document:{normalized}", 0
-                        )
+        await db.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(
+                        f"paper-experiment-document:{normalized}", 0
                     )
                 )
             )
+        )
 
     async def add_revision(
         self,
+        db: AsyncSession,
         revision: PaperExperimentRevision,
         *,
         created_by: str | None = None,
         created_at: datetime | None = None,
-        transaction: AsyncSession | None = None,
+
     ) -> StoredPaperExperimentRevision:
-        async with database_session_scope(
-            self.session_factory, transaction, write=True
-        ) as session:
-            return await _add_revision(
-                session,
-                revision,
-                created_by=created_by,
-                created_at=created_at,
-            )
+        return await _add_revision(
+            db,
+            revision,
+            created_by=created_by,
+            created_at=created_at,
+        )
 
     async def read_revision(
         self,
+        db: AsyncSession,
         experiment_id: str,
         experiment_version: int,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> StoredPaperExperimentRevision | None:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            row = await session.scalar(
-                select(PaperExperimentRow).where(
-                    PaperExperimentRow.experiment_id == experiment_id,
-                    PaperExperimentRow.experiment_version == experiment_version,
-                )
+        row = await db.scalar(
+            select(PaperExperimentRow).where(
+                PaperExperimentRow.experiment_id == experiment_id,
+                PaperExperimentRow.experiment_version == experiment_version,
             )
-            return await load_experiment_revision(session, row) if row is not None else None
+        )
+        return await load_experiment_revision(db, row) if row is not None else None
 
     async def read_revision_by_id(
         self,
+        db: AsyncSession,
         revision_id: int,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> StoredPaperExperimentRevision | None:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            row = await session.get(PaperExperimentRow, revision_id)
-            return await load_experiment_revision(session, row) if row is not None else None
+        row = await db.get(PaperExperimentRow, revision_id)
+        return await load_experiment_revision(db, row) if row is not None else None
 
     async def read_latest_revision(
         self,
+        db: AsyncSession,
         experiment_id: str,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> StoredPaperExperimentRevision | None:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            if transaction is not None:
-                # A row lock cannot serialize the first revision because no
-                # row exists yet.  The writer therefore takes a transaction-
-                # scoped advisory lock for the stable experiment identity
-                # before calculating the next version.
-                await session.execute(
-                    select(
-                        func.pg_advisory_xact_lock(
-                            func.hashtextextended(experiment_id, 0)
-                        )
-                    )
+        await db.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(experiment_id, 0)
                 )
-            row = await session.scalar(
-                select(PaperExperimentRow)
-                .where(PaperExperimentRow.experiment_id == experiment_id)
-                .order_by(PaperExperimentRow.experiment_version.desc())
-                .limit(1)
             )
-            return await load_experiment_revision(session, row) if row is not None else None
+        )
+        row = await db.scalar(
+            select(PaperExperimentRow)
+            .where(PaperExperimentRow.experiment_id == experiment_id)
+            .order_by(PaperExperimentRow.experiment_version.desc())
+            .limit(1)
+        )
+        return await load_experiment_revision(db, row) if row is not None else None
 
     async def list_latest_for_document(
         self,
+        db: AsyncSession,
         document_id: str,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> tuple[StoredPaperExperimentRevision, ...]:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            rows = tuple(
-                await session.scalars(
-                    select(PaperExperimentRow)
-                    .where(PaperExperimentRow.document_id == document_id)
-                    .order_by(
-                        PaperExperimentRow.experiment_id,
-                        PaperExperimentRow.experiment_version.desc(),
-                    )
+        rows = tuple(
+            await db.scalars(
+                select(PaperExperimentRow)
+                .where(PaperExperimentRow.document_id == document_id)
+                .order_by(
+                    PaperExperimentRow.experiment_id,
+                    PaperExperimentRow.experiment_version.desc(),
                 )
             )
-            latest_rows: list[PaperExperimentRow] = []
-            seen: set[str] = set()
-            for row in rows:
-                if row.experiment_id in seen:
-                    continue
-                seen.add(row.experiment_id)
-                latest_rows.append(row)
-            return tuple(
-                [await load_experiment_revision(session, row) for row in latest_rows]
-            )
+        )
+        latest_rows: list[PaperExperimentRow] = []
+        seen: set[str] = set()
+        for row in rows:
+            if row.experiment_id in seen:
+                continue
+            seen.add(row.experiment_id)
+            latest_rows.append(row)
+        return tuple(
+            [await load_experiment_revision(db, row) for row in latest_rows]
+        )
 
 
 async def _add_revision(
-    session: AsyncSession,
+    db: AsyncSession,
     revision: PaperExperimentRevision,
     *,
     created_by: str | None = None,
@@ -212,14 +176,14 @@ async def _add_revision(
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=timezone.utc)
 
-    existing = await session.scalar(
+    existing = await db.scalar(
         select(PaperExperimentRow).where(
             PaperExperimentRow.experiment_id == validated.experiment_id,
             PaperExperimentRow.experiment_version == validated.experiment_version,
         )
     )
     if existing is not None:
-        stored = await load_experiment_revision(session, existing)
+        stored = await load_experiment_revision(db, existing)
         if stored.revision == validated:
             return stored
         raise PaperExperimentRevisionConflictError(
@@ -251,26 +215,26 @@ async def _add_revision(
         created_by=created_by,
         archived_at=None,
     )
-    session.add(row)
+    db.add(row)
     try:
-        await session.flush()
-        await _add_components(session, row.id, validated)
-        await session.flush()
+        await db.flush()
+        await _add_components(db, row.id, validated)
+        await db.flush()
     except IntegrityError as exc:
         if _constraint_name(exc) == "uq_paper_experiment_identity_version":
             raise PaperExperimentRevisionConflictError(
                 "paper experiment revision identity already exists"
             ) from exc
         raise
-    return await load_experiment_revision(session, row)
+    return await load_experiment_revision(db, row)
 
 
 async def _add_components(
-    session: AsyncSession,
+    db: AsyncSession,
     paper_experiment_id: int,
     revision: PaperExperimentRevision,
 ) -> None:
-    session.add_all(
+    db.add_all(
         [
             ExperimentalVariantRow(
                 paper_experiment_id=paper_experiment_id,
@@ -365,7 +329,7 @@ async def _add_components(
             for position, item in enumerate(revision.variants)
         ]
     )
-    session.add_all(
+    db.add_all(
         [
             ExperimentTestConditionRow(
                 paper_experiment_id=paper_experiment_id,
@@ -429,7 +393,7 @@ async def _add_components(
             for position, item in enumerate(revision.test_conditions)
         ]
     )
-    await session.flush()
+    await db.flush()
 
     measurement_rows: list[ExperimentMeasurementResultRow] = []
     for position, item in enumerate(revision.measurements):
@@ -473,7 +437,7 @@ async def _add_components(
                 notes_json=list(item.notes),
             )
         )
-    session.add_all(measurement_rows)
+    db.add_all(measurement_rows)
 
     comparison_rows = [
         ExperimentComparisonRow(
@@ -540,8 +504,8 @@ async def _add_components(
         )
         for position, item in enumerate(revision.comparisons)
     ]
-    session.add_all(comparison_rows)
-    await session.flush()
+    db.add_all(comparison_rows)
+    await db.flush()
 
     links: list[ExperimentComparisonMeasurementRow] = []
     for comparison in revision.comparisons:
@@ -559,8 +523,8 @@ async def _add_components(
                 )
                 for position, measurement_key in enumerate(measurement_keys)
             )
-    session.add_all(links)
-    session.add_all(
+    db.add_all(links)
+    db.add_all(
         [
             ReportedInterpretationRow(
                 paper_experiment_id=paper_experiment_id,
@@ -586,40 +550,40 @@ async def _add_components(
 
 
 async def load_experiment_revision(
-    session: AsyncSession,
+    db: AsyncSession,
     row: PaperExperimentRow,
 ) -> StoredPaperExperimentRevision:
     revision_id = row.id
     variants = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ExperimentalVariantRow)
             .where(ExperimentalVariantRow.paper_experiment_id == revision_id)
             .order_by(ExperimentalVariantRow.position)
         )
     )
     tests = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ExperimentTestConditionRow)
             .where(ExperimentTestConditionRow.paper_experiment_id == revision_id)
             .order_by(ExperimentTestConditionRow.position)
         )
     )
     measurements = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ExperimentMeasurementResultRow)
             .where(ExperimentMeasurementResultRow.paper_experiment_id == revision_id)
             .order_by(ExperimentMeasurementResultRow.position)
         )
     )
     comparisons = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ExperimentComparisonRow)
             .where(ExperimentComparisonRow.paper_experiment_id == revision_id)
             .order_by(ExperimentComparisonRow.position)
         )
     )
     links = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ExperimentComparisonMeasurementRow)
             .where(
                 ExperimentComparisonMeasurementRow.paper_experiment_id
@@ -633,7 +597,7 @@ async def load_experiment_revision(
         )
     )
     interpretations = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ReportedInterpretationRow)
             .where(ReportedInterpretationRow.paper_experiment_id == revision_id)
             .order_by(ReportedInterpretationRow.position)

@@ -142,7 +142,7 @@ def build_research_objective_service(
     )
     objective_repository = kwargs.pop(
         "objective_repository",
-        ObjectiveRepository(session_factory),
+        ObjectiveRepository(),
     )
     document_profile_service = kwargs.pop("document_profile_service", None)
     if document_profile_service is None:

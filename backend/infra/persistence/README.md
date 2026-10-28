@@ -13,9 +13,19 @@ identity model is [`../../docs/architecture/persistence-model.md`](../../docs/ar
 - Alembic is the only runtime schema-change path.
 - Test doubles live under `tests/support/`, outside runtime infrastructure.
 
-Maintained runtime composition uses one SQLAlchemy `AsyncEngine`, one
-`async_sessionmaker`, and concrete repositories from `main.py`. Each
-operation creates a short task-local `AsyncSession`.
+`database.py` exposes the native `AsyncSessionLocal` factory with
+`expire_on_commit=False`. `main.py` creates one SQLAlchemy `AsyncEngine` during
+startup and calls `AsyncSessionLocal.configure(bind=engine)` before bootstrap.
+Imports do not create engines; startup failure and normal shutdown dispose the
+owned engine. The process uses one database binding, so overlapping runtimes
+cannot configure different databases in the same process.
+
+Standalone reads create a task-local session with `AsyncSessionLocal() as db`;
+writes add `db.begin()`. Application operations that publish several related
+records open one transaction and pass a required `db: AsyncSession` to all
+participants. No optional transaction scope or transaction factory wrapper is
+maintained. Test fixtures replace the factory at each consumer with an isolated
+native test factory, without rebinding a running application's factory.
 
 ## Current Aggregate Ownership
 

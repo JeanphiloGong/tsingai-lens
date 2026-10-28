@@ -41,7 +41,7 @@ def _app_repository_dependencies(auth_session_service, *, postgres_session_facto
         "source_artifact_repository": SourceArtifactRepository(),
         "document_profile_repository": DocumentProfileRepository(),
         "paper_map_repository": PaperMapRepository(),
-        "objective_repository": ObjectiveRepository(postgres_session_factory),
+        "objective_repository": ObjectiveRepository(),
         "finding_review_repository": FindingReviewRepository(),
         "experiment_plan_repository": ExperimentPlanRepository(),
         "chat_repository": object(),

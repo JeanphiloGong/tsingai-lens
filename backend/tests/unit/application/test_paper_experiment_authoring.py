@@ -401,7 +401,7 @@ class _SourceRepository:
 
 class _Writer:
     async def write_paper_experiment_revisions(self, **kwargs):
-        self.transaction = kwargs.get("transaction")
+        self.db = kwargs.get("db")
         self.output_count = len(kwargs["experiment_outputs"])
         return SimpleNamespace(revisions=(), selections=(), groups=(), findings=())
 
@@ -440,8 +440,17 @@ async def test_prepare_rejects_foreign_collection_before_reading_sources():
 
 
 class _TransactionFactory:
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
     def __init__(self):
-        self.handle = object()
+        self.handle = self
         self.events = []
 
     @asynccontextmanager
@@ -457,15 +466,11 @@ class _TransactionFactory:
 
 
 @pytest.mark.anyio
-async def test_write_saves_paper_experiment_without_objective_analysis():
+async def test_write_saves_paper_experiment_without_objective_analysis(monkeypatch, ):
     writer = _Writer()
     transactions = _TransactionFactory()
-    service = PaperExperimentAuthoringService(
-        collection_service=_CollectionService(),
-        source_artifact_repository=_SourceRepository(),
-        experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=transactions,
-    )
+    monkeypatch.setattr("application.core.objectives.paper_experiment_authoring_service.AsyncSessionLocal", transactions)
+    service = PaperExperimentAuthoringService(collection_service=_CollectionService(), source_artifact_repository=_SourceRepository(), experiment_analysis_writer=writer)
     prepared = await service.prepare(
         collection_id="collection-1",
         user_id="user-1",
@@ -480,7 +485,7 @@ async def test_write_saves_paper_experiment_without_objective_analysis():
     )
 
     assert transactions.events == ["begin", "commit"]
-    assert writer.transaction is transactions.handle
+    assert writer.db is transactions.handle
     assert writer.output_count == 1
     assert result.selections == ()
     assert result.findings == ()

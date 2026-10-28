@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
@@ -18,81 +18,67 @@ from infra.persistence.postgres.models.paper_experiment import (
     ExperimentMeasurementResultRow,
     PaperExperimentRow,
 )
-from infra.persistence.postgres.transaction import database_session_scope
 
 
 class ObjectiveExperimentSelectionRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def add_selection(
         self,
+        db: AsyncSession,
         collection_id: str,
         selection: ObjectiveExperimentSelection,
         *,
         revision_id: int,
-        transaction: AsyncSession | None = None,
+
     ) -> ObjectiveExperimentSelection:
-        async with database_session_scope(
-            self.session_factory, transaction, write=True
-        ) as session:
-            return await _add_selection(
-                session,
-                collection_id,
-                selection,
-                revision_id=revision_id,
-            )
+        return await _add_selection(
+            db,
+            collection_id,
+            selection,
+            revision_id=revision_id,
+        )
 
     async def read_selection(
         self,
+        db: AsyncSession,
         collection_id: str,
         selection_id: str,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> ObjectiveExperimentSelection | None:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            row = await session.scalar(
-                select(ObjectiveExperimentSelectionRow).where(
-                    ObjectiveExperimentSelectionRow.collection_id == collection_id,
-                    ObjectiveExperimentSelectionRow.selection_id == selection_id,
-                )
+        row = await db.scalar(
+            select(ObjectiveExperimentSelectionRow).where(
+                ObjectiveExperimentSelectionRow.collection_id == collection_id,
+                ObjectiveExperimentSelectionRow.selection_id == selection_id,
             )
-            return await load_experiment_selection(session, row) if row is not None else None
+        )
+        return await load_experiment_selection(db, row) if row is not None else None
 
     async def list_selections(
         self,
+        db: AsyncSession,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> tuple[ObjectiveExperimentSelection, ...]:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            rows = tuple(
-                await session.scalars(
-                    select(ObjectiveExperimentSelectionRow)
-                    .where(
-                        ObjectiveExperimentSelectionRow.collection_id == collection_id,
-                        ObjectiveExperimentSelectionRow.objective_id == objective_id,
-                        ObjectiveExperimentSelectionRow.analysis_version
-                        == analysis_version,
-                    )
-                    .order_by(ObjectiveExperimentSelectionRow.selection_id)
+        rows = tuple(
+            await db.scalars(
+                select(ObjectiveExperimentSelectionRow)
+                .where(
+                    ObjectiveExperimentSelectionRow.collection_id == collection_id,
+                    ObjectiveExperimentSelectionRow.objective_id == objective_id,
+                    ObjectiveExperimentSelectionRow.analysis_version
+                    == analysis_version,
                 )
+                .order_by(ObjectiveExperimentSelectionRow.selection_id)
             )
-            return tuple(
-                [await load_experiment_selection(session, row) for row in rows]
-            )
+        )
+        return tuple(
+            [await load_experiment_selection(db, row) for row in rows]
+        )
 
 
 async def _add_selection(
-    session: AsyncSession,
+    db: AsyncSession,
     collection_id: str,
     selection: ObjectiveExperimentSelection,
     *,
@@ -102,20 +88,20 @@ async def _add_selection(
         raise ValueError("selection requires collection scope")
     if selection.objective_id == "":
         raise ValueError("selection requires objective")
-    existing = await session.scalar(
+    existing = await db.scalar(
         select(ObjectiveExperimentSelectionRow).where(
             ObjectiveExperimentSelectionRow.selection_id == selection.selection_id,
             ObjectiveExperimentSelectionRow.collection_id == collection_id,
         )
     )
     if existing is not None:
-        restored = await load_experiment_selection(session, existing)
+        restored = await load_experiment_selection(db, existing)
         if restored == selection:
             return restored
         raise ValueError("selection identity already belongs to another record")
 
-    await _validate_analysis(session, collection_id, selection)
-    revision = await session.get(PaperExperimentRow, revision_id)
+    await _validate_analysis(db, collection_id, selection)
+    revision = await db.get(PaperExperimentRow, revision_id)
     if revision is None:
         raise ValueError("selection experiment revision was not found")
     if (
@@ -125,7 +111,7 @@ async def _add_selection(
         raise ValueError("selection experiment identity and revision disagree")
 
     measurements = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ExperimentMeasurementResultRow).where(
                 ExperimentMeasurementResultRow.paper_experiment_id == revision_id,
                 ExperimentMeasurementResultRow.measurement_key.in_(
@@ -135,7 +121,7 @@ async def _add_selection(
         )
     )
     comparisons = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ExperimentComparisonRow).where(
                 ExperimentComparisonRow.paper_experiment_id == revision_id,
                 ExperimentComparisonRow.comparison_key.in_(selection.comparison_keys),
@@ -163,8 +149,8 @@ async def _add_selection(
         missing_context_json=list(selection.missing_context),
         reasons_json=list(selection.reasons),
     )
-    session.add(row)
-    session.add_all(
+    db.add(row)
+    db.add_all(
         SelectionMeasurementRow(
             selection_id=selection.selection_id,
             revision_id=revision_id,
@@ -173,7 +159,7 @@ async def _add_selection(
         )
         for item in measurements
     )
-    session.add_all(
+    db.add_all(
         SelectionComparisonRow(
             selection_id=selection.selection_id,
             revision_id=revision_id,
@@ -183,18 +169,18 @@ async def _add_selection(
         for item in comparisons
     )
     try:
-        await session.flush()
+        await db.flush()
     except IntegrityError as exc:
         raise ValueError("selection links failed validation") from exc
     return selection
 
 
 async def _validate_analysis(
-    session: AsyncSession,
+    db: AsyncSession,
     collection_id: str,
     selection: ObjectiveExperimentSelection,
 ) -> None:
-    row = await session.scalar(
+    row = await db.scalar(
         select(ObjectiveAnalysisRecord).where(
             ObjectiveAnalysisRecord.collection_id == collection_id,
             ObjectiveAnalysisRecord.objective_id == selection.objective_id,
@@ -206,18 +192,18 @@ async def _validate_analysis(
 
 
 async def load_experiment_selection(
-    session: AsyncSession,
+    db: AsyncSession,
     row: ObjectiveExperimentSelectionRow,
 ) -> ObjectiveExperimentSelection:
     measurement_keys = tuple(
-        await session.scalars(
+        await db.scalars(
             select(SelectionMeasurementRow.measurement_key)
             .where(SelectionMeasurementRow.selection_id == row.selection_id)
             .order_by(SelectionMeasurementRow.id)
         )
     )
     comparison_keys = tuple(
-        await session.scalars(
+        await db.scalars(
             select(SelectionComparisonRow.comparison_key)
             .where(SelectionComparisonRow.selection_id == row.selection_id)
             .order_by(SelectionComparisonRow.id)

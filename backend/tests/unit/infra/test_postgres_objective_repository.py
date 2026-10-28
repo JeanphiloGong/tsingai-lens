@@ -40,7 +40,7 @@ def test_research_objective_does_not_expose_persistence_timestamps() -> None:
 
 
 @pytest.mark.anyio
-async def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> None:
+async def test_objective_record_keeps_timestamps_out_of_scientific_payload(monkeypatch) -> None:
     created_at = datetime(2026, 9, 2, 1, 2, 3, tzinfo=UTC)
     updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     objective = _objective()
@@ -59,14 +59,14 @@ async def test_objective_record_keeps_timestamps_out_of_scientific_payload() -> 
     assert row.created_at == created_at
     assert row.updated_at == updated_at
 
-    restored = await _repository(row).read_objective_record("collection-1", "objective-1")
+    restored = await _repository(row, monkeypatch).read_objective_record("collection-1", "objective-1")
     assert restored.objective == objective
     assert restored.created_at == created_at
     assert restored.updated_at == updated_at
 
 
 @pytest.mark.anyio
-async def test_objective_record_columns_override_legacy_payload_timestamps() -> None:
+async def test_objective_record_columns_override_legacy_payload_timestamps(monkeypatch) -> None:
     column_created_at = datetime(2026, 9, 2, 1, 2, 3, tzinfo=UTC)
     column_updated_at = datetime(2026, 9, 2, 4, 5, 6, tzinfo=UTC)
     legacy_created_at = datetime(2020, 1, 1, tzinfo=UTC)
@@ -86,14 +86,14 @@ async def test_objective_record_columns_override_legacy_payload_timestamps() -> 
         updated_at=column_updated_at,
     )
 
-    restored = await _repository(row).read_objective_record("collection-1", "objective-1")
+    restored = await _repository(row, monkeypatch).read_objective_record("collection-1", "objective-1")
 
     assert restored.created_at == column_created_at
     assert restored.updated_at == column_updated_at
 
 
 @pytest.mark.anyio
-async def test_analysis_row_persists_private_diagnostics_without_public_exposure() -> None:
+async def test_analysis_row_persists_private_diagnostics_without_public_exposure(monkeypatch) -> None:
     analysis = ObjectiveAnalysis(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -191,7 +191,7 @@ async def test_analysis_row_persists_private_diagnostics_without_public_exposure
             "status": "verified",
         }
     ]
-    restored = await _repository(row).read_analysis("collection-1", "objective-1", 1)
+    restored = await _repository(row, monkeypatch).read_analysis("collection-1", "objective-1", 1)
     assert restored.diagnostics == (
         {
             "trace_type": "table_matrix_repair",
@@ -206,17 +206,18 @@ def anyio_backend():
     return "asyncio"
 
 
-def _repository(row):
+def _repository(row, monkeypatch):
     session = AsyncMock()
     session.get.return_value = row
     factory = MagicMock()
     factory.return_value.__aenter__.return_value = session
-    return ObjectiveRepository(factory)
+    monkeypatch.setattr("repositories.objective_repository.AsyncSessionLocal", factory)
+    return ObjectiveRepository()
 
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("confidence, expected", [(0.8123456, 0.8123), (0.999999, 1.0), (0.0, 0.0)])
-async def test_saved_analysis_confidence_keeps_four_digit_read_precision(confidence, expected):
+async def test_saved_analysis_confidence_keeps_four_digit_read_precision(confidence, expected, monkeypatch):
     identity = {
         "collection_id": "collection-1", "objective_id": "objective-1",
         "analysis_version": 1, "document_id": "paper-1", "confidence": confidence,
@@ -240,7 +241,7 @@ async def test_saved_analysis_confidence_keeps_four_digit_read_precision(confide
             }],
         },
     )
-    repository = _repository(row)
+    repository = _repository(row, monkeypatch)
 
     contributions = await repository.list_contributions("collection-1", "objective-1", 1)
     evidence, total = await repository.list_evidence("collection-1", "objective-1", 1)

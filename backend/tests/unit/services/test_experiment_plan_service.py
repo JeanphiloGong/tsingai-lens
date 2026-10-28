@@ -399,4 +399,4 @@ async def research_records(postgres_session_factory, anyio_backend):
     session = ChatSession.create(collection_id="col_1", user_id="user-1", session_id="chat_legacy", created_at="2026-07-13T00:00:00+00:00")
     await chat.add_session(session)
     message = ChatMessage.assistant(message_id="msg_legacy", session_id=session.session_id, content="Historical research plan.", created_at=session.created_at)
-    await chat.save_trajectory(session=session, messages=(message,), tool_calls=(), tool_results=())
+    await chat.save_trajectory(chat_session=session, messages=(message,), tool_calls=(), tool_results=())

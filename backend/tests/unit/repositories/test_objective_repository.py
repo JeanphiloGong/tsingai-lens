@@ -44,7 +44,7 @@ def _authored_objective() -> ResearchObjective:
 
 
 async def test_authored_candidate_does_not_require_objective_discovery(*, postgres_session_factory) -> None:
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     objective = _authored_objective()
 
     created = await repository.create_authored_candidate(

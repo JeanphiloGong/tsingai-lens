@@ -21,12 +21,13 @@ from domain.shared.enums import (
 
 
 @pytest.fixture
-def profile_repository():
+def profile_repository(monkeypatch):
     session = AsyncMock()
     manager = MagicMock()
     manager.__aenter__ = AsyncMock(return_value=session)
     manager.__aexit__ = AsyncMock(return_value=None)
     factory = MagicMock(return_value=manager)
+    monkeypatch.setattr("repositories.document_profile_repository.AsyncSessionLocal", factory)
     return DocumentProfileRepository(), session
 
 

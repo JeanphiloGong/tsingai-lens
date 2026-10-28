@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from infra.persistence import database
+
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace
@@ -484,8 +486,8 @@ def _physical_split_experiment(
 
 
 class _RevisionRepository:
-    async def read_revision(self, experiment_id, experiment_version, *, transaction=None):
-        self.transaction_handles.append(transaction)
+    async def read_revision(self, db, experiment_id, experiment_version):
+        self.transaction_handles.append(db)
         return self.records.get((experiment_id, experiment_version))
 
     def __init__(self):
@@ -495,13 +497,13 @@ class _RevisionRepository:
         self.latest_revision_calls: list[str] = []
         self.document_lock_calls: list[str] = []
 
-    async def lock_document(self, document_id, *, transaction=None):
+    async def lock_document(self, db, document_id):
         self.document_lock_calls.append(document_id)
-        self.transaction_handles.append(transaction)
+        self.transaction_handles.append(db)
 
-    async def read_latest_revision(self, experiment_id, *, transaction=None):
+    async def read_latest_revision(self, db, experiment_id):
         self.latest_revision_calls.append(experiment_id)
-        self.transaction_handles.append(transaction)
+        self.transaction_handles.append(db)
         values = [
             record
             for (identity, _), record in self.records.items()
@@ -509,8 +511,8 @@ class _RevisionRepository:
         ]
         return max(values, key=lambda item: item.revision.experiment_version) if values else None
 
-    async def list_latest_for_document(self, document_id, *, transaction=None):
-        self.transaction_handles.append(transaction)
+    async def list_latest_for_document(self, db, document_id):
+        self.transaction_handles.append(db)
         latest_by_identity: dict[str, StoredPaperExperimentRevision] = {}
         for record in self.records.values():
             if record.revision.document_id != document_id:
@@ -524,10 +526,8 @@ class _RevisionRepository:
                 latest_by_identity[record.revision.experiment_id] = record
         return tuple(latest_by_identity.values())
 
-    async def add_revision(
-        self, revision, *, created_by=None, created_at=None, transaction=None
-    ):
-        self.transaction_handles.append(transaction)
+    async def add_revision(self, db, revision, *, created_by=None, created_at=None):
+        self.transaction_handles.append(db)
         key = (revision.experiment_id, revision.experiment_version)
         existing = self.records.get(key)
         if existing is not None:
@@ -551,16 +551,12 @@ class _AnalysisRepository:
         self.graphs: list[ExperimentAnalysisWrite] = []
         self.transaction_handles: list[object | None] = []
 
-    async def write_graph(self, graph, *, transaction=None):
+    async def write_graph(self, db, graph):
         self.graphs.append(graph)
-        self.transaction_handles.append(transaction)
+        self.transaction_handles.append(db)
         stored_revisions = tuple(
             [
-                await self.revisions.add_revision(
-                    revision,
-                    created_by=graph.created_by,
-                    transaction=transaction,
-                )
+                await self.revisions.add_revision(db, revision, created_by=graph.created_by)
                 for revision in graph.revisions
             ]
         )
@@ -591,12 +587,14 @@ async def test_writer_creates_revision_selection_and_finding_idempotently():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
+        db=object(),
     )
     second = await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
+        db=object(),
     )
 
     assert len(first.revisions) == len(second.revisions) == 1
@@ -616,7 +614,7 @@ async def test_source_only_writer_saves_multiple_paper_experiments_without_selec
 
     result = await writer.write_paper_experiment_revisions(
         experiment_outputs=(output,),
-        transaction=object(),
+        db=object(),
         created_by="user-1",
     )
 
@@ -634,7 +632,7 @@ async def test_source_only_batch_validates_all_experiments_before_writing():
     output = _physical_split_experiment("paper-a", distinct_boundary=False)
     with pytest.raises(ValueError, match="identity collision"):
         await writer.write_paper_experiment_revisions(
-            experiment_outputs=(output,), transaction=object(),
+            experiment_outputs=(output,), db=object(),
         )
     assert revisions.records == {}
     assert graphs.graphs == []
@@ -647,6 +645,7 @@ async def test_authored_selection_revision_preserves_parent_limits_and_provenanc
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_comparison_experiment("paper-a"),),
+        db=object(),
     )
     revision = await writer.write_selection_finding_revision(
         collection_id="collection-1",
@@ -662,6 +661,7 @@ async def test_authored_selection_revision_preserves_parent_limits_and_provenanc
         created_by="researcher-1",
         parent_finding_id=original.findings[0].finding_id,
         limitations=("Only the tested preheat conditions are supported.",),
+        db=object(),
     )
     (finding,) = revision.findings
     assert finding.parent_finding_id == original.findings[0].finding_id
@@ -685,6 +685,7 @@ async def test_abstention_revision_writes_no_placeholder_finding():
         selections=(),
         created_by="researcher-1",
         limitations=("No comparable measurement was found.",),
+        db=object(),
     )
     assert result.findings == ()
     assert result.selections == ()
@@ -692,7 +693,7 @@ async def test_abstention_revision_writes_no_placeholder_finding():
     assert len(analyses.graphs) == 1
 
 
-async def test_researcher_revises_limits_then_abstains_without_changing_source(collection_service, *, postgres_session_factory):
+async def test_researcher_revises_limits_then_abstains_without_changing_source(monkeypatch, collection_service, *, postgres_session_factory):
     from tests.support.postgres import seed_collection, seed_user
 
     await seed_user(postgres_session_factory, "researcher-1")
@@ -703,7 +704,7 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(c
     collection_id = collection["collection_id"]
     await seed_collection(postgres_session_factory, collection_id, document_ids=("paper-a", "paper-b"))
     objective = replace(_objective(), collection_id=collection_id)
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     await repository.replace(
         collection_id,
         ObjectiveFactSet(research_objectives=(objective,)),
@@ -723,6 +724,7 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(c
         objective=objective,
         analysis=analysis,
         experiment_outputs=(_comparison_experiment("paper-a"),),
+        db=object(),
     )
     coverage = tuple(
         PaperContribution(
@@ -750,25 +752,16 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(c
         )
         for paper in ("paper-a", "paper-b")
     )
-    await repository.publish_experiment_analysis(
-        collection_id,
-        objective.objective_id,
-        1,
-        contributions=coverage,
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await repository.publish_experiment_analysis(db, collection_id, objective.objective_id, 1, contributions=coverage)
     query = SimpleNamespace(read_analysis_bundle=AsyncMock(return_value=source))
 
     @asynccontextmanager
-    async def transaction():
+    async def db():
         yield None
 
-    service = FindingAuthoringService(
-        collection_service=collection_service,
-        objective_repository=repository,
-        experiment_query_service=query,
-        experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=SimpleNamespace(begin=transaction),
-    )
+    monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", database.AsyncSessionLocal)
+    service = FindingAuthoringService(collection_service=collection_service, objective_repository=repository, experiment_query_service=query, experiment_analysis_writer=writer)
     revised = await service.create_selection_version(
         collection_id=collection_id,
         objective_id=objective.objective_id,
@@ -850,6 +843,7 @@ async def test_writer_keeps_selection_for_exact_partial_protocol() -> None:
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
+        db=object(),
     )
 
     assert len(result.revisions) == 1
@@ -864,7 +858,7 @@ async def test_source_only_writer_commits_revision_without_selection():
     writer, revisions, analyses = _writer()
     result = await writer.write_paper_experiment_revisions(
         experiment_outputs=(_comparison_experiment("paper-a"),),
-        transaction=object(),
+        db=object(),
         created_by="agent-user",
     )
 
@@ -878,19 +872,19 @@ async def test_source_only_writer_commits_revision_without_selection():
 
 async def test_writer_passes_one_transaction_to_every_graph_repository():
     writer, revisions, analyses = _writer()
-    transaction = object()
+    db = object()
 
     await writer.write_experiment_analysis(
         collection_id="collection-1",
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_comparison_experiment("paper-a"),),
-        transaction=transaction,
+        db=db,
     )
 
     handles = revisions.transaction_handles + analyses.transaction_handles
     assert handles
-    assert all(handle is transaction for handle in handles)
+    assert all(handle is db for handle in handles)
 
 
 async def test_writer_acquires_multi_draft_identities_in_deterministic_order():
@@ -918,7 +912,7 @@ async def test_writer_acquires_multi_draft_identities_in_deterministic_order():
         analysis=_analysis(),
         experiment_outputs=ordered_inputs,
         allow_finding=False,
-        transaction=object(),
+        db=object(),
     )
 
     assert revisions.document_lock_calls == sorted(revisions.document_lock_calls)
@@ -936,6 +930,7 @@ async def test_writer_synthesizes_and_publishes_from_fixed_experiment_records():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_comparison_experiment("paper-a"),),
+        db=object(),
     )
 
     assert result.groups == ()
@@ -957,6 +952,7 @@ async def test_writer_keeps_different_factor_sets_in_separate_selections():
         objective=_objective(variables=("preheat", "scan speed")),
         analysis=_analysis(),
         experiment_outputs=(_multi_factor_comparison_experiment("paper-a"),),
+        db=object(),
     )
 
     revision = result.revisions[0].revision
@@ -981,6 +977,7 @@ async def test_writer_keeps_valid_selection_when_another_comparison_is_partial()
         objective=_objective(variables=("preheat", "scan speed")),
         analysis=_analysis(),
         experiment_outputs=(_mixed_valid_invalid_comparison_experiment("paper-a"),),
+        db=object(),
     )
 
     revision = result.revisions[0].revision
@@ -1009,6 +1006,7 @@ async def test_writer_creates_conditional_group_for_cross_paper_finding():
             _comparison_experiment("paper-a"),
             _comparison_experiment("paper-b"),
         ),
+        db=object(),
     )
 
     assert len(result.selections) == 2
@@ -1028,6 +1026,7 @@ async def test_changed_source_fingerprint_creates_successor_without_overwrite():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(experiment,),
+        db=object(),
     )
     revised_experiment = _draft_output("paper-a", source_fingerprint="prepared-v2")
     await writer.write_experiment_analysis(
@@ -1035,6 +1034,7 @@ async def test_changed_source_fingerprint_creates_successor_without_overwrite():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(revised_experiment,),
+        db=object(),
     )
 
     versions = sorted(
@@ -1056,6 +1056,7 @@ async def test_parent_identity_stays_stable_when_test_protocol_changes():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_draft_output("paper-a"),),
+        db=object(),
     )
     await writer.write_experiment_analysis(
         collection_id="collection-1",
@@ -1068,6 +1069,7 @@ async def test_parent_identity_stays_stable_when_test_protocol_changes():
                 test_standard="ISO 6892-1",
             ),
         ),
+        db=object(),
     )
 
     stored = tuple(revisions.records.values())
@@ -1084,6 +1086,7 @@ async def test_parent_identity_is_reused_when_reread_adds_variant_context():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_draft_output("paper-a", source_fingerprint="prepared-v1"),),
+        db=object(),
     )
 
     reread = _draft_output("paper-a", source_fingerprint="prepared-v2")
@@ -1119,6 +1122,7 @@ async def test_parent_identity_is_reused_when_reread_adds_variant_context():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(reread,),
+        db=object(),
     )
 
     stored = tuple(revisions.records.values())
@@ -1136,6 +1140,7 @@ async def test_parent_identity_is_reused_for_objective_variant_subset():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_draft_output("paper-a"),),
+        db=object(),
     )
 
     subset = _draft_output("paper-a")
@@ -1190,6 +1195,7 @@ async def test_parent_identity_is_reused_for_objective_variant_subset():
         analysis=_analysis(),
         experiment_outputs=(subset,),
         allow_finding=False,
+        db=object(),
     )
 
     stored = tuple(revisions.records.values())
@@ -1206,6 +1212,7 @@ async def test_physical_split_identity_uses_source_backed_boundary_discriminator
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(_physical_split_experiment("paper-a"),),
+        db=object(),
     )
 
     assert len(result.revisions) == 2
@@ -1234,6 +1241,7 @@ async def test_identical_physical_split_identity_requires_manual_reconciliation(
             experiment_outputs=(
                 _physical_split_experiment("paper-a", distinct_boundary=False),
             ),
+            db=object(),
         )
 
 
@@ -1244,6 +1252,7 @@ async def test_writer_does_not_fabricate_finding_without_matching_experiment():
         objective=_objective(),
         analysis=_analysis(),
         experiment_outputs=(),
+        db=object(),
     )
 
     assert result.revisions == ()
@@ -1262,6 +1271,7 @@ async def test_partial_archive_without_variants_is_retained_without_selection_or
         analysis=_analysis(),
         experiment_outputs=(),
         partial_experiment_outputs=(_partial_archive_without_variants("paper-a"),),
+        db=object(),
     )
 
     assert len(result.revisions) == 1
@@ -1283,6 +1293,7 @@ async def test_partial_archive_without_variants_is_retained_without_selection_or
         analysis=_analysis(),
         experiment_outputs=(),
         partial_experiment_outputs=(_partial_archive_without_variants("paper-a"),),
+        db=object(),
     )
     assert second.revisions[0].revision_id == result.revisions[0].revision_id
     assert len(revisions.records) == 1

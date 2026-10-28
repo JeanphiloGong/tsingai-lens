@@ -132,9 +132,6 @@ from infra.persistence.database import (
     AsyncSessionLocal,
 )
 from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.postgres.experiment_analysis_transaction import (
-    PostgresExperimentAnalysisTransactionFactory,
-)
 from repositories.analysis_job_repository import AnalysisJobRepository
 from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
@@ -263,7 +260,6 @@ class ApplicationOverrides:
     comparison_group_repository: ComparisonGroupRepository | None = None
     experiment_finding_repository: ExperimentFindingRepository | None = None
     experiment_analysis_writer: ExperimentAnalysisWriter | None = None
-    experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory | None = None
     experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None
 
     def requires_database(self) -> bool:
@@ -323,7 +319,6 @@ class ApplicationRuntime:
     experiment_plan_service: ExperimentPlanService
     objective_analysis_service: ObjectiveAnalysisService
     experiment_analysis_writer: ExperimentAnalysisWriter | None
-    experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory | None
     experiment_compatibility_projection: ExperimentCompatibilityProjection | None
     experiment_query_service: ExperimentQueryService | None
 
@@ -340,11 +335,9 @@ async def build_application_runtime(
     database_engine: AsyncEngine | None = None
     try:
         # Resolve persistence dependencies before composing their consumers.
-        session_factory = None
         if overrides.requires_database():
             database_engine = build_database_engine(DatabaseSettings())
             AsyncSessionLocal.configure(bind=database_engine)
-            session_factory = AsyncSessionLocal
 
         if overrides.auth_session_service is None:
             auth_session_service = AuthSessionService(
@@ -383,7 +376,7 @@ async def build_application_runtime(
         )
         objective_repository = (
             overrides.objective_repository
-            or ObjectiveRepository(session_factory)
+            or ObjectiveRepository()
         )
         paper_experiment_repository = overrides.paper_experiment_repository
         objective_experiment_selection_repository = (
@@ -392,35 +385,26 @@ async def build_application_runtime(
         comparison_group_repository = overrides.comparison_group_repository
         experiment_finding_repository = overrides.experiment_finding_repository
         experiment_analysis_repository = None
-        if session_factory is not None:
+        if database_engine is not None:
             paper_experiment_repository = (
                 paper_experiment_repository
-                or PaperExperimentRepository(session_factory)
+                or PaperExperimentRepository()
             )
             objective_experiment_selection_repository = (
                 objective_experiment_selection_repository
-                or ObjectiveExperimentSelectionRepository(session_factory)
+                or ObjectiveExperimentSelectionRepository()
             )
             comparison_group_repository = (
                 comparison_group_repository
-                or ComparisonGroupRepository(session_factory)
+                or ComparisonGroupRepository()
             )
             experiment_finding_repository = (
                 experiment_finding_repository
-                or ExperimentFindingRepository(session_factory)
+                or ExperimentFindingRepository()
             )
-            experiment_analysis_repository = ExperimentAnalysisRepository(
-                session_factory
-            )
+            experiment_analysis_repository = ExperimentAnalysisRepository()
 
         experiment_analysis_writer = overrides.experiment_analysis_writer
-        experiment_analysis_transaction_factory = (
-            overrides.experiment_analysis_transaction_factory
-        )
-        if experiment_analysis_transaction_factory is None and session_factory is not None:
-            experiment_analysis_transaction_factory = (
-                PostgresExperimentAnalysisTransactionFactory(session_factory)
-            )
         if (
             experiment_analysis_writer is None
             and paper_experiment_repository is not None
@@ -436,7 +420,6 @@ async def build_application_runtime(
                 collection_service=collection_service,
                 source_artifact_repository=source_artifact_repository,
                 experiment_analysis_writer=experiment_analysis_writer,
-                experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
             )
         experiment_compatibility_projection = overrides.experiment_compatibility_projection
         if (
@@ -453,7 +436,7 @@ async def build_application_runtime(
                 finding_repository=experiment_finding_repository,
                 objective_repository=objective_repository,
             )
-        if session_factory is not None and (
+        if database_engine is not None and (
             experiment_analysis_writer is None
             or experiment_compatibility_projection is None
         ):
@@ -479,7 +462,7 @@ async def build_application_runtime(
         feedback_dataset_repository = overrides.feedback_dataset_repository
         feedback_dataset_sample_repository = overrides.feedback_dataset_sample_repository
         feedback_dataset_export_repository = overrides.feedback_dataset_export_repository
-        if session_factory is not None:
+        if database_engine is not None:
             analysis_job_repository = (
                 analysis_job_repository
                 or AnalysisJobRepository()
@@ -660,9 +643,6 @@ async def build_application_runtime(
             objective_input_service=objective_input_service,
             document_profile_service=document_profile_service,
             experiment_analysis_writer=experiment_analysis_writer,
-            experiment_analysis_transaction_factory=(
-                experiment_analysis_transaction_factory
-            ),
             experiment_compatibility_projection=experiment_compatibility_projection,
         )
         experiment_query_service = None
@@ -684,7 +664,6 @@ async def build_application_runtime(
             objective_repository=objective_repository,
             experiment_query_service=experiment_query_service,
             experiment_analysis_writer=experiment_analysis_writer,
-            experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
         )
 
         if overrides.chat_session_service is None:
@@ -872,9 +851,6 @@ async def build_application_runtime(
             experiment_plan_service=experiment_plan_service,
             objective_analysis_service=objective_analysis_service,
             experiment_analysis_writer=experiment_analysis_writer,
-            experiment_analysis_transaction_factory=(
-                experiment_analysis_transaction_factory
-            ),
             experiment_compatibility_projection=experiment_compatibility_projection,
             experiment_query_service=experiment_query_service,
         )
@@ -1105,7 +1081,6 @@ def create_app(
     comparison_group_repository: ComparisonGroupRepository | None = None,
     experiment_finding_repository: ExperimentFindingRepository | None = None,
     experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
-    experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory | None = None,
     experiment_compatibility_projection: ExperimentCompatibilityProjection | None = None,
 ) -> FastAPI:
     overrides = ApplicationOverrides(
@@ -1135,7 +1110,6 @@ def create_app(
         comparison_group_repository=comparison_group_repository,
         experiment_finding_repository=experiment_finding_repository,
         experiment_analysis_writer=experiment_analysis_writer,
-        experiment_analysis_transaction_factory=experiment_analysis_transaction_factory,
         experiment_compatibility_projection=experiment_compatibility_projection,
     )
     app = FastAPI(

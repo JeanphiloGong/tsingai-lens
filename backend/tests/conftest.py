@@ -55,7 +55,13 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
     try:
         factory = async_sessionmaker(engine, expire_on_commit=False)
         monkeypatch.setattr("infra.persistence.database.AsyncSessionLocal", factory)
+        monkeypatch.setattr("application.core.objectives.analysis.experiment_query_service.AsyncSessionLocal", factory)
+        monkeypatch.setattr("application.core.objectives.objective_analysis_service.AsyncSessionLocal", factory)
+        monkeypatch.setattr("application.core.objectives.paper_experiment_authoring_service.AsyncSessionLocal", factory)
+        monkeypatch.setattr("application.core.objectives.finding_authoring_service.AsyncSessionLocal", factory)
+        monkeypatch.setattr("application.core.objectives.analysis_service.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.feedback_dataset_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.objective_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.chat_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.analysis_job_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.feedback_dataset_export_repository.AsyncSessionLocal", factory)

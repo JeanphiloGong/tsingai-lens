@@ -590,7 +590,7 @@ async def test_evaluation_gold_service_rejects_gold_item_outside_collection(*, p
 
 
 async def _published_objective_repository(*, postgres_session_factory) -> ObjectiveRepository:
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     objective = ResearchObjective(
         collection_id="col-gold",
         objective_id="obj-1",
@@ -998,7 +998,7 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective(*, postgres_ses
         confidence=0.9,
         warnings=(),
     )
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     await repository.replace(
         "col-gold",
         ObjectiveFactSet(

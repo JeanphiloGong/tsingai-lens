@@ -44,6 +44,7 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.core.paper_experiment import PaperExperimentRevision
+from infra.persistence.database import AsyncSessionLocal
 from repositories.objective_repository import (
     ObjectiveAnalysis,
     ObjectiveRepository,
@@ -518,12 +519,12 @@ class ObjectiveExperimentAnalysisService:
 
             try:
                 async with extraction_limit:
-                    stored_revisions = (
-                        await self.paper_experiment_repository.list_latest_for_document(
-                            document_input.document_id
-                        )
-                        if self.paper_experiment_repository is not None else ()
-                    )
+                    stored_revisions = ()
+                    if self.paper_experiment_repository is not None:
+                        async with AsyncSessionLocal() as db:
+                            stored_revisions = await self.paper_experiment_repository.list_latest_for_document(
+                                db, document_input.document_id
+                            )
                     artifacts = await to_thread(
                         self._reconstruct_document_experiments,
                         collection_id=collection_id,

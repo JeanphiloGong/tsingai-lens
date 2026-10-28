@@ -345,7 +345,7 @@ async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call()
 
 
 async def test_derived_candidate_lineage_round_trips_through_postgres_repository(*, postgres_session_factory) -> None:
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     objective = ResearchObjective(
         collection_id="col-1",
         objective_id="objective-derived",
@@ -382,7 +382,7 @@ async def test_derived_candidate_lineage_round_trips_through_postgres_repository
 
 
 async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(*, postgres_session_factory) -> None:
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     first = ResearchObjective(
         collection_id="col-1",
         objective_id="objective-derived",
@@ -422,7 +422,7 @@ async def test_authored_candidate_retry_cannot_silently_drop_new_lineage(*, post
 
 
 async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(*, postgres_session_factory) -> None:
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     first = ResearchObjective(
         collection_id="col-1",
         objective_id="objective-derived",
@@ -491,7 +491,7 @@ def _published_parent() -> ResearchObjective:
 
 
 async def test_service_rejects_derived_candidate_when_parent_analysis_is_not_published(*, postgres_session_factory) -> None:
-    repository = ObjectiveRepository(postgres_session_factory)
+    repository = ObjectiveRepository()
     await repository.create_authored_candidate(
         _published_parent(),
         created_by_user_id="user-1",

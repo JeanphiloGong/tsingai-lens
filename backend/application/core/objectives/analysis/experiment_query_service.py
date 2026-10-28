@@ -11,6 +11,7 @@ from typing import Any
 from domain.core.comparison_group import ComparisonGroup
 from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
+from infra.persistence.database import AsyncSessionLocal
 from repositories.comparison_group_repository import ComparisonGroupRepository
 from repositories.experiment_finding_repository import (
     ExperimentFindingRepository,
@@ -64,43 +65,47 @@ class ExperimentQueryService:
             objective_id,
             analysis_version,
         )
-        selections = await self.selection_repository.list_selections(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        groups = await self.group_repository.list_groups(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        findings = await self.finding_repository.list_findings(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
+        async with AsyncSessionLocal() as db:
+            selections = await self.selection_repository.list_selections(
+                db,
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            groups = await self.group_repository.list_groups(
+                db,
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            findings = await self.finding_repository.list_findings(
+                db,
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
 
-        revisions_by_identity: dict[tuple[str, int], StoredPaperExperimentRevision] = {}
-        for selection in selections:
-            identity = (selection.experiment_id, selection.experiment_version)
-            if identity in revisions_by_identity:
-                continue
-            stored = await self.paper_experiment_repository.read_revision(*identity)
-            if stored is None:
-                raise ValueError(
-                    "selection references a missing experiment revision: "
-                    f"{identity[0]}/{identity[1]}"
-                )
-            revisions_by_identity[identity] = stored
+            revisions_by_identity: dict[tuple[str, int], StoredPaperExperimentRevision] = {}
+            for selection in selections:
+                identity = (selection.experiment_id, selection.experiment_version)
+                if identity in revisions_by_identity:
+                    continue
+                stored = await self.paper_experiment_repository.read_revision(db, *identity)
+                if stored is None:
+                    raise ValueError(
+                        "selection references a missing experiment revision: "
+                        f"{identity[0]}/{identity[1]}"
+                    )
+                revisions_by_identity[identity] = stored
 
-        return ExperimentAnalysisBundle(
-            selections=selections,
-            groups=groups,
-            findings=findings,
-            revisions=tuple(
-                revisions_by_identity[key] for key in sorted(revisions_by_identity)
-            ),
-        )
+            return ExperimentAnalysisBundle(
+                selections=selections,
+                groups=groups,
+                findings=findings,
+                revisions=tuple(
+                    revisions_by_identity[key] for key in sorted(revisions_by_identity)
+                ),
+            )
 
     async def _validate_analysis_snapshot(
         self,

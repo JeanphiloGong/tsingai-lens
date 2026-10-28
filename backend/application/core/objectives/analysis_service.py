@@ -11,8 +11,7 @@ from asyncio import (
     run_coroutine_threadsafe,
     to_thread,
 )
-from collections.abc import AsyncIterator, Coroutine
-from contextlib import asynccontextmanager
+from collections.abc import Coroutine
 from dataclasses import replace
 from time import perf_counter
 from typing import Any, Callable, Mapping
@@ -45,15 +44,12 @@ from application.core.objectives.objective_analysis_service import (
 )
 from application.core.objectives.objective_input_service import ObjectiveInputService
 from domain.core import ResearchObjective
+from infra.persistence.database import AsyncSessionLocal
 from infra.llm.usage import capture_llm_usage
-from infra.persistence.postgres.experiment_analysis_transaction import (
-    PostgresExperimentAnalysisTransactionFactory,
-)
 from repositories.objective_repository import (
     ObjectiveAnalysis,
     ObjectiveRepository,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -62,19 +58,6 @@ _ANALYSIS_MAX_CONCURRENCY = 4
 
 
 _EVIDENCE_REVIEW_GAP_LIMIT = 200
-
-
-@asynccontextmanager
-async def _analysis_transaction(
-    factory: PostgresExperimentAnalysisTransactionFactory | None,
-) -> AsyncIterator[AsyncSession | None]:
-    """Keep experiment records and Objective publication in one write scope."""
-
-    if factory is None:
-        yield None
-        return
-    async with factory.begin() as transaction:
-        yield transaction
 
 
 def _evidence_review_summary(
@@ -239,8 +222,6 @@ class ObjectiveAnalysisService:
         objective_input_service: ObjectiveInputService,
         document_profile_service: DocumentProfileService,
         experiment_analysis_writer: ExperimentAnalysisWriter | None = None,
-        experiment_analysis_transaction_factory: PostgresExperimentAnalysisTransactionFactory
-        | None = None,
         experiment_compatibility_projection: ExperimentCompatibilityProjection
         | None = None,
         max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
@@ -253,9 +234,6 @@ class ObjectiveAnalysisService:
         self.objective_input_service = objective_input_service
         self.document_profile_service = document_profile_service
         self.experiment_analysis_writer = experiment_analysis_writer
-        self.experiment_analysis_transaction_factory = (
-            experiment_analysis_transaction_factory
-        )
         self.experiment_compatibility_projection = experiment_compatibility_projection
         self._analysis_semaphore = Semaphore(max_concurrency)
         self._task_factory = task_factory
@@ -1503,36 +1481,25 @@ class ObjectiveAnalysisService:
                 raise RuntimeError(
                     "experiment analysis writer does not implement native publication"
                 )
-            async with _analysis_transaction(
-                self.experiment_analysis_transaction_factory
-            ) as transaction:
-                writer_kwargs: dict[str, Any] = {
-                    "collection_id": collection_id,
-                    "objective": objective,
-                    "analysis": claimed,
-                    "experiment_outputs": artifacts.experiment_outputs,
-                    "partial_experiment_outputs": artifacts.partial_experiment_outputs,
-                    "reused_revisions": artifacts.reused_revisions,
-                }
-                if transaction is not None:
-                    writer_kwargs["transaction"] = transaction
-                native_result = await native_writer(**writer_kwargs)
+            async with AsyncSessionLocal() as db, db.begin():
+                native_result = await native_writer(
+                    db=db,
+                    collection_id=collection_id,
+                    objective=objective,
+                    analysis=claimed,
+                    experiment_outputs=artifacts.experiment_outputs,
+                    partial_experiment_outputs=artifacts.partial_experiment_outputs,
+                    reused_revisions=artifacts.reused_revisions,
+                )
                 abstention_reason, abstention_note = _experiment_abstention(
                     native_result
                 )
-                publish_kwargs: dict[str, Any] = {
-                    "contributions": artifacts.contributions,
-                    "abstention_reason": abstention_reason,
-                    "abstention_note": abstention_note,
-                }
-                if transaction is not None:
-                    publish_kwargs["transaction"] = transaction
                 objective, completed = (
                     await self.objective_repository.publish_experiment_analysis(
-                        collection_id,
-                        objective_id,
-                        analysis_version,
-                        **publish_kwargs,
+                        db, collection_id, objective_id, analysis_version,
+                        contributions=artifacts.contributions,
+                        abstention_reason=abstention_reason,
+                        abstention_note=abstention_note,
                     )
                 )
             return await self._result(collection_id, objective.objective_id, analysis=completed)

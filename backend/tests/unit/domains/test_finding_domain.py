@@ -197,7 +197,7 @@ def test_finding_represents_one_atomic_outcome_without_legacy_fields() -> None:
         assert not hasattr(finding, removed)
 
 
-def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> None:
+def test_experiment_backed_finding_keeps_selection_and_optional_group_refs(monkeypatch) -> None:
     finding = Finding(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -229,7 +229,10 @@ def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> 
     session.get = AsyncMock(return_value=row)
     session.__aenter__ = AsyncMock(return_value=session)
     session.__aexit__ = AsyncMock(return_value=None)
-    repository = ObjectiveRepository(lambda: session)
+    monkeypatch.setattr(
+        "repositories.objective_repository.AsyncSessionLocal", lambda: session
+    )
+    repository = ObjectiveRepository()
     restored = asyncio.run(repository.read_finding(
         finding.collection_id, finding.objective_id, finding.analysis_version, finding.finding_id,
     ))

@@ -49,7 +49,7 @@ async def objective_repository(source_repository):
         await source_repository.replace_document(
             COLLECTION_ID, _source(document_id, title=document_id),
         )
-    repository = ObjectiveRepository(database.AsyncSessionLocal)
+    repository = ObjectiveRepository()
     objective = ResearchObjective(
         collection_id=_text(COLLECTION_ID) or "",
         objective_id=_text(OBJECTIVE_ID)
@@ -142,9 +142,6 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
     from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-    from infra.persistence.postgres.experiment_analysis_transaction import (
-        PostgresExperimentAnalysisTransactionFactory,
-    )
     from repositories.collection_repository import (
         CollectionRepository,
     )
@@ -168,7 +165,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     )
 
     sessions = database.AsyncSessionLocal
-    repository = ObjectiveRepository(sessions)
+    repository = ObjectiveRepository()
     objective = ResearchObjective(
         collection_id=_text(COLLECTION_ID) or "",
         objective_id="preheat-elongation",
@@ -199,17 +196,18 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         prompt_versions={},
     )
     analysis = await repository.claim_analysis(COLLECTION_ID, objective.objective_id, 1)
-    experiments = PaperExperimentRepository(sessions)
+    experiments = PaperExperimentRepository()
     writer = ExperimentAnalysisWriter(
         paper_experiment_repository=experiments,
-        experiment_analysis_repository=ExperimentAnalysisRepository(sessions),
+        experiment_analysis_repository=ExperimentAnalysisRepository(),
     )
-    source = await writer.write_experiment_analysis(
-        collection_id=COLLECTION_ID,
-        objective=objective,
-        analysis=analysis,
-        experiment_outputs=(_comparison_experiment("doc_a"),),
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        source = await writer.write_experiment_analysis(db=db,
+            collection_id=COLLECTION_ID,
+            objective=objective,
+            analysis=analysis,
+            experiment_outputs=(_comparison_experiment("doc_a"),),
+        )
     coverage = tuple(
         PaperContribution(
             collection_id=finding_text(COLLECTION_ID) or "",
@@ -236,32 +234,18 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         )
         for doc in ("doc_a", "doc_b")
     )
-    await repository.publish_experiment_analysis(
-        COLLECTION_ID,
-        objective.objective_id,
-        1,
-        contributions=coverage,
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await repository.publish_experiment_analysis(db, COLLECTION_ID, objective.objective_id, 1, contributions=coverage)
     query = ExperimentQueryService(
         experiments,
-        ObjectiveExperimentSelectionRepository(sessions),
-        ComparisonGroupRepository(sessions),
-        ExperimentFindingRepository(sessions),
+        ObjectiveExperimentSelectionRepository(),
+        ComparisonGroupRepository(),
+        ExperimentFindingRepository(),
         objective_repository=repository,
     )
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
-    app.state.finding_authoring_service = FindingAuthoringService(
-        collection_service=CollectionService(
-            CollectionRepository(), FileCollectionWorkspace(tmp_path)
-        ),
-        objective_repository=repository,
-        experiment_query_service=query,
-        experiment_analysis_writer=writer,
-        experiment_analysis_transaction_factory=PostgresExperimentAnalysisTransactionFactory(
-            sessions
-        ),
-    )
+    app.state.finding_authoring_service = FindingAuthoringService(collection_service=CollectionService(CollectionRepository(), FileCollectionWorkspace(tmp_path)), objective_repository=repository, experiment_query_service=query, experiment_analysis_writer=writer)
 
     @app.middleware("http")
     async def authenticate(request, call_next):
@@ -311,7 +295,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
 async def test_published_evidence_gap_survives_a_failed_followup(
     source_repository,
 ) -> None:
-    repository = ObjectiveRepository(database.AsyncSessionLocal)
+    repository = ObjectiveRepository()
     objective = ResearchObjective(
         collection_id=_text(COLLECTION_ID) or "",
         objective_id="laser-power-porosity",
@@ -361,7 +345,8 @@ async def test_published_evidence_gap_survives_a_failed_followup(
     assert queued_objective.active_analysis_version == queued.analysis_version
     assert await repository.read_analysis(*queued.key) == queued
     with pytest.raises(ValueError, match="only running"):
-        await repository.publish_experiment_analysis(*queued.key)
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await repository.publish_experiment_analysis(db, *queued.key)
 
     running = await repository.claim_analysis(*queued.key)
     assert running.status == "running"
@@ -376,11 +361,8 @@ async def test_published_evidence_gap_survives_a_failed_followup(
         prompt_versions={},
         diagnostics=(),
     )
-    published_objective, published = await repository.publish_experiment_analysis(
-        *queued.key,
-        abstention_reason="no_comparable_evidence",
-        abstention_note="The selected papers report power settings but no comparable porosity measurements.",
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        published_objective, published = await repository.publish_experiment_analysis(db, *queued.key, abstention_reason='no_comparable_evidence', abstention_note='The selected papers report power settings but no comparable porosity measurements.')
     assert published_objective.published_analysis_version == queued.analysis_version
     assert published.status == "succeeded"
     assert published.stats.token_usage == TokenUsage(32, 16, 48)

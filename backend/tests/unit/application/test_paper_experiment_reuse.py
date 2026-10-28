@@ -53,7 +53,7 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
         for label, source in output.output.source_labels.items()
     })) for output in outputs)
     saved = await writer.write_paper_experiment_revisions(
-        experiment_outputs=outputs, transaction=object(), created_by="researcher",
+        experiment_outputs=outputs, db=object(), created_by="researcher",
     )
     assert len(saved.revisions) == 3
     assert saved.selections == saved.findings == ()
@@ -115,10 +115,7 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     assert set(artifacts.extraction_statuses.values()) == {"reused"}
     assert all(item.extracted_source_count == item.routed_source_count for item in artifacts.contributions)
     assert all(item.uninspected_source_count == 0 for item in artifacts.contributions)
-    first = await writer.write_experiment_analysis(
-        collection_id="collection-1", objective=objective, analysis=analysis,
-        experiment_outputs=(), reused_revisions=artifacts.reused_revisions,
-    )
+    first = await writer.write_experiment_analysis(collection_id='collection-1', objective=objective, analysis=analysis, experiment_outputs=(), reused_revisions=artifacts.reused_revisions, db=object())
     assert len(first.selections) == 3
     assert first.groups
     assert first.findings
@@ -126,16 +123,12 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     selection_documents = {item.selection_id: experiment_documents[item.experiment_id] for item in first.selections}
     assert any(len({selection_documents[member.selection_id] for member in group.members}) == 2 for group in first.groups)
     other_objective = replace(objective, objective_id="objective-2")
-    second = await writer.write_experiment_analysis(
-        collection_id="collection-1", objective=other_objective,
-        analysis=replace(analysis, objective_id="objective-2"),
-        experiment_outputs=(), reused_revisions=artifacts.reused_revisions,
-    )
+    second = await writer.write_experiment_analysis(collection_id='collection-1', objective=other_objective, analysis=replace(analysis, objective_id='objective-2'), experiment_outputs=(), reused_revisions=artifacts.reused_revisions, db=object())
     assert {item.experiment_id for item in first.selections} == {item.experiment_id for item in second.selections}
     assert all(item.objective_id == "objective-2" for item in second.selections)
     await writer.write_paper_experiment_revisions(
         experiment_outputs=(_draft_output("paper-b", source_fingerprint="updated-source"),),
-        transaction=object(),
+        db=object(),
     )
     assert tuple(item.revision for item in first.revisions) == fixed_revisions
     assert all(item.experiment_version == 1 for item in first.selections)
@@ -148,7 +141,7 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
 async def test_insufficient_or_stale_facts_require_extraction(change):
     writer, _, _ = _writer()
     output = _draft_output("paper-a")
-    saved = await writer.write_paper_experiment_revisions(experiment_outputs=(output,), transaction=object())
+    saved = await writer.write_paper_experiment_revisions(experiment_outputs=(output,), db=object())
     candidates = saved.revisions
     bundle = _bundle(output)
     objective = _objective()

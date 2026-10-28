@@ -41,19 +41,6 @@ from repositories.paper_experiment_repository import (
 )
 
 
-async def _repository_call(
-    method: Any,
-    *args: Any,
-    transaction: AsyncSession | None,
-    **kwargs: Any,
-) -> Any:
-    """Pass the opaque transaction only when the caller supplied one."""
-
-    if transaction is not None:
-        kwargs["transaction"] = transaction
-    return await method(*args, **kwargs)
-
-
 @dataclass(frozen=True)
 class ExperimentAnalysisWriteResult:
     """Records committed for one Objective analysis snapshot."""
@@ -510,7 +497,7 @@ async def _resolve_experiment_identity(
     draft: PaperExperimentDraft,
     document_id: str,
     payload: Mapping[str, Any],
-    transaction: AsyncSession | None,
+    db: AsyncSession,
 ) -> tuple[str, StoredPaperExperimentRevision | None]:
     """Reuse one prior identity when a bounded reread changes its content."""
 
@@ -523,11 +510,7 @@ async def _resolve_experiment_identity(
         # Implementations without the candidate-list operation cannot perform
         # content-based identity reuse.  The single read also takes the
         # transaction-scoped identity lock in the PostgreSQL repository.
-        latest = await _repository_call(
-            repository.read_latest_revision,
-            content_identity,
-            transaction=transaction,
-        )
+        latest = await repository.read_latest_revision(db, content_identity)
         return content_identity, latest
 
     # Inspect candidates before taking any identity lock.  If we lock the
@@ -535,11 +518,7 @@ async def _resolve_experiment_identity(
     # identity, two concurrent writes can acquire those two locks in opposite
     # orders.  The final read below acquires exactly one lock: the identity
     # that this draft will actually write.
-    candidates = await _repository_call(
-        list_latest,
-        document_id,
-        transaction=transaction,
-    )
+    candidates = await list_latest(db, document_id)
     exact = next(
         (
             item
@@ -550,11 +529,7 @@ async def _resolve_experiment_identity(
         None,
     )
     if exact is not None:
-        latest = await _repository_call(
-            repository.read_latest_revision,
-            content_identity,
-            transaction=transaction,
-        )
+        latest = await repository.read_latest_revision(db, content_identity)
         return content_identity, latest
 
     matches = tuple(
@@ -576,18 +551,10 @@ async def _resolve_experiment_identity(
     if matches:
         matched = matches[0]
         matched_identity = matched.revision.experiment_id
-        latest = await _repository_call(
-            repository.read_latest_revision,
-            matched_identity,
-            transaction=transaction,
-        )
+        latest = await repository.read_latest_revision(db, matched_identity)
         return matched_identity, latest
 
-    latest = await _repository_call(
-        repository.read_latest_revision,
-        content_identity,
-        transaction=transaction,
-    )
+    latest = await repository.read_latest_revision(db, content_identity)
     return content_identity, latest
 
 
@@ -776,7 +743,7 @@ class ExperimentAnalysisWriter:
         reused_revisions: Sequence[PaperExperimentRevision] = (),
         allow_finding: bool = True,
         created_by: str | None = None,
-        transaction: AsyncSession | None = None,
+        db: AsyncSession,
     ) -> ExperimentAnalysisWriteResult:
         """Prepare and commit revisions, selections, groups, and Findings."""
 
@@ -787,7 +754,7 @@ class ExperimentAnalysisWriter:
             experiment_outputs=experiment_outputs,
             partial_experiment_outputs=partial_experiment_outputs,
             include_selections=allow_finding,
-            transaction=transaction,
+            db=db,
         )
         reused_selections: list[ObjectiveExperimentSelection] = []
         seen_documents = {item.document_id for item in prepared.revisions}
@@ -803,11 +770,8 @@ class ExperimentAnalysisWriter:
                 or revision.identity_status == "unknown"
             ):
                 raise ValueError("reused experiment does not match the analysis read scope")
-            stored_revision = await _repository_call(
-                self.paper_experiment_repository.read_revision,
-                revision.experiment_id,
-                revision.experiment_version,
-                transaction=transaction,
+            stored_revision = await self.paper_experiment_repository.read_revision(
+                db, revision.experiment_id, revision.experiment_version
             )
             if stored_revision is None or stored_revision.archived_at is not None or stored_revision.revision != revision:
                 raise ValueError("reused experiment is not an available fixed revision")
@@ -836,8 +800,8 @@ class ExperimentAnalysisWriter:
             )
         else:
             synthesis = _EmptySynthesis()
-        stored = await _repository_call(
-            self.experiment_analysis_repository.write_graph,
+        stored = await self.experiment_analysis_repository.write_graph(
+            db,
             ExperimentAnalysisWrite(
                 collection_id=collection_id,
                 objective_id=objective.objective_id,
@@ -848,7 +812,6 @@ class ExperimentAnalysisWriter:
                 findings=synthesis.findings,
                 created_by=created_by,
             ),
-            transaction=transaction,
         )
         return ExperimentAnalysisWriteResult(
             revisions=stored.revisions,
@@ -862,7 +825,7 @@ class ExperimentAnalysisWriter:
         self,
         *,
         experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
-        transaction: AsyncSession,
+        db: AsyncSession,
         created_by: str | None = None,
     ) -> ExperimentAnalysisWriteResult:
         """Persist source-grounded revisions without an Objective snapshot.
@@ -873,8 +836,6 @@ class ExperimentAnalysisWriter:
         path deliberately creates no Objective selections, groups, or Findings.
         """
 
-        if transaction is None:
-            raise ValueError("paper experiment revisions require an atomic transaction")
         if not experiment_outputs:
             return ExperimentAnalysisWriteResult(
                 revisions=(),
@@ -892,15 +853,10 @@ class ExperimentAnalysisWriter:
                 strict=True,
             )
         )
-        if transaction is not None:
-            for document_id in sorted(
-                {output.output.document_id for output in experiment_outputs}
-            ):
-                await _repository_call(
-                    self.paper_experiment_repository.lock_document,
-                    document_id,
-                    transaction=transaction,
-                )
+        for document_id in sorted(
+            {output.output.document_id for output in experiment_outputs}
+        ):
+            await self.paper_experiment_repository.lock_document(db, document_id)
 
         prepared_revisions: list[PaperExperimentRevision] = []
         diagnostics: dict[str, tuple[str, ...]] = {}
@@ -911,7 +867,7 @@ class ExperimentAnalysisWriter:
                 draft=draft,
                 local_key=local_key,
                 allow_partial_archive=True,
-                transaction=transaction,
+                db=db,
             )
             identity_key = (revision.document_id, revision.experiment_id)
             owner = (output.output.document_id, local_key)
@@ -932,11 +888,8 @@ class ExperimentAnalysisWriter:
 
         revisions: list[StoredPaperExperimentRevision] = []
         for revision in prepared_revisions:
-            stored = await _repository_call(
-                self.paper_experiment_repository.add_revision,
-                revision,
-                created_by=created_by,
-                transaction=transaction,
+            stored = await self.paper_experiment_repository.add_revision(
+                db, revision, created_by=created_by
             )
             revisions.append(stored)
 
@@ -959,7 +912,7 @@ class ExperimentAnalysisWriter:
         created_by: str | None = None,
         parent_finding_id: str | None = None,
         limitations: tuple[str, ...] = (),
-        transaction: AsyncSession | None = None,
+        db: AsyncSession,
     ) -> ExperimentAnalysisWriteResult:
         """Copy fixed selections into a new snapshot and synthesize its Finding."""
         selection_map = {
@@ -994,8 +947,8 @@ class ExperimentAnalysisWriter:
             )
             for item in synthesis.findings
         )
-        stored = await _repository_call(
-            self.experiment_analysis_repository.write_graph,
+        stored = await self.experiment_analysis_repository.write_graph(
+            db,
             ExperimentAnalysisWrite(
                 collection_id=collection_id,
                 objective_id=objective.objective_id,
@@ -1006,7 +959,6 @@ class ExperimentAnalysisWriter:
                 findings=findings,
                 created_by=created_by,
             ),
-            transaction=transaction,
         )
         return ExperimentAnalysisWriteResult(
             revisions=stored.revisions,
@@ -1024,7 +976,7 @@ class ExperimentAnalysisWriter:
         experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
         partial_experiment_outputs: Sequence[ReconciledPaperExperimentOutput],
         include_selections: bool,
-        transaction: AsyncSession | None,
+        db: AsyncSession,
     ) -> _PreparedExperimentSelections:
         if objective.collection_id != collection_id:
             raise ValueError("experiment analysis objective belongs to another collection")
@@ -1060,19 +1012,14 @@ class ExperimentAnalysisWriter:
         # rereads whose content hash changed but whose lineage resolves to an
         # existing physical experiment, and locks documents in one global
         # order to avoid cross-document deadlocks.
-        if transaction is not None:
-            document_ids = sorted(
-                {
-                    output.output.document_id
-                    for output, _, _ in output_specs
-                }
-            )
-            for document_id in document_ids:
-                await _repository_call(
-                    self.paper_experiment_repository.lock_document,
-                    document_id,
-                    transaction=transaction,
-                )
+        document_ids = sorted(
+            {
+                output.output.document_id
+                for output, _, _ in output_specs
+            }
+        )
+        for document_id in document_ids:
+            await self.paper_experiment_repository.lock_document(db, document_id)
         for output_index, (
             output,
             output_include_selections,
@@ -1120,7 +1067,7 @@ class ExperimentAnalysisWriter:
                     draft=draft,
                     local_key=local_key,
                     allow_partial_archive=allow_partial_archive,
-                    transaction=transaction,
+                    db=db,
                 )
             )
             revision_selections = tuple(
@@ -1188,7 +1135,7 @@ class ExperimentAnalysisWriter:
         draft: PaperExperimentDraft,
         local_key: str,
         allow_partial_archive: bool,
-        transaction: AsyncSession | None,
+        db: AsyncSession,
     ) -> tuple[
         PaperExperimentRevision,
         tuple[str, ...],
@@ -1214,7 +1161,7 @@ class ExperimentAnalysisWriter:
                 draft=draft,
                 document_id=document_id,
                 payload=payload,
-                transaction=transaction,
+                db=db,
             )
         else:
             experiment_id = stable_partial_archive_experiment_id(
@@ -1223,10 +1170,8 @@ class ExperimentAnalysisWriter:
                 local_key=local_key,
                 payload=payload,
             )
-            latest = await _repository_call(
-                self.paper_experiment_repository.read_latest_revision,
-                experiment_id,
-                transaction=transaction,
+            latest = await self.paper_experiment_repository.read_latest_revision(
+                db, experiment_id
             )
         candidate_version = (
             latest.revision.experiment_version + 1 if latest is not None else 1

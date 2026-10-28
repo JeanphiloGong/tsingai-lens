@@ -32,7 +32,7 @@ async def read_tool_results(repository, session_id: str):
 
 async def seed_objective(session_factory, collection_id: str, objective_id: str):
     await seed_collection(session_factory, collection_id)
-    repository = ObjectiveRepository(session_factory)
+    repository = ObjectiveRepository()
     existing = await repository.read_objective(collection_id, objective_id)
     if existing is not None:
         return existing

@@ -78,7 +78,7 @@ async def _analyze(chain, answer=None):
 async def _second_case(chain):
     answer = replace(chain.answer, message_id="second-preheat-answer", created_at=_now())
     await chain.chat.save_trajectory(
-        session=chain.session.update(user_id=USER_ID, collection_id=COLLECTION_ID, updated_at=_now()),
+        chat_session=chain.session.update(user_id=USER_ID, collection_id=COLLECTION_ID, updated_at=_now()),
         messages=(chain.question, chain.answer, answer), tool_calls=(), tool_results=(),
     )
     return await _analyze(chain, answer)
@@ -222,7 +222,7 @@ async def test_historical_backfill_crosses_a_full_batch(feedback_chain, postgres
     chain = feedback_chain
     answers = tuple(replace(chain.answer, message_id=f"historical-answer-{index}", created_at=_now()) for index in range(201))
     await chain.chat.save_trajectory(
-        session=chain.session.update(user_id=USER_ID, collection_id=COLLECTION_ID, updated_at=_now()),
+        chat_session=chain.session.update(user_id=USER_ID, collection_id=COLLECTION_ID, updated_at=_now()),
         messages=(chain.question, chain.answer, *answers), tool_calls=(), tool_results=(),
     )
     now = datetime.now(timezone.utc)

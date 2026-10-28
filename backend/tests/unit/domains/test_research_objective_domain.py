@@ -539,7 +539,7 @@ def test_research_objective_confirms_queues_and_publishes_active_version() -> No
 
 
 @pytest.mark.anyio
-async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping() -> None:
+async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping(monkeypatch) -> None:
     analysis = _analysis()
     payload = {
         "collection_id": analysis.collection_id,
@@ -608,7 +608,8 @@ async def test_objective_analysis_infers_authored_snapshot_from_legacy_mapping()
     session.get.return_value = ObjectiveAnalysisRecord(payload=payload)
     factory = MagicMock()
     factory.return_value.__aenter__.return_value = session
-    authored = await ObjectiveRepository(factory).read_analysis("collection-1", "objective-1", 2)
+    monkeypatch.setattr("repositories.objective_repository.AsyncSessionLocal", factory)
+    authored = await ObjectiveRepository().read_analysis("collection-1", "objective-1", 2)
 
     assert authored.scientific_record_source == "authored_snapshot"
 

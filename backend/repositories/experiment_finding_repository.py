@@ -39,9 +39,8 @@ from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 from infra.persistence.postgres.models.objective_experiment_selection import (
     ObjectiveExperimentSelectionRow,
 )
-from infra.persistence.postgres.transaction import database_session_scope
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class ExperimentFindingRepository:
@@ -49,68 +48,53 @@ class ExperimentFindingRepository:
 
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def add_finding(
         self,
+        db: AsyncSession,
         finding: Finding,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> Finding:
-        async with database_session_scope(
-            self.session_factory, transaction, write=True
-        ) as session:
-            return await _add_finding(session, finding)
+        return await _add_finding(db, finding)
 
     async def read_finding(
         self,
+        db: AsyncSession,
         collection_id: str,
         finding_id: str,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> Finding | None:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            row = await session.scalar(
-                select(ExperimentFindingRow).where(
-                    ExperimentFindingRow.collection_id == collection_id,
-                    ExperimentFindingRow.finding_id == finding_id,
-                )
+        row = await db.scalar(
+            select(ExperimentFindingRow).where(
+                ExperimentFindingRow.collection_id == collection_id,
+                ExperimentFindingRow.finding_id == finding_id,
             )
-            return await load_experiment_finding(session, row) if row is not None else None
+        )
+        return await load_experiment_finding(db, row) if row is not None else None
 
     async def list_findings(
         self,
+        db: AsyncSession,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
-        *,
-        transaction: AsyncSession | None = None,
     ) -> tuple[Finding, ...]:
-        async with database_session_scope(
-            self.session_factory, transaction, write=False
-        ) as session:
-            rows = tuple(
-                await session.scalars(
-                    select(ExperimentFindingRow)
-                    .where(
-                        ExperimentFindingRow.collection_id == collection_id,
-                        ExperimentFindingRow.objective_id == objective_id,
-                        ExperimentFindingRow.analysis_version == analysis_version,
-                    )
-                    .order_by(ExperimentFindingRow.display_rank, ExperimentFindingRow.finding_id)
+        rows = tuple(
+            await db.scalars(
+                select(ExperimentFindingRow)
+                .where(
+                    ExperimentFindingRow.collection_id == collection_id,
+                    ExperimentFindingRow.objective_id == objective_id,
+                    ExperimentFindingRow.analysis_version == analysis_version,
                 )
+                .order_by(ExperimentFindingRow.display_rank, ExperimentFindingRow.finding_id)
             )
-            records: list[Finding] = []
-            for row in rows:
-                records.append(await load_experiment_finding(session, row))
-            return tuple(records)
+        )
+        records: list[Finding] = []
+        for row in rows:
+            records.append(await load_experiment_finding(db, row))
+        return tuple(records)
 
 
 async def _add_finding(
-    session: AsyncSession,
+    db: AsyncSession,
     finding: Finding,
 ) -> Finding:
     if not finding.selection_ids:
@@ -118,18 +102,18 @@ async def _add_finding(
     if finding.paper_contributions:
         raise ValueError("experiment-backed Finding cannot copy legacy evidence")
 
-    existing = await session.scalar(
+    existing = await db.scalar(
         select(ExperimentFindingRow).where(
             ExperimentFindingRow.finding_id == finding.finding_id
         )
     )
     if existing is not None:
-        restored = await load_experiment_finding(session, existing)
+        restored = await load_experiment_finding(db, existing)
         if restored == finding:
             return restored
         raise ValueError("finding identity already exists")
 
-    selections, groups = await _validate_context(session, finding)
+    selections, groups = await _validate_context(db, finding)
     row = ExperimentFindingRow(
         finding_id=finding.finding_id,
         collection_id=finding.collection_id,
@@ -238,30 +222,30 @@ async def _add_finding(
         created_at=finding.created_at,
         warnings_json=list(finding.warnings),
     )
-    session.add(row)
-    session.add_all(
+    db.add(row)
+    db.add_all(
         FindingSelectionRow(
             finding_id=finding.finding_id,
             selection_id=selection.selection_id,
         )
         for selection in selections
     )
-    session.add_all(
+    db.add_all(
         FindingComparisonGroupRow(
             finding_id=finding.finding_id,
             group_id=group.group_id,
         )
         for group in groups
     )
-    await session.flush()
+    await db.flush()
     return finding
 
 
 async def _validate_context(
-    session: AsyncSession,
+    db: AsyncSession,
     finding: Finding,
 ) -> tuple[tuple[ObjectiveExperimentSelectionRow, ...], tuple[ComparisonGroupRow, ...]]:
-    analysis = await session.scalar(
+    analysis = await db.scalar(
         select(ObjectiveAnalysisRecord).where(
             ObjectiveAnalysisRecord.collection_id == finding.collection_id,
             ObjectiveAnalysisRecord.objective_id == finding.objective_id,
@@ -272,7 +256,7 @@ async def _validate_context(
         raise ValueError("finding analysis snapshot was not found")
 
     selection_rows = tuple(
-        await session.scalars(
+        await db.scalars(
             select(ObjectiveExperimentSelectionRow).where(
                 ObjectiveExperimentSelectionRow.collection_id == finding.collection_id,
                 ObjectiveExperimentSelectionRow.selection_id.in_(finding.selection_ids),
@@ -293,7 +277,7 @@ async def _validate_context(
     group_rows: tuple[ComparisonGroupRow, ...] = ()
     if finding.comparison_group_ids:
         group_rows = tuple(
-            await session.scalars(
+            await db.scalars(
                 select(ComparisonGroupRow).where(
                     ComparisonGroupRow.collection_id == finding.collection_id,
                     ComparisonGroupRow.group_id.in_(finding.comparison_group_ids),
@@ -323,7 +307,7 @@ async def _validate_context(
 
     if group_rows:
         group_members = tuple(
-            await session.scalars(
+            await db.scalars(
                 select(ComparisonGroupMemberRow).where(
                     ComparisonGroupMemberRow.group_id.in_(finding.comparison_group_ids)
                 )
@@ -337,18 +321,18 @@ async def _validate_context(
 
 
 async def load_experiment_finding(
-    session: AsyncSession,
+    db: AsyncSession,
     row: ExperimentFindingRow,
 ) -> Finding:
     selection_rows = tuple(
-        await session.scalars(
+        await db.scalars(
             select(FindingSelectionRow)
             .where(FindingSelectionRow.finding_id == row.finding_id)
             .order_by(FindingSelectionRow.selection_id)
         )
     )
     group_rows = tuple(
-        await session.scalars(
+        await db.scalars(
             select(FindingComparisonGroupRow)
             .where(FindingComparisonGroupRow.finding_id == row.finding_id)
             .order_by(FindingComparisonGroupRow.group_id)

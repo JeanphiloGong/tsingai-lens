@@ -42,7 +42,7 @@ class ExperimentFindingPublisher:
         self,
         finding: Finding,
         *,
-        transaction: AsyncSession | None = None,
+        db: AsyncSession,
     ) -> PublishedExperimentFinding:
         if finding.paper_contributions:
             raise ValueError("experiment-backed Finding cannot use legacy evidence")
@@ -51,17 +51,9 @@ class ExperimentFindingPublisher:
 
         selections: list[ObjectiveExperimentSelection] = []
         for selection_id in finding.selection_ids:
-            if transaction is None:
-                selection = await self.selection_repository.read_selection(
-                    finding.collection_id,
-                    selection_id,
-                )
-            else:
-                selection = await self.selection_repository.read_selection(
-                    finding.collection_id,
-                    selection_id,
-                    transaction=transaction,
-                )
+            selection = await self.selection_repository.read_selection(
+                db, finding.collection_id, selection_id
+            )
             if selection is None:
                 raise ValueError(f"unknown experiment selection: {selection_id}")
             if (
@@ -74,17 +66,9 @@ class ExperimentFindingPublisher:
 
         groups: list[ComparisonGroup] = []
         for group_id in finding.comparison_group_ids:
-            if transaction is None:
-                group = await self.group_repository.read_group(
-                    finding.collection_id,
-                    group_id,
-                )
-            else:
-                group = await self.group_repository.read_group(
-                    finding.collection_id,
-                    group_id,
-                    transaction=transaction,
-                )
+            group = await self.group_repository.read_group(
+                db, finding.collection_id, group_id
+            )
             if group is None:
                 raise ValueError(f"unknown comparison group: {group_id}")
             if (
@@ -106,13 +90,7 @@ class ExperimentFindingPublisher:
         if len(experiment_ids) > 1 and finding.synthesis_status == "single_study":
             raise ValueError("multiple experiments cannot use single_study status")
 
-        if transaction is None:
-            stored = await self.finding_repository.add_finding(finding)
-        else:
-            stored = await self.finding_repository.add_finding(
-                finding,
-                transaction=transaction,
-            )
+        stored = await self.finding_repository.add_finding(db, finding)
         return PublishedExperimentFinding(
             finding=stored,
             selections=tuple(selections),

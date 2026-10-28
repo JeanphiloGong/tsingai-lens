@@ -27,9 +27,6 @@ from domain.core.paper_experiment import (
 from domain.core.scientific_fact import (
     ScientificContext,
 )
-from infra.persistence.postgres.experiment_analysis_transaction import (
-    PostgresExperimentAnalysisTransactionFactory,
-)
 from repositories.comparison_group_repository import (
     ComparisonGroupRepository,
 )
@@ -160,8 +157,8 @@ def _cross_paper_finding(
 class _FailingAfterWriteFindingRepository(ExperimentFindingRepository):
     """Flush a Finding, then fail so the enclosing transaction must undo it."""
 
-    async def add_finding(self, finding, *, transaction=None):
-        await super().add_finding(finding, transaction=transaction)
+    async def add_finding(self, db, finding):
+        await super().add_finding(db, finding)
         raise RuntimeError("forced Finding publication failure")
 
 
@@ -169,46 +166,22 @@ async def test_shared_transaction_rolls_back_graph_and_objective_publication(
     objective_repository,
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
-    session_factory = database.AsyncSessionLocal
-    experiments = PaperExperimentRepository(session_factory)
-    selections = ObjectiveExperimentSelectionRepository(session_factory)
-    transaction_factory = PostgresExperimentAnalysisTransactionFactory(session_factory)
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
     revision = _revision()
     selection = _selection(analysis.analysis_version)
 
     with pytest.raises(RuntimeError, match="forced rollback"):
-        async with transaction_factory.begin() as transaction:
-            stored = await experiments.add_revision(
-                revision,
-                created_by="test-agent",
-                transaction=transaction,
-            )
-            await selections.add_selection(
-                COLLECTION_ID,
-                selection,
-                revision_id=stored.revision_id,
-                transaction=transaction,
-            )
-            await objective_repository.publish_experiment_analysis(
-                COLLECTION_ID,
-                OBJECTIVE_ID,
-                analysis.analysis_version,
-                contributions=(
-                    _contribution(analysis.analysis_version, "doc_a"),
-                    _contribution(analysis.analysis_version, "doc_b"),
-                ),
-                transaction=transaction,
-            )
+        async with database.AsyncSessionLocal() as db, db.begin():
+            stored = await experiments.add_revision(db, revision, created_by='test-agent')
+            await selections.add_selection(db, COLLECTION_ID, selection, revision_id=stored.revision_id)
+            await objective_repository.publish_experiment_analysis(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version, contributions=(_contribution(analysis.analysis_version, 'doc_a'), _contribution(analysis.analysis_version, 'doc_b')))
             raise RuntimeError("forced rollback")
 
-    assert await experiments.read_latest_revision(
-        "experiment-transaction"
-    ) is None
-    assert await selections.list_selections(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, 'experiment-transaction') is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await selections.list_selections(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
     restored = await objective_repository.read_analysis(
         COLLECTION_ID,
         OBJECTIVE_ID,
@@ -223,11 +196,8 @@ async def test_experiment_graph_publication_does_not_require_paper_contributions
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
 
-    await objective_repository.publish_experiment_analysis(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        await objective_repository.publish_experiment_analysis(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version)
 
     published = await objective_repository.read_analysis(
         COLLECTION_ID,
@@ -247,83 +217,52 @@ async def test_finding_failure_rolls_back_revisions_selections_groups_and_findin
     objective_repository,
 ) -> None:
     _, analysis = await _queue_and_claim(objective_repository)
-    session_factory = database.AsyncSessionLocal
-    experiments = PaperExperimentRepository(session_factory)
-    selections = ObjectiveExperimentSelectionRepository(session_factory)
-    groups = ComparisonGroupRepository(session_factory)
-    findings = _FailingAfterWriteFindingRepository(session_factory)
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
+    groups = ComparisonGroupRepository()
+    findings = _FailingAfterWriteFindingRepository()
     publisher = ExperimentFindingPublisher(selections, groups, findings)
-    transaction_factory = PostgresExperimentAnalysisTransactionFactory(session_factory)
 
     revision_a = _revision()
     revision_b = replace(
         revision_a,
-        experiment_id="experiment-transaction-b",
+        experiment_id="experiment-db-b",
         document_id="doc_b",
         source_fingerprint="fingerprint-doc-b",
     )
     selection_a = _selection(analysis.analysis_version)
     selection_b = replace(
         selection_a,
-        selection_id="selection-transaction-b",
-        experiment_id="experiment-transaction-b",
+        selection_id="selection-db-b",
+        experiment_id="experiment-db-b",
     )
     selection_ids = (selection_a.selection_id, selection_b.selection_id)
     group = _comparison_group(analysis.analysis_version, selection_ids)
     finding = _cross_paper_finding(analysis.analysis_version, selection_ids)
 
     with pytest.raises(RuntimeError, match="forced Finding publication failure"):
-        async with transaction_factory.begin() as transaction:
-            stored_a = await experiments.add_revision(
-                revision_a,
-                created_by="test-agent",
-                transaction=transaction,
-            )
-            stored_b = await experiments.add_revision(
-                revision_b,
-                created_by="test-agent",
-                transaction=transaction,
-            )
-            await selections.add_selection(
-                COLLECTION_ID,
-                selection_a,
-                revision_id=stored_a.revision_id,
-                transaction=transaction,
-            )
-            await selections.add_selection(
-                COLLECTION_ID,
-                selection_b,
-                revision_id=stored_b.revision_id,
-                transaction=transaction,
-            )
-            await groups.add_group(
-                COLLECTION_ID,
-                group,
-                transaction=transaction,
-            )
-            await publisher.publish(finding, transaction=transaction)
+        async with database.AsyncSessionLocal() as db, db.begin():
+            stored_a = await experiments.add_revision(db, revision_a, created_by='test-agent')
+            stored_b = await experiments.add_revision(db, revision_b, created_by='test-agent')
+            await selections.add_selection(db, COLLECTION_ID, selection_a, revision_id=stored_a.revision_id)
+            await selections.add_selection(db, COLLECTION_ID, selection_b, revision_id=stored_b.revision_id)
+            await groups.add_group(db, COLLECTION_ID, group)
+            await publisher.publish(finding, db=db)
 
-    assert await experiments.read_latest_revision(
-        revision_a.experiment_id
-    ) is None
-    assert await experiments.read_latest_revision(
-        revision_b.experiment_id
-    ) is None
-    assert await selections.list_selections(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await groups.list_groups(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
-    assert await findings.list_findings(
-        COLLECTION_ID,
-        OBJECTIVE_ID,
-        analysis.analysis_version,
-    ) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, revision_a.experiment_id) is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await experiments.read_latest_revision(db, revision_b.experiment_id) is None
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await selections.list_selections(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await groups.list_groups(db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version) == ()
+    async with database.AsyncSessionLocal() as db, db.begin():
+        assert await findings.list_findings(db,
+            COLLECTION_ID,
+            OBJECTIVE_ID,
+            analysis.analysis_version,
+        ) == ()
 
     restored = await objective_repository.read_analysis(
         COLLECTION_ID,

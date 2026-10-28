@@ -101,7 +101,7 @@ def _revision() -> PaperExperimentRevision:
 
 
 class _Selections:
-    async def list_selections(self, collection_id, objective_id, analysis_version):
+    async def list_selections(self, db, collection_id, objective_id, analysis_version):
         return (
             ObjectiveExperimentSelection(
                 selection_id='selection-1',
@@ -116,17 +116,17 @@ class _Selections:
 
 
 class _Groups:
-    async def list_groups(self, collection_id, objective_id, analysis_version):
+    async def list_groups(self, db, collection_id, objective_id, analysis_version):
         return ()
 
 
 class _Findings:
-    async def list_findings(self, collection_id, objective_id, analysis_version):
+    async def list_findings(self, db, collection_id, objective_id, analysis_version):
         return ()
 
 
 class _Experiments:
-    async def read_revision(self, experiment_id, experiment_version):
+    async def read_revision(self, db, experiment_id, experiment_version):
         revision = _revision()
         return StoredPaperExperimentRevision(
             revision_id=10,

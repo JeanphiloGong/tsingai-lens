@@ -82,7 +82,7 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
     )
     assert feedback is not None
 
-    datasets = FeedbackDatasetRepository(postgres_session_factory)
+    datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository(postgres_session_factory)
     service = FeedbackDatasetService(
         repository=datasets,
@@ -120,7 +120,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     await FeedbackAnalysisWorker(job_repository=chain.jobs, case_repository=chain.cases,
         handler=FeedbackAnalysisHandler(chat_repository=chain.chat)).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
-    datasets = FeedbackDatasetRepository(postgres_session_factory)
+    datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository(postgres_session_factory)
     service = FeedbackDatasetService(repository=datasets, collection_service=chain.collection_service,
         sample_repository=samples, case_repository=chain.cases)
@@ -234,7 +234,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         now=_now(),
     )
 
-    datasets = FeedbackDatasetRepository(postgres_session_factory)
+    datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository(postgres_session_factory)
     service = FeedbackDatasetService(
         repository=datasets,
@@ -451,7 +451,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
         handler=FeedbackAnalysisHandler(chat_repository=chain.chat),
     ).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
-    datasets = FeedbackDatasetRepository(postgres_session_factory)
+    datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository(postgres_session_factory)
     service = FeedbackDatasetService(
         repository=datasets, collection_service=chain.collection_service,

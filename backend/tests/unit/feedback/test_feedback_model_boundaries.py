@@ -9,7 +9,7 @@ from repositories.feedback_dataset_sample_repository import (
 )
 
 
-def test_dataset_storage_timestamps_do_not_enter_domain_or_construction_rules() -> None:
+def test_dataset_storage_timestamps_do_not_enter_domain_or_construction_rules(monkeypatch) -> None:
     dataset = Dataset(
         "ds-1", "col-1", "Preheating", "sft", {"language": "en"}, 1, "user-1"
     )
@@ -23,7 +23,8 @@ def test_dataset_storage_timestamps_do_not_enter_domain_or_construction_rules() 
         async def get(self, *args): return self.row
 
     sessions = Sessions()
-    repository = FeedbackDatasetRepository(sessions)
+    monkeypatch.setattr("repositories.feedback_dataset_repository.AsyncSessionLocal", sessions)
+    repository = FeedbackDatasetRepository()
     asyncio.run(repository.create(dataset))
     stored = asyncio.run(repository.read_record(dataset.dataset_id))
 

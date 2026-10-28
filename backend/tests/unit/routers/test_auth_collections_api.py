@@ -118,7 +118,7 @@ def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) ->
     )
     monkeypatch.setattr("main.DatabaseSettings", lambda: object())
     monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
-    monkeypatch.setattr("main.build_session_factory", lambda _engine: object())
+    monkeypatch.setattr("main.AsyncSessionLocal", Mock())
     monkeypatch.setattr("main.AuthRepository", lambda _factory: object())
     monkeypatch.setattr("main.AuthSessionService", lambda _repository: service)
 

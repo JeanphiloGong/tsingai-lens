@@ -129,7 +129,7 @@ from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
-    build_session_factory,
+    AsyncSessionLocal,
 )
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.postgres.experiment_analysis_transaction import (
@@ -343,7 +343,8 @@ async def build_application_runtime(
         session_factory = None
         if overrides.requires_database():
             database_engine = build_database_engine(DatabaseSettings())
-            session_factory = build_session_factory(database_engine)
+            AsyncSessionLocal.configure(bind=database_engine)
+            session_factory = AsyncSessionLocal
 
         if overrides.auth_session_service is None:
             auth_session_service = AuthSessionService(
@@ -489,7 +490,7 @@ async def build_application_runtime(
             )
             feedback_dataset_repository = (
                 feedback_dataset_repository
-                or FeedbackDatasetRepository(session_factory)
+                or FeedbackDatasetRepository()
             )
             feedback_dataset_sample_repository = (
                 feedback_dataset_sample_repository

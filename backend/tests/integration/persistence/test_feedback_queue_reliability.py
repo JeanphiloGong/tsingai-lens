@@ -55,7 +55,7 @@ def _now():
 
 def _service(chain, factory):
     return FeedbackDatasetService(
-        repository=FeedbackDatasetRepository(factory), collection_service=chain.collection_service,
+        repository=FeedbackDatasetRepository(), collection_service=chain.collection_service,
         sample_repository=FeedbackDatasetSampleRepository(factory), case_repository=chain.cases,
     )
 

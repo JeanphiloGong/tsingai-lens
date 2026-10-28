@@ -16,6 +16,12 @@ from sqlalchemy.ext.asyncio import (
 from config import ENV_FILE_PATH
 
 
+AsyncSessionLocal = async_sessionmaker(
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
 class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_FILE_PATH,

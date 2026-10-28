@@ -44,7 +44,7 @@ def postgres_sync_engine():
 
 
 @pytest.fixture
-def postgres_session_factory(postgres_sync_engine):
+def postgres_session_factory(postgres_sync_engine, monkeypatch):
     # TestClient and asyncio.run may use different loops within the same test.
     engine = create_async_engine(postgres_sync_engine.url, poolclass=NullPool)
     with postgres_sync_engine.begin() as connection:
@@ -53,7 +53,9 @@ def postgres_session_factory(postgres_sync_engine):
             password_hash="!", created_at=datetime.now(timezone.utc),
         ))
     try:
-        yield async_sessionmaker(engine)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        monkeypatch.setattr("repositories.feedback_dataset_repository.AsyncSessionLocal", factory)
+        yield factory
     finally:
         engine.sync_engine.dispose()
 

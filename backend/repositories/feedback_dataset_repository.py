@@ -10,7 +10,9 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.dataset import Dataset, DatasetTaskType
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
@@ -38,11 +40,8 @@ def system_dataset_id(collection_id: str, task_type: str) -> str:
 class FeedbackDatasetRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def create(self, dataset: Dataset) -> Dataset:
-        async with self.session_factory.begin() as session:
+        async with AsyncSessionLocal() as db, db.begin():
             now = datetime.now(timezone.utc)
             row = FeedbackDatasetRow(
                 dataset_id=dataset.dataset_id,
@@ -55,13 +54,13 @@ class FeedbackDatasetRepository:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(row)
-            await session.flush()
+            db.add(row)
+            await db.flush()
         return dataset
 
     async def read(self, dataset_id: str) -> Dataset | None:
-        async with self.session_factory() as session:
-            row = await session.get(FeedbackDatasetRow, dataset_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(FeedbackDatasetRow, dataset_id)
             if row is None:
                 return None
             return Dataset(
@@ -75,8 +74,8 @@ class FeedbackDatasetRepository:
             )
 
     async def read_record(self, dataset_id: str) -> StoredDataset | None:
-        async with self.session_factory() as session:
-            row = await session.get(FeedbackDatasetRow, dataset_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(FeedbackDatasetRow, dataset_id)
             if row is None:
                 return None
             return StoredDataset(
@@ -109,7 +108,7 @@ class FeedbackDatasetRepository:
             .offset(offset)
             .limit(limit)
         )
-        async with self.session_factory() as session:
+        async with AsyncSessionLocal() as db:
             return tuple(
                 StoredDataset(
                     dataset=Dataset(
@@ -124,18 +123,18 @@ class FeedbackDatasetRepository:
                     created_at=_datetime(row.created_at),
                     updated_at=_datetime(row.updated_at),
                 )
-                for row in await session.scalars(statement)
+                for row in await db.scalars(statement)
             )
 
 
 async def ensure_system_datasets(
-    session: AsyncSession, *, collection_id: str, owner_user_id: str, now: datetime,
+    db: AsyncSession, *, collection_id: str, owner_user_id: str, now: datetime,
 ) -> tuple[Dataset, ...]:
     """Use the caller's transaction for collection creation and case writes."""
     records: list[Dataset] = []
     for task_type, name in _SYSTEM_TASKS:
         dataset_id = system_dataset_id(collection_id, task_type)
-        row = await session.get(FeedbackDatasetRow, dataset_id)
+        row = await db.get(FeedbackDatasetRow, dataset_id)
         if row is None:
             dataset = Dataset(
                 dataset_id=dataset_id,
@@ -147,8 +146,8 @@ async def ensure_system_datasets(
                 created_by=owner_user_id,
             )
             try:
-                async with session.begin_nested():
-                    session.add(FeedbackDatasetRow(
+                async with db.begin_nested():
+                    db.add(FeedbackDatasetRow(
                         dataset_id=dataset.dataset_id,
                         collection_id=dataset.collection_id,
                         name=dataset.name,
@@ -159,9 +158,9 @@ async def ensure_system_datasets(
                         created_at=now,
                         updated_at=now,
                     ))
-                    await session.flush()
+                    await db.flush()
             except IntegrityError:
-                row = await session.get(FeedbackDatasetRow, dataset_id)
+                row = await db.get(FeedbackDatasetRow, dataset_id)
             else:
                 records.append(dataset)
                 continue

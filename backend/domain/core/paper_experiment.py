@@ -51,7 +51,7 @@ def _strings(value: Any) -> tuple[str, ...]:
     return tuple(item for item in (_text(item) for item in value) if item)
 
 
-def outcome_labels_compatible(left: Any, right: Any) -> bool:
+def outcome_labels_compatible(left: str, right: str) -> bool:
     """Compare labels while allowing a display-unit annotation only.
 
     A table header may call a result ``elongation (%)`` while the prose calls
@@ -68,8 +68,8 @@ def outcome_labels_compatible(left: Any, right: Any) -> bool:
         "bar", "mbar", "hv", "hb", "hbs", "hbd",
     }
 
-    def normalize(value: Any) -> str:
-        text = unicodedata.normalize("NFKC", _text(value)).casefold().strip()
+    def normalize(value: str) -> str:
+        text = unicodedata.normalize("NFKC", value).casefold().strip()
 
         def remove_unit_group(inner: str, original: str) -> str:
             inner = inner.strip()

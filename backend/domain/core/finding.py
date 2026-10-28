@@ -733,8 +733,8 @@ def _strings(value: Any) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _normalize_term(value: Any) -> str:
-    text = _text(value) or ""
+def _normalize_term(value: str | None) -> str:
+    text = value.strip() if value is not None else ""
     text = _VARIABLE_UNIT_SUFFIX_RE.sub("", text)
     text = _J_PER_CUBIC_MM_RE.sub("J/mm3", text)
     parts = "".join(

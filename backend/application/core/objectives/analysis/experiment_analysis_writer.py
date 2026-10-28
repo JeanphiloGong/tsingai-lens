@@ -334,8 +334,8 @@ def _advisory_lock_identity_for_draft(
     )
 
 
-def _normalized_scope_kind(value: Any) -> str:
-    kind = str(value or "").strip().casefold()
+def _normalized_scope_kind(value: str | None) -> str:
+    kind = value.strip().casefold() if value is not None else ""
     return "parent" if kind in {"", "parent", "matrix"} else kind
 
 
@@ -1307,9 +1307,9 @@ def _selection_slices(
             factor_key = tuple(
                 sorted(
                     {
-                        _normalized_term(item.name)
+                        term
                         for item in comparison.changed_variables
-                        if _normalized_term(item.name)
+                        if (term := _normalized_term(item.name))
                     }
                 )
             )
@@ -1380,9 +1380,9 @@ def _term_matches(left: str, right: str) -> bool:
     return left_tokens <= right_tokens or right_tokens <= left_tokens
 
 
-def _normalized_term(value: Any) -> str:
+def _normalized_term(value: str) -> str:
     return " ".join(
-        part for part in re.split(r"[_\W]+", str(value).casefold()) if part
+        part for part in re.split(r"[_\W]+", value.casefold()) if part
     )
 
 

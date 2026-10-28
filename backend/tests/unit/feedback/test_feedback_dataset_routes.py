@@ -6,9 +6,11 @@ from repositories.feedback_dataset_sample_repository import revision_content_fro
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from application.feedback.dataset_export_service import DatasetExportError
@@ -336,3 +338,51 @@ def test_first_revision_request_passes_null_revision_and_generation_to_service()
         "fdset_1", "sample-1", payload, _request(Service()),
     ))
     assert response.status == "needs_confirmation"
+
+
+@pytest.mark.parametrize("variant", [
+    {"schema_version": "literature-sft.v1", "target": "有来源的回答"},
+    {
+        "schema_version": "literature-preference.v1",
+        "response_a": "保留测量条件",
+        "response_b": "忽略测量条件",
+    },
+    {
+        "schema_version": "literature-evaluation.v1",
+        "reference": "原文测量结果",
+        "criteria": ["保留来源和条件"],
+    },
+])
+def test_sample_revision_rejects_missing_message_content_before_writing(variant) -> None:
+    app = FastAPI()
+    service = SimpleNamespace(update_sample=AsyncMock(return_value=_sample()))
+    app.state.feedback_dataset_service = service
+
+    @app.middleware("http")
+    async def authenticate(request, call_next):
+        request.state.current_user = {"user_id": "user-1"}
+        return await call_next(request)
+
+    app.include_router(task_datasets.router, prefix="/api/v1")
+    excerpt = {"document_title": "Ti-6Al-4V LPBF", "text": "原文测量条件"}
+    content = {
+        **variant,
+        "messages": [{"role": "user"}],
+        "context": [excerpt],
+        "evidence": [excerpt],
+    }
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.patch(
+            "/api/v1/feedback-datasets/fdset_1/samples/sample-1",
+            json={"expected_revision_id": "revision-1", "content": content},
+        )
+        assert response.status_code == 422, response.text
+        service.update_sample.assert_not_awaited()
+
+        content["messages"][0]["content"] = "比较文献中的孔隙率。"
+        response = client.patch(
+            "/api/v1/feedback-datasets/fdset_1/samples/sample-1",
+            json={"expected_revision_id": "revision-1", "content": content},
+        )
+        assert response.status_code == 200, response.text
+        service.update_sample.assert_awaited_once()

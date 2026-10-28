@@ -43,16 +43,6 @@ class DatasetMigrationSpec:
     construction_spec: dict[str, Any]
     created_at: str
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "dataset_id": self.dataset_id,
-            "collection_id": self.collection_id,
-            "owner_id": self.owner_id,
-            "name": self.name,
-            "task_type": self.task_type,
-            "construction_spec": dict(self.construction_spec),
-            "created_at": self.created_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -70,21 +60,6 @@ class DatasetMigrationItem:
     provenance: dict[str, Any]
     created_at: str
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "import_key": self.import_key,
-            "dataset_id": self.dataset_id,
-            "sample_id": self.sample_id,
-            "source_case_id": self.source_case_id,
-            "task_type": self.task_type,
-            "source_digest": self.source_digest,
-            "status": self.status,
-            "missing_reasons": list(self.missing_reasons),
-            "revision_id": self.revision_id,
-            "content_digest": _digest(self.content) if self.content else None,
-            "provenance": dict(self.provenance),
-            "created_at": self.created_at,
-        }
 
 
 @dataclass(frozen=True)
@@ -628,7 +603,24 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
                     mode=mode,
                     status="applied" if apply else "planned",
                     summary=summary,
-                    items=[*map(DatasetMigrationItem.to_record, plan.items), *plan.skipped],
+                    items=[
+                        {
+                            "import_key": item.import_key,
+                            "dataset_id": item.dataset_id,
+                            "sample_id": item.sample_id,
+                            "source_case_id": item.source_case_id,
+                            "task_type": item.task_type,
+                            "source_digest": item.source_digest,
+                            "status": item.status,
+                            "missing_reasons": list(item.missing_reasons),
+                            "revision_id": item.revision_id,
+                            "content_digest": _digest(item.content) if item.content else None,
+                            "provenance": dict(item.provenance),
+                            "created_at": item.created_at,
+                        }
+                        for item in plan.items
+                    ]
+                    + list(plan.skipped),
                     created_at=_datetime(datetime.now(timezone.utc).isoformat()),
                 )
             )
@@ -652,7 +644,24 @@ async def run_migration(*, apply: bool) -> dict[str, Any]:
                                 "mode": mode,
                                 "error_code": _error_code(exc),
                             },
-                            items=[*map(DatasetMigrationItem.to_record, plan.items), *plan.skipped],
+                            items=[
+                                {
+                                    "import_key": item.import_key,
+                                    "dataset_id": item.dataset_id,
+                                    "sample_id": item.sample_id,
+                                    "source_case_id": item.source_case_id,
+                                    "task_type": item.task_type,
+                                    "source_digest": item.source_digest,
+                                    "status": item.status,
+                                    "missing_reasons": list(item.missing_reasons),
+                                    "revision_id": item.revision_id,
+                                    "content_digest": _digest(item.content) if item.content else None,
+                                    "provenance": dict(item.provenance),
+                                    "created_at": item.created_at,
+                                }
+                                for item in plan.items
+                            ]
+                            + list(plan.skipped),
                             created_at=_datetime(datetime.now(timezone.utc).isoformat()),
                         )
                     )

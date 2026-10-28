@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import json
 import logging
 
@@ -122,13 +124,32 @@ def test_progress_trace_exposes_versioned_execution_plan() -> None:
             "status": "in_progress", "explanation": "Start with the exact test conditions.",
         }, position=0,
     )
-    messages = [request, ChatMessage.assistant_tool_calls(
-        message_id="assistant-1", session_id=context.session_id, content="",
-        tool_calls=(plan_call,), created_at="2026-10-09T00:00:01Z",
-    ), ChatMessage.from_tool_result(
-        message_id="tool-1", session_id=context.session_id, created_at="2026-10-09T00:00:02Z",
-        result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=plan_call.arguments),
-    )]
+    tool_result = ChatToolResult(
+        tool_call_id="plan-1", status="succeeded", data=plan_call.arguments
+    )
+    messages = [
+        request,
+        ChatMessage.assistant_tool_calls(
+            message_id="assistant-1",
+            session_id=context.session_id,
+            content="",
+            tool_calls=(plan_call,),
+            created_at="2026-10-09T00:00:01Z",
+        ),
+        ChatMessage(
+            message_id="tool-1",
+            session_id=context.session_id,
+            role="tool",
+            content=json.dumps(
+                asdict(tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-10-09T00:00:02Z",
+            tool_call_id=tool_result.tool_call_id,
+            tool_result=tool_result,
+        ),
+    ]
     progress.refresh_execution_plan(messages)
     progress.trace(context, phase="plan")
 
@@ -154,13 +175,32 @@ def test_progress_log_keeps_model_plan_request_out_of_info_logs(caplog) -> None:
             "status": "in_progress", "explanation": "Start with the Source.",
         }, position=0,
     )
-    messages = [request, ChatMessage.assistant_tool_calls(
-        message_id="assistant-1", session_id=context.session_id, content="",
-        tool_calls=(call,), created_at="2026-10-09T00:00:01Z",
-    ), ChatMessage.from_tool_result(
-        message_id="tool-1", session_id=context.session_id, created_at="2026-10-09T00:00:02Z",
-        result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=call.arguments),
-    )]
+    first_tool_result = ChatToolResult(
+        tool_call_id="plan-1", status="succeeded", data=call.arguments
+    )
+    messages = [
+        request,
+        ChatMessage.assistant_tool_calls(
+            message_id="assistant-1",
+            session_id=context.session_id,
+            content="",
+            tool_calls=(call,),
+            created_at="2026-10-09T00:00:01Z",
+        ),
+        ChatMessage(
+            message_id="tool-1",
+            session_id=context.session_id,
+            role="tool",
+            content=json.dumps(
+                asdict(first_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-10-09T00:00:02Z",
+            tool_call_id=first_tool_result.tool_call_id,
+            tool_result=first_tool_result,
+        ),
+    ]
     progress.refresh_execution_plan(messages)
 
     with caplog.at_level(logging.INFO, logger="application.chat.agent_runner"):
@@ -183,13 +223,32 @@ def test_execution_plan_keeps_scientific_and_technical_end_states_distinct() -> 
                 "status": status, "explanation": "The available support is insufficient.",
             }, position=0,
         )
-        return (request, ChatMessage.assistant_tool_calls(
-            message_id="assistant-1", session_id="chat-1", content="", tool_calls=(call,),
-            created_at="2026-10-09T00:00:01Z",
-        ), ChatMessage.from_tool_result(
-            message_id="tool-1", session_id="chat-1", created_at="2026-10-09T00:00:02Z",
-            result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=call.arguments),
-        ))
+        second_tool_result = ChatToolResult(
+            tool_call_id="plan-1", status="succeeded", data=call.arguments
+        )
+        return (
+            request,
+            ChatMessage.assistant_tool_calls(
+                message_id="assistant-1",
+                session_id="chat-1",
+                content="",
+                tool_calls=(call,),
+                created_at="2026-10-09T00:00:01Z",
+            ),
+            ChatMessage(
+                message_id="tool-1",
+                session_id="chat-1",
+                role="tool",
+                content=json.dumps(
+                    asdict(second_tool_result),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
+                created_at="2026-10-09T00:00:02Z",
+                tool_call_id=second_tool_result.tool_call_id,
+                tool_result=second_tool_result,
+            ),
+        )
 
     scientific = ResearchExecutionPlan.from_messages(
         messages=messages("scientific_refusal"), run_status=AgentRunStatus.COMPLETED,
@@ -219,13 +278,32 @@ def test_execution_plan_keeps_permission_denial_and_stall_distinct() -> None:
                 "status": status, "explanation": "The available support is insufficient.",
             }, position=0,
         )
-        return (request, ChatMessage.assistant_tool_calls(
-            message_id="assistant-1", session_id="chat-1", content="", tool_calls=(call,),
-            created_at="2026-10-09T00:00:01Z",
-        ), ChatMessage.from_tool_result(
-            message_id="tool-1", session_id="chat-1", created_at="2026-10-09T00:00:02Z",
-            result=ChatToolResult(tool_call_id="plan-1", status="succeeded", data=call.arguments),
-        ))
+        third_tool_result = ChatToolResult(
+            tool_call_id="plan-1", status="succeeded", data=call.arguments
+        )
+        return (
+            request,
+            ChatMessage.assistant_tool_calls(
+                message_id="assistant-1",
+                session_id="chat-1",
+                content="",
+                tool_calls=(call,),
+                created_at="2026-10-09T00:00:01Z",
+            ),
+            ChatMessage(
+                message_id="tool-1",
+                session_id="chat-1",
+                role="tool",
+                content=json.dumps(
+                    asdict(third_tool_result),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
+                created_at="2026-10-09T00:00:02Z",
+                tool_call_id=third_tool_result.tool_call_id,
+                tool_result=third_tool_result,
+            ),
+        )
 
     denied = ResearchExecutionPlan.from_messages(
         messages=messages("in_progress"), run_status=AgentRunStatus.FAILED,

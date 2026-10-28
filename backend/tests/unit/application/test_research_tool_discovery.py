@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -169,16 +171,51 @@ def test_experiment_draft_reuses_prior_turn_complete_source_reads():
 
     drafter = _Capability("propose_paper_experiment_draft", ToolRisk.DRAFT, PaperExperimentDraftToolRequest)
     request = ChatToolRequest(tool_call_id="read-1", name="read_source", arguments={}, position=0)
+    tool_result = ChatToolResult(
+        tool_call_id="read-1",
+        status="succeeded",
+        data={
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "methods-1",
+            "source_digest": "a" * 64,
+            "content": "Methods",
+            "content_truncated": False,
+        },
+    )
     messages = [
-        ChatMessage.user(message_id="u1", session_id="chat-1", content="Prepare the experiment draft.", created_at="2026-09-30T00:00:00Z"),
-        ChatMessage.assistant_tool_calls(message_id="a1", session_id="chat-1", content="", tool_calls=(request,), created_at="2026-09-30T00:00:01Z"),
-        ChatMessage.from_tool_result(message_id="t1", session_id="chat-1", created_at="2026-09-30T00:00:02Z", result=ChatToolResult(
-            tool_call_id="read-1", status="succeeded", data={
-                "document_id": "paper-1", "source_kind": "text_window", "source_ref": "methods-1",
-                "source_digest": "a" * 64, "content": "Methods", "content_truncated": False,
-            },
-        )),
-        ChatMessage.user(message_id="u2", session_id="chat-1", content="Save that complete experiment draft.", created_at="2026-09-30T00:01:00Z"),
+        ChatMessage.user(
+            message_id="u1",
+            session_id="chat-1",
+            content="Prepare the experiment draft.",
+            created_at="2026-09-30T00:00:00Z",
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="a1",
+            session_id="chat-1",
+            content="",
+            tool_calls=(request,),
+            created_at="2026-09-30T00:00:01Z",
+        ),
+        ChatMessage(
+            message_id="t1",
+            session_id="chat-1",
+            role="tool",
+            content=json.dumps(
+                asdict(tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-09-30T00:00:02Z",
+            tool_call_id=tool_result.tool_call_id,
+            tool_result=tool_result,
+        ),
+        ChatMessage.user(
+            message_id="u2",
+            session_id="chat-1",
+            content="Save that complete experiment draft.",
+            created_at="2026-09-30T00:01:00Z",
+        ),
     ]
     call = ChatToolCall.requested(tool_call_id="draft-1", session_id="chat-1", assistant_message_id="a2",
         name=drafter.spec.name, risk=ToolRisk.DRAFT, arguments={"objective_id": "objective-1", "document_id": "paper-1"})
@@ -298,6 +335,11 @@ def test_read_only_filters_previously_loaded_writes_without_mutating_loaded_name
         arguments={"tool_names": [read.spec.name, write.spec.name]},
         position=0,
     )
+    first_tool_result = ChatToolResult(
+        tool_call_id="discover-1",
+        status="succeeded",
+        data={"loaded_tool_names": [read.spec.name, write.spec.name]},
+    )
     messages = [
         ChatMessage.user(
             message_id="user-1",
@@ -312,17 +354,18 @@ def test_read_only_filters_previously_loaded_writes_without_mutating_loaded_name
             tool_calls=(discover_call,),
             created_at="2026-10-11T00:00:01Z",
         ),
-        ChatMessage.from_tool_result(
+        ChatMessage(
             message_id="tool-1",
             session_id="chat-1",
-            created_at="2026-10-11T00:00:02Z",
-            result=ChatToolResult(
-                tool_call_id="discover-1",
-                status="succeeded",
-                data={
-                    "loaded_tool_names": [read.spec.name, write.spec.name],
-                },
+            role="tool",
+            content=json.dumps(
+                asdict(first_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
             ),
+            created_at="2026-10-11T00:00:02Z",
+            tool_call_id=first_tool_result.tool_call_id,
+            tool_result=first_tool_result,
         ),
     ]
 
@@ -623,6 +666,11 @@ def test_explicit_none_mode_disables_catalog():
 
 def test_loaded_write_is_not_filtered_by_natural_language_request_scope():
     writer = _Capability("create_finding_version", ToolRisk.WRITE)
+    second_tool_result = ChatToolResult(
+        tool_call_id="discovery",
+        status="succeeded",
+        data={"loaded_tool_names": ["create_finding_version"]},
+    )
     messages = [
         ChatMessage.user(
             message_id="u",
@@ -634,23 +682,28 @@ def test_loaded_write_is_not_filtered_by_natural_language_request_scope():
             message_id="request",
             session_id="chat-1",
             content="",
-            tool_calls=(ChatToolRequest(
-                tool_call_id="discovery",
-                name="discover_research_tools",
-                arguments={"tool_names": ["create_finding_version"]},
-                position=0,
-            ),),
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id="discovery",
+                    name="discover_research_tools",
+                    arguments={"tool_names": ["create_finding_version"]},
+                    position=0,
+                ),
+            ),
             created_at="2026-09-09T00:00:01Z",
         ),
-        ChatMessage.from_tool_result(
+        ChatMessage(
             message_id="result",
             session_id="chat-1",
-            result=ChatToolResult(
-                tool_call_id="discovery",
-                status="succeeded",
-                data={"loaded_tool_names": ["create_finding_version"]},
+            role="tool",
+            content=json.dumps(
+                asdict(second_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
             ),
             created_at="2026-09-09T00:00:02Z",
+            tool_call_id=second_tool_result.tool_call_id,
+            tool_result=second_tool_result,
         ),
     ]
 
@@ -725,18 +778,32 @@ def test_completed_write_does_not_hide_same_capability_for_another_resource():
             "source_inspection_required": False,
         }, position=0,
     )
+    third_tool_result = ChatToolResult(
+        tool_call_id="discover-1",
+        status="succeeded",
+        data={"loaded_tool_names": ["create_objective_candidate"]},
+    )
     messages = [
         user,
         ChatMessage.assistant_tool_calls(
-            message_id="assistant-1", session_id="chat-1", content="",
-            tool_calls=(discovery,), created_at="2026-09-09T00:00:01Z",
+            message_id="assistant-1",
+            session_id="chat-1",
+            content="",
+            tool_calls=(discovery,),
+            created_at="2026-09-09T00:00:01Z",
         ),
-        ChatMessage.from_tool_result(
-            message_id="tool-1", session_id="chat-1", created_at="2026-09-09T00:00:02Z",
-            result=ChatToolResult(
-                tool_call_id="discover-1", status="succeeded",
-                data={"loaded_tool_names": ["create_objective_candidate"]},
+        ChatMessage(
+            message_id="tool-1",
+            session_id="chat-1",
+            role="tool",
+            content=json.dumps(
+                asdict(third_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
             ),
+            created_at="2026-09-09T00:00:02Z",
+            tool_call_id=third_tool_result.tool_call_id,
+            tool_result=third_tool_result,
         ),
     ]
     specs = select_tool_specs(registry, messages, [])
@@ -826,7 +893,6 @@ async def test_plan_revision_rejects_a_parent_that_was_not_inspected(inspection)
     assert result.pending_approval is None
     assert revision.executed_arguments == []
     assert result.tool_results[-1].error_code == "research_plan_not_inspected"
-
 
 
 @pytest.mark.anyio

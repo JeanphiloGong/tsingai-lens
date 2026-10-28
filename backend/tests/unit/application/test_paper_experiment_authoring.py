@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
+import json
+
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -556,14 +560,43 @@ def _prepared_for_capability(draft):
 
 
 def _read_messages(content="Methods", complete=True):
+    tool_result = ChatToolResult(
+        tool_call_id="read-1",
+        status="succeeded",
+        data={
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "source_digest": sha256(content.encode()).hexdigest(),
+            "content": content,
+            "content_truncated": not complete,
+        },
+    )
     return (
-        ChatMessage.assistant_tool_calls(message_id="read-request", session_id="session-1", content="", created_at="2026-09-30T00:00:00Z",
-            tool_calls=(ChatToolRequest(tool_call_id="read-1", name="read_source", arguments={}, position=0),)),
-        ChatMessage.from_tool_result(message_id="read-result", session_id="session-1", created_at="2026-09-30T00:00:01Z",
-            result=ChatToolResult(tool_call_id="read-1", status="succeeded", data={
-                "document_id": "paper-1", "source_kind": "text_window", "source_ref": "block-1",
-                "source_digest": sha256(content.encode()).hexdigest(), "content": content, "content_truncated": not complete,
-            })),
+        ChatMessage.assistant_tool_calls(
+            message_id="read-request",
+            session_id="session-1",
+            content="",
+            created_at="2026-09-30T00:00:00Z",
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id="read-1", name="read_source", arguments={}, position=0
+                ),
+            ),
+        ),
+        ChatMessage(
+            message_id="read-result",
+            session_id="session-1",
+            role="tool",
+            content=json.dumps(
+                asdict(tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-09-30T00:00:01Z",
+            tool_call_id=tool_result.tool_call_id,
+            tool_result=tool_result,
+        ),
     )
 
 
@@ -625,11 +658,18 @@ async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
     assert proposed.data["status"] == "pending_approval"
     assert proposed.data["requires_user_approval"] is True
 
-    message = ChatMessage.from_tool_result(
+    message = ChatMessage(
         message_id="message-1",
         session_id="session-1",
-        result=proposed,
+        role="tool",
+        content=json.dumps(
+            asdict(proposed),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-28T00:00:00+00:00",
+        tool_call_id=proposed.tool_call_id,
+        tool_result=proposed,
     )
     repository = _ChatRepository((message,))
     created = await CreatePaperExperimentRevisionCapability(
@@ -673,9 +713,18 @@ async def test_agent_save_rejects_stale_or_unapproved_draft(change):
         proposed.data["draft_created_at"] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     else:
         prepared.draft_digest = "b" * 64
-    message = ChatMessage.from_tool_result(
-        message_id="draft-result", session_id="session-1", result=proposed,
+    message = ChatMessage(
+        message_id="draft-result",
+        session_id="session-1",
+        role="tool",
+        content=json.dumps(
+            asdict(proposed),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at=datetime.now(timezone.utc).isoformat(),
+        tool_call_id=proposed.tool_call_id,
+        tool_result=proposed,
     )
     with pytest.raises(ValueError, match="digest|expired"):
         await CreatePaperExperimentRevisionCapability(

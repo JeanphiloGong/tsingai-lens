@@ -5,7 +5,7 @@ from domain.chat import ChatToolRequest
 from collections import deque
 import asyncio
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any, ClassVar
 
 import pytest
@@ -286,14 +286,33 @@ def test_reconstruct_active_trajectory_retains_completed_write_observations() ->
             message_id="msg-write",
             session_id="chat-1",
             content="",
-            tool_calls=(completed.to_request(),),
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id=completed.tool_call_id,
+                    name=completed.name,
+                    arguments=completed.arguments,
+                    position=completed.position,
+                    decision_user_id=completed.decision_user_id,
+                    decision_arguments_digest=completed.decision_arguments_digest,
+                    decided_at=completed.decided_at,
+                    decision_basis=completed.decision_basis,
+                    authorization_revision=completed.authorization_revision,
+                ),
+            ),
             created_at="2026-09-29T00:00:30+00:00",
         ),
-        ChatMessage.from_tool_result(
+        ChatMessage(
             message_id="msg-result",
             session_id="chat-1",
-            result=result,
+            role="tool",
+            content=json.dumps(
+                asdict(result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
             created_at="2026-09-29T00:01:01+00:00",
+            tool_call_id=result.tool_call_id,
+            tool_result=result,
         ),
     )
     writer_capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
@@ -340,21 +359,74 @@ def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> N
         arguments_digest=second_request.arguments_digest,
         decided_at="2026-09-29T00:02:45+00:00",
     ).start("2026-09-29T00:03:00+00:00").succeed("2026-09-29T00:03:01+00:00")
+    first_tool_result = ChatToolResult(
+        tool_call_id=first.tool_call_id, status="succeeded", data={"saved": True}
+    )
+    second_tool_result = ChatToolResult(
+        tool_call_id=second.tool_call_id, status="succeeded", data={"saved": True}
+    )
     messages = (
-        ChatMessage.user(message_id="msg-user", session_id="chat-1", content="Save both.", created_at="2026-09-29T00:00:00+00:00"),
+        ChatMessage.user(
+            message_id="msg-user",
+            session_id="chat-1",
+            content="Save both.",
+            created_at="2026-09-29T00:00:00+00:00",
+        ),
         ChatMessage.assistant_tool_calls(
-            message_id="msg-writes", session_id="chat-1", content="",
-            tool_calls=(first.to_request(), second.to_request()), created_at="2026-09-29T00:00:30+00:00",
+            message_id="msg-writes",
+            session_id="chat-1",
+            content="",
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id=first.tool_call_id,
+                    name=first.name,
+                    arguments=first.arguments,
+                    position=first.position,
+                    decision_user_id=first.decision_user_id,
+                    decision_arguments_digest=first.decision_arguments_digest,
+                    decided_at=first.decided_at,
+                    decision_basis=first.decision_basis,
+                    authorization_revision=first.authorization_revision,
+                ),
+                ChatToolRequest(
+                    tool_call_id=second.tool_call_id,
+                    name=second.name,
+                    arguments=second.arguments,
+                    position=second.position,
+                    decision_user_id=second.decision_user_id,
+                    decision_arguments_digest=second.decision_arguments_digest,
+                    decided_at=second.decided_at,
+                    decision_basis=second.decision_basis,
+                    authorization_revision=second.authorization_revision,
+                ),
+            ),
+            created_at="2026-09-29T00:00:30+00:00",
         ),
-        ChatMessage.from_tool_result(
-            message_id="msg-first-result", session_id="chat-1",
-            result=ChatToolResult(tool_call_id=first.tool_call_id, status="succeeded", data={"saved": True}),
+        ChatMessage(
+            message_id="msg-first-result",
+            session_id="chat-1",
+            role="tool",
+            content=json.dumps(
+                asdict(first_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
             created_at="2026-09-29T00:01:01+00:00",
+            tool_call_id=first_tool_result.tool_call_id,
+            tool_result=first_tool_result,
         ),
-        ChatMessage.from_tool_result(
-            message_id="msg-second-result", session_id="chat-1",
-            result=ChatToolResult(tool_call_id=second.tool_call_id, status="succeeded", data={"saved": True}),
+        ChatMessage(
+            message_id="msg-second-result",
+            session_id="chat-1",
+            role="tool",
+            content=json.dumps(
+                asdict(second_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
             created_at="2026-09-29T00:03:01+00:00",
+            tool_call_id=second_tool_result.tool_call_id,
+            tool_result=second_tool_result,
         ),
     )
     capability = _Capability("create_research_plan", ToolRisk.WRITE, _QuestionArguments)
@@ -1400,6 +1472,9 @@ async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() ->
         arguments={},
         position=1,
     )
+    third_tool_result = ChatToolResult(
+        tool_call_id="read-1", status="succeeded", data=read.result_data
+    )
     prior_messages = (
         ChatMessage.user(
             message_id="user-1",
@@ -1414,15 +1489,18 @@ async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() ->
             tool_calls=(source_request, pending_request),
             created_at="2026-10-11T00:00:01Z",
         ),
-        ChatMessage.from_tool_result(
+        ChatMessage(
             message_id="tool-1",
             session_id="chat-1",
-            created_at="2026-10-11T00:00:02Z",
-            result=ChatToolResult(
-                tool_call_id="read-1",
-                status="succeeded",
-                data=read.result_data,
+            role="tool",
+            content=json.dumps(
+                asdict(third_tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
             ),
+            created_at="2026-10-11T00:00:02Z",
+            tool_call_id=third_tool_result.tool_call_id,
+            tool_result=third_tool_result,
         ),
     )
     pending = ChatToolCall.requested(
@@ -2378,7 +2456,17 @@ async def test_successful_approved_write_preserves_result_but_fails_when_respons
             message_id="msg-2",
             session_id="chat-1",
             content="我准备保存这个实验版本。",
-            tool_calls=(approved.to_request(),),
+            tool_calls=(ChatToolRequest(
+                tool_call_id=approved.tool_call_id,
+                name=approved.name,
+                arguments=approved.arguments,
+                position=approved.position,
+                decision_user_id=approved.decision_user_id,
+                decision_arguments_digest=approved.decision_arguments_digest,
+                decided_at=approved.decided_at,
+                decision_basis=approved.decision_basis,
+                authorization_revision=approved.authorization_revision,
+            ),),
             created_at="2026-09-29T00:00:30+00:00",
         ),
     )
@@ -2420,7 +2508,17 @@ async def test_failed_approved_write_allows_a_failure_explanation_without_new_re
         ChatMessage.user(message_id="user-1", session_id="chat-1",
                          content="Publish from the inspected Sources.", created_at="2026-09-08T00:00:00+00:00"),
         ChatMessage.assistant_tool_calls(message_id="request-1", session_id="chat-1", content="",
-                                         tool_calls=(approved.to_request(),), created_at="2026-09-08T00:00:00+00:00"),
+                                         tool_calls=(ChatToolRequest(
+                                             tool_call_id=approved.tool_call_id,
+                                             name=approved.name,
+                                             arguments=approved.arguments,
+                                             position=approved.position,
+                                             decision_user_id=approved.decision_user_id,
+                                             decision_arguments_digest=approved.decision_arguments_digest,
+                                             decided_at=approved.decided_at,
+                                             decision_basis=approved.decision_basis,
+                                             authorization_revision=approved.authorization_revision,
+                                         ),), created_at="2026-09-08T00:00:00+00:00"),
     )
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((writer, read))).resume_claimed_call(
         context=_context(), previous_messages=messages, claimed_call=approved.start("2026-09-08T00:00:02+00:00"),
@@ -4448,21 +4546,129 @@ def test_curation_call_preserves_inspected_identity_and_provenance() -> None:
     from tests.unit.application.test_finding_review_import_service import _finding
 
     canonical = _finding()
-    inspect_request = ChatToolCall.requested(
-        tool_call_id="inspect-1", session_id="chat-1", assistant_message_id="inspect-call",
-        name="inspect_published_finding", arguments={}, risk=ToolRisk.READ,
-    ).start("2026-09-10T00:00:00Z").succeed("2026-09-10T00:00:01Z").to_request()
+    inspect_request = ChatToolRequest(
+        tool_call_id=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .tool_call_id,
+        name=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .name,
+        arguments=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .arguments,
+        position=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .position,
+        decision_user_id=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .decision_user_id,
+        decision_arguments_digest=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .decision_arguments_digest,
+        decided_at=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .decided_at,
+        decision_basis=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .decision_basis,
+        authorization_revision=ChatToolCall.requested(
+            tool_call_id="inspect-1",
+            session_id="chat-1",
+            assistant_message_id="inspect-call",
+            name="inspect_published_finding",
+            arguments={},
+            risk=ToolRisk.READ,
+        )
+        .start("2026-09-10T00:00:00Z")
+        .succeed("2026-09-10T00:00:01Z")
+        .authorization_revision,
+    )
     inspect_call = ChatMessage.assistant_tool_calls(
         message_id="inspect-call", session_id="chat-1", content="", tool_calls=(
             inspect_request,
         ), created_at="2026-09-10T00:00:00Z",
     )
-    inspected = ChatMessage.from_tool_result(
-        message_id="inspect-result", session_id="chat-1", created_at="2026-09-10T00:00:00Z",
-        result=ChatToolResult(
-            tool_call_id="inspect-1", status=ToolResultStatus.SUCCEEDED,
-            data={"finding": canonical},
+    tool_result = ChatToolResult(
+        tool_call_id="inspect-1",
+        status=ToolResultStatus.SUCCEEDED,
+        data={"finding": canonical},
+    )
+    inspected = ChatMessage(
+        message_id="inspect-result",
+        session_id="chat-1",
+        role="tool",
+        content=json.dumps(
+            asdict(tool_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
         ),
+        created_at="2026-09-10T00:00:00Z",
+        tool_call_id=tool_result.tool_call_id,
+        tool_result=tool_result,
     )
     candidate = {
         "objective_id": canonical["objective_id"],

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
+import json
+
 import pytest
 from pydantic import BaseModel
 
@@ -16,25 +20,47 @@ def anyio_backend():
 
 @pytest.fixture
 def discovered_messages():
+    tool_result = ChatToolResult(
+        tool_call_id="discovery",
+        status="succeeded",
+        data={"loaded_tool_names": ["read_source"]},
+    )
     return [
         ChatMessage.user(
-            message_id="user", session_id="chat-1", content="Check the paper's measurements.",
+            message_id="user",
+            session_id="chat-1",
+            content="Check the paper's measurements.",
             created_at="2026-09-20T00:00:00Z",
         ),
         ChatMessage.assistant_tool_calls(
-            message_id="request", session_id="chat-1", content="",
-            tool_calls=(ChatToolRequest(
-                tool_call_id="discovery", name="discover_research_tools",
-                arguments={"tool_names": ["read_source"], "source_inspection_required": True},
-                position=0,
-            ),), created_at="2026-09-20T00:00:01Z",
+            message_id="request",
+            session_id="chat-1",
+            content="",
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id="discovery",
+                    name="discover_research_tools",
+                    arguments={
+                        "tool_names": ["read_source"],
+                        "source_inspection_required": True,
+                    },
+                    position=0,
+                ),
+            ),
+            created_at="2026-09-20T00:00:01Z",
         ),
-        ChatMessage.from_tool_result(
-            message_id="result", session_id="chat-1",
-            result=ChatToolResult(
-                tool_call_id="discovery", status="succeeded",
-                data={"loaded_tool_names": ["read_source"]},
-            ), created_at="2026-09-20T00:00:02Z",
+        ChatMessage(
+            message_id="result",
+            session_id="chat-1",
+            role="tool",
+            content=json.dumps(
+                asdict(tool_result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at="2026-09-20T00:00:02Z",
+            tool_call_id=tool_result.tool_call_id,
+            tool_result=tool_result,
         ),
     ]
 

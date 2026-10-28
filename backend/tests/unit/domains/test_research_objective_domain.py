@@ -17,9 +17,6 @@ from datetime import datetime, timezone
 from typing import Mapping
 
 import pytest
-from application.core.objectives.analysis.experiment_query_service import (
-    objective_evidence_response,
-)
 from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
@@ -1107,14 +1104,14 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert extracted.changed_variables[0].name == "heat treatment"
     assert extracted.attribution_scope == "isolated_effect"
     assert extracted.supports_finding is True
-    assert "route_id" not in objective_evidence_response(extracted)
-    assert "evidence_unit_id" not in objective_evidence_response(extracted)
+    assert not hasattr(extracted, "route_id")
+    assert not hasattr(extracted, "evidence_unit_id")
 
 
 def test_objective_evidence_ignores_legacy_anchor_ids() -> None:
     evidence = _candidate_evidence()
 
-    assert "anchor_ids" not in objective_evidence_response(evidence)
+    assert not hasattr(evidence, "anchor_ids")
 
 
 def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage() -> None:
@@ -1123,10 +1120,8 @@ def test_objective_evidence_preserves_omitted_vs_explicit_empty_source_lineage()
 
     assert legacy.related_source_refs == ()
     assert legacy.related_source_refs_explicit is False
-    assert "related_source_refs" not in objective_evidence_response(legacy)
     assert explicit_empty.related_source_refs == ()
     assert explicit_empty.related_source_refs_explicit is True
-    assert objective_evidence_response(explicit_empty)["related_source_refs"] == []
 
 
 def test_association_evidence_allows_variable_without_comparison_endpoints() -> None:
@@ -1286,7 +1281,7 @@ def test_objective_evidence_result_preserves_categorical_transition() -> None:
     assert evidence.reported_result.baseline_value == "alpha-prime"
     assert evidence.reported_result.target_value == "alpha+beta"
     assert evidence.reported_result.direction == "changed"
-    assert objective_evidence_response(evidence)["reported_result"] == {
+    assert asdict(evidence.reported_result) == {
         "outcome": "phase composition",
         "value": "alpha+beta",
         "baseline_value": "alpha-prime",

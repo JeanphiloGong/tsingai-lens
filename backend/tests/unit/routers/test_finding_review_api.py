@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 from typing import Mapping
 
-from application.core.objectives.analysis.experiment_query_service import (
-    objective_evidence_response,
-)
+
 from application.evaluation.finding_feedback_service import parse_curated_finding
 from controllers.core.finding_review import router
 from domain.core import Finding, ObjectiveEvidence
@@ -697,46 +695,202 @@ def _finding_record(statement: str = "Temperature affects strength.") -> dict:
 
 
 def _evidence_record() -> dict:
-    return objective_evidence_response(
-        ObjectiveEvidence(
-            collection_id="col-1",
-            objective_id="obj-1",
-            analysis_version=1,
-            evidence_id="evidence-1",
-            document_id="paper-1",
-            source_kind="text_window",
-            source_ref="block-7",
-            source_excerpt="At 500 C, strength reached 620 MPa.",
-            page_numbers=(7,),
-            related_source_refs=(),
-            evidence_role="direct_result",
-            selection_status="extracted",
-            selection_reason=None,
-            changed_variables=(
-                ScientificVariable(
-                    name="temperature", baseline_value=400, target_value=500, unit="C"
-                ),
+    expected_objective_evidence = ObjectiveEvidence(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        evidence_id="evidence-1",
+        document_id="paper-1",
+        source_kind="text_window",
+        source_ref="block-7",
+        source_excerpt="At 500 C, strength reached 620 MPa.",
+        page_numbers=(7,),
+        related_source_refs=(),
+        evidence_role="direct_result",
+        selection_status="extracted",
+        selection_reason=None,
+        changed_variables=(
+            ScientificVariable(
+                name="temperature", baseline_value=400, target_value=500, unit="C"
             ),
-            comparison=ScientificComparison(
-                baseline_label="400 C",
-                target_label="500 C",
-                axis_names=("temperature",),
-                comparable=True,
-            ),
-            reported_result=ScientificResult(
-                outcome="strength",
-                value=None,
-                unit=None,
-                direction="increase",
-                result_text="Strength reached 620 MPa.",
-            ),
-            attribution_scope="isolated_effect",
-            scientific_context=ScientificContext(),
-            resolution_status="resolved",
-            failure_reason=None,
-            confidence=0.9,
-        )
+        ),
+        comparison=ScientificComparison(
+            baseline_label="400 C",
+            target_label="500 C",
+            axis_names=("temperature",),
+            comparable=True,
+        ),
+        reported_result=ScientificResult(
+            outcome="strength",
+            value=None,
+            unit=None,
+            direction="increase",
+            result_text="Strength reached 620 MPa.",
+        ),
+        attribution_scope="isolated_effect",
+        scientific_context=ScientificContext(),
+        resolution_status="resolved",
+        failure_reason=None,
+        confidence=0.9,
     )
+    return {
+        "collection_id": expected_objective_evidence.collection_id,
+        "objective_id": expected_objective_evidence.objective_id,
+        "analysis_version": expected_objective_evidence.analysis_version,
+        "evidence_id": expected_objective_evidence.evidence_id,
+        "document_id": expected_objective_evidence.document_id,
+        "source_kind": expected_objective_evidence.source_kind,
+        "source_ref": expected_objective_evidence.source_ref,
+        "source_excerpt": expected_objective_evidence.source_excerpt,
+        "page_numbers": list(expected_objective_evidence.page_numbers),
+        "evidence_role": expected_objective_evidence.evidence_role,
+        "selection_status": expected_objective_evidence.selection_status,
+        "selection_reason": expected_objective_evidence.selection_reason,
+        "evidence_status": expected_objective_evidence.evidence_status,
+        "evidence_status_reason": expected_objective_evidence.evidence_status_reason,
+        "changed_variables": [
+            {
+                "name": variable.name,
+                "baseline_value": variable.baseline_value,
+                "target_value": variable.target_value,
+                "unit": variable.unit,
+            }
+            for variable in expected_objective_evidence.changed_variables
+        ],
+        "comparison": (
+            {
+                "baseline_label": expected_objective_evidence.comparison.baseline_label,
+                "target_label": expected_objective_evidence.comparison.target_label,
+                "axis_names": list(expected_objective_evidence.comparison.axis_names),
+                "comparable": expected_objective_evidence.comparison.comparable,
+                "incomparability_reasons": list(
+                    expected_objective_evidence.comparison.incomparability_reasons
+                ),
+            }
+            if expected_objective_evidence.comparison
+            else None
+        ),
+        "reported_result": (
+            {
+                "outcome": expected_objective_evidence.reported_result.outcome,
+                "value": expected_objective_evidence.reported_result.value,
+                "baseline_value": expected_objective_evidence.reported_result.baseline_value,
+                "target_value": expected_objective_evidence.reported_result.target_value,
+                "unit": expected_objective_evidence.reported_result.unit,
+                "direction": expected_objective_evidence.reported_result.direction,
+                "result_text": expected_objective_evidence.reported_result.result_text,
+                "result_kind": expected_objective_evidence.reported_result.result_kind,
+            }
+            if expected_objective_evidence.reported_result
+            else None
+        ),
+        "attribution_scope": expected_objective_evidence.attribution_scope,
+        "scientific_context": {
+            "material": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in expected_objective_evidence.scientific_context.material
+            ],
+            "sample": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in expected_objective_evidence.scientific_context.sample
+            ],
+            "process": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in expected_objective_evidence.scientific_context.process
+            ],
+            "test": [
+                {
+                    "name": attribute.name,
+                    "value": attribute.value,
+                    "unit": attribute.unit,
+                    **(
+                        {"context_scope": attribute.context_scope}
+                        if attribute.context_scope != "unknown"
+                        else {}
+                    ),
+                    **(
+                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
+                        if attribute.applies_to_outcomes
+                        else {}
+                    ),
+                }
+                for attribute in expected_objective_evidence.scientific_context.test
+            ],
+        },
+        "resolution_status": expected_objective_evidence.resolution_status,
+        "failure_reason": expected_objective_evidence.failure_reason,
+        "confidence": expected_objective_evidence.confidence,
+        "origin": expected_objective_evidence.origin,
+        "source_analysis_version": expected_objective_evidence.source_analysis_version,
+        "supersedes_evidence_id": expected_objective_evidence.supersedes_evidence_id,
+        "superseded_by_evidence_id": expected_objective_evidence.superseded_by_evidence_id,
+        "created_by_user_id": expected_objective_evidence.created_by_user_id,
+        "created_by_tool_call_id": expected_objective_evidence.created_by_tool_call_id,
+        "created_at": (
+            expected_objective_evidence.created_at.isoformat()
+            if expected_objective_evidence.created_at is not None
+            else None
+        ),
+        "authoring_note": expected_objective_evidence.authoring_note,
+        **(
+            {"warnings": list(expected_objective_evidence.warnings)}
+            if expected_objective_evidence.warnings
+            else {}
+        ),
+        **(
+            {
+                "related_source_refs": [
+                    dict(item)
+                    for item in expected_objective_evidence.related_source_refs
+                ]
+            }
+            if expected_objective_evidence.related_source_refs
+            or expected_objective_evidence.related_source_refs_explicit
+            else {}
+        ),
+    }
 
 
 def _client(service: _Service | None = None) -> TestClient:

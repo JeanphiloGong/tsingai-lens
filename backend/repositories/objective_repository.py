@@ -3637,6 +3637,7 @@ class ObjectiveRepository:
                     warnings=tuple(item.get("warnings", ())),
                 ))
             return tuple(evidence), total
+
     @staticmethod
     def _write_contributions(
         row: ObjectiveAnalysisRecord,

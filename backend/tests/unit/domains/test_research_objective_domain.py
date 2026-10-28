@@ -14,7 +14,6 @@ from domain.core.research_objective import (
 
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
-from typing import Mapping
 
 import pytest
 from domain.core import (
@@ -36,18 +35,11 @@ from domain.core import (
     is_question_shaped_objective,
     normalize_objective_terms,
 )
-from domain.core.finding import (
-    PAPER_CONTRIBUTION_STATUSES,
-)
-from domain.core.finding import _choice as finding_choice
 from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
-    PAPER_RELEVANCE_VALUES,
-    PAPER_ROLE_VALUES,
     InspectedObjectiveSourceRef,
-    Mapping,
     ObjectiveEvidence,
     PaperContribution,
     PreparedDocumentInput,
@@ -55,15 +47,9 @@ from domain.core.research_objective import (
     _choice,
 )
 from domain.core.research_objective import (
-    _non_negative_int_or_none as objective_non_negative_int_or_none,
-)
-from domain.core.research_objective import (
     _objective_derivation_basis,
 )
 from domain.core.research_objective import _positive_int_or_none
-from domain.core.research_objective import (
-    _positive_int_or_none as objective_positive_int_or_none,
-)
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.research_objective import (
     _text,
@@ -82,7 +68,6 @@ from repositories.objective_repository import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
     ObjectiveRepository,
-    _evidence_status_counts,
 )
 
 
@@ -888,134 +873,30 @@ def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting(
         "analysis_status": "analyzed",
         "relevance": "high",
         "paper_role": "primary_experiment",
+        "contribution_summary": None,
+        "material_match": (),
+        "changed_variables": (),
+        "measured_property_scope": (),
+        "test_environment_scope": (),
+        "exclusion_reason": None,
+        "warnings": (),
         "confidence": 0.9,
     }
 
     with pytest.raises(ValueError, match="all present or all absent"):
         PaperContribution(
-            collection_id=finding_text(base.get("collection_id", None)) or "",
-            objective_id=finding_text(base.get("objective_id", None)) or "",
-            analysis_version=objective_positive_int_or_none(
-                base.get("analysis_version", None)
-            )
-            or 0,
-            document_id=finding_text(base.get("document_id", None)) or "",
-            analysis_status=finding_choice(
-                base.get("analysis_status", None),
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
-            relevance=finding_choice(
-                base.get("relevance", None), PAPER_RELEVANCE_VALUES, "uncertain"
-            ),
-            paper_role=finding_choice(
-                base.get("paper_role", None), PAPER_ROLE_VALUES, "uncertain"
-            ),
-            contribution_summary=finding_text(base.get("contribution_summary", None)),
-            material_match=normalize_objective_terms(base.get('material_match', ())),
-            changed_variables=normalize_objective_terms(
-                base.get('changed_variables', ())
-            ),
-            measured_property_scope=normalize_objective_terms(
-                base.get('measured_property_scope', ())
-            ),
-            test_environment_scope=normalize_objective_terms(
-                base.get('test_environment_scope', ())
-            ),
-            exclusion_reason=finding_text(base.get("exclusion_reason", None)),
-            warnings=normalize_objective_terms(base.get('warnings', ())),
-            confidence=base.get('confidence', 0.0),
+            **base,
             evidence_disposition="no_routable_evidence",
             routed_source_count=0,
-            extracted_source_count=objective_non_negative_int_or_none(
-                base.get("extracted_source_count", None)
-            ),
-            comparable_evidence_count=objective_non_negative_int_or_none(
-                base.get("comparable_evidence_count", None)
-            ),
-            failed_source_count=objective_non_negative_int_or_none(
-                base.get("failed_source_count", None)
-            ),
-            uninspected_source_count=objective_non_negative_int_or_none(
-                base.get("uninspected_source_count", None)
-            ),
-            evidence_disposition_reason=finding_text(
-                base.get("evidence_disposition_reason", None)
-            ),
-            evidence_status_counts=_evidence_status_counts(
-                base.get("evidence_status_counts", None)
-            ),
-            inspected_source_refs=tuple(
-                (
-                    InspectedObjectiveSourceRef(
-                        source_kind=finding_text(source.get("source_kind")) or "",
-                        source_ref=finding_text(source.get("source_ref")) or "",
-                        source_digest=finding_text(source.get("source_digest")),
-                    )
-                    for source in base.get("inspected_source_refs", None) or ()
-                    if isinstance(source, Mapping)
-                )
-            ),
         )
     with pytest.raises(ValueError, match="requires comparable Evidence"):
         PaperContribution(
-            collection_id=finding_text(base.get("collection_id", None)) or "",
-            objective_id=finding_text(base.get("objective_id", None)) or "",
-            analysis_version=objective_positive_int_or_none(
-                base.get("analysis_version", None)
-            )
-            or 0,
-            document_id=finding_text(base.get("document_id", None)) or "",
-            analysis_status=finding_choice(
-                base.get("analysis_status", None),
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
-            relevance=finding_choice(
-                base.get("relevance", None), PAPER_RELEVANCE_VALUES, "uncertain"
-            ),
-            paper_role=finding_choice(
-                base.get("paper_role", None), PAPER_ROLE_VALUES, "uncertain"
-            ),
-            contribution_summary=finding_text(base.get("contribution_summary", None)),
-            material_match=normalize_objective_terms(base.get('material_match', ())),
-            changed_variables=normalize_objective_terms(
-                base.get('changed_variables', ())
-            ),
-            measured_property_scope=normalize_objective_terms(
-                base.get('measured_property_scope', ())
-            ),
-            test_environment_scope=normalize_objective_terms(
-                base.get('test_environment_scope', ())
-            ),
-            exclusion_reason=finding_text(base.get("exclusion_reason", None)),
-            warnings=normalize_objective_terms(base.get('warnings', ())),
-            confidence=base.get('confidence', 0.0),
+            **base,
             evidence_disposition="comparable_evidence",
             routed_source_count=1,
             extracted_source_count=1,
             comparable_evidence_count=0,
             failed_source_count=0,
-            uninspected_source_count=objective_non_negative_int_or_none(
-                base.get("uninspected_source_count", None)
-            ),
-            evidence_disposition_reason=finding_text(
-                base.get("evidence_disposition_reason", None)
-            ),
-            evidence_status_counts=_evidence_status_counts(
-                base.get("evidence_status_counts", None)
-            ),
-            inspected_source_refs=tuple(
-                (
-                    InspectedObjectiveSourceRef(
-                        source_kind=finding_text(source.get("source_kind")) or "",
-                        source_ref=finding_text(source.get("source_ref")) or "",
-                        source_digest=finding_text(source.get("source_digest")),
-                    )
-                    for source in base.get("inspected_source_refs", None) or ()
-                    if isinstance(source, Mapping)
-                )
-            ),
         )
 
 

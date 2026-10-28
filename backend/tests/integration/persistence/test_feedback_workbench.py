@@ -102,7 +102,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         collections, FileCollectionWorkspace(tmp_path)
     )
 
-    chat = ChatRepository(postgres_session_factory)
+    chat = ChatRepository()
     session = ChatSession.create(
         session_id=SESSION_ID,
         user_id=USER_ID,
@@ -168,7 +168,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         tool_results=(),
     )
 
-    jobs = AnalysisJobRepository(postgres_session_factory)
+    jobs = AnalysisJobRepository()
     chat_service = ChatSessionService(
         collection_service=collection_service,
         source_artifact_repository=None,
@@ -176,7 +176,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         runner=None,
         analysis_job_repository=jobs,
     )
-    cases = FeedbackCaseRepository(postgres_session_factory)
+    cases = FeedbackCaseRepository()
     case_service = FeedbackCaseService(
         case_repository=cases,
         chat_repository=chat,

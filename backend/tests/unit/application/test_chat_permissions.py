@@ -32,7 +32,7 @@ def anyio_backend():
 
 @pytest.mark.parametrize("mode,expected", [("confirm", "approval_required"), ("read_only", "failed"), ("auto", "completed")])
 async def test_session_permission_controls_actual_write(mode, expected, *, postgres_session_factory):
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     write = _WriteCapability()
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
     model = _Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Correct the trend"}),)),
@@ -66,7 +66,7 @@ async def test_session_permission_controls_actual_write(mode, expected, *, postg
 
 
 async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(*, postgres_session_factory):
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     write = _WriteCapability()
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
@@ -86,7 +86,7 @@ async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(*, postgre
 async def test_each_automatic_write_rechecks_current_permission(revoke, *, postgres_session_factory):
     from tests.unit.application.test_research_agent_runner import _Capability
 
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
 
     class RevisionCapability(_Capability):
         async def execute(self, context, arguments):
@@ -160,7 +160,7 @@ async def test_permission_controller_enforces_owner_and_revision(*, postgres_ses
     from controllers.chat.schemas import ChatPermissionRequest
     from controllers.chat.sessions import get_chat_permission, set_chat_permission
     from tests.unit.routers.test_chat_sessions_api import _request
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),
         source_artifact_repository=SourceArtifactRepository(),
         runner=ResearchAgentRunner(model=_Model(), capabilities=CapabilityRegistry(())))
@@ -216,7 +216,7 @@ async def test_new_session_inherits_collection_default_permission(default, expec
             assert (collection_id, user_id) == ("col-1", "user-1")
             return default
 
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = ChatSessionService(
         repository=repository,
         collection_service=_CollectionDefaults(),
@@ -237,7 +237,7 @@ async def test_new_session_inherits_collection_default_permission(default, expec
 
 
 async def test_collection_read_only_default_is_applied_before_runner_tool_selection(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
 
     class _CollectionDefaults(_CollectionService):
         async def get_agent_default_permission_for_user(self, collection_id, user_id):

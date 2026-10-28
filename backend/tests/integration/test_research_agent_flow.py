@@ -95,7 +95,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     )
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
-    chat_repository = ChatRepository(postgres_session_factory)
+    chat_repository = ChatRepository()
     source_artifact_repository = SourceArtifactRepository()
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),

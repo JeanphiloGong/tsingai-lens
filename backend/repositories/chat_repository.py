@@ -11,7 +11,9 @@ from uuid import uuid4
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.chat import (
     ChatMessage,
@@ -132,14 +134,9 @@ class ChatSessionSummary:
 
 
 class ChatRepository:
-    def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession]
-    ) -> None:
-        self.session_factory = session_factory
-
     async def read_permission(self, session_id, user_id):
-        async with self.session_factory() as database:
-            row = await database.get(ChatSessionRow, session_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(ChatSessionRow, session_id)
             if row is None or row.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
             permission = {
@@ -153,19 +150,19 @@ class ChatRepository:
             return permission
 
     async def set_permission(self, session_id, user_id, **changes):
-        async with self.session_factory.begin() as database:
-            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
             row.operation_permission = change_permission(row.operation_permission, **changes)
             return dict(row.operation_permission)
 
     async def claim_automatic_call(self, *, session_id, tool_call_id, user_id, started_at):
-        async with self.session_factory.begin() as database:
-            session = await database.get(ChatSessionRow, session_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            session = await db.get(ChatSessionRow, session_id, with_for_update=True)
             if session is None or session.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
-            row = await database.get(ChatToolCallRow, tool_call_id, with_for_update=True)
+            row = await db.get(ChatToolCallRow, tool_call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
                 raise FileNotFoundError("chat tool call not found")
             permission = {
@@ -217,26 +214,26 @@ class ChatRepository:
     @asynccontextmanager
     async def session_execution(self, session_id: str):
         # Transaction locks are released even when the worker disconnects or crashes.
-        async with self.session_factory.begin() as database:
-            acquired = await database.scalar(select(func.pg_try_advisory_xact_lock(
+        async with AsyncSessionLocal() as db, db.begin():
+            acquired = await db.scalar(select(func.pg_try_advisory_xact_lock(
                 func.hashtextextended(f"chat-execution:{session_id}", 0),
             )))
             if not acquired:
                 raise ChatSessionBusyError()
             # Long model runs must not exhaust the pool needed by their checkpoints.
-            connection = await database.connection()
+            connection = await db.connection()
             connection.sync_connection.detach()
             yield
 
     async def is_session_running(self, session_id: str) -> bool:
-        async with self.session_factory.begin() as database:
-            return not await database.scalar(select(func.pg_try_advisory_xact_lock(
+        async with AsyncSessionLocal() as db, db.begin():
+            return not await db.scalar(select(func.pg_try_advisory_xact_lock(
                 func.hashtextextended(f"chat-execution:{session_id}", 0),
             )))
 
     async def read_response_snapshot(self, session_id: str) -> ChatResponseSnapshot | None:
-        async with self.session_factory() as database:
-            payload = await database.scalar(select(ChatSessionRow.response_snapshot).where(
+        async with AsyncSessionLocal() as db:
+            payload = await db.scalar(select(ChatSessionRow.response_snapshot).where(
                 ChatSessionRow.session_id == session_id,
             ))
             if payload is None:
@@ -248,15 +245,15 @@ class ChatRepository:
 
     async def save_response_snapshot(self, session_id: str, snapshot: ChatResponseSnapshot) -> None:
         payload = asdict(snapshot)
-        async with self.session_factory.begin() as database:
-            await database.execute(update(ChatSessionRow).where(
+        async with AsyncSessionLocal() as db, db.begin():
+            await db.execute(update(ChatSessionRow).where(
                 ChatSessionRow.session_id == session_id,
             ).values(response_snapshot=payload))
 
     async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
         root_id = session.root_session_id or session.session_id
-        async with self.session_factory() as database:
-            rows = await database.scalars(select(ChatSessionRow).where(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(select(ChatSessionRow).where(
                 ChatSessionRow.user_id == session.user_id,
                 ChatSessionRow.collection_id == session.collection_id,
                 or_(ChatSessionRow.session_id == root_id, ChatSessionRow.root_session_id == root_id),
@@ -287,14 +284,14 @@ class ChatRepository:
     async def add_branch(
         self, *, session: ChatSession, source_session_id: str, before_position: int,
     ) -> ChatSession:
-        async with self.session_factory.begin() as database:
-            await database.execute(select(func.pg_advisory_xact_lock(
+        async with AsyncSessionLocal() as db, db.begin():
+            await db.execute(select(func.pg_advisory_xact_lock(
                 func.hashtextextended(f"chat-branch:{session.session_id}", 0),
             )))
-            source = await database.get(ChatSessionRow, source_session_id, with_for_update=True)
+            source = await db.get(ChatSessionRow, source_session_id, with_for_update=True)
             if source is None or (source.user_id, source.collection_id) != (session.user_id, session.collection_id):
                 raise ValueError("branch source must be an owned conversation")
-            existing = await database.get(ChatSessionRow, session.session_id)
+            existing = await db.get(ChatSessionRow, session.session_id)
             if existing is not None:
                 saved = ChatSession(
                     session_id=existing.session_id,
@@ -322,13 +319,13 @@ class ChatRepository:
                 ):
                     raise ValueError("branch request identity was reused for a different revision")
                 return saved
-            rows = tuple(await database.scalars(select(ChatMessageRow).where(
+            rows = tuple(await db.scalars(select(ChatMessageRow).where(
                 ChatMessageRow.session_id == source_session_id,
                 ChatMessageRow.position < before_position,
             ).order_by(ChatMessageRow.position)))
             if len(rows) != before_position:
                 raise ValueError("branch position is outside the saved trajectory")
-            calls = tuple(await database.scalars(select(ChatToolCallRow).where(
+            calls = tuple(await db.scalars(select(ChatToolCallRow).where(
                 ChatToolCallRow.session_id == source_session_id,
             )))
             if any(call.status not in {"succeeded", "failed", "rejected"} for call in calls):
@@ -339,7 +336,7 @@ class ChatRepository:
             result_ids = {row.tool_call_id for row in rows if row.role == "tool"}
             if set(call_ids) != result_ids:
                 raise ValueError("branch history has unresolved tool results")
-            database.add(
+            db.add(
                 ChatSessionRow(
                     session_id=session.session_id,
                     user_id=session.user_id,
@@ -353,20 +350,20 @@ class ChatRepository:
                     fork_content=session.fork_content,
                 )
             )
-            await database.flush()
+            await db.flush()
             for row in rows:
                 content = row.content
                 if row.role == "tool":
                     payload = json.loads(content)
                     payload["tool_call_id"] = call_ids[row.tool_call_id]
                     content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-                database.add(ChatMessageRow(
+                db.add(ChatMessageRow(
                     message_id=message_ids[row.message_id], session_id=session.session_id,
                     position=row.position, role=row.role, content=content,
                     tool_call_id=call_ids.get(row.tool_call_id),
                     source_contexts=row.source_contexts, created_at=row.created_at,
                 ))
-            await database.flush()
+            await db.flush()
             for call in copied_calls:
                 values = {column.name: getattr(call, column.name) for column in ChatToolCallRow.__table__.columns}
                 values.update(
@@ -374,12 +371,12 @@ class ChatRepository:
                     assistant_message_id=message_ids[call.assistant_message_id],
                 )
                 # Historical decisions describe completed work; only fresh calls can be approved.
-                database.add(ChatToolCallRow(**values))
+                db.add(ChatToolCallRow(**values))
             return session
 
     async def add_session(self, record: ChatSession) -> None:
-        async with self.session_factory.begin() as session:
-            session.add(
+        async with AsyncSessionLocal() as db, db.begin():
+            db.add(
                 ChatSessionRow(
                     session_id=record.session_id,
                     user_id=record.user_id,
@@ -392,8 +389,8 @@ class ChatRepository:
             )
 
     async def read_session(self, session_id: str) -> ChatSession | None:
-        async with self.session_factory() as session:
-            row = await session.get(ChatSessionRow, session_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(ChatSessionRow, session_id)
             return (
                 ChatSession(
                     session_id=row.session_id,
@@ -419,16 +416,16 @@ class ChatRepository:
             )
 
     async def delete_session(self, *, session_id: str, user_id: str) -> None:
-        async with self.session_factory.begin() as database:
-            acquired = await database.scalar(select(func.pg_try_advisory_xact_lock(
+        async with AsyncSessionLocal() as db, db.begin():
+            acquired = await db.scalar(select(func.pg_try_advisory_xact_lock(
                 func.hashtextextended(f"chat-execution:{session_id}", 0),
             )))
             if not acquired:
                 raise ChatSessionBusyError()
-            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
-            dependent = await database.scalar(select(ChatSessionRow.session_id).where(
+            dependent = await db.scalar(select(ChatSessionRow.session_id).where(
                 ChatSessionRow.user_id == user_id,
                 ChatSessionRow.collection_id == row.collection_id,
                 or_(ChatSessionRow.parent_session_id == session_id,
@@ -436,13 +433,13 @@ class ChatRepository:
             ).limit(1))
             if dependent is not None:
                 raise ChatSessionHasBranchesError()
-            await database.delete(row)
+            await db.delete(row)
 
     async def set_session_pin(
         self, *, session_id: str, user_id: str, is_pinned: bool,
     ) -> ChatSession:
-        async with self.session_factory.begin() as database:
-            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
             row.is_pinned = is_pinned
@@ -469,8 +466,8 @@ class ChatRepository:
     async def set_session_title(
         self, *, session_id: str, user_id: str, title: str,
     ) -> ChatSession:
-        async with self.session_factory.begin() as database:
-            row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(ChatSessionRow, session_id, with_for_update=True)
             if row is None or row.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
             row.title = title
@@ -497,7 +494,7 @@ class ChatRepository:
     async def list_sessions(
         self, *, user_id: str, collection_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[ChatSessionSummary, ...]:
-        async with self.session_factory() as session:
+        async with AsyncSessionLocal() as db:
             first_user_message = (
                 select(ChatMessageRow.content)
                 .where(
@@ -508,7 +505,7 @@ class ChatRepository:
                 .limit(1)
                 .scalar_subquery()
             )
-            rows = await session.execute(
+            rows = await db.execute(
                 select(ChatSessionRow, first_user_message.label("first_message_title"))
                 .where(
                     ChatSessionRow.user_id == user_id,
@@ -549,13 +546,13 @@ class ChatRepository:
             )
 
     async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
-        async with self.session_factory() as session:
-            rows = tuple(await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = tuple(await db.scalars(
                 select(ChatMessageRow)
                 .where(ChatMessageRow.session_id == session_id)
                 .order_by(ChatMessageRow.position)
             ))
-            call_rows = tuple(await session.scalars(
+            call_rows = tuple(await db.scalars(
                 select(ChatToolCallRow)
                 .where(ChatToolCallRow.session_id == session_id)
                 .order_by(ChatToolCallRow.assistant_message_id, ChatToolCallRow.position)
@@ -631,8 +628,8 @@ class ChatRepository:
             return tuple(messages)
 
     async def read_message(self, message_id: str) -> ChatMessage | None:
-        async with self.session_factory() as session:
-            row = await session.get(ChatMessageRow, message_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(ChatMessageRow, message_id)
             if row is None:
                 return None
             requests = tuple(
@@ -647,13 +644,13 @@ class ChatRepository:
                     decision_basis=call.decision_basis,
                     authorization_revision=call.authorization_revision,
                 )
-                for call in await session.scalars(
+                for call in await db.scalars(
                     select(ChatToolCallRow)
                     .where(ChatToolCallRow.assistant_message_id == message_id)
                     .order_by(ChatToolCallRow.position)
                 )
             )
-            result_row = await session.get(ChatToolCallRow, row.tool_call_id) if row.role == "tool" else None
+            result_row = await db.get(ChatToolCallRow, row.tool_call_id) if row.role == "tool" else None
             tool_result = None
             if result_row is not None:
                 tool_result = ChatToolResult(
@@ -707,8 +704,8 @@ class ChatRepository:
     async def read_feedback(
         self, session_id: str, user_id: str
     ) -> tuple[ChatMessageFeedback, ...]:
-        async with self.session_factory() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(ChatMessageFeedbackRow).where(
                     ChatMessageFeedbackRow.session_id == session_id,
                     ChatMessageFeedbackRow.user_id == user_id,
@@ -728,8 +725,8 @@ class ChatRepository:
             ) for row in rows)
 
     async def read_feedback_by_id(self, feedback_id: str) -> ChatMessageFeedback | None:
-        async with self.session_factory() as session:
-            row = await session.get(ChatMessageFeedbackRow, feedback_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(ChatMessageFeedbackRow, feedback_id)
             return ChatMessageFeedback(
                 feedback_id=row.feedback_id,
                 session_id=row.session_id,
@@ -744,10 +741,10 @@ class ChatRepository:
             ) if row is not None else None
 
     async def start_model_call(self, call: ChatModelCall) -> ChatModelCall:
-        async with self.session_factory.begin() as database:
-            if await database.get(ChatSessionRow, call.session_id) is None:
+        async with AsyncSessionLocal() as db, db.begin():
+            if await db.get(ChatSessionRow, call.session_id) is None:
                 raise FileNotFoundError(f"chat session not found: {call.session_id}")
-            existing = await database.get(ChatModelCallRow, call.call_id, with_for_update=True)
+            existing = await db.get(ChatModelCallRow, call.call_id, with_for_update=True)
             if existing is not None:
                 if existing.session_id != call.session_id or existing.request_digest != call.request_digest:
                     raise ValueError("model call identity cannot be reassigned")
@@ -787,8 +784,8 @@ class ChatRepository:
                 completion_tokens=call.completion_tokens,
                 total_tokens=call.total_tokens,
             )
-            database.add(row)
-            await database.flush()
+            db.add(row)
+            await db.flush()
             return ChatModelCall(
                 call_id=row.call_id,
                 session_id=row.session_id,
@@ -811,8 +808,8 @@ class ChatRepository:
     async def finish_model_call(
         self, *, session_id: str, call_id: str, outcome: ModelCallOutcome
     ) -> ChatModelCall:
-        async with self.session_factory.begin() as database:
-            row = await database.get(ChatModelCallRow, call_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(ChatModelCallRow, call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
                 raise FileNotFoundError(f"chat model call not found: {call_id}")
             if row.finished_at is not None:
@@ -843,7 +840,7 @@ class ChatRepository:
             row.prompt_tokens = outcome.prompt_tokens
             row.completion_tokens = outcome.completion_tokens
             row.total_tokens = outcome.total_tokens
-            await database.flush()
+            await db.flush()
             return ChatModelCall(
                 call_id=row.call_id,
                 session_id=row.session_id,
@@ -868,8 +865,8 @@ class ChatRepository:
     ) -> tuple[ChatModelCall, ...]:
         limit = max(1, min(int(limit), 200))
         offset = max(0, int(offset))
-        async with self.session_factory() as database:
-            rows = await database.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(ChatModelCallRow)
                 .where(ChatModelCallRow.session_id == session_id)
                 .order_by(ChatModelCallRow.started_at, ChatModelCallRow.call_id)
@@ -897,8 +894,8 @@ class ChatRepository:
     async def read_model_call(
         self, session_id: str, call_id: str
     ) -> ChatModelCall | None:
-        async with self.session_factory() as database:
-            row = await database.get(ChatModelCallRow, call_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(ChatModelCallRow, call_id)
             if row is None or row.session_id != session_id:
                 return None
             return ChatModelCall(
@@ -950,11 +947,11 @@ class ChatRepository:
                 row.response_digest != statement.excluded.response_digest,
             ),
         ).returning(row)
-        async with self.session_factory.begin() as session:
-            saved = (await session.scalars(statement)).one_or_none()
+        async with AsyncSessionLocal() as db, db.begin():
+            saved = (await db.scalars(statement)).one_or_none()
             if saved is None:
                 # An identical PUT keeps the original timestamps as well as identity.
-                saved = (await session.scalars(select(row).where(
+                saved = (await db.scalars(select(row).where(
                     row.user_id == feedback.user_id, row.message_id == feedback.message_id,
                 ))).one()
             return ChatMessageFeedback(
@@ -973,16 +970,16 @@ class ChatRepository:
     async def delete_feedback(
         self, *, session_id: str, message_id: str, user_id: str
     ) -> None:
-        async with self.session_factory.begin() as session:
-            await session.execute(delete(ChatMessageFeedbackRow).where(
+        async with AsyncSessionLocal() as db, db.begin():
+            await db.execute(delete(ChatMessageFeedbackRow).where(
                 ChatMessageFeedbackRow.session_id == session_id,
                 ChatMessageFeedbackRow.message_id == message_id,
                 ChatMessageFeedbackRow.user_id == user_id,
             ))
 
     async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
-        async with self.session_factory() as session:
-            row = await session.get(ChatToolCallRow, tool_call_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(ChatToolCallRow, tool_call_id)
             return ChatToolCall(
                 tool_call_id=row.tool_call_id,
                 session_id=row.session_id,
@@ -1006,8 +1003,8 @@ class ChatRepository:
     async def abort_running_tool_calls(
         self, *, session_id: str, error_code: str, finished_at: str
     ) -> tuple[ChatToolCall, ...]:
-        async with self.session_factory.begin() as database:
-            rows = tuple(await database.scalars(
+        async with AsyncSessionLocal() as db, db.begin():
+            rows = tuple(await db.scalars(
                 select(ChatToolCallRow)
                 .where(
                     ChatToolCallRow.session_id == session_id,
@@ -1060,8 +1057,8 @@ class ChatRepository:
             raise ValueError("chat message belongs to another session")
         if any(call.session_id != session.session_id for call in tool_calls):
             raise ValueError("chat tool call belongs to another session")
-        async with self.session_factory.begin() as database:
-            session_row = await database.get(
+        async with AsyncSessionLocal() as db, db.begin():
+            session_row = await db.get(
                 ChatSessionRow, session.session_id, with_for_update=True
             )
             if session_row is None:
@@ -1073,7 +1070,7 @@ class ChatRepository:
                 raise ValueError("session identity cannot be reassigned")
 
             existing_messages = tuple(
-                await database.scalars(
+                await db.scalars(
                     select(ChatMessageRow)
                     .where(ChatMessageRow.session_id == session.session_id)
                     .order_by(ChatMessageRow.position)
@@ -1087,11 +1084,11 @@ class ChatRepository:
 
             for position, message in enumerate(messages[len(existing_ids) :], len(existing_ids)):
                 if (
-                    await database.get(ChatMessageRow, message.message_id)
+                    await db.get(ChatMessageRow, message.message_id)
                     is not None
                 ):
                     raise ValueError("message identity cannot be reassigned")
-                database.add(
+                db.add(
                     ChatMessageRow(
                         message_id=message.message_id,
                         session_id=message.session_id,
@@ -1122,7 +1119,7 @@ class ChatRepository:
                         created_at=_datetime(message.created_at),
                     )
                 )
-            await database.flush()
+            await db.flush()
 
             for call in tool_calls:
                 assistant = next((message for message in messages if message.message_id == call.assistant_message_id), None)
@@ -1138,7 +1135,7 @@ class ChatRepository:
                     authorization_revision=call.authorization_revision,
                 ) not in assistant.tool_calls:
                     raise ValueError("tool call must match its assistant request")
-                row = await database.get(ChatToolCallRow, call.tool_call_id)
+                row = await db.get(ChatToolCallRow, call.tool_call_id)
                 if row is None:
                     row = ChatToolCallRow(
                         tool_call_id=call.tool_call_id,
@@ -1152,7 +1149,7 @@ class ChatRepository:
                         status=call.status.value,
                         proposed_permission_revision=(session_row.operation_permission or {}).get("revision", 0),
                     )
-                    database.add(row)
+                    db.add(row)
                 elif (
                     row.session_id != call.session_id
                     or row.assistant_message_id != call.assistant_message_id
@@ -1178,11 +1175,11 @@ class ChatRepository:
                     row.decided_at = _optional_datetime(call.decided_at)
                     row.decision_basis = call.decision_basis
                     row.authorization_revision = call.authorization_revision
-            await database.flush()
+            await db.flush()
 
             for message in messages:
                 for request in message.tool_calls:
-                    call_row = await database.get(ChatToolCallRow, request.tool_call_id)
+                    call_row = await db.get(ChatToolCallRow, request.tool_call_id)
                     if (call_row is None or call_row.session_id != session.session_id
                             or call_row.assistant_message_id != message.message_id
                             or ChatToolRequest(
@@ -1199,7 +1196,7 @@ class ChatRepository:
                         raise ValueError("assistant request must have an identical durable call")
 
             for result in tool_results:
-                call_row = await database.get(
+                call_row = await db.get(
                     ChatToolCallRow, result.tool_call_id
                 )
                 if call_row is None or call_row.session_id != session.session_id:
@@ -1225,8 +1222,8 @@ class ChatRepository:
     ) -> ChatToolCall:
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be approved or rejected")
-        async with self.session_factory.begin() as database:
-            session_row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            session_row = await db.get(ChatSessionRow, session_id, with_for_update=True)
             if session_row is None or session_row.user_id != user_id:
                 raise FileNotFoundError(f"chat session not found: {session_id}")
             permission = {
@@ -1239,7 +1236,7 @@ class ChatRepository:
                 permission.update(session_row.operation_permission)
             if decision == "approved" and permission["mode"] == "read_only":
                 raise ValueError("permission_read_only")
-            row = await database.get(
+            row = await db.get(
                 ChatToolCallRow, tool_call_id, with_for_update=True
             )
             if row is None or row.session_id != session_id:
@@ -1321,11 +1318,11 @@ class ChatRepository:
         user_id: str,
         started_at: str,
     ) -> ChatToolCall | None:
-        async with self.session_factory.begin() as database:
-            session_row = await database.get(ChatSessionRow, session_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            session_row = await db.get(ChatSessionRow, session_id, with_for_update=True)
             if session_row is None or session_row.user_id != user_id:
                 raise FileNotFoundError(f"chat session not found: {session_id}")
-            row = await database.get(
+            row = await db.get(
                 ChatToolCallRow, tool_call_id, with_for_update=True
             )
             if row is None or row.session_id != session_id:

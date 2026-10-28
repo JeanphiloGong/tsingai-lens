@@ -56,7 +56,7 @@ def _now():
 def _service(chain, factory):
     return FeedbackDatasetService(
         repository=FeedbackDatasetRepository(), collection_service=chain.collection_service,
-        sample_repository=FeedbackDatasetSampleRepository(factory), case_repository=chain.cases,
+        sample_repository=FeedbackDatasetSampleRepository(), case_repository=chain.cases,
     )
 
 
@@ -158,7 +158,7 @@ async def test_selected_publication_ignores_unselected_bad_source(bad_source, fe
             row.status = "withdrawn"
     exports = FeedbackDatasetExportService(
         dataset_service=service, sample_repository=service.sample_repository,
-        repository=FeedbackDatasetExportRepository(postgres_session_factory),
+        repository=FeedbackDatasetExportRepository(),
     )
     preview = await exports.preview_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[chosen.sample_id])
     exported = await exports.publish_for_user(
@@ -207,7 +207,7 @@ async def test_background_backfill_skips_withdrawn_cases_and_is_idempotent(feedb
         row.status = "withdrawn"
         await session.execute(delete(FeedbackDatasetSampleRow))
         await session.execute(delete(AnalysisJobRow).where(AnalysisJobRow.job_type == "dataset_sample_build"))
-    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository()
     assert await repository.backfill_existing_cases() == 1
     assert await repository.backfill_existing_cases() == 1
     async with postgres_session_factory() as session:
@@ -237,7 +237,7 @@ async def test_historical_backfill_crosses_a_full_batch(feedback_chain, postgres
             )
             for index, answer in enumerate(answers)
         ])
-    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository()
     assert await repository.backfill_existing_cases() == 201
     async with postgres_session_factory() as session:
         assert await session.scalar(select(func.count()).select_from(FeedbackDatasetSampleRow)) == 603
@@ -253,7 +253,7 @@ async def test_empty_historical_collections_cross_a_full_batch(feedback_chain, p
             )
             for index in range(201)
         ])
-    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository()
     assert await repository.backfill_existing_cases() == 0
     async with postgres_session_factory() as session:
         assert await session.scalar(select(func.count()).select_from(FeedbackDatasetRow)) == 606
@@ -379,7 +379,7 @@ async def test_timed_out_build_releases_sample_and_job_lease(feedback_chain, pos
 async def test_completion_rechecks_case_after_candidate_generation(feedback_chain, postgres_session_factory):
     chain = feedback_chain
     case = await _analyze(chain)
-    repository = FeedbackDatasetSampleRepository(postgres_session_factory)
+    repository = FeedbackDatasetSampleRepository()
     job = await chain.jobs.claim_next_dataset_sample_build_job(_now())
     dataset_id, sample_id = job.payload["dataset_id"], job.payload["sample_id"]
     sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)

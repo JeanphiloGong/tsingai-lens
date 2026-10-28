@@ -10,7 +10,9 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.analysis_result import AnalysisResult
 from domain.feedback.annotation import FeedbackAnnotation
@@ -33,13 +35,10 @@ from repositories.feedback_dataset_sample_repository import enqueue_case_samples
 class FeedbackCaseRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def save_analysis_result(self, result: AnalysisResult) -> AnalysisResult:
-        async with self.session_factory.begin() as session:
-            row = await _save_result_row(session, result)
-            await session.flush()
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await _save_result_row(db, result)
+            await db.flush()
             return AnalysisResult(
                 result_id=row.result_id,
                 job_id=row.job_id,
@@ -84,11 +83,11 @@ class FeedbackCaseRepository:
     ) -> FeedbackCase:
         timestamp = _datetime(now)
         signals = _ordered_unique(source_signal_ids or (result.feedback_id,))
-        async with self.session_factory.begin() as session:
+        async with AsyncSessionLocal() as db, db.begin():
             # Keep this method usable when a caller has not separately persisted
             # the result, while preserving the same result identity and payload.
-            saved_result = await _save_result_row(session, result)
-            row = await session.scalar(
+            saved_result = await _save_result_row(db, result)
+            row = await db.scalar(
                 select(FeedbackCaseRow)
                 .where(
                     FeedbackCaseRow.session_id == result.session_id,
@@ -110,7 +109,7 @@ class FeedbackCaseRepository:
                     updated_at=timestamp,
                     annotation_digest=None,
                 )
-                session.add(row)
+                db.add(row)
             else:
                 if row.collection_id != result.collection_id:
                     raise ValueError("feedback case identity cannot change collection")
@@ -129,8 +128,8 @@ class FeedbackCaseRepository:
                 if row.status not in {"accepted", "withdrawn"}:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
-            await session.flush()
-            await enqueue_case_samples(session, row, now=timestamp)
+            await db.flush()
+            await enqueue_case_samples(db, row, now=timestamp)
             return FeedbackCase(
                 case_id=row.case_id,
                 collection_id=row.collection_id,
@@ -152,9 +151,9 @@ class FeedbackCaseRepository:
     async def save_correction_signal_analysis_result(
         self, result: CorrectionSignalAnalysisResult
     ) -> CorrectionSignalAnalysisResult:
-        async with self.session_factory.begin() as session:
-            row = await _save_correction_result_row(session, result)
-            await session.flush()
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await _save_correction_result_row(db, result)
+            await db.flush()
             return CorrectionSignalAnalysisResult(
                 result_id=row.result_id,
                 job_id=row.job_id,
@@ -209,9 +208,9 @@ class FeedbackCaseRepository:
 
         timestamp = _datetime(now)
         signals = _ordered_unique(source_signal_ids or (result.signal_id,))
-        async with self.session_factory.begin() as session:
-            saved_result = await _save_correction_result_row(session, result)
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            saved_result = await _save_correction_result_row(db, result)
+            row = await db.scalar(
                 select(FeedbackCaseRow)
                 .where(
                     FeedbackCaseRow.session_id == result.session_id,
@@ -234,7 +233,7 @@ class FeedbackCaseRepository:
                     updated_at=timestamp,
                     annotation_digest=None,
                 )
-                session.add(row)
+                db.add(row)
             else:
                 if row.collection_id != result.collection_id:
                     raise ValueError("feedback case identity cannot change collection")
@@ -253,8 +252,8 @@ class FeedbackCaseRepository:
                 if row.status not in {"accepted", "withdrawn"}:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
-            await session.flush()
-            await enqueue_case_samples(session, row, now=timestamp)
+            await db.flush()
+            await enqueue_case_samples(db, row, now=timestamp)
             return FeedbackCase(
                 case_id=row.case_id,
                 collection_id=row.collection_id,
@@ -276,9 +275,9 @@ class FeedbackCaseRepository:
     async def save_tool_failure_analysis_result(
         self, result: ToolFailureAnalysisResult
     ) -> ToolFailureAnalysisResult:
-        async with self.session_factory.begin() as session:
-            row = await _save_tool_failure_result_row(session, result)
-            await session.flush()
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await _save_tool_failure_result_row(db, result)
+            await db.flush()
             return ToolFailureAnalysisResult(
                 result_id=row.result_id,
                 job_id=row.job_id,
@@ -335,9 +334,9 @@ class FeedbackCaseRepository:
         ).strip()
         if not anchor_message_id:
             raise ValueError("tool failure case requires an anchor message")
-        async with self.session_factory.begin() as session:
-            saved_result = await _save_tool_failure_result_row(session, result)
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            saved_result = await _save_tool_failure_result_row(db, result)
+            row = await db.scalar(
                 select(FeedbackCaseRow)
                 .where(
                     FeedbackCaseRow.session_id == result.session_id,
@@ -361,7 +360,7 @@ class FeedbackCaseRepository:
                     updated_at=timestamp,
                     annotation_digest=None,
                 )
-                session.add(row)
+                db.add(row)
             else:
                 if row.collection_id != result.collection_id:
                     raise ValueError("feedback case identity cannot change collection")
@@ -381,8 +380,8 @@ class FeedbackCaseRepository:
                 if row.status not in {"accepted", "withdrawn"}:
                     row.status = "needs_annotation"
                 row.updated_at = timestamp
-            await session.flush()
-            await enqueue_case_samples(session, row, now=timestamp)
+            await db.flush()
+            await enqueue_case_samples(db, row, now=timestamp)
             return FeedbackCase(
                 case_id=row.case_id,
                 collection_id=row.collection_id,
@@ -402,8 +401,8 @@ class FeedbackCaseRepository:
             )
 
     async def read_case(self, case_id: str) -> FeedbackCase | None:
-        async with self.session_factory() as session:
-            row = await session.get(FeedbackCaseRow, case_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(FeedbackCaseRow, case_id)
             return (
                 FeedbackCase(
                     case_id=row.case_id,
@@ -434,8 +433,8 @@ class FeedbackCaseRepository:
         ids = tuple(dict.fromkeys(str(value) for value in result_ids if value))
         if not ids:
             return ()
-        async with self.session_factory() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(FeedbackAnalysisResultRow).where(
                     FeedbackAnalysisResultRow.result_id.in_(ids)
                 )
@@ -487,8 +486,8 @@ class FeedbackCaseRepository:
         ids = tuple(dict.fromkeys(str(value) for value in result_ids if value))
         if not ids:
             return ()
-        async with self.session_factory() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(FeedbackSignalAnalysisResultRow).where(
                     FeedbackSignalAnalysisResultRow.result_id.in_(ids)
                 )
@@ -542,8 +541,8 @@ class FeedbackCaseRepository:
         ids = tuple(dict.fromkeys(str(value) for value in result_ids if value))
         if not ids:
             return ()
-        async with self.session_factory() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(ToolFailureAnalysisResultRow).where(
                     ToolFailureAnalysisResultRow.result_id.in_(ids)
                 )
@@ -619,8 +618,8 @@ class FeedbackCaseRepository:
             FeedbackCaseRow.created_at,
             FeedbackCaseRow.case_id,
         )
-        async with self.session_factory() as session:
-            rows = list(await session.scalars(statement))
+        async with AsyncSessionLocal() as db:
+            rows = list(await db.scalars(statement))
             if problem_type is not None and rows:
                 analysis_result_ids = {
                     result_id
@@ -641,19 +640,19 @@ class FeedbackCaseRepository:
                 signal_rows: tuple[Any, ...] = ()
                 tool_failure_rows: tuple[Any, ...] = ()
                 if analysis_result_ids:
-                    analysis_rows = tuple(await session.scalars(
+                    analysis_rows = tuple(await db.scalars(
                         select(FeedbackAnalysisResultRow).where(
                             FeedbackAnalysisResultRow.result_id.in_(analysis_result_ids),
                         )
                     ))
                 if signal_result_ids:
-                    signal_rows = tuple(await session.scalars(
+                    signal_rows = tuple(await db.scalars(
                         select(FeedbackSignalAnalysisResultRow).where(
                             FeedbackSignalAnalysisResultRow.result_id.in_(signal_result_ids),
                         )
                     ))
                 if tool_failure_result_ids:
-                    tool_failure_rows = tuple(await session.scalars(
+                    tool_failure_rows = tuple(await db.scalars(
                         select(ToolFailureAnalysisResultRow).where(
                             ToolFailureAnalysisResultRow.result_id.in_(tool_failure_result_ids),
                         )
@@ -707,8 +706,8 @@ class FeedbackCaseRepository:
             )
 
     async def read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
-        async with self.session_factory() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db:
+            row = await db.scalar(
                 select(FeedbackAnnotationRow)
                 .where(FeedbackAnnotationRow.case_id == case_id)
                 .order_by(FeedbackAnnotationRow.version.desc())
@@ -742,8 +741,8 @@ class FeedbackCaseRepository:
         now: str,
     ) -> FeedbackAnnotation:
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            case = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            case = await db.scalar(
                 select(FeedbackCaseRow)
                 .where(FeedbackCaseRow.case_id == annotation.case_id)
                 .with_for_update()
@@ -759,7 +758,7 @@ class FeedbackCaseRepository:
                 "insufficient",
             }:
                 raise ValueError("feedback_case_not_annotatable")
-            current = await session.scalar(
+            current = await db.scalar(
                 select(FeedbackAnnotationRow)
                 .where(FeedbackAnnotationRow.case_id == annotation.case_id)
                 .order_by(FeedbackAnnotationRow.version.desc())
@@ -799,12 +798,12 @@ class FeedbackCaseRepository:
                 created_at=_datetime(annotation.created_at),
                 updated_at=timestamp,
             )
-            session.add(row)
+            db.add(row)
             case.annotation_digest = annotation.annotation_digest
             case.status = "ready_for_review"
             case.updated_at = timestamp
-            await session.flush()
-            await enqueue_case_samples(session, case, now=timestamp)
+            await db.flush()
+            await enqueue_case_samples(db, case, now=timestamp)
             return FeedbackAnnotation(
                 annotation_id=row.annotation_id,
                 case_id=row.case_id,
@@ -822,8 +821,8 @@ class FeedbackCaseRepository:
             )
 
     async def read_review_decisions(self, case_id: str) -> tuple[ReviewDecision, ...]:
-        async with self.session_factory() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(
                 select(FeedbackReviewDecisionRow)
                 .where(FeedbackReviewDecisionRow.case_id == case_id)
                 .order_by(FeedbackReviewDecisionRow.seq)
@@ -850,8 +849,8 @@ class FeedbackCaseRepository:
         now: str,
     ) -> ReviewDecision:
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            case = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            case = await db.scalar(
                 select(FeedbackCaseRow)
                 .where(FeedbackCaseRow.case_id == decision.case_id)
                 .with_for_update()
@@ -862,7 +861,7 @@ class FeedbackCaseRepository:
                 raise ValueError("feedback_case_stale")
             if case.annotation_digest != decision.annotation_digest:
                 raise ValueError("feedback_case_stale")
-            existing_decision = await session.get(
+            existing_decision = await db.get(
                 FeedbackReviewDecisionRow,
                 decision.decision_id,
                 with_for_update=True,
@@ -887,7 +886,7 @@ class FeedbackCaseRepository:
                     seq=existing_decision.seq,
                     created_at=_iso(existing_decision.created_at),
                 )
-            annotation = await session.scalar(
+            annotation = await db.scalar(
                 select(FeedbackAnnotationRow)
                 .where(
                     FeedbackAnnotationRow.case_id == decision.case_id,
@@ -911,7 +910,7 @@ class FeedbackCaseRepository:
                     raise ValueError("feedback_case_not_withdrawable")
             elif case.status != "ready_for_review":
                 raise ValueError("feedback_case_not_reviewable")
-            max_seq = await session.scalar(
+            max_seq = await db.scalar(
                 select(func.max(FeedbackReviewDecisionRow.seq)).where(
                     FeedbackReviewDecisionRow.case_id == decision.case_id
                 )
@@ -929,7 +928,7 @@ class FeedbackCaseRepository:
                 seq=actual_seq,
                 created_at=timestamp,
             )
-            session.add(row)
+            db.add(row)
             case.status = {
                 "accept": "accepted",
                 "reject": "rejected",
@@ -937,7 +936,7 @@ class FeedbackCaseRepository:
                 "withdraw": "withdrawn",
             }[decision.decision]
             case.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return ReviewDecision(
                 decision_id=row.decision_id,
                 case_id=row.case_id,
@@ -951,10 +950,10 @@ class FeedbackCaseRepository:
 
 
 async def _save_result_row(
-    session: AsyncSession, result: AnalysisResult
+    db: AsyncSession, result: AnalysisResult
 ) -> FeedbackAnalysisResultRow:
-    row = await session.get(FeedbackAnalysisResultRow, result.result_id)
-    by_job = await session.scalar(
+    row = await db.get(FeedbackAnalysisResultRow, result.result_id)
+    by_job = await db.scalar(
         select(FeedbackAnalysisResultRow).where(
             FeedbackAnalysisResultRow.job_id == result.job_id
         )
@@ -1003,7 +1002,7 @@ async def _save_result_row(
     if row is None:
         row = by_job or FeedbackAnalysisResultRow(result_id=result.result_id)
         if by_job is None:
-            session.add(row)
+            db.add(row)
     row.job_id = result.job_id
     row.feedback_id = result.feedback_id
     row.session_id = result.session_id
@@ -1022,10 +1021,10 @@ async def _save_result_row(
 
 
 async def _save_correction_result_row(
-    session: AsyncSession, result: CorrectionSignalAnalysisResult
+    db: AsyncSession, result: CorrectionSignalAnalysisResult
 ) -> FeedbackSignalAnalysisResultRow:
-    row = await session.get(FeedbackSignalAnalysisResultRow, result.result_id)
-    by_job = await session.scalar(
+    row = await db.get(FeedbackSignalAnalysisResultRow, result.result_id)
+    by_job = await db.scalar(
         select(FeedbackSignalAnalysisResultRow).where(
             FeedbackSignalAnalysisResultRow.job_id == result.job_id
         )
@@ -1079,7 +1078,7 @@ async def _save_correction_result_row(
     if row is None:
         row = by_job or FeedbackSignalAnalysisResultRow(result_id=result.result_id)
         if by_job is None:
-            session.add(row)
+            db.add(row)
     row.job_id = result.job_id
     row.signal_id = result.signal_id
     row.signal_type = result.signal_type
@@ -1100,10 +1099,10 @@ async def _save_correction_result_row(
 
 
 async def _save_tool_failure_result_row(
-    session: AsyncSession, result: ToolFailureAnalysisResult
+    db: AsyncSession, result: ToolFailureAnalysisResult
 ) -> ToolFailureAnalysisResultRow:
-    row = await session.get(ToolFailureAnalysisResultRow, result.result_id)
-    by_job = await session.scalar(
+    row = await db.get(ToolFailureAnalysisResultRow, result.result_id)
+    by_job = await db.scalar(
         select(ToolFailureAnalysisResultRow).where(
             ToolFailureAnalysisResultRow.job_id == result.job_id
         )
@@ -1157,7 +1156,7 @@ async def _save_tool_failure_result_row(
     if row is None:
         row = by_job or ToolFailureAnalysisResultRow(result_id=result.result_id)
         if by_job is None:
-            session.add(row)
+            db.add(row)
     row.job_id = result.job_id
     row.signal_id = result.signal_id
     row.signal_type = result.signal_type

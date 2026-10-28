@@ -110,7 +110,7 @@ async def test_replay_uses_service_permission_and_exact_approval(mode, *, postgr
     from tests.unit.application.test_research_agent_runner import _Model
     write = _WriteCapability()
     write.spec = ToolSpec(name="record_finding_feedback", description="Save feedback", risk=ToolRisk.WRITE, input_model=_Question)
-    repo = ChatRepository(postgres_session_factory)
+    repo = ChatRepository()
     model = _Model(ModelTurn(tool_calls=(ModelToolCall(name=write.spec.name, arguments={"question": "Review"}),)),
                    ModelTurn(content="Saved"), ModelTurn(content="No tools needed."),
                    ModelTurn(content="No tools needed for the saved review."))

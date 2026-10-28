@@ -83,7 +83,7 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
     assert feedback is not None
 
     datasets = FeedbackDatasetRepository()
-    samples = FeedbackDatasetSampleRepository(postgres_session_factory)
+    samples = FeedbackDatasetSampleRepository()
     service = FeedbackDatasetService(
         repository=datasets,
         collection_service=chain.collection_service,
@@ -121,7 +121,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         handler=FeedbackAnalysisHandler(chat_repository=chain.chat)).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
-    samples = FeedbackDatasetSampleRepository(postgres_session_factory)
+    samples = FeedbackDatasetSampleRepository()
     service = FeedbackDatasetService(repository=datasets, collection_service=chain.collection_service,
         sample_repository=samples, case_repository=chain.cases)
     dataset = await service.create_for_user(user_id=USER_ID, collection_id=COLLECTION_ID,
@@ -185,7 +185,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
         expected_revision_id=saved.current_revision_id)
     exports = FeedbackDatasetExportService(dataset_service=service, sample_repository=samples,
-        repository=FeedbackDatasetExportRepository(postgres_session_factory))
+        repository=FeedbackDatasetExportRepository())
     preview = await exports.preview_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[sample_id])
     assert preview.exportable_count == 1 and not preview.issues
     published = await exports.publish_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id,
@@ -235,7 +235,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     )
 
     datasets = FeedbackDatasetRepository()
-    samples = FeedbackDatasetSampleRepository(postgres_session_factory)
+    samples = FeedbackDatasetSampleRepository()
     service = FeedbackDatasetService(
         repository=datasets,
         collection_service=chain.collection_service,
@@ -334,7 +334,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     assert confirmed.status == "confirmed"
     assert confirmed.confirmed_revision_id == original_revision_id
 
-    exports = FeedbackDatasetExportRepository(postgres_session_factory)
+    exports = FeedbackDatasetExportRepository()
     export_service = FeedbackDatasetExportService(
         dataset_service=service,
         sample_repository=samples,
@@ -452,7 +452,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     ).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
-    samples = FeedbackDatasetSampleRepository(postgres_session_factory)
+    samples = FeedbackDatasetSampleRepository()
     service = FeedbackDatasetService(
         repository=datasets, collection_service=chain.collection_service,
         sample_repository=samples, case_repository=chain.cases,
@@ -483,7 +483,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
         revision=None, outcome="failed", error_code="old_worker_failed", finished_at=later.isoformat(),
     ) is None
     assert (await chain.jobs.read_job(old.job_id)).status == "pending"
-    next_worker = AnalysisJobRepository(postgres_session_factory, worker_id="replacement-worker")
+    next_worker = AnalysisJobRepository( worker_id="replacement-worker")
     new = await next_worker.claim_next_dataset_sample_build_job(later.isoformat())
     assert new is not None and new.lease_version == old.lease_version + 1
     revision = SampleRevision.build_worker(

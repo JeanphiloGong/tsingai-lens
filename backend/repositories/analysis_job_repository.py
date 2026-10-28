@@ -12,7 +12,9 @@ from uuid import uuid4
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.tool_failure import _text as _tool_failure_text
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
@@ -154,10 +156,8 @@ class AnalysisJobRepository:
 
     def __init__(
         self,
-        session_factory: async_sessionmaker[AsyncSession],
         worker_id: str | None = None,
     ) -> None:
-        self.session_factory = session_factory
         self.worker_id = (worker_id or f"{socket.gethostname()}:{os.getpid()}")[:100]
 
     async def enqueue_feedback_analysis(
@@ -172,8 +172,8 @@ class AnalysisJobRepository:
             raise ValueError("idempotency_key is required")
         timestamp = _datetime(now)
         try:
-            async with self.session_factory.begin() as session:
-                existing = await session.scalar(
+            async with AsyncSessionLocal() as db, db.begin():
+                existing = await db.scalar(
                     select(AnalysisJobRow).where(
                         AnalysisJobRow.idempotency_key == idempotency_key
                     )
@@ -214,8 +214,8 @@ class AnalysisJobRepository:
                     created_at=timestamp,
                     updated_at=timestamp,
                 )
-                session.add(row)
-                await session.flush()
+                db.add(row)
+                await db.flush()
                 return AnalysisJob(
                     job_id=row.job_id,
                     job_type=row.job_type,
@@ -237,8 +237,8 @@ class AnalysisJobRepository:
                 )
         except IntegrityError:
             # A concurrent producer may have won the unique idempotency key.
-            async with self.session_factory() as session:
-                existing = await session.scalar(
+            async with AsyncSessionLocal() as db:
+                existing = await db.scalar(
                     select(AnalysisJobRow).where(
                         AnalysisJobRow.idempotency_key == idempotency_key
                     )
@@ -306,8 +306,8 @@ class AnalysisJobRepository:
             "trigger_digest": trigger_digest,
         }
         try:
-            async with self.session_factory.begin() as session:
-                existing = await session.scalar(
+            async with AsyncSessionLocal() as db, db.begin():
+                existing = await db.scalar(
                     select(AnalysisJobRow).where(
                         AnalysisJobRow.idempotency_key == idempotency_key
                     )
@@ -348,8 +348,8 @@ class AnalysisJobRepository:
                     created_at=timestamp,
                     updated_at=timestamp,
                 )
-                session.add(row)
-                await session.flush()
+                db.add(row)
+                await db.flush()
                 return AnalysisJob(
                     job_id=row.job_id,
                     job_type=row.job_type,
@@ -370,8 +370,8 @@ class AnalysisJobRepository:
                     lease_version=row.lease_version,
                 )
         except IntegrityError:
-            async with self.session_factory() as session:
-                existing = await session.scalar(
+            async with AsyncSessionLocal() as db:
+                existing = await db.scalar(
                     select(AnalysisJobRow).where(
                         AnalysisJobRow.idempotency_key == idempotency_key
                     )
@@ -443,8 +443,8 @@ class AnalysisJobRepository:
             "result_digest": result_digest,
         }
         try:
-            async with self.session_factory.begin() as session:
-                existing = await session.scalar(
+            async with AsyncSessionLocal() as db, db.begin():
+                existing = await db.scalar(
                     select(AnalysisJobRow).where(
                         AnalysisJobRow.idempotency_key == idempotency_key
                     )
@@ -485,8 +485,8 @@ class AnalysisJobRepository:
                     created_at=timestamp,
                     updated_at=timestamp,
                 )
-                session.add(row)
-                await session.flush()
+                db.add(row)
+                await db.flush()
                 return AnalysisJob(
                     job_id=row.job_id,
                     job_type=row.job_type,
@@ -507,8 +507,8 @@ class AnalysisJobRepository:
                     lease_version=row.lease_version,
                 )
         except IntegrityError:
-            async with self.session_factory() as session:
-                existing = await session.scalar(
+            async with AsyncSessionLocal() as db:
+                existing = await db.scalar(
                     select(AnalysisJobRow).where(
                         AnalysisJobRow.idempotency_key == idempotency_key
                     )
@@ -538,8 +538,8 @@ class AnalysisJobRepository:
 
     async def claim_next_feedback_analysis_job(self, now: str) -> AnalysisJob | None:
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.scalar(
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == "feedback_analysis",
@@ -560,7 +560,7 @@ class AnalysisJobRepository:
             row.started_at = timestamp
             _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return AnalysisJob(
                 job_id=row.job_id,
                 job_type=row.job_type,
@@ -585,8 +585,8 @@ class AnalysisJobRepository:
         self, now: str
     ) -> AnalysisJob | None:
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.scalar(
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == CORRECTION_SIGNAL_JOB_TYPE,
@@ -607,7 +607,7 @@ class AnalysisJobRepository:
             row.started_at = timestamp
             _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return AnalysisJob(
                 job_id=row.job_id,
                 job_type=row.job_type,
@@ -632,8 +632,8 @@ class AnalysisJobRepository:
         self, now: str
     ) -> AnalysisJob | None:
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.scalar(
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == TOOL_FAILURE_JOB_TYPE,
@@ -654,7 +654,7 @@ class AnalysisJobRepository:
             row.started_at = timestamp
             _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return AnalysisJob(
                 job_id=row.job_id,
                 job_type=row.job_type,
@@ -683,8 +683,8 @@ class AnalysisJobRepository:
         """
 
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.scalar(
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == DATASET_SAMPLE_BUILD_JOB_TYPE,
@@ -709,7 +709,7 @@ class AnalysisJobRepository:
                 row.finished_at = timestamp
                 row.updated_at = timestamp
                 row.error_code = "dataset_sample_build_payload_invalid"
-                await session.flush()
+                await db.flush()
                 return AnalysisJob(
                     job_id=row.job_id,
                     job_type=row.job_type,
@@ -729,7 +729,7 @@ class AnalysisJobRepository:
                     heartbeat_at=_optional_iso(row.heartbeat_at),
                     lease_version=row.lease_version,
                 )
-            sample = await session.scalar(
+            sample = await db.scalar(
                 select(FeedbackDatasetSampleRow)
                 .where(FeedbackDatasetSampleRow.sample_id == sample_id)
                 .with_for_update()
@@ -744,7 +744,7 @@ class AnalysisJobRepository:
                 row.finished_at = timestamp
                 row.updated_at = timestamp
                 row.error_code = "sample_build_superseded"
-                await session.flush()
+                await db.flush()
                 return AnalysisJob(
                     job_id=row.job_id,
                     job_type=row.job_type,
@@ -770,7 +770,7 @@ class AnalysisJobRepository:
             row.updated_at = timestamp
             sample.status = "building"
             sample.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return AnalysisJob(
                 job_id=row.job_id,
                 job_type=row.job_type,
@@ -863,8 +863,8 @@ class AnalysisJobRepository:
             raise ValueError("job_id is required")
         timestamp = _datetime(now)
         available_at = _iso(timestamp)
-        async with self.session_factory.begin() as session:
-            row = await session.get(AnalysisJobRow, job_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(AnalysisJobRow, job_id, with_for_update=True)
             if row is None:
                 raise FileNotFoundError(f"analysis job not found: {job_id}")
             if row.job_type != "feedback_analysis":
@@ -901,7 +901,7 @@ class AnalysisJobRepository:
             row.error_code = None
             _clear_lease(row)
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return AnalysisJob(
                 job_id=row.job_id,
                 job_type=row.job_type,
@@ -927,8 +927,8 @@ class AnalysisJobRepository:
 
         timestamp = _datetime(now)
         recovered = 0
-        async with self.session_factory.begin() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db, db.begin():
+            rows = await db.scalars(
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.status == "running",
@@ -949,7 +949,7 @@ class AnalysisJobRepository:
                 if row.job_type == DATASET_SAMPLE_BUILD_JOB_TYPE:
                     sample_id = str((row.payload or {}).get("sample_id") or "").strip()
                     if sample_id:
-                        sample = await session.scalar(
+                        sample = await db.scalar(
                             select(FeedbackDatasetSampleRow)
                             .where(
                                 FeedbackDatasetSampleRow.sample_id == sample_id,
@@ -962,7 +962,7 @@ class AnalysisJobRepository:
                             sample.status = "pending"
                             sample.updated_at = timestamp
                 recovered += 1
-            await session.flush()
+            await db.flush()
         return recovered
 
     async def renew_lease(
@@ -977,8 +977,8 @@ class AnalysisJobRepository:
         if not job_id.strip() or not worker_id.strip() or lease_version < 1:
             raise ValueError("job lease identity is invalid")
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.scalar(
                 select(AnalysisJobRow)
                 .where(AnalysisJobRow.job_id == job_id)
                 .with_for_update()
@@ -993,7 +993,7 @@ class AnalysisJobRepository:
             row.lease_expires_at = timestamp + timedelta(seconds=self.lease_seconds)
             row.heartbeat_at = timestamp
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return AnalysisJob(
                 job_id=row.job_id,
                 job_type=row.job_type,
@@ -1031,8 +1031,8 @@ class AnalysisJobRepository:
             raise ValueError("feedback_id is required")
         timestamp = _datetime(finished_at)
         cancelled = 0
-        async with self.session_factory.begin() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db, db.begin():
+            rows = await db.scalars(
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == "feedback_analysis",
@@ -1049,7 +1049,7 @@ class AnalysisJobRepository:
                 row.updated_at = timestamp
                 row.error_code = "feedback_withdrawn"
                 cancelled += 1
-            await session.flush()
+            await db.flush()
         return cancelled
 
     async def cancel_correction_signal_analysis_jobs(
@@ -1062,8 +1062,8 @@ class AnalysisJobRepository:
             raise ValueError("trigger_message_id is required")
         timestamp = _datetime(finished_at)
         cancelled = 0
-        async with self.session_factory.begin() as session:
-            rows = await session.scalars(
+        async with AsyncSessionLocal() as db, db.begin():
+            rows = await db.scalars(
                 select(AnalysisJobRow)
                 .where(
                     AnalysisJobRow.job_type == CORRECTION_SIGNAL_JOB_TYPE,
@@ -1079,7 +1079,7 @@ class AnalysisJobRepository:
                 row.updated_at = timestamp
                 row.error_code = "correction_signal_withdrawn"
                 cancelled += 1
-            await session.flush()
+            await db.flush()
         return cancelled
 
     async def _mark_finished(
@@ -1094,8 +1094,8 @@ class AnalysisJobRepository:
         lease_version: int | None,
     ) -> AnalysisJob:
         timestamp = _datetime(finished_at)
-        async with self.session_factory.begin() as session:
-            row = await session.get(AnalysisJobRow, job_id, with_for_update=True)
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.get(AnalysisJobRow, job_id, with_for_update=True)
             if row is None:
                 raise FileNotFoundError(f"analysis job not found: {job_id}")
             if worker_id is not None or lease_version is not None:
@@ -1162,7 +1162,7 @@ class AnalysisJobRepository:
             row.result_id = result_id
             row.error_code = error_code
             _clear_lease(row)
-            await session.flush()
+            await db.flush()
             return AnalysisJob(
                 job_id=row.job_id,
                 job_type=row.job_type,
@@ -1184,8 +1184,8 @@ class AnalysisJobRepository:
             )
 
     async def read_job(self, job_id: str) -> AnalysisJob | None:
-        async with self.session_factory() as session:
-            row = await session.get(AnalysisJobRow, job_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(AnalysisJobRow, job_id)
             return (
                 AnalysisJob(
                     job_id=row.job_id,
@@ -1233,8 +1233,8 @@ class AnalysisJobRepository:
             .offset(offset)
             .limit(limit)
         )
-        async with self.session_factory() as session:
-            rows = await session.scalars(statement)
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(statement)
             return tuple(
                 AnalysisJob(
                     job_id=row.job_id,

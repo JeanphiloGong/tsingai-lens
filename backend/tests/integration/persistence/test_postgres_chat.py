@@ -53,7 +53,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     await CollectionRepository().add_collection(
         collection
     )
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     chat = ChatSession.create(
         session_id="chat-1",
         user_id=user["user_id"],
@@ -347,7 +347,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         ),
     )
     await repository.save_trajectory(session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
-    reloaded = await ChatRepository(postgres_session_factory).read_messages(chat.session_id)
+    reloaded = await ChatRepository().read_messages(chat.session_id)
     assert reloaded == trajectory
     assert await repository.read_message(user_message.message_id) == user_message
     assert await repository.read_message(tool_message.message_id) == tool_message

@@ -70,7 +70,7 @@ async def feedback_app(postgres_session_factory, tmp_path):
             updated_at=NOW,
         )
     )
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     chat = ChatSession.create(session_id="chat-1", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW)
     await repository.add_session(chat)
     await repository.add_session(ChatSession.create(session_id="chat-2", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW))

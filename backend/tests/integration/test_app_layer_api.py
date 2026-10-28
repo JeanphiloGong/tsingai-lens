@@ -113,7 +113,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service, 
             objective_repository=ObjectiveRepository(postgres_session_factory),
             finding_review_repository=FindingReviewRepository(),
             experiment_plan_repository=ExperimentPlanRepository(),
-            chat_repository=ChatRepository(postgres_session_factory),
+            chat_repository=ChatRepository(),
         )
     ) as client:
         client.app.state.document_preparation_service = (

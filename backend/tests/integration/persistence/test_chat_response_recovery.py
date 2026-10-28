@@ -65,7 +65,7 @@ async def test_real_http_disconnect_resumes_on_another_worker_without_duplicate_
     reader = ChatSessionService(
         collection_service=writer.collection_service,
         source_artifact_repository=writer.source_artifact_repository,
-        repository=ChatRepository(fixture.factory), runner=writer.runner,
+        repository=ChatRepository(), runner=writer.runner,
     )
     auth = AuthSessionService(AuthRepository())
     cookies = {SESSION_COOKIE_NAME: fixture.cookies[0]}

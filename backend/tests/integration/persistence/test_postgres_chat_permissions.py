@@ -35,7 +35,7 @@ async def permission_case(postgres_session_factory):
             updated_at=now,
         )
     )
-    repo = ChatRepository(postgres_session_factory)
+    repo = ChatRepository()
     session = ChatSession.create(session_id="s", user_id="u", collection_id="c", created_at=now)
     await repo.add_session(session)
     grant = await repo.set_permission("s", "u", mode="auto", actions=["record_finding_feedback"],
@@ -65,7 +65,7 @@ async def test_automatic_claim_is_durable_and_not_replayed(permission_case, post
         for _ in range(2)])
     claimed = first or second
     assert (first is None) != (second is None)
-    fresh = ChatRepository(postgres_session_factory)
+    fresh = ChatRepository()
     stored = await fresh.read_tool_call("call")
     assert stored == claimed
     assert stored.decision_basis == "scope_grant"

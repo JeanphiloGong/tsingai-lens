@@ -498,7 +498,7 @@ def test_title_route_validates_input_and_hides_unowned_sessions(collection_servi
     from tests.support.postgres import seed_collection
     import asyncio
     asyncio.run(seed_collection(postgres_session_factory, "col-1", document_ids=("doc-1",)))
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="Answer")), repository)
     session = asyncio.run(service.create_session(collection_id="col-1", user_id="user-1"))
     app = create_app(

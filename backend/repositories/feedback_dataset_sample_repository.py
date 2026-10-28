@@ -16,7 +16,9 @@ from typing import Literal
 from uuid import uuid4
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.dataset_sample import (
     DatasetSample,
@@ -121,21 +123,18 @@ BuildCompletionKind = Literal["candidate", "needs_input", "failed"]
 class FeedbackDatasetSampleRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def backfill_existing_cases(self) -> int:
         """Initialize historical workbenches once at Worker startup, in bounded batches."""
         cursor = ""
         while True:
-            async with self.session_factory.begin() as session:
-                collections = list(await session.scalars(
+            async with AsyncSessionLocal() as db, db.begin():
+                collections = list(await db.scalars(
                     select(Collection).where(Collection.collection_id > cursor)
                     .order_by(Collection.collection_id).limit(200)
                 ))
                 for collection in collections:
                     await ensure_system_datasets(
-                        session, collection_id=collection.collection_id,
+                        db, collection_id=collection.collection_id,
                         owner_user_id=collection.owner_user_id, now=datetime.now(timezone.utc),
                     )
                 if collections:
@@ -146,14 +145,14 @@ class FeedbackDatasetSampleRepository:
         cursor = ""
         processed = 0
         while True:
-            async with self.session_factory.begin() as session:
-                cases = list(await session.scalars(
+            async with AsyncSessionLocal() as db, db.begin():
+                cases = list(await db.scalars(
                     select(FeedbackCaseRow).where(
                         FeedbackCaseRow.case_id > cursor, FeedbackCaseRow.status != "withdrawn",
                     ).order_by(FeedbackCaseRow.case_id).limit(200).with_for_update()
                 ))
                 for case in cases:
-                    await enqueue_case_samples(session, case, now=datetime.now(timezone.utc))
+                    await enqueue_case_samples(db, case, now=datetime.now(timezone.utc))
                 processed += len(cases)
                 if cases:
                     cursor = cases[-1].case_id
@@ -169,10 +168,10 @@ class FeedbackDatasetSampleRepository:
         if len(samples) != len(jobs):
             raise ValueError("sample and job collections must have equal length")
         collected: list[CollectedDatasetSample] = []
-        async with self.session_factory.begin() as session:
+        async with AsyncSessionLocal() as db, db.begin():
             cases = {
                 case.case_id: case
-                for case in await session.scalars(
+                for case in await db.scalars(
                     select(FeedbackCaseRow)
                     .where(FeedbackCaseRow.case_id.in_(tuple(sample.source_case_id for sample in samples)))
                     .order_by(FeedbackCaseRow.case_id)
@@ -186,14 +185,14 @@ class FeedbackDatasetSampleRepository:
                     or source_digest_for_case(case) != sample.source_digest
                 ):
                     raise DatasetSampleRevisionConflict("sample_source_stale")
-                collected.append(await _collect_sample(session, sample, job))
+                collected.append(await _collect_sample(db, sample, job))
         return tuple(collected)
 
     async def read_sample(
         self, *, dataset_id: str, sample_id: str
     ) -> DatasetSample | None:
-        async with self.session_factory() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db:
+            row = await db.scalar(
                 select(FeedbackDatasetSampleRow).where(
                     FeedbackDatasetSampleRow.dataset_id == dataset_id,
                     FeedbackDatasetSampleRow.sample_id == sample_id,
@@ -244,8 +243,8 @@ class FeedbackDatasetSampleRepository:
             statement = statement.offset(offset).limit(limit)
         else:
             statement = statement.offset(offset)
-        async with self.session_factory() as session:
-            rows = await session.scalars(statement)
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(statement)
             return tuple(
                 DatasetSample(
                     sample_id=row.sample_id,
@@ -267,8 +266,8 @@ class FeedbackDatasetSampleRepository:
             )
 
     async def read_revision(self, revision_id: str) -> SampleRevision | None:
-        async with self.session_factory() as session:
-            row = await session.get(FeedbackSampleRevisionRow, revision_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(FeedbackSampleRevisionRow, revision_id)
             if row is None:
                 return None
             content_value = row.content
@@ -327,8 +326,8 @@ class FeedbackDatasetSampleRepository:
         ).join(FeedbackCaseRow).where(FeedbackCaseRow.status != "withdrawn")
         if status is not None:
             statement = statement.where(FeedbackDatasetSampleRow.status == status)
-        async with self.session_factory() as session:
-            return int((await session.scalar(statement)) or 0)
+        async with AsyncSessionLocal() as db:
+            return int((await db.scalar(statement)) or 0)
 
     async def read_confirmed_members(
         self, *, dataset_id: str, sample_ids: tuple[str, ...] | None = None
@@ -357,8 +356,8 @@ class FeedbackDatasetSampleRepository:
         )
         if sample_ids is not None:
             statement = statement.where(FeedbackDatasetSampleRow.sample_id.in_(sample_ids))
-        async with self.session_factory() as session:
-            rows = (await session.execute(statement)).all()
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(statement)).all()
             members: list[ConfirmedDatasetMember] = []
             for sample, revision, case in rows:
                 if case.status == "withdrawn":
@@ -454,8 +453,8 @@ class FeedbackDatasetSampleRepository:
         if revision.author_kind != "human" or revision.sample_id != sample_id:
             raise ValueError("human revision identity is invalid")
         timestamp = _datetime(updated_at)
-        async with self.session_factory.begin() as session:
-            row, case = await _lock_sample_source(session, sample_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            row, case = await _lock_sample_source(db, sample_id)
             if row.current_revision_id != expected_revision_id:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
             if expected_generation is not None and row.generation != expected_generation:
@@ -499,7 +498,7 @@ class FeedbackDatasetSampleRepository:
                     "criteria": list(content_value.criteria),
                     "evaluation_mode": content_value.evaluation_mode,
                 }
-            session.add(
+            db.add(
                 FeedbackSampleRevisionRow(
                     revision_id=revision.revision_id,
                     sample_id=revision.sample_id,
@@ -515,7 +514,7 @@ class FeedbackDatasetSampleRepository:
                     created_at=_datetime(revision.created_at),
                 )
             )
-            await session.flush()
+            await db.flush()
             row.current_revision_id = revision.revision_id
             row.confirmed_revision_id = None
             row.confirmed_by = None
@@ -523,7 +522,7 @@ class FeedbackDatasetSampleRepository:
             row.status = "needs_confirmation"
             row.missing_reasons = []
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return DatasetSample(
                 sample_id=row.sample_id,
                 dataset_id=row.dataset_id,
@@ -551,8 +550,8 @@ class FeedbackDatasetSampleRepository:
         confirmed_at: str,
     ) -> DatasetSample:
         timestamp = _datetime(confirmed_at)
-        async with self.session_factory.begin() as session:
-            row, case = await _lock_sample_source(session, sample_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            row, case = await _lock_sample_source(db, sample_id)
             if (
                 case is None or case.status == "withdrawn"
                 or source_digest_for_case(case) != expected_source_digest
@@ -579,7 +578,7 @@ class FeedbackDatasetSampleRepository:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
             if row.status != "needs_confirmation":
                 raise ValueError("sample_not_confirmable")
-            revision = await session.get(FeedbackSampleRevisionRow, expected_revision_id)
+            revision = await db.get(FeedbackSampleRevisionRow, expected_revision_id)
             if revision is None or revision.sample_id != sample_id:
                 raise ValueError("sample_revision_missing")
             if revision.input_digest != expected_source_digest:
@@ -589,7 +588,7 @@ class FeedbackDatasetSampleRepository:
             row.confirmed_at = timestamp
             row.status = "confirmed"
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return DatasetSample(
                 sample_id=row.sample_id,
                 dataset_id=row.dataset_id,
@@ -624,8 +623,8 @@ class FeedbackDatasetSampleRepository:
         now: str,
     ) -> DatasetSample:
         timestamp = _datetime(now)
-        async with self.session_factory.begin() as session:
-            row = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            row = await db.scalar(
                 select(FeedbackDatasetSampleRow)
                 .where(
                     FeedbackDatasetSampleRow.dataset_id == dataset_id,
@@ -635,7 +634,7 @@ class FeedbackDatasetSampleRepository:
             )
             if row is None:
                 raise FileNotFoundError("dataset sample not found")
-            previous_action = await session.scalar(
+            previous_action = await db.scalar(
                 select(FeedbackSampleActionRow).where(
                     FeedbackSampleActionRow.sample_id == sample_id,
                     FeedbackSampleActionRow.idempotency_key == idempotency_key,
@@ -663,7 +662,7 @@ class FeedbackDatasetSampleRepository:
                     or job.payload.get("source_digest") != source_digest
                 ):
                     raise ValueError("sample build action job identity is invalid")
-                session.add(
+                db.add(
                     AnalysisJobRow(
                         job_id=job.job_id,
                         job_type=job.job_type,
@@ -707,7 +706,7 @@ class FeedbackDatasetSampleRepository:
                 if job is not None or source_digest is None:
                     raise ValueError("restore requires current source identity and no job")
                 current = (
-                    await session.get(FeedbackSampleRevisionRow, row.current_revision_id)
+                    await db.get(FeedbackSampleRevisionRow, row.current_revision_id)
                     if row.current_revision_id else None
                 )
                 has_current_content = (
@@ -724,7 +723,7 @@ class FeedbackDatasetSampleRepository:
             row.confirmed_by = None
             row.confirmed_at = None
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             result = DatasetSample(
                 sample_id=row.sample_id,
                 dataset_id=row.dataset_id,
@@ -741,7 +740,7 @@ class FeedbackDatasetSampleRepository:
                 confirmed_by=row.confirmed_by,
                 confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
             )
-            session.add(
+            db.add(
                 FeedbackSampleActionRow(
                     action_id=f"action_{uuid4().hex[:32]}",
                     sample_id=sample_id,
@@ -774,7 +773,7 @@ class FeedbackDatasetSampleRepository:
                     created_at=timestamp,
                 )
             )
-            await session.flush()
+            await db.flush()
             return result
 
     async def complete_build(
@@ -796,13 +795,13 @@ class FeedbackDatasetSampleRepository:
         if outcome != "candidate" and revision is not None:
             raise ValueError("non-candidate build cannot persist a revision")
         timestamp = _datetime(finished_at)
-        async with self.session_factory.begin() as session:
-            identity = await session.get(FeedbackDatasetSampleRow, sample_id)
+        async with AsyncSessionLocal() as db, db.begin():
+            identity = await db.get(FeedbackDatasetSampleRow, sample_id)
             if identity is None:
                 raise FileNotFoundError("sample build identity not found")
             # Keep source -> job -> sample ordering compatible with case writes and claims.
-            case = await session.get(FeedbackCaseRow, identity.source_case_id, with_for_update=True)
-            job_row = await session.get(AnalysisJobRow, job.job_id, with_for_update=True)
+            case = await db.get(FeedbackCaseRow, identity.source_case_id, with_for_update=True)
+            job_row = await db.get(AnalysisJobRow, job.job_id, with_for_update=True)
             if job_row is None:
                 raise FileNotFoundError("sample build identity not found")
             if job_row.status in {"succeeded", "failed", "cancelled"}:
@@ -810,7 +809,7 @@ class FeedbackDatasetSampleRepository:
                     return None
             elif not _lease_matches(job_row, job, timestamp):
                 return None
-            row = await session.scalar(
+            row = await db.scalar(
                 select(FeedbackDatasetSampleRow)
                 .where(FeedbackDatasetSampleRow.sample_id == sample_id)
                 .with_for_update()
@@ -864,7 +863,7 @@ class FeedbackDatasetSampleRepository:
                 row.missing_reasons = ["source_changed_since_collection"]
                 row.updated_at = timestamp
                 _finish_job(job_row, status="succeeded", finished_at=timestamp, result_id=sample_id, error_code=None)
-                await session.flush()
+                await db.flush()
                 return DatasetSample(
                     sample_id=row.sample_id,
                     dataset_id=row.dataset_id,
@@ -919,7 +918,7 @@ class FeedbackDatasetSampleRepository:
                         "criteria": list(content_value.criteria),
                         "evaluation_mode": content_value.evaluation_mode,
                     }
-                session.add(
+                db.add(
                     FeedbackSampleRevisionRow(
                         revision_id=revision.revision_id,
                         sample_id=revision.sample_id,
@@ -935,7 +934,7 @@ class FeedbackDatasetSampleRepository:
                         created_at=_datetime(revision.created_at),
                     )
                 )
-                await session.flush()
+                await db.flush()
                 row.current_revision_id = revision.revision_id
                 row.status = "needs_confirmation"
                 row.active_job_id = None
@@ -981,7 +980,7 @@ class FeedbackDatasetSampleRepository:
                     error_code=error_code or "sample_build_failed",
                 )
             row.updated_at = timestamp
-            await session.flush()
+            await db.flush()
             return DatasetSample(
                 sample_id=row.sample_id,
                 dataset_id=row.dataset_id,
@@ -1001,13 +1000,13 @@ class FeedbackDatasetSampleRepository:
 
 
 async def _lock_sample_source(
-    session: AsyncSession, sample_id: str,
+    db: AsyncSession, sample_id: str,
 ) -> tuple[FeedbackDatasetSampleRow, FeedbackCaseRow | None]:
-    identity = await session.get(FeedbackDatasetSampleRow, sample_id)
+    identity = await db.get(FeedbackDatasetSampleRow, sample_id)
     if identity is None:
         raise FileNotFoundError("dataset sample not found")
-    case = await session.get(FeedbackCaseRow, identity.source_case_id, with_for_update=True)
-    sample = await session.scalar(
+    case = await db.get(FeedbackCaseRow, identity.source_case_id, with_for_update=True)
+    sample = await db.scalar(
         select(FeedbackDatasetSampleRow)
         .where(FeedbackDatasetSampleRow.sample_id == sample_id)
         .with_for_update()
@@ -1018,18 +1017,18 @@ async def _lock_sample_source(
     return sample, case
 
 
-async def enqueue_case_samples(session: AsyncSession, case: FeedbackCaseRow, *, now: datetime) -> None:
+async def enqueue_case_samples(db: AsyncSession, case: FeedbackCaseRow, *, now: datetime) -> None:
     """Persist all three sample queues in the same transaction as the case."""
     if case.status == "withdrawn":
         return
-    collection = await session.get(Collection, case.collection_id)
+    collection = await db.get(Collection, case.collection_id)
     if collection is None:
         raise FileNotFoundError("feedback case collection not found")
     datasets = await ensure_system_datasets(
-        session, collection_id=case.collection_id, owner_user_id=collection.owner_user_id, now=now,
+        db, collection_id=case.collection_id, owner_user_id=collection.owner_user_id, now=now,
     )
     # Existing explicitly collected samples also need invalidation when their source changes.
-    additional = await session.scalars(select(FeedbackDatasetRow).where(
+    additional = await db.scalars(select(FeedbackDatasetRow).where(
         FeedbackDatasetRow.collection_id == case.collection_id,
         FeedbackDatasetRow.dataset_id.not_in(tuple(dataset.dataset_id for dataset in datasets)),
         select(FeedbackDatasetSampleRow.sample_id).where(
@@ -1069,11 +1068,11 @@ async def enqueue_case_samples(session: AsyncSession, case: FeedbackCaseRow, *, 
             created_at=now.isoformat(),
             updated_at=now.isoformat(),
         )
-        await _collect_sample(session, sample, job)
+        await _collect_sample(db, sample, job)
 
 
-async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: AnalysisJob) -> CollectedDatasetSample:
-    existing = await session.scalar(
+async def _collect_sample(db: AsyncSession, sample: DatasetSample, job: AnalysisJob) -> CollectedDatasetSample:
+    existing = await db.scalar(
         select(FeedbackDatasetSampleRow).where(
             FeedbackDatasetSampleRow.dataset_id == sample.dataset_id,
             FeedbackDatasetSampleRow.source_case_id == sample.source_case_id,
@@ -1109,14 +1108,14 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
         existing.confirmed_at = None
         existing.updated_at = _datetime(sample.updated_at)
         revision = (
-            await session.get(FeedbackSampleRevisionRow, existing.current_revision_id)
+            await db.get(FeedbackSampleRevisionRow, existing.current_revision_id)
             if existing.current_revision_id else None
         )
         if revision is not None and revision.author_kind == "human":
             existing.status = "needs_input"
             existing.active_job_id = None
             existing.missing_reasons = ["source_changed_since_collection"]
-            await session.flush()
+            await db.flush()
             return CollectedDatasetSample(
                 DatasetSample(
                     sample_id=existing.sample_id,
@@ -1146,7 +1145,7 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
                 spec_version=job.payload["spec_version"], source_digest=sample.source_digest,
             ),
         )
-        session.add(
+        db.add(
             AnalysisJobRow(
                 job_id=job.job_id,
                 job_type=job.job_type,
@@ -1169,11 +1168,11 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
                 lease_version=job.lease_version,
             )
         )
-        await session.flush()
+        await db.flush()
         existing.status = "pending"
         existing.active_job_id = job.job_id
         existing.missing_reasons = []
-        await session.flush()
+        await db.flush()
         return CollectedDatasetSample(
             DatasetSample(
                 sample_id=existing.sample_id,
@@ -1196,7 +1195,7 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
             job,
         )
 
-    session.add(
+    db.add(
         AnalysisJobRow(
             job_id=job.job_id,
             job_type=job.job_type,
@@ -1219,15 +1218,15 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
             lease_version=job.lease_version,
         )
     )
-    await session.flush()
+    await db.flush()
     row = FeedbackDatasetSampleRow(
         sample_id=sample.sample_id, dataset_id=sample.dataset_id, source_case_id=sample.source_case_id,
         status="pending", generation=sample.generation, source_digest=sample.source_digest,
         active_job_id=job.job_id, missing_reasons=[],
         created_at=_datetime(sample.created_at), updated_at=_datetime(sample.updated_at),
     )
-    session.add(row)
-    await session.flush()
+    db.add(row)
+    await db.flush()
     return CollectedDatasetSample(
         DatasetSample(
             sample_id=row.sample_id,

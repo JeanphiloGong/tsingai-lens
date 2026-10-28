@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.dataset_export import (
     EXPORT_SCHEMA_VERSION,
@@ -79,11 +81,8 @@ class DatasetExportIdempotencyConflict(ValueError):
 class FeedbackDatasetExportRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self.session_factory = session_factory
-
     async def save_preview(self, preview: ExportPreview) -> ExportPreview:
-        async with self.session_factory.begin() as session:
+        async with AsyncSessionLocal() as db, db.begin():
             member_values = []
             for member in preview.members:
                 content_value = member.content
@@ -130,7 +129,7 @@ class FeedbackDatasetExportRepository:
                         "row_key": member.row_key,
                     }
                 )
-            session.add(
+            db.add(
                 FeedbackDatasetExportPreviewRow(
                     preview_id=preview.preview_id,
                     dataset_id=preview.dataset_id,
@@ -152,12 +151,12 @@ class FeedbackDatasetExportRepository:
                     expires_at=_datetime(preview.expires_at),
                 )
             )
-            await session.flush()
+            await db.flush()
         return preview
 
     async def read_preview(self, preview_id: str) -> ExportPreview | None:
-        async with self.session_factory() as session:
-            row = await session.get(FeedbackDatasetExportPreviewRow, preview_id)
+        async with AsyncSessionLocal() as db:
+            row = await db.get(FeedbackDatasetExportPreviewRow, preview_id)
             if row is None:
                 return None
             member_values = []
@@ -241,8 +240,8 @@ class FeedbackDatasetExportRepository:
             .offset(offset)
             .limit(limit)
         )
-        async with self.session_factory() as session:
-            rows = await session.scalars(statement)
+        async with AsyncSessionLocal() as db:
+            rows = await db.scalars(statement)
             return tuple(
                 DatasetExportSummary(
                     export_id=row.export_id,
@@ -259,8 +258,8 @@ class FeedbackDatasetExportRepository:
             )
 
     async def publish_if_current(self, *, draft: DatasetExportDraft) -> DatasetExport:
-        async with self.session_factory.begin() as session:
-            existing = await session.scalar(
+        async with AsyncSessionLocal() as db, db.begin():
+            existing = await db.scalar(
                 select(FeedbackDatasetExportRow)
                 .where(
                     FeedbackDatasetExportRow.dataset_id == draft.dataset_id,
@@ -273,9 +272,9 @@ class FeedbackDatasetExportRepository:
                     raise DatasetExportIdempotencyConflict(
                         "export_idempotency_identity_conflict"
                     )
-                return await _read_export_locked(session, existing)
+                return await _read_export_locked(db, existing)
 
-            preview = await session.scalar(
+            preview = await db.scalar(
                 select(FeedbackDatasetExportPreviewRow)
                 .where(
                     FeedbackDatasetExportPreviewRow.preview_id == draft.preview_id,
@@ -338,18 +337,18 @@ class FeedbackDatasetExportRepository:
                 )
             preview_members = tuple(member_values)
             selected = {member.sample_id for member in preview_members}
-            current_members = await _read_current_members(session, draft.dataset_id, sample_ids=tuple(selected))
+            current_members = await _read_current_members(db, draft.dataset_id, sample_ids=tuple(selected))
             if member_digest(current_members) != draft.member_digest:
                 raise DatasetExportConflict("export_preview_stale")
             if member_digest(preview_members) != draft.member_digest:
                 raise DatasetExportConflict("export_preview_stale")
 
-            await session.execute(
+            await db.execute(
                 select(FeedbackDatasetRow)
                 .where(FeedbackDatasetRow.dataset_id == draft.dataset_id)
                 .with_for_update()
             )
-            max_no = await session.scalar(
+            max_no = await db.scalar(
                 select(func.max(FeedbackDatasetExportRow.export_no)).where(
                     FeedbackDatasetExportRow.dataset_id == draft.dataset_id
                 )
@@ -383,13 +382,13 @@ class FeedbackDatasetExportRepository:
                 idempotency_key=draft.idempotency_key,
                 created_at=now,
             )
-            session.add(row)
+            db.add(row)
             # The ORM models intentionally keep the export/member relationship
             # explicit rather than relying on implicit unit-of-work ordering.
             # Flush the parent first so PostgreSQL can satisfy the member FK.
-            await session.flush()
+            await db.flush()
             for member in draft.members:
-                session.add(
+                db.add(
                     FeedbackDatasetExportMemberRow(
                         export_id=export_id,
                         row_key=member.row_key,
@@ -400,17 +399,17 @@ class FeedbackDatasetExportRepository:
                         provenance_digest=_digest(member.provenance),
                     )
                 )
-            await session.flush()
-            return await _read_export_locked(session, row)
+            await db.flush()
+            return await _read_export_locked(db, row)
 
     async def read_export(self, export_id: str) -> DatasetExport | None:
-        async with self.session_factory() as session:
-            row = await session.get(FeedbackDatasetExportRow, export_id)
-            return await _read_export_locked(session, row) if row is not None else None
+        async with AsyncSessionLocal() as db:
+            row = await db.get(FeedbackDatasetExportRow, export_id)
+            return await _read_export_locked(db, row) if row is not None else None
 
 
 async def _read_current_members(
-    session: AsyncSession, dataset_id: str, *, sample_ids: tuple[str, ...]
+    db: AsyncSession, dataset_id: str, *, sample_ids: tuple[str, ...]
 ) -> tuple[ExportMember, ...]:
     statement = (
         select(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow, FeedbackCaseRow)
@@ -433,9 +432,9 @@ async def _read_current_members(
         .order_by(FeedbackCaseRow.case_id, FeedbackDatasetSampleRow.sample_id)
     )
     # Case writers lock the source before its samples; publication uses the same order.
-    await session.execute(statement.with_for_update(of=FeedbackCaseRow))
+    await db.execute(statement.with_for_update(of=FeedbackCaseRow))
     statement = statement.with_for_update(of=(FeedbackDatasetSampleRow, FeedbackSampleRevisionRow))
-    rows = (await session.execute(statement)).all()
+    rows = (await db.execute(statement)).all()
     for sample, _revision_row, case in rows:
         if case.status == "withdrawn":
             raise DatasetExportConflict("sample_source_stale")
@@ -492,9 +491,9 @@ async def _read_current_members(
 
 
 async def _read_export_locked(
-    session: AsyncSession, row: FeedbackDatasetExportRow
+    db: AsyncSession, row: FeedbackDatasetExportRow
 ) -> DatasetExport:
-    member_rows = list(await session.scalars(
+    member_rows = list(await db.scalars(
         select(FeedbackDatasetExportMemberRow)
         .where(FeedbackDatasetExportMemberRow.export_id == row.export_id)
         .order_by(FeedbackDatasetExportMemberRow.row_key)
@@ -502,14 +501,14 @@ async def _read_export_locked(
     revisions = {}
     if member_rows:
         revision_ids = [member.revision_id for member in member_rows]
-        revision_rows = await session.scalars(
+        revision_rows = await db.scalars(
             select(FeedbackSampleRevisionRow).where(
                 FeedbackSampleRevisionRow.revision_id.in_(revision_ids)
             )
         )
         revisions = {revision.revision_id: revision for revision in revision_rows}
         sample_ids = [member.sample_id for member in member_rows]
-        sample_rows = await session.scalars(
+        sample_rows = await db.scalars(
             select(FeedbackDatasetSampleRow).where(
                 FeedbackDatasetSampleRow.sample_id.in_(sample_ids)
             )

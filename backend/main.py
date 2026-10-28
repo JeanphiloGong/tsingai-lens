@@ -470,7 +470,7 @@ async def build_application_runtime(
             or ExperimentPlanRepository()
         )
         chat_repository = overrides.chat_repository or (
-            ChatRepository(session_factory)
+            ChatRepository()
             if overrides.chat_session_service is None
             else None
         )
@@ -482,11 +482,11 @@ async def build_application_runtime(
         if session_factory is not None:
             analysis_job_repository = (
                 analysis_job_repository
-                or AnalysisJobRepository(session_factory)
+                or AnalysisJobRepository()
             )
             feedback_case_repository = (
                 feedback_case_repository
-                or FeedbackCaseRepository(session_factory)
+                or FeedbackCaseRepository()
             )
             feedback_dataset_repository = (
                 feedback_dataset_repository
@@ -494,11 +494,11 @@ async def build_application_runtime(
             )
             feedback_dataset_sample_repository = (
                 feedback_dataset_sample_repository
-                or FeedbackDatasetSampleRepository(session_factory)
+                or FeedbackDatasetSampleRepository()
             )
             feedback_dataset_export_repository = (
                 feedback_dataset_export_repository
-                or FeedbackDatasetExportRepository(session_factory)
+                or FeedbackDatasetExportRepository()
             )
 
         feedback_analysis_worker = overrides.feedback_analysis_worker

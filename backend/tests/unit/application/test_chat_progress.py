@@ -17,7 +17,7 @@ def anyio_backend():
 async def test_heartbeat_preserves_research_phase_and_completed_counts(monkeypatch, *, postgres_session_factory):
     monkeypatch.setattr("application.chat.session_service._HEARTBEAT_INTERVAL_SECONDS", 0.1)
     monkeypatch.setattr("application.chat.session_service._SNAPSHOT_INTERVAL_SECONDS", 0.05)
-    service = _service(_Model(), ChatRepository(postgres_session_factory))
+    service = _service(_Model(), ChatRepository())
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     release = asyncio.Event()
 

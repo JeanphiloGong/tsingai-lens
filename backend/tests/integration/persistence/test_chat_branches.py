@@ -112,7 +112,7 @@ async def branch_app(postgres_session_factory, tmp_path):
         ),
         updated_at=NOW,
     )
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     chat = ChatSession.create(session_id="original", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW)
     await repository.add_session(chat)
     call = ChatToolCall.requested(
@@ -250,7 +250,7 @@ async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(bran
     await app.repository.save_trajectory(
         session=original, messages=messages, tool_calls=(), tool_results=(),
     )
-    reloaded = ChatRepository(app.factory)
+    reloaded = ChatRepository()
     assert (await reloaded.read_session("original")).is_pinned is True
     assert await reloaded.read_messages("original") == messages
     first = await app.client.get(BASE, params={"collection_id": "collection", "limit": 1})
@@ -469,7 +469,7 @@ async def test_branch_authorization_busy_worker_and_message_boundaries(branch_ap
         assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message_id": message_id})).status_code == 404
     for change in ({"message": " "}, {"message": "bad\x00question"}, {"message": "x" * 12001}, {"request_id": "invalid"}, {"user_id": "other"}):
         assert (await app.client.post(f"{BASE}/original/branches", json={**payload, **change})).status_code == 422
-    other_worker = ChatRepository(app.factory)
+    other_worker = ChatRepository()
     async with other_worker.session_execution("original"):
         assert (await app.client.get(f"{BASE}/original/messages")).json()["running"] is True
         assert (await app.client.post(f"{BASE}/original/branches", json=payload)).status_code == 409

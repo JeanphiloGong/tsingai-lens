@@ -150,7 +150,7 @@ def _service(
 
 
 async def test_chat_session_service_persists_ordinary_conversation(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="你好，我可以帮助你。")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
@@ -168,7 +168,7 @@ async def test_chat_session_service_persists_ordinary_conversation(*, postgres_s
 
 
 async def test_chat_session_access_uses_collection_owner_probe(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="answer")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
@@ -184,7 +184,7 @@ class _FailingAnalysisJobs:
 
 
 async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = ChatSessionService(
         collection_service=_CollectionService(),
         source_artifact_repository=SourceArtifactRepository(),
@@ -229,7 +229,7 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(*, 
 
 
 async def test_chat_session_service_persists_selected_source_with_user_message(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="这段原文报告了一个测量结果。")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
@@ -276,7 +276,7 @@ async def test_chat_session_service_persists_selected_source_with_user_message(*
 
 @pytest.mark.parametrize("forged_second_block", [False, True])
 async def test_selected_blocks_are_canonicalized_together_before_a_turn(forged_second_block: bool, *, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     sources = SourceArtifactRepository()
     methods = SourceBlock(
         block_id="methods", document_id="doc-1", block_type="paragraph",
@@ -315,7 +315,7 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(forged_s
 
 
 async def test_chat_session_service_rejects_source_from_another_collection(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     foreign_source = ChatSourceContext(
@@ -346,7 +346,7 @@ async def test_chat_session_service_rejects_source_from_another_collection(*, po
 
 
 async def test_chat_session_service_rejects_unknown_document_source(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     unknown_source = ChatSourceContext(
@@ -403,7 +403,7 @@ async def test_chat_session_service_rejects_unknown_document_source(*, postgres_
     ),
 )
 async def test_chat_session_service_rejects_forged_source_context(source_kind: str, source_ref: str, quote: str, error: str, *, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
@@ -437,7 +437,7 @@ async def test_chat_session_service_rejects_forged_source_context(source_kind: s
 
 
 async def test_chat_session_service_accepts_a_bounded_canonical_quote(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(
         _Model(ModelTurn(content="This is a partial Source quote.")), repository
     )
@@ -472,7 +472,7 @@ async def test_chat_session_service_accepts_a_bounded_canonical_quote(*, postgre
 
 
 async def test_chat_session_service_rejects_a_stale_source_digest(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="must not run")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     source_context = ChatSourceContext(
@@ -502,7 +502,7 @@ async def test_chat_session_service_rejects_a_stale_source_digest(*, postgres_se
 
 
 async def test_chat_session_service_streams_text_before_the_persisted_turn(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="逐段回复")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
@@ -550,7 +550,7 @@ class _PausedResponseModel:
 
 
 async def test_disconnected_response_restores_text_and_continues_with_the_same_message(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     model = _PausedResponseModel()
     service = _service(model, repository)
     reader = _service(model, repository)
@@ -600,7 +600,7 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
 
 
 async def test_interrupted_response_keeps_partial_text_without_claiming_it_completed(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     model = _PausedResponseModel()
     service = _service(model, repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
@@ -623,7 +623,7 @@ async def test_interrupted_response_keeps_partial_text_without_claiming_it_compl
 
 
 async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     started = asyncio.Event()
     release = asyncio.Event()
 
@@ -701,7 +701,7 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(*, po
 
 
 async def test_new_request_recovers_a_running_call_left_by_a_dead_worker(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     model = _Model(ModelTurn(content="The previous interruption was recovered."))
     service = _service(model, repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
@@ -833,7 +833,7 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker(*, post
 
 @pytest.mark.parametrize("transition", ["starts", "completes", "stops"])
 async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(transition, monkeypatch, *, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="unused")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     snapshot = ChatResponseSnapshot(
@@ -858,7 +858,7 @@ async def test_recovery_distinguishes_snapshot_changes_from_a_stopped_worker(tra
 
 
 async def test_approved_continuation_captures_text_without_repeating_the_write(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     capability = _WriteCapability()
     service = _service(_Model(ModelTurn(tool_calls=(ModelToolCall(
         name="create_objective_candidate", arguments={"question": "Compare matched LPBF tensile conditions"},
@@ -898,7 +898,7 @@ async def test_approved_continuation_captures_text_without_repeating_the_write(*
 
 
 async def test_approved_write_response_failure_preserves_saved_result_but_fails_turn(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     capability = _WriteCapability()
     service = _service(
         _Model(ModelTurn(tool_calls=(ModelToolCall(
@@ -947,7 +947,7 @@ async def test_approved_write_response_failure_preserves_saved_result_but_fails_
 
 
 async def test_chat_session_service_checkpoints_every_agent_step(*, postgres_session_factory, monkeypatch) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     from unittest.mock import AsyncMock
     save_trajectory = AsyncMock(wraps=repository.save_trajectory)
     monkeypatch.setattr(repository, "save_trajectory", save_trajectory)
@@ -1003,7 +1003,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
 
     now = [0.0]
     monkeypatch.setattr(agent_runner_module, "monotonic", lambda: now[0])
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     sources = SourceArtifactRepository()
     collection = _CollectionService()
     read = ReadSourceCapability(collection_service=collection, source_artifact_repository=sources)
@@ -1076,7 +1076,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
 
 
 async def test_chat_session_service_approves_exact_write_and_resumes(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     capability = _WriteCapability()
     service = _service(
         _Model(
@@ -1155,7 +1155,7 @@ async def test_chat_session_service_approves_exact_write_and_resumes(*, postgres
 
 
 async def test_chat_session_service_rejection_never_executes_write(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     capability = _WriteCapability()
     service = _service(
         _Model(
@@ -1200,7 +1200,7 @@ async def test_chat_session_service_rejection_never_executes_write(*, postgres_s
 
 
 async def test_rename_survives_continuation_and_rejects_non_owner(*, postgres_session_factory) -> None:
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     service = _service(_Model(ModelTurn(content="Evidence retained.")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     saved = await service.set_session_title_for_user(session.session_id, "user-1", title="  IN718 comparison  ")
@@ -1242,7 +1242,7 @@ async def test_approval_continuation_recovers_context_without_repeating_write(de
                 raise ModelResponseError("context rejected", reason="context_window_exceeded", retryable=False)
             return ModelTurn(content="The reviewed decision is recorded; comparable measurements remain uncertain.")
 
-    repository = ChatRepository(postgres_session_factory)
+    repository = ChatRepository()
     capability = _WriteCapability()
     model = RecoveringModel()
     service = _service(model, repository, capability)

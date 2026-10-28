@@ -92,8 +92,8 @@ from infra.persistence.postgres.models.objective import (
 from infra.persistence.postgres.transaction import database_session_scope
 from repositories.pipeline_run_repository import (
     ExecutionStats,
-    execution_stats_from_json,
-    execution_stats_record,
+    ModelUsage,
+    TokenUsage,
 )
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -1077,7 +1077,41 @@ class ObjectiveRepository:
                             active_row.payload.get("prompt_versions", {})
                         ).items()
                     },
-                    stats=execution_stats_from_json(active_row.payload.get("stats")),
+                    stats=ExecutionStats(
+                        duration_ms=(active_row.payload.get("stats") or {}).get(
+                            "duration_ms"
+                        ),
+                        model_usage=tuple(
+                            ModelUsage(
+                                model_name=item["model_name"],
+                                request_count=item["request_count"],
+                                token_usage=(
+                                    TokenUsage(
+                                        input_tokens=item["token_usage"][
+                                            "input_tokens"
+                                        ],
+                                        output_tokens=item["token_usage"][
+                                            "output_tokens"
+                                        ],
+                                        total_tokens=item["token_usage"][
+                                            "total_tokens"
+                                        ],
+                                    )
+                                    if item.get("token_usage") is not None
+                                    else None
+                                ),
+                                unreported_request_count=item.get(
+                                    "unreported_request_count", 0
+                                ),
+                            )
+                            for item in (active_row.payload.get("stats") or {}).get(
+                                "model_usage", ()
+                            )
+                        ),
+                        prompt_versions=(active_row.payload.get("stats") or {}).get(
+                            "prompt_versions", {}
+                        ),
+                    ),
                     status=active_row.payload.get("status", "queued"),
                     phase=active_row.payload.get("phase", "queued"),
                     processed_document_count=active_row.payload.get(
@@ -1194,7 +1228,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -1278,7 +1324,33 @@ class ObjectiveRepository:
                         row.payload.get("prompt_versions", {})
                     ).items()
                 },
-                stats=execution_stats_from_json(row.payload.get("stats")),
+                stats=ExecutionStats(
+                    duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
+                    model_usage=tuple(
+                        ModelUsage(
+                            model_name=item["model_name"],
+                            request_count=item["request_count"],
+                            token_usage=(
+                                TokenUsage(
+                                    input_tokens=item["token_usage"]["input_tokens"],
+                                    output_tokens=item["token_usage"]["output_tokens"],
+                                    total_tokens=item["token_usage"]["total_tokens"],
+                                )
+                                if item.get("token_usage") is not None
+                                else None
+                            ),
+                            unreported_request_count=item.get(
+                                "unreported_request_count", 0
+                            ),
+                        )
+                        for item in (row.payload.get("stats") or {}).get(
+                            "model_usage", ()
+                        )
+                    ),
+                    prompt_versions=(row.payload.get("stats") or {}).get(
+                        "prompt_versions", {}
+                    ),
+                ),
                 status=row.payload.get("status", "queued"),
                 phase=row.payload.get("phase", "queued"),
                 processed_document_count=row.payload.get("processed_document_count", 0),
@@ -1326,7 +1398,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -1405,7 +1489,33 @@ class ObjectiveRepository:
                         row.payload.get("prompt_versions", {})
                     ).items()
                 },
-                stats=execution_stats_from_json(row.payload.get("stats")),
+                stats=ExecutionStats(
+                    duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
+                    model_usage=tuple(
+                        ModelUsage(
+                            model_name=item["model_name"],
+                            request_count=item["request_count"],
+                            token_usage=(
+                                TokenUsage(
+                                    input_tokens=item["token_usage"]["input_tokens"],
+                                    output_tokens=item["token_usage"]["output_tokens"],
+                                    total_tokens=item["token_usage"]["total_tokens"],
+                                )
+                                if item.get("token_usage") is not None
+                                else None
+                            ),
+                            unreported_request_count=item.get(
+                                "unreported_request_count", 0
+                            ),
+                        )
+                        for item in (row.payload.get("stats") or {}).get(
+                            "model_usage", ()
+                        )
+                    ),
+                    prompt_versions=(row.payload.get("stats") or {}).get(
+                        "prompt_versions", {}
+                    ),
+                ),
                 status=row.payload.get("status", "queued"),
                 phase=row.payload.get("phase", "queued"),
                 processed_document_count=row.payload.get("processed_document_count", 0),
@@ -1458,7 +1568,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -1537,7 +1659,39 @@ class ObjectiveRepository:
                             row.payload.get("prompt_versions", {})
                         ).items()
                     },
-                    stats=execution_stats_from_json(row.payload.get("stats")),
+                    stats=ExecutionStats(
+                        duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
+                        model_usage=tuple(
+                            ModelUsage(
+                                model_name=item["model_name"],
+                                request_count=item["request_count"],
+                                token_usage=(
+                                    TokenUsage(
+                                        input_tokens=item["token_usage"][
+                                            "input_tokens"
+                                        ],
+                                        output_tokens=item["token_usage"][
+                                            "output_tokens"
+                                        ],
+                                        total_tokens=item["token_usage"][
+                                            "total_tokens"
+                                        ],
+                                    )
+                                    if item.get("token_usage") is not None
+                                    else None
+                                ),
+                                unreported_request_count=item.get(
+                                    "unreported_request_count", 0
+                                ),
+                            )
+                            for item in (row.payload.get("stats") or {}).get(
+                                "model_usage", ()
+                            )
+                        ),
+                        prompt_versions=(row.payload.get("stats") or {}).get(
+                            "prompt_versions", {}
+                        ),
+                    ),
                     status=row.payload.get("status", "queued"),
                     phase=row.payload.get("phase", "queued"),
                     processed_document_count=row.payload.get(
@@ -1591,7 +1745,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -1669,7 +1835,33 @@ class ObjectiveRepository:
                         row.payload.get("prompt_versions", {})
                     ).items()
                 },
-                stats=execution_stats_from_json(row.payload.get("stats")),
+                stats=ExecutionStats(
+                    duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
+                    model_usage=tuple(
+                        ModelUsage(
+                            model_name=item["model_name"],
+                            request_count=item["request_count"],
+                            token_usage=(
+                                TokenUsage(
+                                    input_tokens=item["token_usage"]["input_tokens"],
+                                    output_tokens=item["token_usage"]["output_tokens"],
+                                    total_tokens=item["token_usage"]["total_tokens"],
+                                )
+                                if item.get("token_usage") is not None
+                                else None
+                            ),
+                            unreported_request_count=item.get(
+                                "unreported_request_count", 0
+                            ),
+                        )
+                        for item in (row.payload.get("stats") or {}).get(
+                            "model_usage", ()
+                        )
+                    ),
+                    prompt_versions=(row.payload.get("stats") or {}).get(
+                        "prompt_versions", {}
+                    ),
+                ),
                 status=row.payload.get("status", "queued"),
                 phase=row.payload.get("phase", "queued"),
                 processed_document_count=row.payload.get("processed_document_count", 0),
@@ -1735,7 +1927,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -1809,7 +2013,39 @@ class ObjectiveRepository:
                             row.payload.get("prompt_versions", {})
                         ).items()
                     },
-                    stats=execution_stats_from_json(row.payload.get("stats")),
+                    stats=ExecutionStats(
+                        duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
+                        model_usage=tuple(
+                            ModelUsage(
+                                model_name=item["model_name"],
+                                request_count=item["request_count"],
+                                token_usage=(
+                                    TokenUsage(
+                                        input_tokens=item["token_usage"][
+                                            "input_tokens"
+                                        ],
+                                        output_tokens=item["token_usage"][
+                                            "output_tokens"
+                                        ],
+                                        total_tokens=item["token_usage"][
+                                            "total_tokens"
+                                        ],
+                                    )
+                                    if item.get("token_usage") is not None
+                                    else None
+                                ),
+                                unreported_request_count=item.get(
+                                    "unreported_request_count", 0
+                                ),
+                            )
+                            for item in (row.payload.get("stats") or {}).get(
+                                "model_usage", ()
+                            )
+                        ),
+                        prompt_versions=(row.payload.get("stats") or {}).get(
+                            "prompt_versions", {}
+                        ),
+                    ),
                     status=row.payload.get("status", "queued"),
                     phase=row.payload.get("phase", "queued"),
                     processed_document_count=row.payload.get(
@@ -1865,7 +2101,19 @@ class ObjectiveRepository:
                     "pipeline_version": analysis.pipeline_version,
                     "model_name": analysis.model_name,
                     "prompt_versions": dict(analysis.prompt_versions),
-                    "stats": execution_stats_record(analysis.stats),
+                    "stats": {
+                        "duration_ms": analysis.stats.duration_ms,
+                        "token_usage": (
+                            asdict(analysis.stats.token_usage)
+                            if analysis.stats.token_usage is not None
+                            else None
+                        ),
+                        "model_usage": [
+                            asdict(item) for item in analysis.stats.model_usage
+                        ],
+                        "unreported_request_count": analysis.stats.unreported_request_count,
+                        "prompt_versions": dict(analysis.stats.prompt_versions),
+                    },
                     "status": analysis.status,
                     "phase": analysis.phase,
                     "processed_document_count": analysis.processed_document_count,
@@ -1946,7 +2194,35 @@ class ObjectiveRepository:
                         analysis_row.payload.get("prompt_versions", {})
                     ).items()
                 },
-                stats=execution_stats_from_json(analysis_row.payload.get("stats")),
+                stats=ExecutionStats(
+                    duration_ms=(analysis_row.payload.get("stats") or {}).get(
+                        "duration_ms"
+                    ),
+                    model_usage=tuple(
+                        ModelUsage(
+                            model_name=item["model_name"],
+                            request_count=item["request_count"],
+                            token_usage=(
+                                TokenUsage(
+                                    input_tokens=item["token_usage"]["input_tokens"],
+                                    output_tokens=item["token_usage"]["output_tokens"],
+                                    total_tokens=item["token_usage"]["total_tokens"],
+                                )
+                                if item.get("token_usage") is not None
+                                else None
+                            ),
+                            unreported_request_count=item.get(
+                                "unreported_request_count", 0
+                            ),
+                        )
+                        for item in (analysis_row.payload.get("stats") or {}).get(
+                            "model_usage", ()
+                        )
+                    ),
+                    prompt_versions=(analysis_row.payload.get("stats") or {}).get(
+                        "prompt_versions", {}
+                    ),
+                ),
                 status=analysis_row.payload.get("status", "queued"),
                 phase=analysis_row.payload.get("phase", "queued"),
                 processed_document_count=analysis_row.payload.get(
@@ -2083,7 +2359,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -2186,7 +2474,35 @@ class ObjectiveRepository:
                         analysis_row.payload.get("prompt_versions", {})
                     ).items()
                 },
-                stats=execution_stats_from_json(analysis_row.payload.get("stats")),
+                stats=ExecutionStats(
+                    duration_ms=(analysis_row.payload.get("stats") or {}).get(
+                        "duration_ms"
+                    ),
+                    model_usage=tuple(
+                        ModelUsage(
+                            model_name=item["model_name"],
+                            request_count=item["request_count"],
+                            token_usage=(
+                                TokenUsage(
+                                    input_tokens=item["token_usage"]["input_tokens"],
+                                    output_tokens=item["token_usage"]["output_tokens"],
+                                    total_tokens=item["token_usage"]["total_tokens"],
+                                )
+                                if item.get("token_usage") is not None
+                                else None
+                            ),
+                            unreported_request_count=item.get(
+                                "unreported_request_count", 0
+                            ),
+                        )
+                        for item in (analysis_row.payload.get("stats") or {}).get(
+                            "model_usage", ()
+                        )
+                    ),
+                    prompt_versions=(analysis_row.payload.get("stats") or {}).get(
+                        "prompt_versions", {}
+                    ),
+                ),
                 status=analysis_row.payload.get("status", "queued"),
                 phase=analysis_row.payload.get("phase", "queued"),
                 processed_document_count=analysis_row.payload.get(
@@ -2311,7 +2627,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -2479,7 +2807,19 @@ class ObjectiveRepository:
                 "pipeline_version": analysis.pipeline_version,
                 "model_name": analysis.model_name,
                 "prompt_versions": dict(analysis.prompt_versions),
-                "stats": execution_stats_record(analysis.stats),
+                "stats": {
+                    "duration_ms": analysis.stats.duration_ms,
+                    "token_usage": (
+                        asdict(analysis.stats.token_usage)
+                        if analysis.stats.token_usage is not None
+                        else None
+                    ),
+                    "model_usage": [
+                        asdict(item) for item in analysis.stats.model_usage
+                    ],
+                    "unreported_request_count": analysis.stats.unreported_request_count,
+                    "prompt_versions": dict(analysis.stats.prompt_versions),
+                },
                 "status": analysis.status,
                 "phase": analysis.phase,
                 "processed_document_count": analysis.processed_document_count,
@@ -2586,7 +2926,39 @@ class ObjectiveRepository:
                             row.payload.get("prompt_versions", {})
                         ).items()
                     },
-                    stats=execution_stats_from_json(row.payload.get("stats")),
+                    stats=ExecutionStats(
+                        duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
+                        model_usage=tuple(
+                            ModelUsage(
+                                model_name=item["model_name"],
+                                request_count=item["request_count"],
+                                token_usage=(
+                                    TokenUsage(
+                                        input_tokens=item["token_usage"][
+                                            "input_tokens"
+                                        ],
+                                        output_tokens=item["token_usage"][
+                                            "output_tokens"
+                                        ],
+                                        total_tokens=item["token_usage"][
+                                            "total_tokens"
+                                        ],
+                                    )
+                                    if item.get("token_usage") is not None
+                                    else None
+                                ),
+                                unreported_request_count=item.get(
+                                    "unreported_request_count", 0
+                                ),
+                            )
+                            for item in (row.payload.get("stats") or {}).get(
+                                "model_usage", ()
+                            )
+                        ),
+                        prompt_versions=(row.payload.get("stats") or {}).get(
+                            "prompt_versions", {}
+                        ),
+                    ),
                     status=row.payload.get("status", "queued"),
                     phase=row.payload.get("phase", "queued"),
                     processed_document_count=row.payload.get(
@@ -2666,7 +3038,39 @@ class ObjectiveRepository:
                             row.payload.get("prompt_versions", {})
                         ).items()
                     },
-                    stats=execution_stats_from_json(row.payload.get("stats")),
+                    stats=ExecutionStats(
+                        duration_ms=(row.payload.get("stats") or {}).get("duration_ms"),
+                        model_usage=tuple(
+                            ModelUsage(
+                                model_name=item["model_name"],
+                                request_count=item["request_count"],
+                                token_usage=(
+                                    TokenUsage(
+                                        input_tokens=item["token_usage"][
+                                            "input_tokens"
+                                        ],
+                                        output_tokens=item["token_usage"][
+                                            "output_tokens"
+                                        ],
+                                        total_tokens=item["token_usage"][
+                                            "total_tokens"
+                                        ],
+                                    )
+                                    if item.get("token_usage") is not None
+                                    else None
+                                ),
+                                unreported_request_count=item.get(
+                                    "unreported_request_count", 0
+                                ),
+                            )
+                            for item in (row.payload.get("stats") or {}).get(
+                                "model_usage", ()
+                            )
+                        ),
+                        prompt_versions=(row.payload.get("stats") or {}).get(
+                            "prompt_versions", {}
+                        ),
+                    ),
                     status=row.payload.get("status", "queued"),
                     phase=row.payload.get("phase", "queued"),
                     processed_document_count=row.payload.get(

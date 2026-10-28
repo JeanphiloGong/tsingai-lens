@@ -43,7 +43,6 @@ from domain.core.research_objective import (
     build_paper_research_relationship,
     build_paper_research_signal,
 )
-from repositories.pipeline_run_repository import execution_stats_record
 
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
@@ -478,6 +477,7 @@ def run_baseline(
                 response_client
             ),
         )
+    stats = usage.execution_stats(duration_ms=int((perf_counter() - started) * 1000))
     return {
         "objectives": [
             {
@@ -486,9 +486,15 @@ def run_baseline(
             }
             for objective in facts.research_objectives
         ],
-        "execution_stats": execution_stats_record(
-            usage.execution_stats(duration_ms=int((perf_counter() - started) * 1000))
-        ),
+        "execution_stats": {
+            "duration_ms": stats.duration_ms,
+            "token_usage": (
+                asdict(stats.token_usage) if stats.token_usage is not None else None
+            ),
+            "model_usage": [asdict(item) for item in stats.model_usage],
+            "unreported_request_count": stats.unreported_request_count,
+            "prompt_versions": dict(stats.prompt_versions),
+        },
         "last_axis_trace": response_client.consume_last_trace(),
         "interest_filter": "none_in_current_discovery_contract",
     }
@@ -669,9 +675,16 @@ def run_proposal(
                     for error in exc.errors(include_input=False, include_url=False)
                 ]
     record["trace"] = response_client.consume_last_trace()
-    record["execution_stats"] = execution_stats_record(
-        usage.execution_stats(duration_ms=int((perf_counter() - started) * 1000))
-    )
+    stats = usage.execution_stats(duration_ms=int((perf_counter() - started) * 1000))
+    record["execution_stats"] = {
+        "duration_ms": stats.duration_ms,
+        "token_usage": (
+            asdict(stats.token_usage) if stats.token_usage is not None else None
+        ),
+        "model_usage": [asdict(item) for item in stats.model_usage],
+        "unreported_request_count": stats.unreported_request_count,
+        "prompt_versions": dict(stats.prompt_versions),
+    }
     record["duration_s"] = round(perf_counter() - started, 3)
     return record
 

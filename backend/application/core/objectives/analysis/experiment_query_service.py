@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from domain.core.comparison_group import ComparisonGroup
@@ -34,7 +34,6 @@ from repositories.paper_experiment_repository import (
     PaperExperimentRepository,
     StoredPaperExperimentRevision,
 )
-from repositories.pipeline_run_repository import execution_stats_record
 
 
 @dataclass(frozen=True)
@@ -942,7 +941,17 @@ def objective_analysis_response(value: ObjectiveAnalysis) -> dict[str, Any]:
         "pipeline_version": value.pipeline_version,
         "model_name": value.model_name,
         "prompt_versions": dict(value.prompt_versions),
-        "stats": execution_stats_record(value.stats),
+        "stats": {
+            "duration_ms": value.stats.duration_ms,
+            "token_usage": (
+                asdict(value.stats.token_usage)
+                if value.stats.token_usage is not None
+                else None
+            ),
+            "model_usage": [asdict(item) for item in value.stats.model_usage],
+            "unreported_request_count": value.stats.unreported_request_count,
+            "prompt_versions": dict(value.stats.prompt_versions),
+        },
         "status": value.status,
         "phase": value.phase,
         "processed_document_count": value.processed_document_count,

@@ -119,7 +119,7 @@ async def feedback_app(postgres_session_factory, tmp_path):
             message_id="answer", session_id="chat-1", content=ANSWER, created_at=NOW
         ),
     )
-    await repository.save_trajectory(session=chat, messages=messages, tool_calls=(call,), tool_results=(result,))
+    await repository.save_trajectory(chat_session=chat, messages=messages, tool_calls=(call,), tool_results=(result,))
     service = ChatSessionService(
         collection_service=CollectionService(collections, FileCollectionWorkspace(tmp_path)),
         source_artifact_repository=None, repository=repository, runner=None,

@@ -147,7 +147,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         created_at="2026-08-19T00:00:06+00:00",
     )
     await repository.save_trajectory(
-        session=chat.update(
+        chat_session=chat.update(
             user_id=chat.user_id,
             collection_id=chat.collection_id,
             updated_at="2026-08-19T00:00:06+00:00",
@@ -182,7 +182,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     with pytest.raises(FileNotFoundError):
         await repository.set_session_title(session_id=chat.session_id, user_id="other-user", title="Forbidden")
     await repository.save_trajectory(
-        session=chat.update(user_id=chat.user_id, collection_id=chat.collection_id, updated_at="2026-08-19T00:00:06+00:00"),
+        chat_session=chat.update(user_id=chat.user_id, collection_id=chat.collection_id, updated_at="2026-08-19T00:00:06+00:00"),
         messages=(user_message, assistant_call, tool_message, final_message),
         tool_calls=(read_call,), tool_results=(read_result,),
     )
@@ -207,7 +207,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         risk=ToolRisk.WRITE,
     ).require_approval()
     await repository.save_trajectory(
-        session=chat.update(
+        chat_session=chat.update(
             user_id=chat.user_id,
             collection_id=chat.collection_id,
             updated_at="2026-08-19T00:01:00+00:00",
@@ -346,7 +346,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
             for index, result in enumerate(observations)
         ),
     )
-    await repository.save_trajectory(session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
+    await repository.save_trajectory(chat_session=chat, messages=trajectory, tool_calls=(finished, *batch), tool_results=(write_result, *observations))
     reloaded = await ChatRepository().read_messages(chat.session_id)
     assert reloaded == trajectory
     assert await repository.read_message(user_message.message_id) == user_message

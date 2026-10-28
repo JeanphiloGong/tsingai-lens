@@ -454,7 +454,7 @@ class ChatSessionService:
                 fork_position=position, fork_content=content,
             )
             return await self.repository.add_branch(
-                session=branch, source_session_id=session_id, before_position=position,
+                chat_session=branch, source_session_id=session_id, before_position=position,
             )
 
     async def get_trajectory_for_user(self, session_id: str, user_id: str) -> dict[str, Any]:
@@ -1252,7 +1252,7 @@ class ChatSessionService:
                             )
                         )
                     await self.repository.save_trajectory(
-                        session=session.update(
+                        chat_session=session.update(
                             user_id=session.user_id,
                             collection_id=session.collection_id,
                             updated_at=messages[-1].created_at,
@@ -1335,7 +1335,7 @@ class ChatSessionService:
             )
         if results:
             await self.repository.save_trajectory(
-                session=session.update(
+                chat_session=session.update(
                     user_id=session.user_id,
                     collection_id=session.collection_id,
                     updated_at=messages[-1].created_at,
@@ -1597,7 +1597,7 @@ class ChatSessionService:
         ) -> None:
             updated_at = messages[-1].created_at if messages else _now_iso()
             await self.repository.save_trajectory(
-                session=session.update(
+                chat_session=session.update(
                     user_id=session.user_id,
                     collection_id=session.collection_id,
                     updated_at=updated_at,

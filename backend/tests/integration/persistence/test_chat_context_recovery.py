@@ -80,7 +80,7 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
         )
         calls.append(call)
         results.append(result)
-    await fixture.repository.save_trajectory(session=session, messages=tuple(history),
+    await fixture.repository.save_trajectory(chat_session=session, messages=tuple(history),
                                              tool_calls=tuple(calls), tool_results=tuple(results))
     requests = []
     answer = "The available records do not establish a comparable elongation ranking."

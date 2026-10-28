@@ -198,7 +198,7 @@ async def branch_app(postgres_session_factory, tmp_path):
             created_at=NOW,
         ),
     )
-    await repository.save_trajectory(session=chat, messages=messages, tool_calls=(call,), tool_results=(result,))
+    await repository.save_trajectory(chat_session=chat, messages=messages, tool_calls=(call,), tool_results=(result,))
     model = _Model(*(ModelTurn(content=ANSWER) for _ in range(8)))
     write = _WriteCapability()
     sources = _Sources()
@@ -248,7 +248,7 @@ async def test_pinned_comparison_survives_reload_checkpoints_and_pagination(bran
 
     # A model checkpoint that started before pinning must not undo the preference.
     await app.repository.save_trajectory(
-        session=original, messages=messages, tool_calls=(), tool_results=(),
+        chat_session=original, messages=messages, tool_calls=(), tool_results=(),
     )
     reloaded = ChatRepository()
     assert (await reloaded.read_session("original")).is_pinned is True
@@ -374,7 +374,7 @@ async def test_tree_and_checkpoint_enforce_ownership_busy_and_completed_boundari
     unanswered = ChatMessage.user(message_id="unanswered", session_id="original",
                                   content="What about cooling rate?", created_at=NOW)
     await app.repository.save_trajectory(
-        session=await app.repository.read_session("original"), messages=(*original, unanswered),
+        chat_session=await app.repository.read_session("original"), messages=(*original, unanswered),
         tool_calls=(), tool_results=(),
     )
     assert (await app.client.post(f"{BASE}/original/branches", json={**payload, "message_id": "unanswered"})).status_code == 422

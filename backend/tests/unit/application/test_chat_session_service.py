@@ -197,7 +197,7 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(*, 
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     await repository.save_trajectory(
-        session=session,
+        chat_session=session,
         messages=(
             ChatMessage.user(
                 message_id="question-1",
@@ -800,7 +800,7 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker(*, post
         risk=ToolRisk.READ,
     ).start("2026-10-10T00:00:02Z")
     await repository.save_trajectory(
-        session=session,
+        chat_session=session,
         messages=(user_message, assistant_message),
         tool_calls=(running,),
         tool_results=(),
@@ -1261,7 +1261,7 @@ async def test_approval_continuation_recovers_context_without_repeating_write(de
         for message in history for request in message.tool_calls
     )
     await repository.save_trajectory(
-        session=session, messages=history, tool_calls=calls,
+        chat_session=session, messages=history, tool_calls=calls,
         tool_results=tuple(message.tool_result for message in history if message.tool_result),
     )
     proposed = await service.post_message_for_user(session.session_id, "user-1", message="Save the reviewed objective.")

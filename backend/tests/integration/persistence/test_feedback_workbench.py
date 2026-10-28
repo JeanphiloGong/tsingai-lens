@@ -158,7 +158,7 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         created_at="2026-09-24T10:00:02+00:00",
     )
     await chat.save_trajectory(
-        session=session.update(
+        chat_session=session.update(
             user_id=USER_ID,
             collection_id=COLLECTION_ID,
             updated_at="2026-09-24T10:00:02+00:00",
@@ -475,7 +475,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
         final_answer,
     )
     await chain.chat.save_trajectory(
-        session=chain.session.update(
+        chat_session=chain.session.update(
             user_id=USER_ID,
             collection_id=COLLECTION_ID,
             updated_at="2026-09-24T10:00:05+00:00",

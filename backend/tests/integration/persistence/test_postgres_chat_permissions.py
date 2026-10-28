@@ -54,7 +54,7 @@ async def permission_case(postgres_session_factory):
             decision_basis=call.decision_basis,
             authorization_revision=call.authorization_revision,
         ),), created_at=now)
-    await repo.save_trajectory(session=session, messages=(message,), tool_calls=(call,), tool_results=())
+    await repo.save_trajectory(chat_session=session, messages=(message,), tool_calls=(call,), tool_results=())
     return repo, call, grant, now
 
 

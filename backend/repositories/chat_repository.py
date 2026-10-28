@@ -11,7 +11,6 @@ from uuid import uuid4
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from infra.persistence.database import AsyncSessionLocal
 
@@ -159,8 +158,8 @@ class ChatRepository:
 
     async def claim_automatic_call(self, *, session_id, tool_call_id, user_id, started_at):
         async with AsyncSessionLocal() as db, db.begin():
-            session = await db.get(ChatSessionRow, session_id, with_for_update=True)
-            if session is None or session.user_id != user_id:
+            session_row = await db.get(ChatSessionRow, session_id, with_for_update=True)
+            if session_row is None or session_row.user_id != user_id:
                 raise FileNotFoundError("chat session not found")
             row = await db.get(ChatToolCallRow, tool_call_id, with_for_update=True)
             if row is None or row.session_id != session_id:
@@ -171,8 +170,8 @@ class ChatRepository:
                 "expires_at": None,
                 "revision": 0,
             }
-            if session.operation_permission:
-                permission.update(session.operation_permission)
+            if session_row.operation_permission:
+                permission.update(session_row.operation_permission)
             call = ChatToolCall(
                 tool_call_id=row.tool_call_id,
                 session_id=row.session_id,
@@ -250,12 +249,12 @@ class ChatRepository:
                 ChatSessionRow.session_id == session_id,
             ).values(response_snapshot=payload))
 
-    async def read_session_family(self, session: ChatSession) -> tuple[ChatSession, ...]:
-        root_id = session.root_session_id or session.session_id
+    async def read_session_family(self, chat_session: ChatSession) -> tuple[ChatSession, ...]:
+        root_id = chat_session.root_session_id or chat_session.session_id
         async with AsyncSessionLocal() as db:
             rows = await db.scalars(select(ChatSessionRow).where(
-                ChatSessionRow.user_id == session.user_id,
-                ChatSessionRow.collection_id == session.collection_id,
+                ChatSessionRow.user_id == chat_session.user_id,
+                ChatSessionRow.collection_id == chat_session.collection_id,
                 or_(ChatSessionRow.session_id == root_id, ChatSessionRow.root_session_id == root_id),
             ).order_by(ChatSessionRow.created_at, ChatSessionRow.session_id))
             return tuple(
@@ -282,16 +281,16 @@ class ChatRepository:
             )
 
     async def add_branch(
-        self, *, session: ChatSession, source_session_id: str, before_position: int,
+        self, *, chat_session: ChatSession, source_session_id: str, before_position: int,
     ) -> ChatSession:
         async with AsyncSessionLocal() as db, db.begin():
             await db.execute(select(func.pg_advisory_xact_lock(
-                func.hashtextextended(f"chat-branch:{session.session_id}", 0),
+                func.hashtextextended(f"chat-branch:{chat_session.session_id}", 0),
             )))
             source = await db.get(ChatSessionRow, source_session_id, with_for_update=True)
-            if source is None or (source.user_id, source.collection_id) != (session.user_id, session.collection_id):
+            if source is None or (source.user_id, source.collection_id) != (chat_session.user_id, chat_session.collection_id):
                 raise ValueError("branch source must be an owned conversation")
-            existing = await db.get(ChatSessionRow, session.session_id)
+            existing = await db.get(ChatSessionRow, chat_session.session_id)
             if existing is not None:
                 saved = ChatSession(
                     session_id=existing.session_id,
@@ -314,8 +313,8 @@ class ChatRepository:
                 )
                 if (saved.user_id, saved.collection_id, saved.parent_session_id,
                     saved.fork_message_id, saved.fork_content) != (
-                    session.user_id, session.collection_id, session.parent_session_id,
-                    session.fork_message_id, session.fork_content,
+                    chat_session.user_id, chat_session.collection_id, chat_session.parent_session_id,
+                    chat_session.fork_message_id, chat_session.fork_content,
                 ):
                     raise ValueError("branch request identity was reused for a different revision")
                 return saved
@@ -338,16 +337,16 @@ class ChatRepository:
                 raise ValueError("branch history has unresolved tool results")
             db.add(
                 ChatSessionRow(
-                    session_id=session.session_id,
-                    user_id=session.user_id,
-                    collection_id=session.collection_id,
-                    created_at=_datetime(session.created_at),
-                    updated_at=_datetime(session.updated_at),
-                    root_session_id=session.root_session_id,
-                    parent_session_id=session.parent_session_id,
-                    fork_message_id=session.fork_message_id,
-                    fork_position=session.fork_position,
-                    fork_content=session.fork_content,
+                    session_id=chat_session.session_id,
+                    user_id=chat_session.user_id,
+                    collection_id=chat_session.collection_id,
+                    created_at=_datetime(chat_session.created_at),
+                    updated_at=_datetime(chat_session.updated_at),
+                    root_session_id=chat_session.root_session_id,
+                    parent_session_id=chat_session.parent_session_id,
+                    fork_message_id=chat_session.fork_message_id,
+                    fork_position=chat_session.fork_position,
+                    fork_content=chat_session.fork_content,
                 )
             )
             await db.flush()
@@ -358,7 +357,7 @@ class ChatRepository:
                     payload["tool_call_id"] = call_ids[row.tool_call_id]
                     content = json.dumps(payload, ensure_ascii=False, sort_keys=True)
                 db.add(ChatMessageRow(
-                    message_id=message_ids[row.message_id], session_id=session.session_id,
+                    message_id=message_ids[row.message_id], session_id=chat_session.session_id,
                     position=row.position, role=row.role, content=content,
                     tool_call_id=call_ids.get(row.tool_call_id),
                     source_contexts=row.source_contexts, created_at=row.created_at,
@@ -367,12 +366,12 @@ class ChatRepository:
             for call in copied_calls:
                 values = {column.name: getattr(call, column.name) for column in ChatToolCallRow.__table__.columns}
                 values.update(
-                    tool_call_id=call_ids[call.tool_call_id], session_id=session.session_id,
+                    tool_call_id=call_ids[call.tool_call_id], session_id=chat_session.session_id,
                     assistant_message_id=message_ids[call.assistant_message_id],
                 )
                 # Historical decisions describe completed work; only fresh calls can be approved.
                 db.add(ChatToolCallRow(**values))
-            return session
+            return chat_session
 
     async def add_session(self, record: ChatSession) -> None:
         async with AsyncSessionLocal() as db, db.begin():
@@ -1048,31 +1047,31 @@ class ChatRepository:
     async def save_trajectory(
         self,
         *,
-        session: ChatSession,
+        chat_session: ChatSession,
         messages: tuple[ChatMessage, ...],
         tool_calls: tuple[ChatToolCall, ...],
         tool_results: tuple[ChatToolResult, ...],
     ) -> None:
-        if any(message.session_id != session.session_id for message in messages):
+        if any(message.session_id != chat_session.session_id for message in messages):
             raise ValueError("chat message belongs to another session")
-        if any(call.session_id != session.session_id for call in tool_calls):
+        if any(call.session_id != chat_session.session_id for call in tool_calls):
             raise ValueError("chat tool call belongs to another session")
         async with AsyncSessionLocal() as db, db.begin():
             session_row = await db.get(
-                ChatSessionRow, session.session_id, with_for_update=True
+                ChatSessionRow, chat_session.session_id, with_for_update=True
             )
             if session_row is None:
-                raise ValueError(f"chat session not found: {session.session_id}")
+                raise ValueError(f"chat session not found: {chat_session.session_id}")
             if (
-                session_row.user_id != session.user_id
-                or session_row.collection_id != session.collection_id
+                session_row.user_id != chat_session.user_id
+                or session_row.collection_id != chat_session.collection_id
             ):
                 raise ValueError("session identity cannot be reassigned")
 
             existing_messages = tuple(
                 await db.scalars(
                     select(ChatMessageRow)
-                    .where(ChatMessageRow.session_id == session.session_id)
+                    .where(ChatMessageRow.session_id == chat_session.session_id)
                     .order_by(ChatMessageRow.position)
                 )
             )
@@ -1080,7 +1079,7 @@ class ChatRepository:
             incoming_ids = tuple(message.message_id for message in messages)
             if incoming_ids[: len(existing_ids)] != existing_ids:
                 raise ValueError("chat trajectory is append-only")
-            session_row.updated_at = _datetime(session.updated_at)
+            session_row.updated_at = _datetime(chat_session.updated_at)
 
             for position, message in enumerate(messages[len(existing_ids) :], len(existing_ids)):
                 if (
@@ -1180,7 +1179,7 @@ class ChatRepository:
             for message in messages:
                 for request in message.tool_calls:
                     call_row = await db.get(ChatToolCallRow, request.tool_call_id)
-                    if (call_row is None or call_row.session_id != session.session_id
+                    if (call_row is None or call_row.session_id != chat_session.session_id
                             or call_row.assistant_message_id != message.message_id
                             or ChatToolRequest(
                                 tool_call_id=call_row.tool_call_id,
@@ -1199,7 +1198,7 @@ class ChatRepository:
                 call_row = await db.get(
                     ChatToolCallRow, result.tool_call_id
                 )
-                if call_row is None or call_row.session_id != session.session_id:
+                if call_row is None or call_row.session_id != chat_session.session_id:
                     raise ValueError("tool result belongs to an unknown call")
                 call_row.result_status = result.status.value
                 call_row.result_data = dict(result.data)

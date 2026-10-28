@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -72,6 +73,17 @@ def _records(frame: pd.DataFrame, artifact_kind: str) -> list[dict]:
     for record in records:
         sanitized, removed_count = _remove_nul(record)
         sanitized_record = dict(sanitized)
+        if artifact_kind == "blocks":
+            raw_page = sanitized_record.get("page")
+            try:
+                page = float(raw_page) if raw_page is not None else 0.0
+            except (TypeError, ValueError):
+                page = 0.0
+            sanitized_record["page"] = (
+                int(page)
+                if math.isfinite(page) and page > 0 and page.is_integer()
+                else None
+            )
         sanitized_records.append(sanitized_record)
         if removed_count:
             artifact_id = next(

@@ -3,24 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from domain.core.document_profile import (
-    DocumentProfile,
-    ProfileStatus,
-    PROFILE_STATUS_COMPLETED,
-    PROFILE_STATUS_EXTRACTION_FAILED,
-    PROFILE_EXTRACTION_FAILED_WARNING,
-)
-from domain.shared.enums import (
-    DOC_TYPE_EXPERIMENTAL,
-    DOC_TYPE_REVIEW,
-    DOC_TYPE_MIXED,
-    DOC_TYPE_UNCERTAIN,
-)
+from domain.core.document_profile import DocumentProfile
 from infra.persistence.postgres.models.document import Document
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
@@ -37,7 +24,7 @@ class DocumentProfileRepository:
             "title": profile.title,
             "doc_type": profile.doc_type,
             "profile_warnings": list(profile.profile_warnings),
-            "confidence": round(float(profile.confidence), 2),
+            "confidence": round(profile.confidence, 2),
             "profile_status": profile.profile_status,
             "source_fingerprint": profile.source_fingerprint,
             "profile_version": profile.profile_version,
@@ -85,22 +72,18 @@ class DocumentProfileRepository:
             )
             if row is None or not row.profile_json:
                 return None
-            payload = dict(row.profile_json or {})
-            payload.setdefault("document_id", row.document_id)
-            warnings = _normalize_string_tuple(payload.get("profile_warnings"))
+            payload = row.profile_json
             profile = DocumentProfile(
-                document_id=str(payload.get("document_id") or ""),
-                title=_normalize_optional_text(payload.get("title")),
-                doc_type=_normalize_doc_type(payload.get("doc_type")),
-                profile_warnings=warnings,
-                confidence=round(float(payload.get("confidence") or 0.0), 2),
-                profile_status=_normalize_profile_status(
-                    payload.get("profile_status"), warnings=warnings
-                ),
-                source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
-                profile_version=_normalize_optional_text(payload.get("profile_version")),
-                profile_fingerprint=_normalize_optional_text(payload.get("profile_fingerprint")),
-                generated_at=_normalize_optional_text(payload.get("generated_at")),
+                document_id=row.document_id,
+                title=payload["title"],
+                doc_type=payload["doc_type"],
+                profile_warnings=tuple(payload["profile_warnings"]),
+                confidence=payload["confidence"],
+                profile_status=payload["profile_status"],
+                source_fingerprint=payload["source_fingerprint"],
+                profile_version=payload["profile_version"],
+                profile_fingerprint=payload["profile_fingerprint"],
+                generated_at=payload["generated_at"],
             )
             return profile
 
@@ -131,124 +114,21 @@ class DocumentProfileRepository:
             for row in rows:
                 if not row.profile_json:
                     continue
-                payload = dict(row.profile_json or {})
-                payload.setdefault("document_id", row.document_id)
-                warnings = _normalize_string_tuple(payload.get("profile_warnings"))
+                payload = row.profile_json
                 profile = DocumentProfile(
-                    document_id=str(payload.get("document_id") or ""),
-                    title=_normalize_optional_text(payload.get("title")),
-                    doc_type=_normalize_doc_type(payload.get("doc_type")),
-                    profile_warnings=warnings,
-                    confidence=round(float(payload.get("confidence") or 0.0), 2),
-                    profile_status=_normalize_profile_status(
-                        payload.get("profile_status"), warnings=warnings
-                    ),
-                    source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
-                    profile_version=_normalize_optional_text(payload.get("profile_version")),
-                    profile_fingerprint=_normalize_optional_text(payload.get("profile_fingerprint")),
-                    generated_at=_normalize_optional_text(payload.get("generated_at")),
+                    document_id=row.document_id,
+                    title=payload["title"],
+                    doc_type=payload["doc_type"],
+                    profile_warnings=tuple(payload["profile_warnings"]),
+                    confidence=payload["confidence"],
+                    profile_status=payload["profile_status"],
+                    source_fingerprint=payload["source_fingerprint"],
+                    profile_version=payload["profile_version"],
+                    profile_fingerprint=payload["profile_fingerprint"],
+                    generated_at=payload["generated_at"],
                 )
                 profiles.append(profile)
             return tuple(profiles)
 
 
-def _normalize_optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _normalize_string_tuple(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        text = value.strip()
-        return (text,) if text else ()
-    if isinstance(value, (list, tuple, set)):
-        return tuple(str(item) for item in value if str(item).strip())
-    if hasattr(value, "tolist") and not isinstance(value, (dict, bytes)):
-        converted = value.tolist()
-        if converted is not value:
-            return _normalize_string_tuple(converted)
-    text = str(value).strip()
-    return (text,) if text else ()
-
-
-def _normalize_doc_type(
-    value: Any,
-) -> str:
-    raw = _normalize_label(value)
-    if raw in {
-        DOC_TYPE_EXPERIMENTAL,
-        DOC_TYPE_REVIEW,
-        DOC_TYPE_MIXED,
-        DOC_TYPE_UNCERTAIN,
-    }:
-        return raw
-
-    if raw in {
-        "research article",
-        "research paper",
-        "original research",
-        "original article",
-        "primary research",
-        "primary study",
-        "empirical study",
-        "experiment",
-        "experimental study",
-    }:
-        return DOC_TYPE_EXPERIMENTAL
-
-    if raw in {
-        "review article",
-        "review paper",
-        "literature review",
-        "survey",
-        "overview",
-        "perspective",
-    }:
-        return DOC_TYPE_REVIEW
-
-    if raw in {
-        "mixed",
-        "mixed study",
-        "mixed article",
-    }:
-        return DOC_TYPE_MIXED
-
-    if raw in {
-        "",
-        "unknown",
-        "unclear",
-        "other",
-        "n/a",
-        "na",
-    }:
-        return DOC_TYPE_UNCERTAIN
-
-    return DOC_TYPE_UNCERTAIN
-
-
-def _normalize_profile_status(
-    value: Any,
-    *,
-    warnings: tuple[str, ...] = (),
-) -> ProfileStatus:
-    normalized = _normalize_label(value)
-    if (
-        normalized.replace(" ", "_") == PROFILE_STATUS_EXTRACTION_FAILED
-        or PROFILE_EXTRACTION_FAILED_WARNING in warnings
-    ):
-        return PROFILE_STATUS_EXTRACTION_FAILED
-    return PROFILE_STATUS_COMPLETED
-
-
-def _normalize_label(value: Any) -> str:
-    text = _normalize_optional_text(value)
-    if text is None:
-        return ""
-    return text.lower().replace("_", " ").replace("-", " ")
-
-
-__all__ = ['DocumentProfileRepository']
+__all__ = ["DocumentProfileRepository"]

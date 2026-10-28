@@ -10,7 +10,7 @@ def first_page(provenance: Any) -> int | None:
         return None
     first = provenance[0]
     page_no = getattr(first, "page_no", None)
-    return int(page_no) if page_no is not None else None
+    return page_no
 
 
 def first_bbox(provenance: Any) -> Any | None:

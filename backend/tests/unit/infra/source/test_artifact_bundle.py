@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
+import pytest
 
 from infra.source.artifact_bundle import SourceArtifactBundle
 
@@ -112,3 +113,51 @@ def test_to_documents_removes_nul_from_all_source_text(caplog):
     assert all("\x00" not in str(value) for value in values)
     assert "documents" in caplog.text
     assert "doc_1" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("raw_page", "expected"),
+    [
+        (1, 1),
+        (2.0, 2),
+        ("3", 3),
+        (None, None),
+        (0, None),
+        (-1, None),
+        (1.5, None),
+        (float("nan"), None),
+        (float("inf"), None),
+        ("invalid", None),
+    ],
+)
+def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
+    from application.core.document_profiles.service import DocumentProfileService
+
+    bundle = SourceArtifactBundle(
+        documents=pd.DataFrame([{"id": "doc_1"}]),
+        text_units=pd.DataFrame(),
+        blocks=pd.DataFrame(
+            [
+                {
+                    "block_id": "block_1",
+                    "document_id": "doc_1",
+                    "text": "Laser power versus porosity.",
+                    "page": raw_page,
+                }
+            ]
+        ),
+        figures=pd.DataFrame(),
+        tables=pd.DataFrame(),
+        table_rows=pd.DataFrame(),
+        table_cells=pd.DataFrame(),
+        figure_assets={},
+    )
+    document = bundle.to_documents()[0]
+    content = DocumentProfileService(None, None, None)._build_document_content_blocks(
+        "", list(document.blocks)
+    )
+
+    assert document.blocks[0].page == expected
+    assert content[0]["page"] == expected
+    assert content[0]["block_id"] == "block_1"
+    assert content[0]["text"] == "Laser power versus porosity."

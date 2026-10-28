@@ -11,7 +11,6 @@ from application.core.document_profiles.extraction import (
     DocumentProfileModelOutput,
 )
 from application.core.document_profiles.service import (
-    _profile_response,
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
@@ -372,7 +371,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
     with caplog.at_level("WARNING"):
         profiles = await _build_profiles(profile_service, collection_id)
 
-    records = {profile.document_id: _profile_response(profile) for profile in profiles}
+    records = {profile["document_id"]: profile for profile in (await profile_service.list_document_profiles(collection_id))["items"]}
     assert records["paper-failed"]["doc_type"] == "uncertain"
     assert records["paper-failed"]["confidence"] == 0.0
     assert records["paper-failed"]["profile_warnings"] == [
@@ -443,7 +442,7 @@ async def test_document_profile_service_round_trips_repository_storage_fields(tm
     await _build_profiles(profile_service, collection_id)
 
     restored = await profile_service.read_document_profiles(collection_id)
-    assert isinstance(_profile_response(restored[0])["profile_warnings"], list)
+    assert isinstance((await profile_service.get_document_profile(collection_id, restored[0].document_id))["profile_warnings"], list)
 
 
 async def test_single_paper_reads_do_not_hydrate_other_papers(tmp_path, monkeypatch, *, postgres_session_factory):

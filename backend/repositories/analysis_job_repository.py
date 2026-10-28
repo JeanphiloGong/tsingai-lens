@@ -180,7 +180,25 @@ class AnalysisJobRepository:
                 )
                 if existing is not None:
                     _ensure_feedback_identity(existing, feedback_id)
-                    return _job(existing)
+                    return AnalysisJob(
+                        job_id=existing.job_id,
+                        job_type=existing.job_type,
+                        payload_version=existing.payload_version,
+                        payload=dict(existing.payload or {}),
+                        status=existing.status,
+                        idempotency_key=existing.idempotency_key,
+                        available_at=_iso(existing.available_at),
+                        created_at=_iso(existing.created_at),
+                        updated_at=_iso(existing.updated_at),
+                        started_at=_optional_iso(existing.started_at),
+                        finished_at=_optional_iso(existing.finished_at),
+                        result_id=existing.result_id,
+                        error_code=existing.error_code,
+                        worker_id=existing.worker_id,
+                        lease_expires_at=_optional_iso(existing.lease_expires_at),
+                        heartbeat_at=_optional_iso(existing.heartbeat_at),
+                        lease_version=existing.lease_version,
+                    )
                 row = AnalysisJobRow(
                     job_id=f"job_{uuid4().hex[:32]}",
                     job_type="feedback_analysis",
@@ -198,7 +216,25 @@ class AnalysisJobRepository:
                 )
                 session.add(row)
                 await session.flush()
-                return _job(row)
+                return AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
         except IntegrityError:
             # A concurrent producer may have won the unique idempotency key.
             async with self.session_factory() as session:
@@ -210,7 +246,25 @@ class AnalysisJobRepository:
                 if existing is None:
                     raise
                 _ensure_feedback_identity(existing, feedback_id)
-                return _job(existing)
+                return AnalysisJob(
+                    job_id=existing.job_id,
+                    job_type=existing.job_type,
+                    payload_version=existing.payload_version,
+                    payload=dict(existing.payload or {}),
+                    status=existing.status,
+                    idempotency_key=existing.idempotency_key,
+                    available_at=_iso(existing.available_at),
+                    created_at=_iso(existing.created_at),
+                    updated_at=_iso(existing.updated_at),
+                    started_at=_optional_iso(existing.started_at),
+                    finished_at=_optional_iso(existing.finished_at),
+                    result_id=existing.result_id,
+                    error_code=existing.error_code,
+                    worker_id=existing.worker_id,
+                    lease_expires_at=_optional_iso(existing.lease_expires_at),
+                    heartbeat_at=_optional_iso(existing.heartbeat_at),
+                    lease_version=existing.lease_version,
+                )
 
     async def enqueue_correction_signal_analysis(
         self,
@@ -260,7 +314,25 @@ class AnalysisJobRepository:
                 )
                 if existing is not None:
                     _ensure_correction_identity(existing, payload)
-                    return _job(existing)
+                    return AnalysisJob(
+                        job_id=existing.job_id,
+                        job_type=existing.job_type,
+                        payload_version=existing.payload_version,
+                        payload=dict(existing.payload or {}),
+                        status=existing.status,
+                        idempotency_key=existing.idempotency_key,
+                        available_at=_iso(existing.available_at),
+                        created_at=_iso(existing.created_at),
+                        updated_at=_iso(existing.updated_at),
+                        started_at=_optional_iso(existing.started_at),
+                        finished_at=_optional_iso(existing.finished_at),
+                        result_id=existing.result_id,
+                        error_code=existing.error_code,
+                        worker_id=existing.worker_id,
+                        lease_expires_at=_optional_iso(existing.lease_expires_at),
+                        heartbeat_at=_optional_iso(existing.heartbeat_at),
+                        lease_version=existing.lease_version,
+                    )
                 row = AnalysisJobRow(
                     job_id=f"job_{uuid4().hex[:32]}",
                     job_type=CORRECTION_SIGNAL_JOB_TYPE,
@@ -278,7 +350,25 @@ class AnalysisJobRepository:
                 )
                 session.add(row)
                 await session.flush()
-                return _job(row)
+                return AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
         except IntegrityError:
             async with self.session_factory() as session:
                 existing = await session.scalar(
@@ -289,7 +379,25 @@ class AnalysisJobRepository:
                 if existing is None:
                     raise
                 _ensure_correction_identity(existing, payload)
-                return _job(existing)
+                return AnalysisJob(
+                    job_id=existing.job_id,
+                    job_type=existing.job_type,
+                    payload_version=existing.payload_version,
+                    payload=dict(existing.payload or {}),
+                    status=existing.status,
+                    idempotency_key=existing.idempotency_key,
+                    available_at=_iso(existing.available_at),
+                    created_at=_iso(existing.created_at),
+                    updated_at=_iso(existing.updated_at),
+                    started_at=_optional_iso(existing.started_at),
+                    finished_at=_optional_iso(existing.finished_at),
+                    result_id=existing.result_id,
+                    error_code=existing.error_code,
+                    worker_id=existing.worker_id,
+                    lease_expires_at=_optional_iso(existing.lease_expires_at),
+                    heartbeat_at=_optional_iso(existing.heartbeat_at),
+                    lease_version=existing.lease_version,
+                )
 
     async def enqueue_tool_failure_analysis(
         self,
@@ -343,7 +451,25 @@ class AnalysisJobRepository:
                 )
                 if existing is not None:
                     _ensure_tool_failure_identity(existing, payload)
-                    return _job(existing)
+                    return AnalysisJob(
+                        job_id=existing.job_id,
+                        job_type=existing.job_type,
+                        payload_version=existing.payload_version,
+                        payload=dict(existing.payload or {}),
+                        status=existing.status,
+                        idempotency_key=existing.idempotency_key,
+                        available_at=_iso(existing.available_at),
+                        created_at=_iso(existing.created_at),
+                        updated_at=_iso(existing.updated_at),
+                        started_at=_optional_iso(existing.started_at),
+                        finished_at=_optional_iso(existing.finished_at),
+                        result_id=existing.result_id,
+                        error_code=existing.error_code,
+                        worker_id=existing.worker_id,
+                        lease_expires_at=_optional_iso(existing.lease_expires_at),
+                        heartbeat_at=_optional_iso(existing.heartbeat_at),
+                        lease_version=existing.lease_version,
+                    )
                 row = AnalysisJobRow(
                     job_id=f"job_{uuid4().hex[:32]}",
                     job_type=TOOL_FAILURE_JOB_TYPE,
@@ -361,7 +487,25 @@ class AnalysisJobRepository:
                 )
                 session.add(row)
                 await session.flush()
-                return _job(row)
+                return AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
         except IntegrityError:
             async with self.session_factory() as session:
                 existing = await session.scalar(
@@ -372,7 +516,25 @@ class AnalysisJobRepository:
                 if existing is None:
                     raise
                 _ensure_tool_failure_identity(existing, payload)
-                return _job(existing)
+                return AnalysisJob(
+                    job_id=existing.job_id,
+                    job_type=existing.job_type,
+                    payload_version=existing.payload_version,
+                    payload=dict(existing.payload or {}),
+                    status=existing.status,
+                    idempotency_key=existing.idempotency_key,
+                    available_at=_iso(existing.available_at),
+                    created_at=_iso(existing.created_at),
+                    updated_at=_iso(existing.updated_at),
+                    started_at=_optional_iso(existing.started_at),
+                    finished_at=_optional_iso(existing.finished_at),
+                    result_id=existing.result_id,
+                    error_code=existing.error_code,
+                    worker_id=existing.worker_id,
+                    lease_expires_at=_optional_iso(existing.lease_expires_at),
+                    heartbeat_at=_optional_iso(existing.heartbeat_at),
+                    lease_version=existing.lease_version,
+                )
 
     async def claim_next_feedback_analysis_job(self, now: str) -> AnalysisJob | None:
         timestamp = _datetime(now)
@@ -399,7 +561,25 @@ class AnalysisJobRepository:
             _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
             await session.flush()
-            return _job(row)
+            return AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            )
 
     async def claim_next_correction_signal_analysis_job(
         self, now: str
@@ -428,9 +608,29 @@ class AnalysisJobRepository:
             _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
             await session.flush()
-            return _job(row)
+            return AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            )
 
-    async def claim_next_tool_failure_analysis_job(self, now: str) -> AnalysisJob | None:
+    async def claim_next_tool_failure_analysis_job(
+        self, now: str
+    ) -> AnalysisJob | None:
         timestamp = _datetime(now)
         async with self.session_factory.begin() as session:
             row = await session.scalar(
@@ -455,7 +655,25 @@ class AnalysisJobRepository:
             _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
             row.updated_at = timestamp
             await session.flush()
-            return _job(row)
+            return AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            )
 
     async def claim_next_dataset_sample_build_job(self, now: str) -> AnalysisJob | None:
         """Claim exactly one sample build and mark its sample as building.
@@ -492,7 +710,25 @@ class AnalysisJobRepository:
                 row.updated_at = timestamp
                 row.error_code = "dataset_sample_build_payload_invalid"
                 await session.flush()
-                return _job(row)
+                return AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
             sample = await session.scalar(
                 select(FeedbackDatasetSampleRow)
                 .where(FeedbackDatasetSampleRow.sample_id == sample_id)
@@ -509,7 +745,25 @@ class AnalysisJobRepository:
                 row.updated_at = timestamp
                 row.error_code = "sample_build_superseded"
                 await session.flush()
-                return _job(row)
+                return AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
             row.status = "running"
             row.started_at = timestamp
             _assign_lease(row, timestamp, self.worker_id, self.lease_seconds)
@@ -517,7 +771,25 @@ class AnalysisJobRepository:
             sample.status = "building"
             sample.updated_at = timestamp
             await session.flush()
-            return _job(row)
+            return AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            )
 
     async def mark_succeeded(
         self,
@@ -602,7 +874,25 @@ class AnalysisJobRepository:
             if row.result_id is not None:
                 raise ValueError("failed analysis job with a result cannot be requeued")
 
-            requeued = _job(row).requeue_failed_feedback_analysis(available_at)
+            requeued = AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            ).requeue_failed_feedback_analysis(available_at)
             row.status = requeued.status
             row.available_at = timestamp
             row.started_at = None
@@ -612,7 +902,25 @@ class AnalysisJobRepository:
             _clear_lease(row)
             row.updated_at = timestamp
             await session.flush()
-            return _job(row)
+            return AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            )
 
     async def recover_expired_jobs(self, now: str) -> int:
         """Return jobs whose worker lease expired to the pending queue."""
@@ -686,7 +994,25 @@ class AnalysisJobRepository:
             row.heartbeat_at = timestamp
             row.updated_at = timestamp
             await session.flush()
-            return _job(row)
+            return AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            )
 
     async def cancel_feedback_analysis_jobs(
         self,
@@ -781,15 +1107,53 @@ class AnalysisJobRepository:
                     lease_version=lease_version,
                     timestamp=timestamp,
                 ):
-                    return _job(row)
+                    return AnalysisJob(
+                        job_id=row.job_id,
+                        job_type=row.job_type,
+                        payload_version=row.payload_version,
+                        payload=dict(row.payload or {}),
+                        status=row.status,
+                        idempotency_key=row.idempotency_key,
+                        available_at=_iso(row.available_at),
+                        created_at=_iso(row.created_at),
+                        updated_at=_iso(row.updated_at),
+                        started_at=_optional_iso(row.started_at),
+                        finished_at=_optional_iso(row.finished_at),
+                        result_id=row.result_id,
+                        error_code=row.error_code,
+                        worker_id=row.worker_id,
+                        lease_expires_at=_optional_iso(row.lease_expires_at),
+                        heartbeat_at=_optional_iso(row.heartbeat_at),
+                        lease_version=row.lease_version,
+                    )
             if row.status in {"succeeded", "failed", "cancelled"}:
                 if (
                     row.status != status
                     or row.result_id != result_id
                     or row.error_code != error_code
                 ):
-                    raise ValueError("analysis job is already in a different terminal state")
-                return _job(row)
+                    raise ValueError(
+                        "analysis job is already in a different terminal state"
+                    )
+                return AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
             if row.status not in {"pending", "running"}:
                 raise ValueError(f"analysis job cannot finish from {row.status}")
             row.status = status
@@ -799,12 +1163,52 @@ class AnalysisJobRepository:
             row.error_code = error_code
             _clear_lease(row)
             await session.flush()
-            return _job(row)
+            return AnalysisJob(
+                job_id=row.job_id,
+                job_type=row.job_type,
+                payload_version=row.payload_version,
+                payload=dict(row.payload or {}),
+                status=row.status,
+                idempotency_key=row.idempotency_key,
+                available_at=_iso(row.available_at),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+                result_id=row.result_id,
+                error_code=row.error_code,
+                worker_id=row.worker_id,
+                lease_expires_at=_optional_iso(row.lease_expires_at),
+                heartbeat_at=_optional_iso(row.heartbeat_at),
+                lease_version=row.lease_version,
+            )
 
     async def read_job(self, job_id: str) -> AnalysisJob | None:
         async with self.session_factory() as session:
             row = await session.get(AnalysisJobRow, job_id)
-            return _job(row) if row is not None else None
+            return (
+                AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
+                if row is not None
+                else None
+            )
 
     async def list_jobs(
         self,
@@ -821,13 +1225,38 @@ class AnalysisJobRepository:
             statement = statement.where(AnalysisJobRow.job_type == job_type)
         if status is not None:
             statement = statement.where(AnalysisJobRow.status == status)
-        statement = statement.order_by(
-            AnalysisJobRow.created_at,
-            AnalysisJobRow.job_id,
-        ).offset(offset).limit(limit)
+        statement = (
+            statement.order_by(
+                AnalysisJobRow.created_at,
+                AnalysisJobRow.job_id,
+            )
+            .offset(offset)
+            .limit(limit)
+        )
         async with self.session_factory() as session:
             rows = await session.scalars(statement)
-            return tuple(_job(row) for row in rows)
+            return tuple(
+                AnalysisJob(
+                    job_id=row.job_id,
+                    job_type=row.job_type,
+                    payload_version=row.payload_version,
+                    payload=dict(row.payload or {}),
+                    status=row.status,
+                    idempotency_key=row.idempotency_key,
+                    available_at=_iso(row.available_at),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    started_at=_optional_iso(row.started_at),
+                    finished_at=_optional_iso(row.finished_at),
+                    result_id=row.result_id,
+                    error_code=row.error_code,
+                    worker_id=row.worker_id,
+                    lease_expires_at=_optional_iso(row.lease_expires_at),
+                    heartbeat_at=_optional_iso(row.heartbeat_at),
+                    lease_version=row.lease_version,
+                )
+                for row in rows
+            )
 
 
 def _ensure_feedback_identity(row: AnalysisJobRow, feedback_id: str) -> None:
@@ -854,12 +1283,16 @@ def _completion_lease_matches(
     lease_version: int | None,
     timestamp: datetime,
 ) -> bool:
-    return bool(worker_id) and lease_version is not None and (
-        row.status == "running"
-        and row.worker_id == worker_id
-        and row.lease_version == lease_version
-        and row.lease_expires_at is not None
-        and row.lease_expires_at > timestamp
+    return (
+        bool(worker_id)
+        and lease_version is not None
+        and (
+            row.status == "running"
+            and row.worker_id == worker_id
+            and row.lease_version == lease_version
+            and row.lease_expires_at is not None
+            and row.lease_expires_at > timestamp
+        )
     )
 
 
@@ -882,40 +1315,14 @@ def _clear_lease(row: AnalysisJobRow) -> None:
     row.heartbeat_at = None
 
 
-def _ensure_correction_identity(
-    row: AnalysisJobRow, payload: dict[str, str]
-) -> None:
+def _ensure_correction_identity(row: AnalysisJobRow, payload: dict[str, str]) -> None:
     if row.job_type != CORRECTION_SIGNAL_JOB_TYPE or dict(row.payload or {}) != payload:
         raise ValueError("idempotency key is already bound to another analysis input")
 
 
-def _ensure_tool_failure_identity(
-    row: AnalysisJobRow, payload: dict[str, str]
-) -> None:
+def _ensure_tool_failure_identity(row: AnalysisJobRow, payload: dict[str, str]) -> None:
     if row.job_type != TOOL_FAILURE_JOB_TYPE or dict(row.payload or {}) != payload:
         raise ValueError("idempotency key is already bound to another analysis input")
-
-
-def _job(row: AnalysisJobRow) -> AnalysisJob:
-    return AnalysisJob(
-        job_id=row.job_id,
-        job_type=row.job_type,
-        payload_version=row.payload_version,
-        payload=dict(row.payload or {}),
-        status=row.status,
-        idempotency_key=row.idempotency_key,
-        available_at=_iso(row.available_at),
-        created_at=_iso(row.created_at),
-        updated_at=_iso(row.updated_at),
-        started_at=_optional_iso(row.started_at),
-        finished_at=_optional_iso(row.finished_at),
-        result_id=row.result_id,
-        error_code=row.error_code,
-        worker_id=row.worker_id,
-        lease_expires_at=_optional_iso(row.lease_expires_at),
-        heartbeat_at=_optional_iso(row.heartbeat_at),
-        lease_version=row.lease_version,
-    )
 
 
 def _datetime(value: Any) -> datetime:
@@ -939,4 +1346,4 @@ def _optional_iso(value: datetime | None) -> str | None:
     return _iso(value) if value is not None else None
 
 
-__all__ = ['AnalysisJob', 'AnalysisJobStatus', 'AnalysisJobRepository']
+__all__ = ["AnalysisJob", "AnalysisJobStatus", "AnalysisJobRepository"]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 from application.core.objectives.analysis.experiment_query_service import (
     finding_response,
 )
@@ -34,7 +36,8 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-from repositories.objective_repository import _finding_from_snapshot
+from repositories.objective_repository import ObjectiveRepository
+from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
 
 
 def _evidence(
@@ -224,8 +227,16 @@ def test_experiment_backed_finding_keeps_selection_and_optional_group_refs() -> 
         selection_ids=("selection-1",),
     )
 
-    record = finding_response(finding)
-    restored = _finding_from_snapshot(record)
+    row = ObjectiveAnalysisRecord(payload={})
+    ObjectiveRepository._write_result_records(row, (), (finding,))
+    session = MagicMock()
+    session.get = AsyncMock(return_value=row)
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    repository = ObjectiveRepository(lambda: session)
+    restored = asyncio.run(repository.read_finding(
+        finding.collection_id, finding.objective_id, finding.analysis_version, finding.finding_id,
+    ))
 
     assert restored == finding
     assert restored.selection_ids == ("selection-1",)

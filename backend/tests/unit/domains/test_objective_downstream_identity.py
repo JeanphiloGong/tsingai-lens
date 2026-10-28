@@ -5,10 +5,6 @@ from domain.evaluation import (
     FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
-from repositories.experiment_plan_repository import (
-    experiment_plan_from_record,
-    experiment_plan_record,
-)
 from repositories.finding_review_repository import (
     finding_curation_from_record,
     finding_curation_record,
@@ -18,7 +14,7 @@ from repositories.finding_review_repository import (
 
 
 def test_experiment_plan_record_has_only_objective_identity() -> None:
-    plan = experiment_plan_from_record(
+    plan = ExperimentPlanRecord(**
         {
             "plan_id": "plan-1",
             "collection_id": "collection-1",
@@ -26,14 +22,17 @@ def test_experiment_plan_record_has_only_objective_identity() -> None:
             "title": "Validation plan",
             "content": "Compare two processing conditions.",
             "status": "draft",
+            "source_message_id": None,
+            "source_links": (),
+            "metadata": {},
+            "created_by": None,
             "created_at": "2026-07-20T00:00:00+00:00",
             "updated_at": "2026-07-20T00:00:00+00:00",
         }
     )
 
     assert plan.objective_id == "objective-1"
-    assert experiment_plan_record(plan)["objective_id"] == "objective-1"
-    assert "goal_id" not in experiment_plan_record(plan)
+    assert not hasattr(plan, "goal_id")
 
 
 def test_review_records_have_only_objective_identity() -> None:

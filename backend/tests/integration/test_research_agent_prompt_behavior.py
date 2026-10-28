@@ -7,6 +7,8 @@ explicit operator-supplied endpoint. No environment file is loaded here.
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 from infra.source.artifact_bundle import source_documents_from_records
 
 import json
@@ -29,7 +31,6 @@ from application.chat.capabilities import (
     ReadSourceCapability,
     SearchSourcesCapability,
 )
-from application.chat.tool_result_projection import tool_result_record
 from domain.source import (
     Document,
 )
@@ -203,7 +204,22 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(collecti
             )
         )
         for outcome in result.tool_results
-    ), [tool_result_record(outcome) for outcome in result.tool_results]
+    ), [{
+        "tool_call_id": outcome.tool_call_id,
+        "status": outcome.status.value,
+        "data": deepcopy(dict(outcome.data)),
+        "resource_refs": [
+            {
+                "resource_type": item.resource_type,
+                "resource_id": item.resource_id,
+                "href": item.href,
+            }
+            for item in outcome.resource_refs
+        ],
+        "warnings": list(outcome.warnings),
+        "error_code": outcome.error_code,
+        "error_message": outcome.error_message,
+    } for outcome in result.tool_results]
     answer = " ".join(message.content for message in result.messages if message.content)
     assert "72" in answer and "82" in answer
     assert not any(

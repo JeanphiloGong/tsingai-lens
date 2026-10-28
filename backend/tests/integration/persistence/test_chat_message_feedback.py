@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
+import json
+
+from domain.chat import ChatToolRequest
+
 import asyncio
 from hashlib import sha256
 from types import SimpleNamespace
@@ -68,10 +74,47 @@ async def feedback_app(postgres_session_factory, tmp_path):
     call = ChatToolCall.requested(tool_call_id="call", session_id="chat-1", assistant_message_id="request", name="list_findings", arguments={}, risk=ToolRisk.READ)
     result = ChatToolResult(tool_call_id="call", status="succeeded", data={"findings": []})
     messages = (
-        ChatMessage.user(message_id="question", session_id="chat-1", content="Can I compare these LPBF strength results?", created_at=NOW),
-        ChatMessage.assistant_tool_calls(message_id="request", session_id="chat-1", tool_calls=(call.to_request(),), content="Inspecting comparison conditions.", created_at=NOW),
-        ChatMessage.from_tool_result(message_id="tool-result", session_id="chat-1", result=result, created_at=NOW),
-        ChatMessage.assistant(message_id="answer", session_id="chat-1", content=ANSWER, created_at=NOW),
+        ChatMessage.user(
+            message_id="question",
+            session_id="chat-1",
+            content="Can I compare these LPBF strength results?",
+            created_at=NOW,
+        ),
+        ChatMessage.assistant_tool_calls(
+            message_id="request",
+            session_id="chat-1",
+            tool_calls=(
+                ChatToolRequest(
+                    tool_call_id=call.tool_call_id,
+                    name=call.name,
+                    arguments=call.arguments,
+                    position=call.position,
+                    decision_user_id=call.decision_user_id,
+                    decision_arguments_digest=call.decision_arguments_digest,
+                    decided_at=call.decided_at,
+                    decision_basis=call.decision_basis,
+                    authorization_revision=call.authorization_revision,
+                ),
+            ),
+            content="Inspecting comparison conditions.",
+            created_at=NOW,
+        ),
+        ChatMessage(
+            message_id="tool-result",
+            session_id="chat-1",
+            role="tool",
+            content=json.dumps(
+                asdict(result),
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ),
+            created_at=NOW,
+            tool_call_id=result.tool_call_id,
+            tool_result=result,
+        ),
+        ChatMessage.assistant(
+            message_id="answer", session_id="chat-1", content=ANSWER, created_at=NOW
+        ),
     )
     await repository.save_trajectory(session=chat, messages=messages, tool_calls=(call,), tool_results=(result,))
     service = ChatSessionService(

@@ -4,7 +4,7 @@ from copy import deepcopy
 import json
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 
 from application.chat.session_service import ChatSessionService
-from application.chat.tool_result_projection import tool_result_record
 from application.feedback.analysis_handler import FeedbackAnalysisHandler
 from application.feedback.analysis_worker import FeedbackAnalysisWorker
 from application.feedback.dataset_snapshot_service import (
@@ -449,11 +448,18 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
         error_code="source_unavailable",
         error_message="The selected source is unavailable.",
     )
-    tool_message = ChatMessage.from_tool_result(
+    tool_message = ChatMessage(
         message_id="feedback-chain-tool-result",
         session_id=SESSION_ID,
-        result=failed_result,
+        role="tool",
+        content=json.dumps(
+            asdict(failed_result),
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
         created_at="2026-09-24T10:00:04+00:00",
+        tool_call_id=failed_result.tool_call_id,
+        tool_result=failed_result,
     )
     final_answer = ChatMessage.assistant(
         message_id="feedback-chain-tool-answer",
@@ -479,7 +485,22 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
         tool_results=(failed_result,),
     )
 
-    result_digest = tool_result_digest(tool_result_record(failed_result))
+    result_digest = tool_result_digest({
+        "tool_call_id": failed_result.tool_call_id,
+        "status": failed_result.status.value,
+        "data": deepcopy(dict(failed_result.data)),
+        "resource_refs": [
+            {
+                "resource_type": item.resource_type,
+                "resource_id": item.resource_id,
+                "href": item.href,
+            }
+            for item in failed_result.resource_refs
+        ],
+        "warnings": list(failed_result.warnings),
+        "error_code": failed_result.error_code,
+        "error_message": failed_result.error_message,
+    })
     enqueue_kwargs = {
         "session_id": SESSION_ID,
         "tool_call_id": call.tool_call_id,

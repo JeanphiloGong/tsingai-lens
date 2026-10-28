@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final, Mapping
+from typing import Any, Final
 
 from domain.core.finding import Finding
 
@@ -60,6 +60,7 @@ class EvaluationGoldSet:
     description: str | None = None
     metadata: dict[str, Any] | None = None
 
+
 @dataclass(frozen=True)
 class EvaluationGoldItem:
     gold_item_id: str
@@ -71,6 +72,7 @@ class EvaluationGoldItem:
     evidence_refs: tuple[dict[str, Any], ...] = ()
     metadata: dict[str, Any] | None = None
 
+
 @dataclass(frozen=True)
 class EvaluationPredictionItem:
     item_id: str
@@ -80,6 +82,7 @@ class EvaluationPredictionItem:
     payload: dict[str, Any]
     source_refs: tuple[dict[str, Any], ...] = ()
     confidence: float | None = None
+
 
 @dataclass(frozen=True)
 class EvaluationPredictionSnapshot:
@@ -91,6 +94,7 @@ class EvaluationPredictionSnapshot:
     artifact_counts: dict[str, int]
     items: tuple[EvaluationPredictionItem, ...]
 
+
 @dataclass(frozen=True)
 class EvaluationScore:
     score_id: str
@@ -101,6 +105,7 @@ class EvaluationScore:
     numerator: float | None = None
     denominator: float | None = None
     document_id: str | None = None
+
 
 @dataclass(frozen=True)
 class EvaluationFailure:
@@ -118,6 +123,7 @@ class EvaluationFailure:
     reason: str | None = None
     source_refs: tuple[dict[str, Any], ...] = ()
 
+
 @dataclass(frozen=True)
 class EvaluationRun:
     evaluation_run_id: str
@@ -131,6 +137,7 @@ class EvaluationRun:
     summary: dict[str, Any]
     scores: tuple[EvaluationScore, ...] = ()
     failures: tuple[EvaluationFailure, ...] = ()
+
 
 @dataclass(frozen=True)
 class FindingFeedback:
@@ -157,9 +164,8 @@ class FindingFeedback:
         if self.review_status == "correct" and self.issue_type != "none":
             raise ValueError("correct finding feedback cannot report an issue")
         if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
-            raise ValueError(
-                f"{self.review_status} finding feedback requires an issue"
-            )
+            raise ValueError(f"{self.review_status} finding feedback requires an issue")
+
 
 @dataclass(frozen=True)
 class FindingCuration:
@@ -191,54 +197,9 @@ class FindingCuration:
         ):
             raise ValueError("curated Finding identity differs from curation identity")
 
+
 def _normalize_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
-
-
-def _normalize_choice(value: Any, *, allowed: frozenset[str], default: str) -> str:
-    text = (_normalize_text(value) or default).lower()
-    return text if text in allowed else default
-
-
-def _normalize_mapping(value: Any) -> dict[str, Any]:
-    if not isinstance(value, Mapping):
-        return {}
-    return {str(key): item for key, item in value.items()}
-
-
-def _normalize_mapping_sequence(value: Any) -> tuple[dict[str, Any], ...]:
-    if value is None:
-        return ()
-    if isinstance(value, Mapping):
-        return (_normalize_mapping(value),)
-    if isinstance(value, (str, bytes)):
-        return ()
-    try:
-        return tuple(
-            _normalize_mapping(item) for item in value if isinstance(item, Mapping)
-        )
-    except TypeError:
-        return ()
-
-
-def _normalize_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
-    return _normalize_mapping_sequence(value)
-
-
-def _normalize_text_tuple(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, (str, bytes)):
-        normalized = _normalize_text(value)
-        return (normalized,) if normalized else ()
-    try:
-        return tuple(
-            normalized
-            for item in value
-            if (normalized := _normalize_text(item)) is not None
-        )
-    except TypeError:
-        return ()

@@ -431,4 +431,4 @@ def _timestamp_id() -> str:
 
 
 def _normalize_key(value: str) -> str:
-    return "_".join(str(value or "").strip().lower().split()) or "none"
+    return "_".join(value.strip().lower().split()) or "none"

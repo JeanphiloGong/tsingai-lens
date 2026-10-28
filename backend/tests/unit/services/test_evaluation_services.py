@@ -509,14 +509,16 @@ async def test_evaluation_gold_service_registers_gold_set_for_collection(*, post
     gold_set = await service.register_gold_set(
         collection_id="col-gold",
         gold_id="gold-v1",
+        metadata={},
         items=[
-            {
-                "gold_item_id": "gold-1",
-                "document_id": "doc-1",
-                "family": "measurement_results",
-                "item_key": "doc-1:sample-a:yield_strength",
-                "payload": {"metric": "yield_strength", "value": 520, "unit": "MPa"},
-            }
+            EvaluationGoldItem(
+                gold_item_id="gold-1",
+                gold_id="gold-v1",
+                document_id="doc-1",
+                family="measurement_results",
+                item_key="doc-1:sample-a:yield_strength",
+                payload={"metric": "yield_strength", "value": 520, "unit": "MPa"},
+            )
         ],
     )
 
@@ -536,13 +538,14 @@ async def test_evaluation_gold_service_accepts_collection_file_storage_key(*, po
         collection_id="col-gold",
         gold_id="gold-by-storage-key",
         items=[
-            {
-                "gold_item_id": "gold-storage-key-1",
-                "document_id": "col-gold/input/paper-1.pdf",
-                "family": "measurement_results",
-                "item_key": "paper-1:sample-a:yield_strength",
-                "payload": {"metric": "yield_strength", "value": 520, "unit": "MPa"},
-            }
+            EvaluationGoldItem(
+                gold_item_id="gold-storage-key-1",
+                gold_id="gold-by-storage-key",
+                document_id="col-gold/input/paper-1.pdf",
+                family="measurement_results",
+                item_key="paper-1:sample-a:yield_strength",
+                payload={"metric": "yield_strength", "value": 520, "unit": "MPa"},
+            )
         ],
     )
 
@@ -574,17 +577,14 @@ async def test_evaluation_gold_service_rejects_gold_item_outside_collection(*, p
             collection_id="col-gold",
             gold_id="gold-v1",
             items=[
-                {
-                    "gold_item_id": "gold-1",
-                    "document_id": "doc-outside",
-                    "family": "measurement_results",
-                    "item_key": "doc-outside:sample-a:yield_strength",
-                    "payload": {
-                        "metric": "yield_strength",
-                        "value": 520,
-                        "unit": "MPa",
-                    },
-                }
+                EvaluationGoldItem(
+                    gold_item_id="gold-1",
+                    gold_id="gold-v1",
+                    document_id="doc-outside",
+                    family="measurement_results",
+                    item_key="doc-outside:sample-a:yield_strength",
+                    payload={"metric": "yield_strength", "value": 520, "unit": "MPa"},
+                )
             ],
         )
 

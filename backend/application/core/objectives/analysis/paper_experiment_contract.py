@@ -2891,8 +2891,14 @@ _BROAD_TEST_LABELS = frozenset(
 )
 
 
-def _normalized_label(value: Any) -> str:
-    return " ".join(str(value or "").strip().casefold().replace("_", "-").split())
+def _normalized_label(value: str | int | float | bool | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float, bool)):
+        text = str(value) if value else ""
+    else:
+        text = value
+    return " ".join(text.strip().casefold().replace("_", "-").split())
 
 
 def _variant_has_concrete_identity(variant: Mapping[str, Any]) -> bool:

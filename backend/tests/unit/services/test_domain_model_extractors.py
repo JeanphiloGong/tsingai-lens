@@ -31,6 +31,8 @@ from application.core.objectives.analysis.source_screening import (
     PaperFrameBatchResult,
     build_objective_paper_frame_prompt,
 )
+from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.source_validation import validate_source_fact
 from application.core.objectives.discovery.axis_equivalence import (
     AxisCanonicalizationPlanModelOutput,
     ResearchAxisEquivalenceClassifier,
@@ -3176,6 +3178,52 @@ def test_domain_model_extractors_validates_objective_evidence_response():
     assert extraction.attribution_scope == "association_only"
     assert extractions.extractions[0].resolution_status == "resolved"
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 3072
+
+
+@pytest.mark.parametrize("has_result", [True, False])
+def test_parsed_source_fact_keeps_no_change_and_context_only_meanings(has_result):
+    text = (
+        "The elongation remained unchanged at 12% for Ti-6Al-4V."
+        if has_result else "All specimens used Ti-6Al-4V."
+    )
+    extraction = {
+        "evidence_role": "direct_result" if has_result else "condition_context",
+        "reported_result": {
+            "outcome": "elongation", "value": 12, "unit": "%",
+            "direction": "unknown", "result_text": text,
+        } if has_result else None,
+        "scientific_context": {"material": [{"name": "alloy", "value": "Ti-6Al-4V"}]},
+        "attribution_scope": "descriptive_only" if has_result else "not_attributable",
+    }
+    source = {"source_kind": "text_window", "source_ref": "results-1", "text": text}
+    client = _FakeOpenAIClient(json.dumps({"extractions": [extraction]}))
+    parsed = ObjectiveSourceExtractor(_response_client(client)).extract_source({
+        "objective": {"question": "How does laser power affect elongation?"},
+        "evidence_route": {"source_kind": "text_window", "source_ref": "results-1"},
+        "source": source,
+    })
+    route = EvidenceCandidate(
+        objective_id="objective-1", document_id="paper-1",
+        source_kind="text_window", source_ref="results-1", role="current_experimental_evidence",
+        extractable=True, reason=None, table_schema={}, column_roles={}, join_plan={}, confidence=0.8,
+    )
+
+    facts = validate_source_fact(
+        route=route, source=source, objective_context=None,
+        extracted_record=parsed.extractions[0].model_dump(),
+    )
+
+    assert len(facts) == 1
+    fact = facts[0]
+    assert fact["objective_id"] == "objective-1"
+    assert fact["document_id"] == "paper-1"
+    assert fact["source_refs"][0]["source_ref"] == "results-1"
+    if has_result:
+        assert fact["reported_result"]["direction"] == "no_change"
+        assert fact["reported_result"]["value"] == 12
+    else:
+        assert fact["reported_result"] is None
+        assert fact["scientific_context"]["material"][0]["value"] == "Ti-6Al-4V"
 
 
 def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():

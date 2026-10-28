@@ -1500,18 +1500,18 @@ def _objective_normalize_explicit_no_change_direction(
 ) -> dict[str, Any]:
     normalized = dict(record)
     result = normalized.get("reported_result")
-    if not isinstance(result, Mapping):
+    if result is None:
         return normalized
 
     normalized_result = dict(result)
-    result_text = str(normalized_result.get("result_text") or "").strip()
+    result_text = normalized_result["result_text"].strip()
     result_key = _objective_column_key(result_text)
     explicitly_unchanged = any(
         phrase in result_key for phrase in _NO_CHANGE_RESULT_KEYS
     )
     if not explicitly_unchanged:
         return normalized
-    if str(normalized_result.get("direction") or "unknown") == "unknown":
+    if normalized_result["direction"] == "unknown":
         normalized_result["direction"] = "no_change"
         normalized["reported_result"] = normalized_result
     return normalized

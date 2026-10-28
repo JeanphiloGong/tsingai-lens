@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import (
     Any,
@@ -84,7 +85,12 @@ class FindingReviewRepository:
             if existing is None:
                 session.add(row)
             await session.flush()
-            return _feedback(row)
+            return replace(
+                feedback,
+                note=_normalize_text(row.note),
+                reviewer=_normalize_text(row.reviewer),
+                created_at=_isoformat(row.created_at),
+            )
 
     async def list_feedback(
         self,
@@ -115,7 +121,21 @@ class FindingReviewRepository:
                     FindingFeedbackRecord.feedback_id,
                 )
             )
-            return tuple(_feedback(row) for row in rows)
+            return tuple(
+                FindingFeedback(
+                    feedback_id=row.feedback_id,
+                    collection_id=row.collection_id,
+                    objective_id=row.objective_id,
+                    analysis_version=row.analysis_version,
+                    finding_id=row.finding_id,
+                    review_status=row.review_status,
+                    issue_type=row.issue_type,
+                    note=_normalize_text(row.note),
+                    reviewer=_normalize_text(row.reviewer),
+                    created_at=_isoformat(row.created_at),
+                )
+                for row in rows
+            )
 
     async def upsert_curation(
         self, curation: FindingCuration
@@ -194,23 +214,6 @@ def _curation_key(value) -> tuple[str, str, int, str]:
     )
 
 
-def _feedback(row: FindingFeedbackRecord) -> FindingFeedback:
-    return finding_feedback_from_record(
-        {
-            "feedback_id": row.feedback_id,
-            "collection_id": row.collection_id,
-            "objective_id": row.objective_id,
-            "analysis_version": row.analysis_version,
-            "finding_id": row.finding_id,
-            "review_status": row.review_status,
-            "issue_type": row.issue_type,
-            "note": row.note,
-            "reviewer": row.reviewer,
-            "created_at": _isoformat(row.created_at),
-        }
-    )
-
-
 def _curation(row: FindingCurationRecord) -> FindingCuration:
     return finding_curation_from_record(
         {
@@ -268,20 +271,6 @@ async def _require_finding(session: AsyncSession, value: object) -> None:
 
 
 __all__ = ['FindingReviewRepository']
-
-
-def finding_feedback_from_record(payload: Mapping[str, Any]) -> FindingFeedback:
-    return FindingFeedback(
-        feedback_id=_normalize_text(payload.get("feedback_id")) or "",
-        collection_id=_normalize_text(payload.get("collection_id")) or "",
-        objective_id=_normalize_text(payload.get("objective_id")) or "",
-        analysis_version=int(payload.get("analysis_version") or 0),
-        finding_id=_normalize_text(payload.get("finding_id")) or "",
-        review_status=(_normalize_text(payload.get("review_status")) or "").lower(),
-        issue_type=(_normalize_text(payload.get("issue_type")) or "").lower(),
-        note=_normalize_text(payload.get("note")), reviewer=_normalize_text(payload.get("reviewer")),
-        created_at=_normalize_text(payload.get("created_at")) or "",
-    )
 
 
 def finding_feedback_record(value: FindingFeedback) -> dict[str, Any]:

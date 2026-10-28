@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-import json
 from typing import Any, Mapping
 
 from domain.chat.tool_call import ChatToolResult, _arguments, _required_text
@@ -137,42 +136,5 @@ class ChatMessage:
             tool_calls=tool_calls,
         )
 
-    @classmethod
-    def from_tool_result(
-        cls,
-        *,
-        message_id: str,
-        session_id: str,
-        result: ChatToolResult,
-        created_at: str,
-    ) -> "ChatMessage":
-        return cls(
-            message_id,
-            session_id,
-            ChatMessageRole.TOOL,
-            json.dumps(
-                {
-                    "tool_call_id": result.tool_call_id,
-                    "status": result.status.value,
-                    "data": dict(result.data),
-                    "resource_refs": [
-                        {
-                            "resource_type": item.resource_type,
-                            "resource_id": item.resource_id,
-                            "href": item.href,
-                        }
-                        for item in result.resource_refs
-                    ],
-                    "warnings": list(result.warnings),
-                    "error_code": result.error_code,
-                    "error_message": result.error_message,
-                },
-                ensure_ascii=True,
-                separators=(",", ":"),
-            ),
-            created_at,
-            tool_call_id=result.tool_call_id,
-            tool_result=result,
-        )
 
 __all__ = ["ChatMessage", "ChatMessageRole", "ChatToolRequest"]

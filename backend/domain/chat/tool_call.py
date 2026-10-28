@@ -212,20 +212,6 @@ class ChatToolCall:
             position=position,
         )
 
-    def to_request(self):
-        from domain.chat.message import ChatToolRequest
-
-        return ChatToolRequest(
-            self.tool_call_id,
-            self.name,
-            self.arguments,
-            self.position,
-            decision_user_id=self.decision_user_id,
-            decision_arguments_digest=self.decision_arguments_digest,
-            decided_at=self.decided_at,
-            decision_basis=self.decision_basis,
-            authorization_revision=self.authorization_revision,
-        )
 
     def require_approval(self) -> "ChatToolCall":
         if self.status is not ToolCallStatus.REQUESTED or self.risk is not ToolRisk.WRITE:

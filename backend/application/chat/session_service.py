@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+
 import asyncio
 import json
 import logging
 import re
 import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
 from math import isfinite
@@ -26,7 +28,6 @@ from application.chat.inline_citations import (
     format_inline_citations,
     format_message_citations,
 )
-from application.chat.tool_result_projection import tool_result_record
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,
@@ -940,7 +941,22 @@ class ChatSessionService:
                 or result_message.session_id != session.session_id
             ):
                 continue
-            digest = tool_result_digest(tool_result_record(tool_result))
+            digest = tool_result_digest({
+                "tool_call_id": tool_result.tool_call_id,
+                "status": tool_result.status.value,
+                "data": deepcopy(dict(tool_result.data)),
+                "resource_refs": [
+                    {
+                        "resource_type": item.resource_type,
+                        "resource_id": item.resource_id,
+                        "href": item.href,
+                    }
+                    for item in tool_result.resource_refs
+                ],
+                "warnings": list(tool_result.warnings),
+                "error_code": tool_result.error_code,
+                "error_message": tool_result.error_message,
+            })
             key = tool_failure_idempotency_key(
                 session_id=session.session_id,
                 tool_call_id=call.tool_call_id,
@@ -1202,12 +1218,21 @@ class ChatSessionService:
                             error_message="The research action was interrupted before it finished.",
                         )
                         results.append(result)
-                        messages.append(ChatMessage.from_tool_result(
-                            message_id=f"msg_{uuid4().hex}",
-                            session_id=session.session_id,
-                            result=result,
-                            created_at=_now_iso(),
-                        ))
+                        messages.append(
+                            ChatMessage(
+                                message_id=f"msg_{uuid4().hex}",
+                                session_id=session.session_id,
+                                role="tool",
+                                content=json.dumps(
+                                    asdict(result),
+                                    ensure_ascii=True,
+                                    separators=(",", ":"),
+                                ),
+                                created_at=_now_iso(),
+                                tool_call_id=result.tool_call_id,
+                                tool_result=result,
+                            )
+                        )
                     await self.repository.save_trajectory(
                         session=session.update(
                             user_id=session.user_id,
@@ -1275,12 +1300,21 @@ class ChatSessionService:
                 error_message="The previous research action was interrupted before it finished.",
             )
             results.append(result)
-            messages.append(ChatMessage.from_tool_result(
-                message_id=f"msg_{uuid4().hex}",
-                session_id=session.session_id,
-                result=result,
-                created_at=_now_iso(),
-            ))
+            messages.append(
+                ChatMessage(
+                    message_id=f"msg_{uuid4().hex}",
+                    session_id=session.session_id,
+                    role="tool",
+                    content=json.dumps(
+                        asdict(result),
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    ),
+                    created_at=_now_iso(),
+                    tool_call_id=result.tool_call_id,
+                    tool_result=result,
+                )
+            )
         if results:
             await self.repository.save_trajectory(
                 session=session.update(

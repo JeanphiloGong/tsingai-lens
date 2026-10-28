@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from domain.chat import ChatToolRequest
+
 import json
 import logging
 import traceback
 from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from email.utils import parsedate_to_datetime
@@ -939,7 +941,19 @@ class ResearchAgentRunner:
             )
         calls[-1] = call
         results.append(result)
-        messages.append(self._result_message(context, result))
+        messages.append(
+            ChatMessage(
+                message_id=ResearchAgentRunner._message_id(),
+                session_id=context.session_id,
+                role="tool",
+                content=json.dumps(
+                    asdict(result), ensure_ascii=True, separators=(",", ":")
+                ),
+                created_at=_now_iso(),
+                tool_call_id=result.tool_call_id,
+                tool_result=result,
+            )
+        )
         progress.refresh_execution_plan(messages)
         await self._checkpoint(checkpoint, messages, calls, results)
         return await self._continue(
@@ -994,7 +1008,19 @@ class ResearchAgentRunner:
             next_calls.append(tool_call)
         if not any(item.tool_call_id == tool_result.tool_call_id for item in next_results):
             next_results.append(tool_result)
-        messages.append(self._result_message(context, tool_result))
+        messages.append(
+            ChatMessage(
+                message_id=ResearchAgentRunner._message_id(),
+                session_id=context.session_id,
+                role="tool",
+                content=json.dumps(
+                    asdict(tool_result), ensure_ascii=True, separators=(",", ":")
+                ),
+                created_at=_now_iso(),
+                tool_call_id=tool_result.tool_call_id,
+                tool_result=tool_result,
+            )
+        )
         progress.refresh_execution_plan(messages)
         await self._checkpoint(checkpoint, messages, next_calls, next_results)
         return await self._continue(
@@ -1491,7 +1517,21 @@ class ResearchAgentRunner:
                         **dict(capability_result.data), "source_coverage": coverage,
                     })
                 results.append(capability_result)
-                messages.append(self._result_message(context, capability_result))
+                messages.append(
+                    ChatMessage(
+                        message_id=ResearchAgentRunner._message_id(),
+                        session_id=context.session_id,
+                        role="tool",
+                        content=json.dumps(
+                            asdict(capability_result),
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        ),
+                        created_at=_now_iso(),
+                        tool_call_id=capability_result.tool_call_id,
+                        tool_result=capability_result,
+                    )
+                )
                 if call.name == "update_execution_plan":
                     plan_update_accepted = progress.accept_plan_update(capability_result) or plan_update_accepted
                 else:
@@ -2154,7 +2194,17 @@ class ResearchAgentRunner:
                     message_id=assistant_message_id,
                     session_id=context.session_id,
                     content=turn.content,
-                    tool_calls=tuple(call.to_request() for call, _ in requested),
+                    tool_calls=tuple(ChatToolRequest(
+                        tool_call_id=call.tool_call_id,
+                        name=call.name,
+                        arguments=call.arguments,
+                        position=call.position,
+                        decision_user_id=call.decision_user_id,
+                        decision_arguments_digest=call.decision_arguments_digest,
+                        decided_at=call.decided_at,
+                        decision_basis=call.decision_basis,
+                        authorization_revision=call.authorization_revision,
+                    ) for call, _ in requested),
                     created_at=progress.response_created_at,
                 )
             )
@@ -2276,7 +2326,6 @@ class ResearchAgentRunner:
                 candidate[key] = value
         return {**arguments, "curated_finding": candidate}
 
-
     async def _execute_read_batch(
         self,
         context,
@@ -2306,7 +2355,6 @@ class ResearchAgentRunner:
         if all(handler.spec.parallel_safe for _, handler in requested):
             return tuple(await gather(*(bounded(call, handler) for call, handler in requested)))
         return tuple([await bounded(call, handler) for call, handler in requested])
-
 
     @staticmethod
     def _active_turn_action_counts(
@@ -2443,7 +2491,6 @@ class ResearchAgentRunner:
             for result in (message.tool_result,)
         ]
         return calls, results
-
 
     @staticmethod
     def _active_user_request(messages: list[ChatMessage]) -> str:
@@ -2798,7 +2845,6 @@ class ResearchAgentRunner:
                 "The approved research action could not be completed in this turn.",
             )
 
-
     @staticmethod
     def _failure(
         call: ChatToolCall,
@@ -2835,18 +2881,6 @@ class ResearchAgentRunner:
                 messages=messages,
             ),
             created_at=progress.response_created_at,
-        )
-
-    @staticmethod
-    def _result_message(
-        context: AgentContext,
-        result: ChatToolResult,
-    ) -> ChatMessage:
-        return ChatMessage.from_tool_result(
-            message_id=ResearchAgentRunner._message_id(),
-            session_id=context.session_id,
-            result=result,
-            created_at=_now_iso(),
         )
 
     @staticmethod

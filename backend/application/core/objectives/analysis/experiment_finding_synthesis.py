@@ -22,7 +22,6 @@ from domain.core.research_objective import ResearchObjective
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 
 
-_DIRECTION_ORDER = ("increase", "decrease", "no_change", "mixed")
 _ATTRIBUTION_RANK = {
     "isolated_effect": 0,
     "joint_effect": 1,
@@ -176,17 +175,17 @@ def _selected_study(
     if len(factor_keys) != 1:
         raise ValueError("one experiment selection cannot mix comparison factor sets")
     factors = _ordered_factor_names(selected)
-    directions = {_normalized_direction(item.direction) for item in selected}
+    directions = {item.direction for item in selected}
     direction = next(iter(directions)) if len(directions) == 1 else "mixed"
     attribution_scope = _aggregate_attribution(selected, len(factors))
     context = _study_context(revision, selected)
     measurements = _comparison_measurements(revision, selected)
     units = frozenset(
-        _normalize_unit(item.unit) for item in measurements if _normalize_unit(item.unit)
+        unit for item in measurements if (unit := _normalize_unit(item.unit))
     )
     tests = _comparison_tests(revision, measurements)
     test_types = frozenset(
-        _normalize_term(item.test_type) for item in tests if _normalize_term(item.test_type)
+        term for item in tests if (term := _normalize_term(item.test_type))
     )
     incomplete_protocol = any(
         item.protocol_completeness.casefold() != "complete" for item in tests
@@ -578,12 +577,14 @@ def _comparison_measurements(
     comparisons: Sequence[ExperimentComparison],
 ) -> tuple[ExperimentMeasurementResult, ...]:
     by_key = {item.measurement_key: item for item in revision.measurements}
-    keys = _terms(
-        key
-        for comparison in comparisons
-        for key in (
-            *comparison.baseline_measurement_keys,
-            *comparison.target_measurement_keys,
+    keys = tuple(
+        dict.fromkeys(
+            key
+            for comparison in comparisons
+            for key in (
+                *comparison.baseline_measurement_keys,
+                *comparison.target_measurement_keys,
+            )
         )
     )
     missing = [key for key in keys if key not in by_key]
@@ -597,10 +598,12 @@ def _comparison_variants(
     comparisons: Sequence[ExperimentComparison],
 ) -> tuple[ExperimentalVariant, ...]:
     by_key = {item.variant_key: item for item in revision.variants}
-    keys = _terms(
-        key
-        for comparison in comparisons
-        for key in (comparison.baseline_variant_key, comparison.target_variant_key)
+    keys = tuple(
+        dict.fromkeys(
+            key
+            for comparison in comparisons
+            for key in (comparison.baseline_variant_key, comparison.target_variant_key)
+        )
     )
     missing = [key for key in keys if key not in by_key]
     if missing:
@@ -613,7 +616,7 @@ def _comparison_tests(
     measurements: Sequence[ExperimentMeasurementResult],
 ) -> tuple[ExperimentTestCondition, ...]:
     by_key = {item.test_key: item for item in revision.test_conditions}
-    keys = _terms(item.test_key for item in measurements if item.test_key)
+    keys = tuple(dict.fromkeys(item.test_key for item in measurements if item.test_key))
     missing = [key for key in keys if key not in by_key]
     if missing:
         raise ValueError("measurement references missing tests: " + ", ".join(missing))
@@ -707,23 +710,19 @@ def _same_term(left: str, right: str) -> bool:
     return _normalize_term(left) == _normalize_term(right)
 
 
-def _normalize_term(value: Any) -> str:
-    return " ".join(part for part in _TERM_SEPARATOR_RE.split(str(value).casefold()) if part)
+def _normalize_term(value: str) -> str:
+    return " ".join(part for part in _TERM_SEPARATOR_RE.split(value.casefold()) if part)
 
 
-def _normalize_unit(value: Any) -> str:
-    return "".join(str(value or "").casefold().split())
+def _normalize_unit(value: str | None) -> str:
+    return "".join(value.casefold().split()) if value is not None else ""
 
 
-def _normalized_direction(value: str) -> str:
-    return value if value in _DIRECTION_ORDER else "mixed"
-
-
-def _terms(values: Iterable[Any]) -> tuple[str, ...]:
+def _terms(values: Iterable[str]) -> tuple[str, ...]:
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
-        text = str(value or "").strip()
+        text = value.strip()
         key = text.casefold()
         if text and key not in seen:
             seen.add(key)

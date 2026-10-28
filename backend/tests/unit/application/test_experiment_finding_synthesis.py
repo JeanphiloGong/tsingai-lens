@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
 
 from domain.core.scientific_fact import (
     ScientificAttribute,
@@ -202,6 +205,7 @@ def test_synthesizes_single_study_finding_from_selected_comparison() -> None:
     assert result.groups == ()
     assert len(result.findings) == 1
     finding = result.findings[0]
+    assert finding.finding_id == "finding_957664fe8bbdd8d3ba92b39c0ca1"
     assert finding.selection_ids == ("selection-a",)
     assert finding.factors == ("preheat",)
     assert finding.outcome == "elongation"
@@ -245,10 +249,61 @@ def test_groups_aligned_cross_paper_comparisons_and_reports_agreement() -> None:
 
     assert len(result.groups) == 1
     assert result.groups[0].status == "comparable"
+    assert result.groups[0].group_id == "grp_6dc097fce07dd87f79ab2de52c32"
     assert len(result.groups[0].members) == 2
     assert len(result.findings) == 1
     assert result.findings[0].synthesis_status == "agreement"
+    assert result.findings[0].finding_id == "finding_a1e0fe5ab6b64a07b8833fd73b44"
     assert result.findings[0].comparison_group_ids == (result.groups[0].group_id,)
+
+
+@pytest.mark.parametrize("direction", ["increase", "decrease", "no_change", "mixed", "unknown"])
+def test_synthesis_preserves_known_directions_and_skips_unknown(direction):
+    result = _synthesize(
+        (_revision("experiment-a", "paper-a", direction=direction),),
+        (_selection("experiment-a", "a"),),
+    )
+
+    if direction == "unknown":
+        assert result.findings == ()
+    else:
+        assert result.findings[0].direction == direction
+
+
+def test_synthesis_keeps_case_distinct_fixed_keys_when_intersecting_conditions():
+    revision = _revision("experiment-a", "paper-a")
+    first, second = revision.variants
+    measurements = revision.measurements
+    test = revision.test_conditions[0]
+    comparison = revision.comparisons[0]
+    revision = replace(
+        revision,
+        variants=(
+            replace(first, variant_key="V", state=(ScientificAttribute("orientation", "horizontal"),)),
+            replace(second, variant_key="v", state=(ScientificAttribute("orientation", "vertical"),)),
+        ),
+        measurements=(
+            replace(measurements[0], measurement_key="M", variant_key="V", test_key="T"),
+            replace(measurements[1], measurement_key="m", variant_key="v", test_key="t"),
+        ),
+        test_conditions=(
+            replace(test, test_key="T"),
+            replace(test, test_key="t", parameters=(ScientificAttribute("temperature", 80, "C"),)),
+        ),
+        comparisons=(replace(
+            comparison, baseline_variant_key="V", target_variant_key="v",
+            baseline_measurement_keys=("M",), target_measurement_keys=("m",),
+        ),),
+    )
+    selection = replace(_selection("experiment-a", "a"), measurement_keys=("M", "m"))
+
+    result = _synthesize((revision,), (selection,))
+
+    assert len(result.findings) == 1
+    context = result.findings[0].scientific_context
+    assert context.sample == ()
+    assert all(attribute.name != "temperature" for attribute in context.test)
+    assert any(attribute.name == "test_type" and attribute.value == "tensile" for attribute in context.test)
 
 
 def test_preserves_condition_dependent_directions_without_claiming_conflict() -> None:

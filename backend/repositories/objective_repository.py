@@ -2810,7 +2810,172 @@ class ObjectiveRepository:
             total = len(records)
             page = records[max(0, offset) : max(0, offset) + max(1, min(limit, 200))]
             return (
-                tuple(_finding_from_snapshot(item) for item in page),
+                tuple(
+                    Finding(
+                        collection_id=item.get("collection_id") or "",
+                        objective_id=item.get("objective_id") or "",
+                        analysis_version=item.get("analysis_version"),
+                        finding_id=item.get("finding_id")
+                        or finding_stable_id(
+                            "finding",
+                            item.get("objective_id"),
+                            item.get("analysis_version"),
+                            tuple(item.get("factors", ())),
+                            item.get("outcome") or "",
+                            item.get("supporting_evidence_ids"),
+                        ),
+                        statement=item.get("statement") or "",
+                        factors=tuple(item.get("factors", ())),
+                        outcome=item.get("outcome") or "",
+                        direction=item.get("direction", "unknown"),
+                        assertion_strength=item.get(
+                            "assertion_strength", "descriptive"
+                        ),
+                        attribution_scope=item.get(
+                            "attribution_scope", "descriptive_only"
+                        ),
+                        synthesis_status=item.get(
+                            "synthesis_status", "insufficient_confirmation"
+                        ),
+                        certainty=round(item.get("certainty", 0.0), 2),
+                        display_rank=item.get("display_rank"),
+                        mechanisms=tuple(
+                            (
+                                FindingMechanismRelation(
+                                    source_term=item.get("source_term") or "",
+                                    relation_type=item.get("relation_type") or "",
+                                    target_term=item.get("target_term") or "",
+                                    direction=item.get("direction"),
+                                    assertion_strength=item.get(
+                                        "assertion_strength", "descriptive"
+                                    ),
+                                    supporting_evidence_ids=tuple(
+                                        item.get("supporting_evidence_ids", ())
+                                    ),
+                                )
+                                for item in tuple(
+                                    (dict(item) for item in item.get("mechanisms", ()))
+                                )
+                            )
+                        ),
+                        scientific_context=ScientificContext(
+                            material=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("material", ())
+                                )
+                            ),
+                            sample=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("sample", ())
+                                )
+                            ),
+                            process=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("process", ())
+                                )
+                            ),
+                            test=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("test", ())
+                                )
+                            ),
+                        ),
+                        limitations=tuple(item.get("limitations", ())),
+                        paper_contributions=tuple(
+                            (
+                                FindingPaperContribution(
+                                    document_id=item.get("document_id") or "",
+                                    analysis_status=item.get(
+                                        "analysis_status", "pending"
+                                    ),
+                                    supporting_evidence_ids=tuple(
+                                        item.get("supporting_evidence_ids", ())
+                                    ),
+                                    contradicting_evidence_ids=tuple(
+                                        item.get("contradicting_evidence_ids", ())
+                                    ),
+                                    context_evidence_ids=tuple(
+                                        item.get("context_evidence_ids", ())
+                                    ),
+                                    condition_boundary_evidence_ids=tuple(
+                                        item.get("condition_boundary_evidence_ids", ())
+                                    ),
+                                )
+                                for item in tuple(
+                                    (
+                                        dict(item)
+                                        for item in item.get("paper_contributions", ())
+                                    )
+                                )
+                            )
+                        ),
+                        origin=item.get("origin", "system_generated"),
+                        source_analysis_version=item.get("source_analysis_version")
+                        or None,
+                        parent_finding_id=item.get("parent_finding_id"),
+                        created_by_user_id=item.get("created_by_user_id"),
+                        created_by_tool_call_id=item.get("created_by_tool_call_id"),
+                        created_at=_finding_creation_time(item.get("created_at")),
+                        warnings=tuple(item.get("warnings", ())),
+                        selection_ids=tuple(item.get("selection_ids", ())),
+                        comparison_group_ids=tuple(
+                            item.get("comparison_group_ids", ())
+                        ),
+                    )
+                    for item in page
+                ),
                 total,
             )
 
@@ -2830,7 +2995,169 @@ class ObjectiveRepository:
                 return None
             for item in (row.payload or {}).get("findings", ()):
                 if item.get("finding_id") == finding_id:
-                    return _finding_from_snapshot(item)
+                    return Finding(
+                        collection_id=item.get("collection_id") or "",
+                        objective_id=item.get("objective_id") or "",
+                        analysis_version=item.get("analysis_version"),
+                        finding_id=item.get("finding_id")
+                        or finding_stable_id(
+                            "finding",
+                            item.get("objective_id"),
+                            item.get("analysis_version"),
+                            tuple(item.get("factors", ())),
+                            item.get("outcome") or "",
+                            item.get("supporting_evidence_ids"),
+                        ),
+                        statement=item.get("statement") or "",
+                        factors=tuple(item.get("factors", ())),
+                        outcome=item.get("outcome") or "",
+                        direction=item.get("direction", "unknown"),
+                        assertion_strength=item.get(
+                            "assertion_strength", "descriptive"
+                        ),
+                        attribution_scope=item.get(
+                            "attribution_scope", "descriptive_only"
+                        ),
+                        synthesis_status=item.get(
+                            "synthesis_status", "insufficient_confirmation"
+                        ),
+                        certainty=round(item.get("certainty", 0.0), 2),
+                        display_rank=item.get("display_rank"),
+                        mechanisms=tuple(
+                            (
+                                FindingMechanismRelation(
+                                    source_term=item.get("source_term") or "",
+                                    relation_type=item.get("relation_type") or "",
+                                    target_term=item.get("target_term") or "",
+                                    direction=item.get("direction"),
+                                    assertion_strength=item.get(
+                                        "assertion_strength", "descriptive"
+                                    ),
+                                    supporting_evidence_ids=tuple(
+                                        item.get("supporting_evidence_ids", ())
+                                    ),
+                                )
+                                for item in tuple(
+                                    (dict(item) for item in item.get("mechanisms", ()))
+                                )
+                            )
+                        ),
+                        scientific_context=ScientificContext(
+                            material=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("material", ())
+                                )
+                            ),
+                            sample=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("sample", ())
+                                )
+                            ),
+                            process=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("process", ())
+                                )
+                            ),
+                            test=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=attribute["name"],
+                                        value=attribute["value"],
+                                        unit=attribute.get("unit"),
+                                        context_scope=attribute.get(
+                                            "context_scope", "unknown"
+                                        ),
+                                        applies_to_outcomes=tuple(
+                                            attribute.get("applies_to_outcomes", ())
+                                        ),
+                                    )
+                                    for attribute in (
+                                        item.get("scientific_context") or {}
+                                    ).get("test", ())
+                                )
+                            ),
+                        ),
+                        limitations=tuple(item.get("limitations", ())),
+                        paper_contributions=tuple(
+                            (
+                                FindingPaperContribution(
+                                    document_id=item.get("document_id") or "",
+                                    analysis_status=item.get(
+                                        "analysis_status", "pending"
+                                    ),
+                                    supporting_evidence_ids=tuple(
+                                        item.get("supporting_evidence_ids", ())
+                                    ),
+                                    contradicting_evidence_ids=tuple(
+                                        item.get("contradicting_evidence_ids", ())
+                                    ),
+                                    context_evidence_ids=tuple(
+                                        item.get("context_evidence_ids", ())
+                                    ),
+                                    condition_boundary_evidence_ids=tuple(
+                                        item.get("condition_boundary_evidence_ids", ())
+                                    ),
+                                )
+                                for item in tuple(
+                                    (
+                                        dict(item)
+                                        for item in item.get("paper_contributions", ())
+                                    )
+                                )
+                            )
+                        ),
+                        origin=item.get("origin", "system_generated"),
+                        source_analysis_version=item.get("source_analysis_version")
+                        or None,
+                        parent_finding_id=item.get("parent_finding_id"),
+                        created_by_user_id=item.get("created_by_user_id"),
+                        created_by_tool_call_id=item.get("created_by_tool_call_id"),
+                        created_at=_finding_creation_time(item.get("created_at")),
+                        warnings=tuple(item.get("warnings", ())),
+                        selection_ids=tuple(item.get("selection_ids", ())),
+                        comparison_group_ids=tuple(
+                            item.get("comparison_group_ids", ())
+                        ),
+                    )
             return None
 
     async def list_evidence(
@@ -2863,11 +3190,11 @@ class ObjectiveRepository:
                 )
                 if finding is None:
                     return (), 0
-                finding = _finding_from_snapshot(finding)
                 evidence_ids = {
-                    *finding.supporting_evidence_ids,
-                    *finding.contradicting_evidence_ids,
-                    *finding.context_evidence_ids,
+                    evidence_id
+                    for contribution in finding.get("paper_contributions", ())
+                    for field_name in ("supporting_evidence_ids", "contradicting_evidence_ids", "context_evidence_ids")
+                    for evidence_id in contribution.get(field_name, ())
                 }
             records = list(payload.get("evidence_records", ()))
             if evidence_ids is not None:
@@ -3121,7 +3448,80 @@ class ObjectiveRepository:
                             "not_attributable",
                         ),
                         scientific_context=(
-                            _stored_scientific_context(item.get("scientific_context"))
+                            ScientificContext(
+                                material=tuple(
+                                    (
+                                        ScientificAttribute(
+                                            name=attribute["name"],
+                                            value=attribute["value"],
+                                            unit=attribute.get("unit"),
+                                            context_scope=attribute.get(
+                                                "context_scope", "unknown"
+                                            ),
+                                            applies_to_outcomes=tuple(
+                                                attribute.get("applies_to_outcomes", ())
+                                            ),
+                                        )
+                                        for attribute in (
+                                            item.get("scientific_context") or {}
+                                        ).get("material", ())
+                                    )
+                                ),
+                                sample=tuple(
+                                    (
+                                        ScientificAttribute(
+                                            name=attribute["name"],
+                                            value=attribute["value"],
+                                            unit=attribute.get("unit"),
+                                            context_scope=attribute.get(
+                                                "context_scope", "unknown"
+                                            ),
+                                            applies_to_outcomes=tuple(
+                                                attribute.get("applies_to_outcomes", ())
+                                            ),
+                                        )
+                                        for attribute in (
+                                            item.get("scientific_context") or {}
+                                        ).get("sample", ())
+                                    )
+                                ),
+                                process=tuple(
+                                    (
+                                        ScientificAttribute(
+                                            name=attribute["name"],
+                                            value=attribute["value"],
+                                            unit=attribute.get("unit"),
+                                            context_scope=attribute.get(
+                                                "context_scope", "unknown"
+                                            ),
+                                            applies_to_outcomes=tuple(
+                                                attribute.get("applies_to_outcomes", ())
+                                            ),
+                                        )
+                                        for attribute in (
+                                            item.get("scientific_context") or {}
+                                        ).get("process", ())
+                                    )
+                                ),
+                                test=tuple(
+                                    (
+                                        ScientificAttribute(
+                                            name=attribute["name"],
+                                            value=attribute["value"],
+                                            unit=attribute.get("unit"),
+                                            context_scope=attribute.get(
+                                                "context_scope", "unknown"
+                                            ),
+                                            applies_to_outcomes=tuple(
+                                                attribute.get("applies_to_outcomes", ())
+                                            ),
+                                        )
+                                        for attribute in (
+                                            item.get("scientific_context") or {}
+                                        ).get("test", ())
+                                    )
+                                ),
+                            )
                         ),
                         resolution_status=finding_choice(
                             item.get("resolution_status"),
@@ -3266,19 +3666,91 @@ class ObjectiveRepository:
                 "attribution_scope": item.attribution_scope,
                 "scientific_context": {
                     "material": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.material
                     ],
                     "sample": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.sample
                     ],
                     "process": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.process
                     ],
                     "test": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.test
                     ],
                 },
@@ -3338,19 +3810,91 @@ class ObjectiveRepository:
                 ],
                 "scientific_context": {
                     "material": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.material
                     ],
                     "sample": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.sample
                     ],
                     "process": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.process
                     ],
                     "test": [
-                        _scientific_attribute_payload(attribute)
+                        {
+                            "name": attribute.name,
+                            "value": attribute.value,
+                            "unit": attribute.unit,
+                            **(
+                                {"context_scope": attribute.context_scope}
+                                if attribute.context_scope != "unknown"
+                                else {}
+                            ),
+                            **(
+                                {
+                                    "applies_to_outcomes": list(
+                                        attribute.applies_to_outcomes
+                                    )
+                                }
+                                if attribute.applies_to_outcomes
+                                else {}
+                            ),
+                        }
                         for attribute in item.scientific_context.test
                     ],
                 },
@@ -3499,180 +4043,6 @@ def _evidence_status_counts(value: Any) -> tuple[tuple[str, int], ...]:
             raise ValueError("evidence status count must be a non-negative integer")
         counts.append((normalized_status, normalized_count))
     return tuple(counts)
-
-
-def _finding_from_snapshot(payload: Mapping[str, Any]) -> Finding:
-    """Restore one member of the persisted analysis snapshot findings array."""
-    return Finding(
-        collection_id=finding_text(payload.get("collection_id")) or "",
-        objective_id=finding_text(payload.get("objective_id")) or "",
-        analysis_version=finding_positive_int(payload.get("analysis_version")),
-        finding_id=finding_text(payload.get("finding_id"))
-        or finding_stable_id(
-            "finding",
-            payload.get("objective_id"),
-            payload.get("analysis_version"),
-            finding_strings(payload.get("factors")),
-            finding_text(payload.get("outcome")) or "",
-            payload.get("supporting_evidence_ids"),
-        ),
-        statement=finding_text(payload.get("statement")) or "",
-        factors=finding_strings(payload.get("factors")),
-        outcome=finding_text(payload.get("outcome")) or "",
-        direction=finding_choice(
-            payload.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
-        ),
-        assertion_strength=finding_choice(
-            payload.get("assertion_strength"),
-            FINDING_ASSERTION_STRENGTHS,
-            "descriptive",
-        ),
-        attribution_scope=finding_choice(
-            payload.get("attribution_scope"),
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
-        synthesis_status=finding_choice(
-            payload.get("synthesis_status"),
-            FINDING_SYNTHESIS_STATUSES,
-            "insufficient_confirmation",
-        ),
-        certainty=finding_certainty(payload.get("certainty")),
-        display_rank=finding_non_negative_int(payload.get("display_rank")),
-        mechanisms=tuple(
-            (
-                FindingMechanismRelation(
-                    source_term=finding_text(item.get("source_term")) or "",
-                    relation_type=finding_text(item.get("relation_type")) or "",
-                    target_term=finding_text(item.get("target_term")) or "",
-                    direction=finding_text(item.get("direction")),
-                    assertion_strength=finding_choice(
-                        item.get("assertion_strength"),
-                        FINDING_ASSERTION_STRENGTHS,
-                        "descriptive",
-                    ),
-                    supporting_evidence_ids=finding_strings(
-                        item.get("supporting_evidence_ids")
-                    ),
-                )
-                for item in tuple(
-                    (
-                        dict(item)
-                        for item in (
-                            payload.get("mechanisms")
-                            if isinstance(payload.get("mechanisms"), (list, tuple))
-                            else ()
-                        )
-                        if isinstance(item, Mapping)
-                    )
-                )
-            )
-        ),
-        scientific_context=_stored_scientific_context(
-            payload.get("scientific_context")
-        ),
-        limitations=finding_strings(payload.get("limitations")),
-        paper_contributions=tuple(
-            (
-                FindingPaperContribution(
-                    document_id=finding_text(item.get("document_id")) or "",
-                    analysis_status=finding_choice(
-                        item.get("analysis_status"),
-                        PAPER_CONTRIBUTION_STATUSES,
-                        "pending",
-                    ),
-                    supporting_evidence_ids=finding_strings(
-                        item.get("supporting_evidence_ids")
-                    ),
-                    contradicting_evidence_ids=finding_strings(
-                        item.get("contradicting_evidence_ids")
-                    ),
-                    context_evidence_ids=finding_strings(
-                        item.get("context_evidence_ids")
-                    ),
-                    condition_boundary_evidence_ids=finding_strings(
-                        item.get("condition_boundary_evidence_ids")
-                    ),
-                )
-                for item in tuple(
-                    (
-                        dict(item)
-                        for item in (
-                            payload.get("paper_contributions")
-                            if isinstance(
-                                payload.get("paper_contributions"), (list, tuple)
-                            )
-                            else ()
-                        )
-                        if isinstance(item, Mapping)
-                    )
-                )
-            )
-        ),
-        origin=finding_choice(
-            payload.get("origin"), FINDING_ORIGINS, "system_generated"
-        ),
-        source_analysis_version=finding_positive_int(
-            payload.get("source_analysis_version")
-        )
-        or None,
-        parent_finding_id=finding_text(payload.get("parent_finding_id")),
-        created_by_user_id=finding_text(payload.get("created_by_user_id")),
-        created_by_tool_call_id=finding_text(payload.get("created_by_tool_call_id")),
-        created_at=_finding_creation_time(payload.get("created_at")),
-        warnings=finding_strings(payload.get("warnings")),
-        selection_ids=finding_strings(payload.get("selection_ids")),
-        comparison_group_ids=finding_strings(payload.get("comparison_group_ids")),
-    )
-
-
-def _context_attributes(records: Any) -> tuple[ScientificAttribute, ...]:
-    return tuple(
-        ScientificAttribute(
-            name=scientific_text(item.get("name")) or "",
-            value=(
-                scientific_scalar(item.get("value"))
-                if scientific_scalar(item.get("value")) is not None
-                else ""
-            ),
-            unit=scientific_text(item.get("unit")),
-            context_scope=scientific_choice(
-                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
-            ),
-            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
-        )
-        for item in (records if isinstance(records, (list, tuple)) else ())
-        if isinstance(item, Mapping)
-    )
-
-
-def _stored_scientific_context(value: Any) -> ScientificContext:
-    if not isinstance(value, Mapping):
-        return ScientificContext()
-    return ScientificContext(
-        material=_context_attributes(value.get("material")),
-        sample=_context_attributes(value.get("sample")),
-        process=_context_attributes(value.get("process")),
-        test=_context_attributes(value.get("test")),
-    )
-
-
-def _scientific_attribute_payload(value: ScientificAttribute) -> dict[str, Any]:
-    return {
-        "name": value.name,
-        "value": value.value,
-        "unit": value.unit,
-        **(
-            {"context_scope": value.context_scope}
-            if value.context_scope != "unknown"
-            else {}
-        ),
-        **(
-            {"applies_to_outcomes": list(value.applies_to_outcomes)}
-            if value.applies_to_outcomes
-            else {}
-        ),
-    }
 
 
 def _finding_creation_time(value: Any) -> datetime | None:

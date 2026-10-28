@@ -14,15 +14,11 @@ from application.core.objectives.llm.structured_response import (
 from .common import (
     PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
-    _PAPER_MAP_CONTEXT_LIMIT,
     _PAPER_MAP_STUDY_LIMIT,
     _PAPER_MAP_VARIED_FACTOR_LIMIT,
     _REVIEW_CITATION_LEAD_LIMIT,
     _REVIEW_KNOWLEDGE_ITEM_LIMIT,
-    _bounded_mapping_list,
-    _mark_bounded_output,
 )
-from .normalization import _downgrade_unresolved_relationships
 from .paper_map_outputs import (
     ExperimentalPaperMapModelOutput,
     ReviewPaperMapModelOutput,
@@ -80,96 +76,6 @@ Non-negotiable rules:
 - Copy only supplied short `source_labels`; the backend owns real Source identity.
 - A citation points to primary literature; it is not review-owned evidence.
 """.strip()
-
-
-def _normalize_experimental_paper_map_payload(value: Any) -> Any:
-    if not isinstance(value, Mapping):
-        return value
-    downgraded = _downgrade_unresolved_relationships(value)
-    if not isinstance(downgraded, Mapping):
-        return downgraded
-    payload = dict(downgraded)
-    overflows: list[str] = []
-    studies = _bounded_mapping_list(
-        payload,
-        "studies",
-        limit=_PAPER_MAP_STUDY_LIMIT,
-        path="studies",
-        overflows=overflows,
-    )
-    normalized_studies: list[object] = []
-    for study_index, study in enumerate(studies):
-        if not isinstance(study, Mapping):
-            normalized_studies.append(study)
-            continue
-        normalized_study = dict(study)
-        for field_name in ("material_scope", "process_context"):
-            _bounded_mapping_list(
-                normalized_study,
-                field_name,
-                limit=_PAPER_MAP_CONTEXT_LIMIT,
-                path=f"studies[{study_index}].{field_name}",
-                overflows=overflows,
-            )
-        relationships = _bounded_mapping_list(
-            normalized_study,
-            "relationships",
-            limit=PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
-            path=f"studies[{study_index}].relationships",
-            overflows=overflows,
-        )
-        normalized_relationships: list[object] = []
-        for relationship_index, relationship in enumerate(relationships):
-            if not isinstance(relationship, Mapping):
-                normalized_relationships.append(relationship)
-                continue
-            normalized_relationship = dict(relationship)
-            overflow_count = len(overflows)
-            _bounded_mapping_list(
-                normalized_relationship,
-                "factor_assertions",
-                limit=_PAPER_MAP_VARIED_FACTOR_LIMIT,
-                path=(
-                    f"studies[{study_index}].relationships[{relationship_index}]"
-                    ".factor_assertions"
-                ),
-                overflows=overflows,
-            )
-            if len(overflows) > overflow_count:
-                # A truncated joint factor set describes a different study.
-                # Omit that relationship, not individual factors within it.
-                continue
-            normalized_relationships.append(normalized_relationship)
-        if relationships and not normalized_relationships:
-            continue
-        normalized_study["relationships"] = normalized_relationships
-        normalized_studies.append(normalized_study)
-    payload["studies"] = normalized_studies
-
-    signals = _bounded_mapping_list(
-        payload,
-        "unresolved_signals",
-        limit=PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
-        path="unresolved_signals",
-        overflows=overflows,
-    )
-    normalized_signals: list[object] = []
-    for signal_index, signal in enumerate(signals):
-        if not isinstance(signal, Mapping):
-            normalized_signals.append(signal)
-            continue
-        normalized_signal = dict(signal)
-        for field_name in ("material_scope", "process_context"):
-            _bounded_mapping_list(
-                normalized_signal,
-                field_name,
-                limit=_PAPER_MAP_CONTEXT_LIMIT,
-                path=f"unresolved_signals[{signal_index}].{field_name}",
-                overflows=overflows,
-            )
-        normalized_signals.append(normalized_signal)
-    payload["unresolved_signals"] = normalized_signals
-    return _mark_bounded_output(payload, overflows=overflows)
 
 
 def _review_synthesis_only(response: StructuredPaperResearchMap) -> StructuredPaperResearchMap:
@@ -726,11 +632,6 @@ class PaperResearchMapExtractor:
             return self.response_client.complete_json(
                 **kwargs,
                 build_retry_prompt=build_retry_prompt,
-                normalize_response_payload=(
-                    _normalize_experimental_paper_map_payload
-                    if kwargs.get("response_model") is ExperimentalPaperMapModelOutput
-                    else None
-                ),
                 postprocess_response=validate_output_contract,
                 fail_on_output_saturation=True,
             )

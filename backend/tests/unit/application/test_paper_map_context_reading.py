@@ -13,7 +13,6 @@ from application.core.objectives.discovery.paper_understanding.paper_map_results
 )
 from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
-    _normalize_experimental_paper_map_payload,
 )
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.paper_map_extraction import (
@@ -315,7 +314,7 @@ def test_factor_overflow_never_turns_a_joint_design_into_a_smaller_factor_set():
         "outcome": "relative density", "source_labels": ["S1"],
     }]}]}
 
-    result = ExperimentalPaperMapModelOutput.model_validate(_normalize_experimental_paper_map_payload(payload))
+    result = ExperimentalPaperMapModelOutput.model_validate(payload)
 
     assert result.output_saturated
     assert result.studies == []
@@ -361,3 +360,67 @@ def test_other_window_budget_failure_does_not_mask_this_window_parse_failure():
     coverage = results[0][0][0].source_unit_coverage[0]
     assert "malformed_json" in coverage.reason
     assert "recovery_budget_exhausted" not in coverage.reason
+
+@pytest.mark.parametrize("field,value", [("studies", None), ("studies", {}), ("unresolved_signals", None), ("warnings", None), ("output_saturated", "false")])
+def test_paper_map_extractor_rejects_explicit_wrong_shapes(field, value):
+    from pydantic import ValidationError
+
+    client = _FakeOpenAIClient(json.dumps({field: value}))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+
+    with pytest.raises(ValidationError):
+        reader.extract({"document_id": "paper-1", "source_units": []})
+    assert len(client.chat.completions.calls) == 2
+
+
+@pytest.mark.parametrize("relationship", [
+    {"factor_assertions": None, "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [17], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [{"label": 17, "role": "varied", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [{"label": "power", "role": "INVALID", "source_labels": ["S1"]}], "outcome": "microstructure", "source_labels": ["S1"]},
+    {"factor_assertions": [], "outcome": {"invalid": "object"}, "source_labels": ["S1"]},
+    {"factor_assertions": [], "outcome": "microstructure", "source_labels": [17]},
+])
+def test_scientific_downgrade_does_not_hide_malformed_relationship(relationship):
+    from pydantic import ValidationError
+
+    client = _FakeOpenAIClient(json.dumps({"studies": [{"relationships": [relationship]}]}))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+    with pytest.raises(ValidationError):
+        reader.extract({"document_id": "paper-1", "source_units": [{"source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1", "content": "Power and microstructure."}]})
+    assert len(client.chat.completions.calls) == 2
+
+@pytest.mark.parametrize("extraction_mode", ["json_text", "provider_parse"])
+def test_each_paper_map_response_is_processed_once_before_source_binding(monkeypatch, extraction_mode):
+    from application.core.objectives.discovery.paper_understanding import paper_map_outputs
+
+    original = paper_map_outputs._downgrade_unresolved_relationships
+    calls = []
+
+    def record_call(value):
+        calls.append(value)
+        return original(value)
+
+    monkeypatch.setattr(paper_map_outputs, "_downgrade_unresolved_relationships", record_call)
+    response = {"studies": [{"material_scope": ["Ti-6Al-4V"], "relationships": [{"factor_assertions": [], "outcome": "porosity", "source_labels": ["S1"]}]}]}
+    client = _FakeOpenAIClient(json.dumps(response), parsed=response)
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode=extraction_mode))
+    result = reader.extract({"document_id": "paper-1", "source_units": [{"source_unit_id": "unit-1", "source_kind": "block", "source_ref": "block-1", "content": "Porosity was measured; its varied factor is unresolved."}]})
+
+    assert len(calls) == 1
+    assert result.studies == []
+    assert result.unresolved_signals[0].source_unit_ids == ["unit-1"]
+    assert result.unresolved_signals[0].material_scope == ["Ti-6Al-4V"]
+    assert len(client.chat.completions.calls) + len(client.beta.chat.completions.calls) == 1
+
+
+@pytest.mark.parametrize("field,value", [("warnings", None), ("warnings", [17]), ("output_saturated", "false")])
+def test_budget_diagnostics_do_not_replace_invalid_fields(field, value):
+    from pydantic import ValidationError
+
+    response = {"unresolved_signals": [{"signal_type": "outcome", "label": f"outcome-{index}", "variable_role": "not_applicable", "source_labels": ["S1"]} for index in range(13)], field: value}
+    client = _FakeOpenAIClient(json.dumps(response))
+    reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
+    with pytest.raises(ValidationError):
+        reader.extract({"document_id": "paper-1", "source_units": [{"source_unit_id": "unit-1", "source_ref": "block-1", "content": "Measured outcomes."}]})
+    assert len(client.chat.completions.calls) == 2

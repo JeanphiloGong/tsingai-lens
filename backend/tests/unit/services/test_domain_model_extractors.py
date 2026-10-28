@@ -300,7 +300,7 @@ def test_paper_research_map_contract_represents_bounded_preliminary_scope():
 
 
 def test_paper_research_map_contract_bounds_diagnostic_warnings():
-    parsed = StructuredPaperResearchMap.model_validate(
+    parsed = ExperimentalPaperMapModelOutput.model_validate(
         {"warnings": ["w" * 241, "second", "third"]}
     )
 
@@ -1506,10 +1506,14 @@ def test_paper_research_map_downgrades_descriptive_factor_clause_to_unresolved_o
                 "claim_scope": "current_work",
                 "relationships": [
                     {
-                        "varied_factors": [
-                            "microstructural features including grain morphology, "
-                            "phase distribution, and crystallographic texture from "
-                            "pole figures"
+                        "factor_assertions": [
+                            {
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                                "label": "microstructural features including grain morphology, "
+                                "phase distribution, and crystallographic texture from "
+                                "pole figures",
+                            }
                         ],
                         "outcome": "alpha phase fraction",
                         "source_labels": ["S1"],
@@ -1555,25 +1559,49 @@ def test_paper_research_map_downgrades_compound_and_generic_outcomes_without_los
                 "process_context": ["post-build annealing"],
                 "relationships": [
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S1"],
+                            }
+                        ],
                         "outcome": "microstructure",
                         "source_labels": ["S1"],
                         "confidence": 0.91,
                     },
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S2"],
+                            }
+                        ],
                         "outcome": "strength and ductility of SLMed Ti-6Al-4V",
                         "source_labels": ["S2"],
                         "confidence": 0.86,
                     },
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S3"],
+                            }
+                        ],
                         "outcome": "mechanical property combination",
                         "source_labels": ["S3"],
                         "confidence": 0.81,
                     },
                     {
-                        "varied_factors": ["annealing temperature"],
+                        "factor_assertions": [
+                            {
+                                "label": "annealing temperature",
+                                "role": "varied",
+                                "source_labels": ["S4"],
+                            }
+                        ],
                         "outcome": (
                             "microstructure (grain size, shape, phase fraction, "
                             "composition)"

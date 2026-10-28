@@ -11,7 +11,6 @@ from domain.core.research_objective import (
 from infra.source.artifact_bundle import source_documents_from_records
 
 
-
 import json
 from threading import Lock
 from time import sleep
@@ -1373,26 +1372,49 @@ def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
             }
         ],
     }
-    parsed = StructuredPaperResearchMap(
-        studies=[
+    from application.core.objectives.discovery.paper_understanding.workflow import (
+        PaperResearchMapExtractor,
+    )
+    from application.core.objectives.llm.structured_response import (
+        StructuredResponseClient,
+    )
+    from tests.unit.services.test_domain_model_extractors import _FakeOpenAIClient
+
+    client = _FakeOpenAIClient(
+        json.dumps(
             {
-                "experiment_label": "heat-treatment experiment",
-                "design_type": "experimental",
-                "claim_scope": "current_work",
-                "material_scope": ["Ti-6Al-4V"],
-                "process_context": ["heat treatment"],
-                "relationships": [
+                "studies": [
                     {
-                        "varied_factors": ["heat treatment"],
-                        "outcome": "microstructure",
-                        "source_unit_ids": ["source-microstructure"],
+                        "experiment_label": "heat-treatment experiment",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["heat treatment"],
+                        "relationships": [
+                            {
+                                "outcome": "microstructure",
+                                "confidence": 0.8,
+                                "factor_assertions": [
+                                    {
+                                        "label": "heat treatment",
+                                        "role": "varied",
+                                        "source_labels": ["S1"],
+                                    }
+                                ],
+                                "source_labels": ["S1"],
+                            }
+                        ],
                         "confidence": 0.8,
                     }
-                ],
-                "confidence": 0.8,
+                ]
             }
-        ]
+        )
     )
+    parsed = PaperResearchMapExtractor(
+        StructuredResponseClient(
+            client=client, model="fake-model", extraction_mode="json_text"
+        )
+    ).extract(payload)
 
     skim, signals = PaperMapExtractionService()._resolve_window_result(
         document_id="paper-heat-treatment",

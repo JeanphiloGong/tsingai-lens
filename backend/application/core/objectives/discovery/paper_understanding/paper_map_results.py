@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 
 from .common import (
     PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
@@ -16,10 +16,7 @@ from .common import (
     _PaperResearchMapResponse,
     _STUDY_CONTEXT_VALUE_CHARS,
     _VARIED_FACTOR_LIMIT,
-    _normalize_list,
-    _normalize_warnings,
 )
-from .normalization import _downgrade_unresolved_relationships
 
 
 class StructuredPaperResearchRelationship(_PaperResearchMapResponse):
@@ -31,11 +28,6 @@ class StructuredPaperResearchRelationship(_PaperResearchMapResponse):
         Annotated[str, Field(min_length=1, max_length=160)]
     ] = Field(min_length=1)
     confidence: float = 0.0
-
-    @field_validator("varied_factors", "source_unit_ids", mode="before")
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
 
     @model_validator(mode="after")
     def _validate_source_unit_ids(self) -> StructuredPaperResearchRelationship:
@@ -74,30 +66,17 @@ class StructuredPaperResearchScope(_PaperResearchMapResponse):
     )
     confidence: float = 0.0
 
-    @field_validator(
-        "material_scope",
-        "process_context",
-        "relationships",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
-
     def identity_key(
         self,
         source_keys: Mapping[str, tuple[str, str]] | None = None,
     ) -> tuple[object, ...]:
         def normalized_values(values: list[str]) -> tuple[str, ...]:
-            return tuple(
-                sorted(
-                    {
-                        str(value).strip().casefold()
-                        for value in values
-                        if str(value).strip()
-                    }
-                )
-            )
+            normalized: set[str] = set()
+            for value in values:
+                text = value.strip().casefold()
+                if text:
+                    normalized.add(text)
+            return tuple(sorted(normalized))
 
         relationships = tuple(
             sorted(
@@ -184,16 +163,6 @@ class StructuredPaperResearchSignal(_PaperResearchMapResponse):
         )
         return normalized
 
-    @field_validator(
-        "material_scope",
-        "process_context",
-        "source_unit_ids",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
-
     @model_validator(mode="after")
     def _validate_source_unit_ids(self) -> StructuredPaperResearchSignal:
         normalized = [value.strip() for value in self.source_unit_ids]
@@ -233,18 +202,6 @@ class StructuredReviewKnowledgeItem(_PaperResearchMapResponse):
     ] = Field(min_length=1, max_length=4)
     confidence: float = 0.0
 
-    @field_validator(
-        "material_scope",
-        "variables",
-        "outcomes",
-        "conditions",
-        "source_unit_ids",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
-
     @model_validator(mode="after")
     def _validate_source_unit_ids(self) -> "StructuredReviewKnowledgeItem":
         normalized = [value.strip() for value in self.source_unit_ids]
@@ -271,17 +228,6 @@ class StructuredReviewSynthesisMap(_PaperResearchMapResponse):
         max_length=_REVIEW_CITATION_LEAD_LIMIT,
     )
 
-    @field_validator(
-        "synthesis_claims",
-        "disputes",
-        "evidence_gaps",
-        "citation_leads",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
-
 
 class StructuredPaperResearchMap(_PaperResearchMapResponse):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
@@ -304,21 +250,6 @@ class StructuredPaperResearchMap(_PaperResearchMapResponse):
     warnings: list[
         Annotated[str, Field(max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[1])]
     ] = Field(default_factory=list, max_length=PAPER_RESEARCH_MAP_WARNING_LIMIT[0])
-
-    @model_validator(mode="before")
-    @classmethod
-    def _downgrade_unresolved_relationships(cls, value: object) -> object:
-        return _downgrade_unresolved_relationships(value)
-
-    @field_validator("studies", "unresolved_signals", mode="before")
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list(value)
-
-    @field_validator("warnings", mode="before")
-    @classmethod
-    def _normalize_warnings(cls, value: object) -> object:
-        return _normalize_warnings(value)
 
     @model_validator(mode="after")
     def _validate_study_identities(self) -> StructuredPaperResearchMap:

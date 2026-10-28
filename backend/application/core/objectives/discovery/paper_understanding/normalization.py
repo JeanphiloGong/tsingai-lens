@@ -12,7 +12,7 @@ def _downgrade_unresolved_relationships(value: object) -> object:
     unresolved_signals = value.get("unresolved_signals")
     if not isinstance(studies, list):
         return value
-    if unresolved_signals is not None and not isinstance(unresolved_signals, list):
+    if "unresolved_signals" in value and not isinstance(unresolved_signals, list):
         return value
 
     retained_studies: list[object] = []
@@ -33,27 +33,44 @@ def _downgrade_unresolved_relationships(value: object) -> object:
             if not isinstance(relationship, Mapping):
                 retained_relationships.append(relationship)
                 continue
-            factor_values = (
-                relationship.get("factor_assertions")
-                if "factor_assertions" in relationship
-                else relationship.get("varied_factors")
-            )
-            has_varied_factor = not isinstance(factor_values, list) or (
-                bool(factor_values)
-                and all(
-                    0
-                    < len(
-                        str(
-                            item.get("label") if isinstance(item, Mapping) else item
-                        ).strip()
+            factor_values = relationship.get("factor_assertions")
+            if (
+                set(relationship)
+                - {"factor_assertions", "outcome", "source_labels", "confidence"}
+                or not isinstance(factor_values, list)
+                or any(
+                    not isinstance(item, Mapping)
+                    or set(item) - {"label", "role", "source_labels"}
+                    or not isinstance(item.get("label"), str)
+                    or item.get("role") not in {"varied", "compared", "modeled"}
+                    or not isinstance(item.get("source_labels"), list)
+                    or not item["source_labels"]
+                    or any(
+                        not isinstance(label, str) for label in item["source_labels"]
                     )
-                    <= 80
+                    or len(item["source_labels"]) != len(set(item["source_labels"]))
                     for item in factor_values
                 )
+            ):
+                retained_relationships.append(relationship)
+                continue
+            if "confidence" in study and (
+                type(study["confidence"]) not in {int, float}
+                or not 0 <= study["confidence"] <= 1
+            ):
+                retained_relationships.append(relationship)
+                continue
+            has_varied_factor = bool(factor_values) and all(
+                0 < len(item["label"].strip()) <= 80 for item in factor_values
             )
-            outcome = str(relationship.get("outcome") or "").strip()
-            if has_varied_factor and not property_matching.outcome_label_requires_resolution(
-                outcome
+            outcome = relationship.get("outcome")
+            if not isinstance(outcome, str):
+                retained_relationships.append(relationship)
+                continue
+            outcome = outcome.strip()
+            if (
+                has_varied_factor
+                and not property_matching.outcome_label_requires_resolution(outcome)
             ):
                 retained_relationships.append(relationship)
                 continue
@@ -65,7 +82,8 @@ def _downgrade_unresolved_relationships(value: object) -> object:
                 not outcome
                 or len(outcome) > 80
                 or not isinstance(lineage_values, list)
-                or not any(str(item).strip() for item in lineage_values)
+                or not lineage_values
+                or any(not isinstance(item, str) for item in lineage_values)
             ):
                 retained_relationships.append(relationship)
                 continue
@@ -74,21 +92,26 @@ def _downgrade_unresolved_relationships(value: object) -> object:
                 "signal_type": "outcome",
                 "label": outcome,
                 "variable_role": "not_applicable",
-                lineage_field: list(lineage_values),
+                lineage_field: list(
+                    dict.fromkeys(
+                        [
+                            *lineage_values,
+                            *(
+                                label
+                                for assertion in factor_values
+                                for label in assertion["source_labels"]
+                            ),
+                        ]
+                    )
+                ),
             }
             if "confidence" in relationship:
                 signal["confidence"] = relationship["confidence"]
             elif "confidence" in study:
                 signal["confidence"] = study["confidence"]
-            for field_name in (
-                "experiment_label",
-                "design_type",
-                "claim_scope",
-                "material_scope",
-                "process_context",
-            ):
-                if field_name in study:
-                    signal[field_name] = study[field_name]
+            for field_name, field_value in study.items():
+                if field_name not in {"relationships", "confidence"}:
+                    signal[field_name] = field_value
             downgraded_signals.append(signal)
             study_changed = True
             changed = True

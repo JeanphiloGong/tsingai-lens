@@ -32,7 +32,6 @@ from repositories.feedback_dataset_sample_repository import (
     DatasetSampleActionConflict,
     DatasetSampleRevisionConflict,
     FeedbackDatasetSampleRepository,
-    build_job_payload,
     sample_action_digest,
     sample_build_idempotency_key,
     source_digest_for_case,
@@ -218,13 +217,13 @@ class FeedbackDatasetService:
                     job_id=job_id,
                     job_type=DATASET_SAMPLE_BUILD_JOB_TYPE,
                     payload_version=DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
-                    payload=build_job_payload(
-                        dataset_id=dataset.dataset_id,
-                        sample_id=sample_id,
-                        generation=generation,
-                        spec_version=dataset.spec_version,
-                        source_digest=source_digest,
-                    ),
+                    payload={
+                        "dataset_id": dataset.dataset_id,
+                        "sample_id": sample_id,
+                        "generation": generation,
+                        "spec_version": dataset.spec_version,
+                        "source_digest": source_digest,
+                    },
                     status="pending",
                     idempotency_key=idempotency_key,
                     available_at=now,
@@ -481,13 +480,13 @@ class FeedbackDatasetService:
         if action in {"rebuild", "retry"}:
             assert source_digest is not None
             generation = sample.generation + 1
-            payload = build_job_payload(
-                dataset_id=dataset_id,
-                sample_id=sample_id,
-                generation=generation,
-                spec_version=dataset.spec_version,
-                source_digest=source_digest,
-            )
+            payload = {
+                "dataset_id": dataset_id,
+                "sample_id": sample_id,
+                "generation": generation,
+                "spec_version": dataset.spec_version,
+                "source_digest": source_digest,
+            }
             if cleaned_reason:
                 payload["review_note"] = cleaned_reason
             job = AnalysisJob(

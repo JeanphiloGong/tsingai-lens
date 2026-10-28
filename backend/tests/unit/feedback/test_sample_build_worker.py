@@ -19,7 +19,6 @@ from domain.feedback import (
 )
 from repositories.analysis_job_repository import AnalysisJob
 from repositories.feedback_dataset_sample_repository import (
-    build_job_payload,
     sample_build_idempotency_key,
     source_digest_for_case,
 )
@@ -129,13 +128,13 @@ def _case() -> FeedbackCase:
 
 def _job() -> AnalysisJob:
     source_digest = source_digest_for_case(_case())
-    payload = build_job_payload(
-        dataset_id="fdset-1",
-        sample_id="sample-1",
-        generation=1,
-        spec_version=1,
-        source_digest=source_digest,
-    )
+    payload = {
+        "dataset_id": "fdset-1",
+        "sample_id": "sample-1",
+        "generation": 1,
+        "spec_version": 1,
+        "source_digest": source_digest,
+    }
     return AnalysisJob(
         job_id="job-1",
         job_type="dataset_sample_build",
@@ -344,13 +343,13 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
 
 def _job_for_case(case: FeedbackCase) -> AnalysisJob:
     source_digest = source_digest_for_case(case)
-    payload = build_job_payload(
-        dataset_id="fdset-1",
-        sample_id="sample-1",
-        generation=1,
-        spec_version=1,
-        source_digest=source_digest,
-    )
+    payload = {
+        "dataset_id": "fdset-1",
+        "sample_id": "sample-1",
+        "generation": 1,
+        "spec_version": 1,
+        "source_digest": source_digest,
+    }
     return AnalysisJob(
         job_id="job-1",
         job_type="dataset_sample_build",

@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from hashlib import sha256
-from typing import Any, Literal
+from typing import Literal
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -93,22 +93,6 @@ def sample_build_idempotency_key(
         )
     )
 
-
-def build_job_payload(
-    *,
-    dataset_id: str,
-    sample_id: str,
-    generation: int,
-    spec_version: int,
-    source_digest: str,
-) -> dict[str, Any]:
-    return {
-        "dataset_id": dataset_id,
-        "sample_id": sample_id,
-        "generation": generation,
-        "spec_version": spec_version,
-        "source_digest": source_digest,
-    }
 
 
 @dataclass(frozen=True)
@@ -1070,10 +1054,13 @@ async def enqueue_case_samples(session: AsyncSession, case: FeedbackCaseRow, *, 
             job_id=job_id,
             job_type=DATASET_SAMPLE_BUILD_JOB_TYPE,
             payload_version=DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
-            payload=build_job_payload(
-                dataset_id=dataset.dataset_id, sample_id=sample_id, generation=1,
-                spec_version=dataset.spec_version, source_digest=source_digest,
-            ),
+            payload={
+                "dataset_id": dataset.dataset_id,
+                "sample_id": sample_id,
+                "generation": 1,
+                "spec_version": dataset.spec_version,
+                "source_digest": source_digest,
+            },
             status="pending",
             idempotency_key=sample_build_idempotency_key(
                 sample_id=sample_id, generation=1, spec_version=dataset.spec_version, source_digest=source_digest,

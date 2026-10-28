@@ -13,6 +13,9 @@ from types import SimpleNamespace
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, func, inspect, select, update
@@ -31,13 +34,13 @@ from infra.persistence.postgres.models import (
     ChatSessionRow,
 )
 from infra.persistence.postgres.models.collection import Collection as CollectionRow
+from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
 from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from repositories.collection_repository import (
     CollectionRepository,
     StoredCollection,
 )
-from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 pytestmark = pytest.mark.anyio
 NOW = "2026-09-09T08:00:00+00:00"
@@ -202,6 +205,7 @@ async def test_parent_deletion_cascades_feedback(feedback_app, parent):
     async with app.sessions.begin() as database:
         if parent is AuthUser:
             await database.execute(update(CollectionRow).values(owner_user_id=app.users[1]["user_id"]))
+            await database.execute(update(FeedbackDatasetRow).values(created_by=app.users[1]["user_id"]))
             await database.execute(delete(AuthUser).where(AuthUser.user_id == app.users[0]["user_id"]))
         else:
             await database.execute(delete(parent))
@@ -210,28 +214,17 @@ async def test_parent_deletion_cascades_feedback(feedback_app, parent):
 
 
 async def test_feedback_migration_can_be_rolled_back(postgres_sync_engine):
-    # The current head includes 20260924_0075, whose downgrade is deliberately
-    # irreversible. Start this round-trip at the last reversible checkpoint so
-    # the feedback migration itself is tested independently of that boundary.
-    reset_postgres_schema(postgres_sync_engine)
     config = Config("alembic.ini")
     with postgres_sync_engine.begin() as connection:
+        # Isolate feedback DDL from irreversible and later dataset migrations.
+        migration = ScriptDirectory.from_config(config).get_revision("20260909_0056").module
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.downgrade()
+            assert "chat_message_feedback" not in inspect(connection).get_table_names()
+            assert "chat_messages" in inspect(connection).get_table_names()
+            migration.upgrade()
+            assert "chat_message_feedback" in inspect(connection).get_table_names()
         config.attributes["connection"] = connection
-        command.upgrade(config, "20260924_0074")
-        assert "chat_message_feedback" in inspect(connection).get_table_names()
-        command.downgrade(config, "20260908_0055")
-        assert "chat_message_feedback" not in inspect(connection).get_table_names()
-        assert "chat_messages" in inspect(connection).get_table_names()
-        command.upgrade(config, "head")
-
-    # The rollback path intentionally crosses the historical 0055 schema. A
-    # clean head replay is the authoritative schema-drift check and avoids
-    # conflating that legacy path's unrelated Finding index differences with
-    # the Chat feedback migration under test.
-    reset_postgres_schema(postgres_sync_engine)
-    with postgres_sync_engine.begin() as connection:
-        config.attributes["connection"] = connection
-        command.upgrade(config, "head")
         command.check(config)
 
 

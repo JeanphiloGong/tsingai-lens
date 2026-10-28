@@ -7,8 +7,10 @@ from contextlib import asynccontextmanager
 
 import pytest
 import uvicorn
-from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import inspect, text
@@ -125,9 +127,12 @@ async def test_snapshot_migration_preserves_saved_conversations(branch_app, post
     config = Config("alembic.ini")
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.downgrade(config, "20260909_0057")
-        assert "response_snapshot" not in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
-        command.upgrade(config, "head")
+        # Exercise this migration without crossing the irreversible 0075 step.
+        migration = ScriptDirectory.from_config(config).get_revision("20260910_0058").module
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.downgrade()
+            assert "response_snapshot" not in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
+            migration.upgrade()
         assert "response_snapshot" in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
         assert connection.scalar(text("SELECT count(*) FROM chat_messages WHERE session_id = 'original'")) == len(before)
     assert await branch_app.repository.read_messages("original") == before

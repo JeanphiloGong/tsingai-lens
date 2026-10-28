@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -29,6 +30,10 @@ class ChatSessionRow(Base):
     __tablename__ = "chat_sessions"
     __table_args__ = (
         CheckConstraint("updated_at >= created_at", name="valid_timestamps"),
+        Index(
+            "ix_chat_sessions_user_collection_updated",
+            "user_id", "collection_id", "updated_at", "session_id",
+        ),
     )
 
     session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
@@ -68,6 +73,7 @@ class ChatMessageRow(Base):
             name="role_valid",
         ),
         UniqueConstraint("session_id", "position", name="uq_chat_messages_position"),
+        Index("ix_chat_messages_session_role_position", "session_id", "role", "position"),
     )
 
     message_id: Mapped[str] = mapped_column(String(128), primary_key=True)

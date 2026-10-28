@@ -13,6 +13,9 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import inspect
@@ -552,7 +555,10 @@ async def test_branch_migration_round_trip_preserves_original_sessions(branch_ap
     config = Config("alembic.ini")
     with postgres_sync_engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.downgrade(config, "20260909_0056")
-        assert "fork_position" not in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
-        command.upgrade(config, "head")
+        # Exercise this migration without crossing the irreversible 0075 step.
+        migration = ScriptDirectory.from_config(config).get_revision("20260909_0057").module
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.downgrade()
+            assert "fork_position" not in {column["name"] for column in inspect(connection).get_columns("chat_sessions")}
+            migration.upgrade()
     assert (await app.repository.read_messages("original"))[4].content == QUESTION

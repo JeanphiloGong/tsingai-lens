@@ -215,7 +215,26 @@ class FeedbackDatasetSampleRepository:
                     FeedbackDatasetSampleRow.sample_id == sample_id,
                 )
             )
-            return _sample(row) if row is not None else None
+            return (
+                DatasetSample(
+                    sample_id=row.sample_id,
+                    dataset_id=row.dataset_id,
+                    source_case_id=row.source_case_id,
+                    status=row.status,
+                    current_revision_id=row.current_revision_id,
+                    confirmed_revision_id=row.confirmed_revision_id,
+                    generation=row.generation,
+                    source_digest=row.source_digest,
+                    active_job_id=row.active_job_id,
+                    missing_reasons=tuple(row.missing_reasons or ()),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    confirmed_by=row.confirmed_by,
+                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+                )
+                if row is not None
+                else None
+            )
 
     async def list_samples(
         self,
@@ -243,12 +262,78 @@ class FeedbackDatasetSampleRepository:
             statement = statement.offset(offset)
         async with self.session_factory() as session:
             rows = await session.scalars(statement)
-            return tuple(_sample(row) for row in rows)
+            return tuple(
+                DatasetSample(
+                    sample_id=row.sample_id,
+                    dataset_id=row.dataset_id,
+                    source_case_id=row.source_case_id,
+                    status=row.status,
+                    current_revision_id=row.current_revision_id,
+                    confirmed_revision_id=row.confirmed_revision_id,
+                    generation=row.generation,
+                    source_digest=row.source_digest,
+                    active_job_id=row.active_job_id,
+                    missing_reasons=tuple(row.missing_reasons or ()),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    confirmed_by=row.confirmed_by,
+                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+                )
+                for row in rows
+            )
 
     async def read_revision(self, revision_id: str) -> SampleRevision | None:
         async with self.session_factory() as session:
             row = await session.get(FeedbackSampleRevisionRow, revision_id)
-            return _revision(row) if row is not None else None
+            if row is None:
+                return None
+            content_value = row.content
+            if content_value["schema_version"] == SFT_SCHEMA_VERSION:
+                content = SftRevisionContent(
+                    schema_version=content_value["schema_version"],
+                    messages=tuple(content_value["messages"]),
+                    context=tuple(content_value["context"]),
+                    evidence=tuple(content_value["evidence"]),
+                    target=content_value["target"],
+                )
+            elif content_value["schema_version"] == PREFERENCE_SCHEMA_VERSION:
+                content = PreferenceRevisionContent(
+                    schema_version=content_value["schema_version"],
+                    messages=tuple(content_value["messages"]),
+                    context=tuple(content_value["context"]),
+                    evidence=tuple(content_value["evidence"]),
+                    response_a=content_value["response_a"],
+                    response_b=content_value["response_b"],
+                    suggested_preference=content_value["suggested_preference"],
+                    rationale=content_value["rationale"],
+                    human_preference=content_value["human_preference"],
+                )
+            elif content_value["schema_version"] == EVALUATION_SCHEMA_VERSION:
+                content = EvaluationRevisionContent(
+                    schema_version=content_value["schema_version"],
+                    messages=tuple(content_value["messages"]),
+                    context=tuple(content_value["context"]),
+                    evidence=tuple(content_value["evidence"]),
+                    reference=content_value["reference"],
+                    criteria=tuple(content_value["criteria"]),
+                    evaluation_mode=content_value["evaluation_mode"],
+                )
+            else:
+                raise ValueError("unsupported sample revision schema")
+            return SampleRevision(
+                revision_id=row.revision_id,
+                sample_id=row.sample_id,
+                revision_no=row.revision_no,
+                author_kind=row.author_kind,
+                content=content,
+                content_digest=row.content_digest,
+                input_digest=row.input_digest,
+                construction_spec_version=row.construction_spec_version,
+                provenance=dict(row.provenance or {}),
+                created_at=_iso(row.created_at),
+                created_by=row.created_by,
+                job_id=row.job_id,
+            )
 
     async def count_samples(self, *, dataset_id: str, status: str | None = None) -> int:
         from sqlalchemy import func
@@ -299,8 +384,76 @@ class FeedbackDatasetSampleRepository:
                     continue
                 if source_digest_for_case(case) != sample.source_digest:
                     raise DatasetSampleRevisionConflict("sample_source_stale")
+                content_value = revision.content
+                if content_value["schema_version"] == SFT_SCHEMA_VERSION:
+                    content = SftRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        target=content_value["target"],
+                    )
+                elif content_value["schema_version"] == PREFERENCE_SCHEMA_VERSION:
+                    content = PreferenceRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        response_a=content_value["response_a"],
+                        response_b=content_value["response_b"],
+                        suggested_preference=content_value["suggested_preference"],
+                        rationale=content_value["rationale"],
+                        human_preference=content_value["human_preference"],
+                    )
+                elif content_value["schema_version"] == EVALUATION_SCHEMA_VERSION:
+                    content = EvaluationRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        reference=content_value["reference"],
+                        criteria=tuple(content_value["criteria"]),
+                        evaluation_mode=content_value["evaluation_mode"],
+                    )
+                else:
+                    raise ValueError("unsupported sample revision schema")
                 members.append(
-                    ConfirmedDatasetMember(sample=_sample(sample), revision=_revision(revision))
+                    ConfirmedDatasetMember(
+                        sample=DatasetSample(
+                            sample_id=sample.sample_id,
+                            dataset_id=sample.dataset_id,
+                            source_case_id=sample.source_case_id,
+                            status=sample.status,
+                            current_revision_id=sample.current_revision_id,
+                            confirmed_revision_id=sample.confirmed_revision_id,
+                            generation=sample.generation,
+                            source_digest=sample.source_digest,
+                            active_job_id=sample.active_job_id,
+                            missing_reasons=tuple(sample.missing_reasons or ()),
+                            created_at=_iso(sample.created_at),
+                            updated_at=_iso(sample.updated_at),
+                            confirmed_by=sample.confirmed_by,
+                            confirmed_at=(
+                                _iso(sample.confirmed_at)
+                                if sample.confirmed_at
+                                else None
+                            ),
+                        ),
+                        revision=SampleRevision(
+                            revision_id=revision.revision_id,
+                            sample_id=revision.sample_id,
+                            revision_no=revision.revision_no,
+                            author_kind=revision.author_kind,
+                            content=content,
+                            content_digest=revision.content_digest,
+                            input_digest=revision.input_digest,
+                            construction_spec_version=revision.construction_spec_version,
+                            provenance=dict(revision.provenance or {}),
+                            created_at=_iso(revision.created_at),
+                            created_by=revision.created_by,
+                            job_id=revision.job_id,
+                        ),
+                    )
                 )
             return tuple(members)
 
@@ -331,7 +484,55 @@ class FeedbackDatasetSampleRepository:
                 raise DatasetSampleRevisionConflict("sample_source_stale")
             if expected_revision_id is None and expected_generation is None:
                 raise ValueError("sample_generation_required")
-            session.add(_revision_row(revision))
+            content_value = revision.content
+            if isinstance(content_value, SftRevisionContent):
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "target": content_value.target,
+                }
+            elif isinstance(content_value, PreferenceRevisionContent):
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "response_a": content_value.response_a,
+                    "response_b": content_value.response_b,
+                    "suggested_preference": content_value.suggested_preference,
+                    "rationale": content_value.rationale,
+                    "human_preference": content_value.human_preference,
+                }
+            elif isinstance(content_value, EvaluationRevisionContent):
+                content_payload = {
+                    "schema_version": content_value.schema_version,
+                    "messages": [dict(item) for item in content_value.messages],
+                    "context": [dict(item) for item in content_value.context],
+                    "evidence": [dict(item) for item in content_value.evidence],
+                    "reference": content_value.reference,
+                    "criteria": list(content_value.criteria),
+                    "evaluation_mode": content_value.evaluation_mode,
+                }
+            else:
+                raise ValueError("unsupported sample revision content")
+            session.add(
+                FeedbackSampleRevisionRow(
+                    revision_id=revision.revision_id,
+                    sample_id=revision.sample_id,
+                    revision_no=revision.revision_no,
+                    author_kind=revision.author_kind,
+                    content=content_payload,
+                    content_digest=revision.content_digest,
+                    input_digest=revision.input_digest,
+                    construction_spec_version=revision.construction_spec_version,
+                    provenance=dict(revision.provenance),
+                    created_by=revision.created_by,
+                    job_id=revision.job_id,
+                    created_at=_datetime(revision.created_at),
+                )
+            )
             await session.flush()
             row.current_revision_id = revision.revision_id
             row.confirmed_revision_id = None
@@ -341,7 +542,22 @@ class FeedbackDatasetSampleRepository:
             row.missing_reasons = []
             row.updated_at = timestamp
             await session.flush()
-            return _sample(row)
+            return DatasetSample(
+                sample_id=row.sample_id,
+                dataset_id=row.dataset_id,
+                source_case_id=row.source_case_id,
+                status=row.status,
+                current_revision_id=row.current_revision_id,
+                confirmed_revision_id=row.confirmed_revision_id,
+                generation=row.generation,
+                source_digest=row.source_digest,
+                active_job_id=row.active_job_id,
+                missing_reasons=tuple(row.missing_reasons or ()),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                confirmed_by=row.confirmed_by,
+                confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+            )
 
     async def confirm_revision(
         self,
@@ -361,7 +577,22 @@ class FeedbackDatasetSampleRepository:
             ):
                 raise DatasetSampleRevisionConflict("sample_source_stale")
             if row.confirmed_revision_id == expected_revision_id and row.status == "confirmed":
-                return _sample(row)
+                return DatasetSample(
+                    sample_id=row.sample_id,
+                    dataset_id=row.dataset_id,
+                    source_case_id=row.source_case_id,
+                    status=row.status,
+                    current_revision_id=row.current_revision_id,
+                    confirmed_revision_id=row.confirmed_revision_id,
+                    generation=row.generation,
+                    source_digest=row.source_digest,
+                    active_job_id=row.active_job_id,
+                    missing_reasons=tuple(row.missing_reasons or ()),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    confirmed_by=row.confirmed_by,
+                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+                )
             if row.current_revision_id != expected_revision_id:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
             if row.status != "needs_confirmation":
@@ -377,7 +608,22 @@ class FeedbackDatasetSampleRepository:
             row.status = "confirmed"
             row.updated_at = timestamp
             await session.flush()
-            return _sample(row)
+            return DatasetSample(
+                sample_id=row.sample_id,
+                dataset_id=row.dataset_id,
+                source_case_id=row.source_case_id,
+                status=row.status,
+                current_revision_id=row.current_revision_id,
+                confirmed_revision_id=row.confirmed_revision_id,
+                generation=row.generation,
+                source_digest=row.source_digest,
+                active_job_id=row.active_job_id,
+                missing_reasons=tuple(row.missing_reasons or ()),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                confirmed_by=row.confirmed_by,
+                confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+            )
 
     async def apply_action(
         self,
@@ -435,7 +681,37 @@ class FeedbackDatasetSampleRepository:
                     or job.payload.get("source_digest") != source_digest
                 ):
                     raise ValueError("sample build action job identity is invalid")
-                session.add(_job_row(job))
+                session.add(
+                    AnalysisJobRow(
+                        job_id=job.job_id,
+                        job_type=job.job_type,
+                        payload_version=job.payload_version,
+                        payload=dict(job.payload),
+                        status=job.status,
+                        available_at=_datetime(job.available_at),
+                        started_at=(
+                            _datetime(job.started_at) if job.started_at else None
+                        ),
+                        finished_at=(
+                            _datetime(job.finished_at) if job.finished_at else None
+                        ),
+                        result_id=job.result_id,
+                        error_code=job.error_code,
+                        idempotency_key=job.idempotency_key,
+                        created_at=_datetime(job.created_at),
+                        updated_at=_datetime(job.updated_at),
+                        worker_id=job.worker_id,
+                        lease_expires_at=(
+                            _datetime(job.lease_expires_at)
+                            if job.lease_expires_at
+                            else None
+                        ),
+                        heartbeat_at=(
+                            _datetime(job.heartbeat_at) if job.heartbeat_at else None
+                        ),
+                        lease_version=job.lease_version,
+                    )
+                )
                 row.status = "pending"
                 row.active_job_id = job.job_id
                 row.source_digest = source_digest
@@ -467,7 +743,22 @@ class FeedbackDatasetSampleRepository:
             row.confirmed_at = None
             row.updated_at = timestamp
             await session.flush()
-            result = _sample(row)
+            result = DatasetSample(
+                sample_id=row.sample_id,
+                dataset_id=row.dataset_id,
+                source_case_id=row.source_case_id,
+                status=row.status,
+                current_revision_id=row.current_revision_id,
+                confirmed_revision_id=row.confirmed_revision_id,
+                generation=row.generation,
+                source_digest=row.source_digest,
+                active_job_id=row.active_job_id,
+                missing_reasons=tuple(row.missing_reasons or ()),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                confirmed_by=row.confirmed_by,
+                confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+            )
             session.add(
                 FeedbackSampleActionRow(
                     action_id=f"action_{uuid4().hex[:32]}",
@@ -545,7 +836,22 @@ class FeedbackDatasetSampleRepository:
                     )
                 return None
             if job_row.status in {"succeeded", "failed", "cancelled"}:
-                return _sample(row)
+                return DatasetSample(
+                    sample_id=row.sample_id,
+                    dataset_id=row.dataset_id,
+                    source_case_id=row.source_case_id,
+                    status=row.status,
+                    current_revision_id=row.current_revision_id,
+                    confirmed_revision_id=row.confirmed_revision_id,
+                    generation=row.generation,
+                    source_digest=row.source_digest,
+                    active_job_id=row.active_job_id,
+                    missing_reasons=tuple(row.missing_reasons or ()),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    confirmed_by=row.confirmed_by,
+                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+                )
             if job_row.status != "running" or row.status not in {"pending", "building"}:
                 raise ValueError("sample build is not running")
 
@@ -562,7 +868,22 @@ class FeedbackDatasetSampleRepository:
                 row.updated_at = timestamp
                 _finish_job(job_row, status="succeeded", finished_at=timestamp, result_id=sample_id, error_code=None)
                 await session.flush()
-                return _sample(row)
+                return DatasetSample(
+                    sample_id=row.sample_id,
+                    dataset_id=row.dataset_id,
+                    source_case_id=row.source_case_id,
+                    status=row.status,
+                    current_revision_id=row.current_revision_id,
+                    confirmed_revision_id=row.confirmed_revision_id,
+                    generation=row.generation,
+                    source_digest=row.source_digest,
+                    active_job_id=row.active_job_id,
+                    missing_reasons=tuple(row.missing_reasons or ()),
+                    created_at=_iso(row.created_at),
+                    updated_at=_iso(row.updated_at),
+                    confirmed_by=row.confirmed_by,
+                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+                )
 
             if outcome == "candidate":
                 assert revision is not None
@@ -570,7 +891,55 @@ class FeedbackDatasetSampleRepository:
                     raise ValueError("revision does not belong to sample")
                 if revision.input_digest != row.source_digest:
                     raise DatasetSampleRevisionConflict("sample_source_stale")
-                session.add(_revision_row(revision))
+                content_value = revision.content
+                if isinstance(content_value, SftRevisionContent):
+                    content_payload = {
+                        "schema_version": content_value.schema_version,
+                        "messages": [dict(item) for item in content_value.messages],
+                        "context": [dict(item) for item in content_value.context],
+                        "evidence": [dict(item) for item in content_value.evidence],
+                        "target": content_value.target,
+                    }
+                elif isinstance(content_value, PreferenceRevisionContent):
+                    content_payload = {
+                        "schema_version": content_value.schema_version,
+                        "messages": [dict(item) for item in content_value.messages],
+                        "context": [dict(item) for item in content_value.context],
+                        "evidence": [dict(item) for item in content_value.evidence],
+                        "response_a": content_value.response_a,
+                        "response_b": content_value.response_b,
+                        "suggested_preference": content_value.suggested_preference,
+                        "rationale": content_value.rationale,
+                        "human_preference": content_value.human_preference,
+                    }
+                elif isinstance(content_value, EvaluationRevisionContent):
+                    content_payload = {
+                        "schema_version": content_value.schema_version,
+                        "messages": [dict(item) for item in content_value.messages],
+                        "context": [dict(item) for item in content_value.context],
+                        "evidence": [dict(item) for item in content_value.evidence],
+                        "reference": content_value.reference,
+                        "criteria": list(content_value.criteria),
+                        "evaluation_mode": content_value.evaluation_mode,
+                    }
+                else:
+                    raise ValueError("unsupported sample revision content")
+                session.add(
+                    FeedbackSampleRevisionRow(
+                        revision_id=revision.revision_id,
+                        sample_id=revision.sample_id,
+                        revision_no=revision.revision_no,
+                        author_kind=revision.author_kind,
+                        content=content_payload,
+                        content_digest=revision.content_digest,
+                        input_digest=revision.input_digest,
+                        construction_spec_version=revision.construction_spec_version,
+                        provenance=dict(revision.provenance),
+                        created_by=revision.created_by,
+                        job_id=revision.job_id,
+                        created_at=_datetime(revision.created_at),
+                    )
+                )
                 await session.flush()
                 row.current_revision_id = revision.revision_id
                 row.status = "needs_confirmation"
@@ -618,7 +987,22 @@ class FeedbackDatasetSampleRepository:
                 )
             row.updated_at = timestamp
             await session.flush()
-            return _sample(row)
+            return DatasetSample(
+                sample_id=row.sample_id,
+                dataset_id=row.dataset_id,
+                source_case_id=row.source_case_id,
+                status=row.status,
+                current_revision_id=row.current_revision_id,
+                confirmed_revision_id=row.confirmed_revision_id,
+                generation=row.generation,
+                source_digest=row.source_digest,
+                active_job_id=row.active_job_id,
+                missing_reasons=tuple(row.missing_reasons or ()),
+                created_at=_iso(row.created_at),
+                updated_at=_iso(row.updated_at),
+                confirmed_by=row.confirmed_by,
+                confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+            )
 
 
 async def _lock_sample_source(
@@ -699,7 +1083,27 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
     )
     if existing is not None:
         if existing.source_digest == sample.source_digest or existing.status == "discarded":
-            return CollectedDatasetSample(_sample(existing), None)
+            return CollectedDatasetSample(
+                DatasetSample(
+                    sample_id=existing.sample_id,
+                    dataset_id=existing.dataset_id,
+                    source_case_id=existing.source_case_id,
+                    status=existing.status,
+                    current_revision_id=existing.current_revision_id,
+                    confirmed_revision_id=existing.confirmed_revision_id,
+                    generation=existing.generation,
+                    source_digest=existing.source_digest,
+                    active_job_id=existing.active_job_id,
+                    missing_reasons=tuple(existing.missing_reasons or ()),
+                    created_at=_iso(existing.created_at),
+                    updated_at=_iso(existing.updated_at),
+                    confirmed_by=existing.confirmed_by,
+                    confirmed_at=(
+                        _iso(existing.confirmed_at) if existing.confirmed_at else None
+                    ),
+                ),
+                None,
+            )
         existing.generation += 1
         existing.source_digest = sample.source_digest
         existing.confirmed_revision_id = None
@@ -715,7 +1119,27 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
             existing.active_job_id = None
             existing.missing_reasons = ["source_changed_since_collection"]
             await session.flush()
-            return CollectedDatasetSample(_sample(existing), None)
+            return CollectedDatasetSample(
+                DatasetSample(
+                    sample_id=existing.sample_id,
+                    dataset_id=existing.dataset_id,
+                    source_case_id=existing.source_case_id,
+                    status=existing.status,
+                    current_revision_id=existing.current_revision_id,
+                    confirmed_revision_id=existing.confirmed_revision_id,
+                    generation=existing.generation,
+                    source_digest=existing.source_digest,
+                    active_job_id=existing.active_job_id,
+                    missing_reasons=tuple(existing.missing_reasons or ()),
+                    created_at=_iso(existing.created_at),
+                    updated_at=_iso(existing.updated_at),
+                    confirmed_by=existing.confirmed_by,
+                    confirmed_at=(
+                        _iso(existing.confirmed_at) if existing.confirmed_at else None
+                    ),
+                ),
+                None,
+            )
         job = replace(
             job,
             payload={**job.payload, "sample_id": existing.sample_id, "generation": existing.generation},
@@ -724,15 +1148,79 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
                 spec_version=job.payload["spec_version"], source_digest=sample.source_digest,
             ),
         )
-        session.add(_job_row(job))
+        session.add(
+            AnalysisJobRow(
+                job_id=job.job_id,
+                job_type=job.job_type,
+                payload_version=job.payload_version,
+                payload=dict(job.payload),
+                status=job.status,
+                available_at=_datetime(job.available_at),
+                started_at=_datetime(job.started_at) if job.started_at else None,
+                finished_at=_datetime(job.finished_at) if job.finished_at else None,
+                result_id=job.result_id,
+                error_code=job.error_code,
+                idempotency_key=job.idempotency_key,
+                created_at=_datetime(job.created_at),
+                updated_at=_datetime(job.updated_at),
+                worker_id=job.worker_id,
+                lease_expires_at=(
+                    _datetime(job.lease_expires_at) if job.lease_expires_at else None
+                ),
+                heartbeat_at=_datetime(job.heartbeat_at) if job.heartbeat_at else None,
+                lease_version=job.lease_version,
+            )
+        )
         await session.flush()
         existing.status = "pending"
         existing.active_job_id = job.job_id
         existing.missing_reasons = []
         await session.flush()
-        return CollectedDatasetSample(_sample(existing), job)
+        return CollectedDatasetSample(
+            DatasetSample(
+                sample_id=existing.sample_id,
+                dataset_id=existing.dataset_id,
+                source_case_id=existing.source_case_id,
+                status=existing.status,
+                current_revision_id=existing.current_revision_id,
+                confirmed_revision_id=existing.confirmed_revision_id,
+                generation=existing.generation,
+                source_digest=existing.source_digest,
+                active_job_id=existing.active_job_id,
+                missing_reasons=tuple(existing.missing_reasons or ()),
+                created_at=_iso(existing.created_at),
+                updated_at=_iso(existing.updated_at),
+                confirmed_by=existing.confirmed_by,
+                confirmed_at=(
+                    _iso(existing.confirmed_at) if existing.confirmed_at else None
+                ),
+            ),
+            job,
+        )
 
-    session.add(_job_row(job))
+    session.add(
+        AnalysisJobRow(
+            job_id=job.job_id,
+            job_type=job.job_type,
+            payload_version=job.payload_version,
+            payload=dict(job.payload),
+            status=job.status,
+            available_at=_datetime(job.available_at),
+            started_at=_datetime(job.started_at) if job.started_at else None,
+            finished_at=_datetime(job.finished_at) if job.finished_at else None,
+            result_id=job.result_id,
+            error_code=job.error_code,
+            idempotency_key=job.idempotency_key,
+            created_at=_datetime(job.created_at),
+            updated_at=_datetime(job.updated_at),
+            worker_id=job.worker_id,
+            lease_expires_at=(
+                _datetime(job.lease_expires_at) if job.lease_expires_at else None
+            ),
+            heartbeat_at=_datetime(job.heartbeat_at) if job.heartbeat_at else None,
+            lease_version=job.lease_version,
+        )
+    )
     await session.flush()
     row = FeedbackDatasetSampleRow(
         sample_id=sample.sample_id, dataset_id=sample.dataset_id, source_case_id=sample.source_case_id,
@@ -742,28 +1230,24 @@ async def _collect_sample(session: AsyncSession, sample: DatasetSample, job: Ana
     )
     session.add(row)
     await session.flush()
-    return CollectedDatasetSample(_sample(row), job)
-
-
-def _job_row(job: AnalysisJob) -> AnalysisJobRow:
-    return AnalysisJobRow(
-        job_id=job.job_id,
-        job_type=job.job_type,
-        payload_version=job.payload_version,
-        payload=dict(job.payload),
-        status=job.status,
-        available_at=_datetime(job.available_at),
-        started_at=_datetime(job.started_at) if job.started_at else None,
-        finished_at=_datetime(job.finished_at) if job.finished_at else None,
-        result_id=job.result_id,
-        error_code=job.error_code,
-        idempotency_key=job.idempotency_key,
-        created_at=_datetime(job.created_at),
-        updated_at=_datetime(job.updated_at),
-        worker_id=job.worker_id,
-        lease_expires_at=_datetime(job.lease_expires_at) if job.lease_expires_at else None,
-        heartbeat_at=_datetime(job.heartbeat_at) if job.heartbeat_at else None,
-        lease_version=job.lease_version,
+    return CollectedDatasetSample(
+        DatasetSample(
+            sample_id=row.sample_id,
+            dataset_id=row.dataset_id,
+            source_case_id=row.source_case_id,
+            status=row.status,
+            current_revision_id=row.current_revision_id,
+            confirmed_revision_id=row.confirmed_revision_id,
+            generation=row.generation,
+            source_digest=row.source_digest,
+            active_job_id=row.active_job_id,
+            missing_reasons=tuple(row.missing_reasons or ()),
+            created_at=_iso(row.created_at),
+            updated_at=_iso(row.updated_at),
+            confirmed_by=row.confirmed_by,
+            confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
+        ),
+        job,
     )
 
 
@@ -796,61 +1280,6 @@ def _lease_matches(row: AnalysisJobRow, job: AnalysisJob, timestamp: datetime) -
         and row.lease_version == job.lease_version
         and row.lease_expires_at is not None
         and row.lease_expires_at > timestamp
-    )
-
-
-
-
-def _sample(row: FeedbackDatasetSampleRow) -> DatasetSample:
-    return DatasetSample(
-        sample_id=row.sample_id,
-        dataset_id=row.dataset_id,
-        source_case_id=row.source_case_id,
-        status=row.status,  # type: ignore[arg-type]
-        current_revision_id=row.current_revision_id,
-        confirmed_revision_id=row.confirmed_revision_id,
-        generation=row.generation,
-        source_digest=row.source_digest,
-        active_job_id=row.active_job_id,
-        missing_reasons=tuple(row.missing_reasons or ()),
-        created_at=_iso(row.created_at),
-        updated_at=_iso(row.updated_at),
-        confirmed_by=row.confirmed_by,
-        confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
-    )
-
-
-def _revision(row: FeedbackSampleRevisionRow) -> SampleRevision:
-    return SampleRevision(
-        revision_id=row.revision_id,
-        sample_id=row.sample_id,
-        revision_no=row.revision_no,
-        author_kind=row.author_kind,  # type: ignore[arg-type]
-        content=revision_content_from_json(row.content),
-        content_digest=row.content_digest,
-        input_digest=row.input_digest,
-        construction_spec_version=row.construction_spec_version,
-        provenance=dict(row.provenance or {}),
-        created_at=_iso(row.created_at),
-        created_by=row.created_by,
-        job_id=row.job_id,
-    )
-
-
-def _revision_row(revision: SampleRevision) -> FeedbackSampleRevisionRow:
-    return FeedbackSampleRevisionRow(
-        revision_id=revision.revision_id,
-        sample_id=revision.sample_id,
-        revision_no=revision.revision_no,
-        author_kind=revision.author_kind,
-        content=revision_content_json(revision.content),
-        content_digest=revision.content_digest,
-        input_digest=revision.input_digest,
-        construction_spec_version=revision.construction_spec_version,
-        provenance=dict(revision.provenance),
-        created_by=revision.created_by,
-        job_id=revision.job_id,
-        created_at=_datetime(revision.created_at),
     )
 
 

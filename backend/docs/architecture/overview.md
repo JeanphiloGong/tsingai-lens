@@ -50,6 +50,13 @@ window-result normalization; `paper_map_aggregation.py` owns merging, signal
 reconciliation, and map status. This separation is structural: the scientific
 selection rules and persisted Paper Map contract remain unchanged.
 
+HTTP, tool, model and Source-parser inputs are parsed by their owning boundary.
+Application methods pass those values and domain objects directly. Repositories
+construct stored results beside the query and write fields beside the mutation;
+they do not expose general model codecs. Controllers and Agent outputs assemble
+their own responses. Scientific matching, stable identities, Source ownership,
+approval and revision rules remain with the operations that own them.
+
 ## Find The Modification Point
 
 | Your question | Read next |

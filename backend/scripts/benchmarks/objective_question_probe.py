@@ -52,7 +52,7 @@ from application.core.objectives.objective_candidate_service import (
     CandidateQuestionBatch,
     ObjectiveCandidateService,
 )
-from domain.core import PaperResearchMap, PreparedDocumentInput
+from domain.core import PreparedDocumentInput
 from infra.llm.usage import capture_llm_usage
 
 

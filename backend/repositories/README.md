@@ -18,6 +18,11 @@ A researcher opens a saved question about laser power and porosity:
 Domain objects retain scientific rules. Application services coordinate work.
 Each repository owns SQL, ORM mapping and operation-local transactions; it
 returns domain objects or dedicated query results, never ORM rows or HTTP models.
+Read and write methods construct their values beside the query or assignment.
+An aggregate loader may query related rows, but pure row factories, shared
+record codecs and object-to-dictionary round trips are not repository interfaces.
+Saved canonical fields are read directly; external formats are parsed at their
+actual input boundary. Domain objects retain ownership, revision and state rules.
 
 ## Find the Owner
 

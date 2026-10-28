@@ -61,21 +61,15 @@ from domain.core import (
     ResearchObjective,
     SourceObservation,
 )
+from domain.core.research_objective import normalize_objective_terms
 from domain.core.research_process import build_source_observation_id
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    SCIENTIFIC_RESULT_DIRECTIONS,
-    SCIENTIFIC_RESULT_KINDS,
     ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 from domain.source import SourceDocumentTree, render_markdown_table
 from openai import APIConnectionError, APIStatusError
 from pydantic import (
@@ -2103,7 +2097,126 @@ def _extract_source_round(
                     )
                     else "uncertain"
                 )
-            route_units.append(_observation_from_extraction(record))
+            source_refs = tuple(dict(item) for item in record.get("source_refs", ()))
+            first_source_ref = source_refs[0] if source_refs else {}
+            observation_id = record.get("observation_id") or record.get("evidence_id")
+            if not observation_id:
+                # Identity uses the captured record before display text is trimmed.
+                observation_id = build_source_observation_id(
+                    objective_id=record["objective_id"],
+                    document_id=record["document_id"],
+                    source_kind=record.get("source_kind")
+                    or first_source_ref.get("source_kind"),
+                    source_ref=record.get("source_ref") or first_source_ref.get("source_ref"),
+                    observation_role=record.get("observation_role")
+                    or record.get("evidence_role"),
+                    reported_result=record.get("reported_result"),
+                    scientific_context=record.get("scientific_context"),
+                )
+            comparison = record.get("comparison")
+            result = record.get("reported_result")
+            context = record.get("scientific_context", {})
+            route_units.append(SourceObservation(
+                observation_id=observation_id,
+                collection_id=collection_id,
+                objective_id=route.objective_id,
+                document_id=route.document_id,
+                source_kind=record.get("source_kind") or first_source_ref.get("source_kind", "text_window"),
+                source_ref=record.get("source_ref") or first_source_ref.get("source_ref") or (
+                    observation_id if record["status"] == "rejected" else ""
+                ),
+                observation_role=record.get("observation_role") or record.get("evidence_role", "unknown"),
+                source_excerpt=record.get("source_excerpt") or first_source_ref.get("source_excerpt", ""),
+                changed_variables=tuple(
+                    ScientificVariable(
+                        name=item["name"].strip(),
+                        baseline_value=(
+                            item["baseline_value"].strip() or None
+                            if isinstance(item.get("baseline_value"), str)
+                            else item.get("baseline_value")
+                        ),
+                        target_value=(
+                            item["target_value"].strip() or None
+                            if isinstance(item.get("target_value"), str)
+                            else item.get("target_value")
+                        ),
+                        unit=(
+                            item["unit"].strip() or None
+                            if item.get("unit") is not None else None
+                        ),
+                    )
+                    for item in record.get("changed_variables", ())
+                ),
+                comparison=(
+                    ScientificComparison(
+                        baseline_label=comparison["baseline_label"].strip(),
+                        target_label=comparison["target_label"].strip(),
+                        axis_names=normalize_objective_terms(comparison["axis_names"]),
+                        comparable=comparison["comparable"],
+                        incomparability_reasons=normalize_objective_terms(
+                            comparison.get("incomparability_reasons", ())
+                        ),
+                    ) if comparison is not None else None
+                ),
+                reported_result=(
+                    ScientificResult(
+                        outcome=result["outcome"].strip(),
+                        value=(
+                            result["value"].strip() or None
+                            if isinstance(result.get("value"), str)
+                            else result.get("value")
+                        ),
+                        unit=(
+                            result["unit"].strip() or None
+                            if result.get("unit") is not None else None
+                        ),
+                        direction=result.get("direction", "unknown"),
+                        result_text=result["result_text"].strip(),
+                        baseline_value=(
+                            result["baseline_value"].strip() or None
+                            if isinstance(result.get("baseline_value"), str)
+                            else result.get("baseline_value")
+                        ),
+                        target_value=(
+                            result["target_value"].strip() or None
+                            if isinstance(result.get("target_value"), str)
+                            else result.get("target_value")
+                        ),
+                        result_kind=result.get("result_kind", "observed"),
+                    ) if result is not None else None
+                ),
+                scientific_context=ScientificContext(**{
+                    group: tuple(
+                        ScientificAttribute(
+                            name=attribute["name"].strip(),
+                            value=(
+                                attribute["value"].strip()
+                                if isinstance(attribute["value"], str)
+                                else attribute["value"]
+                            ),
+                            unit=(
+                                attribute["unit"].strip() or None
+                                if attribute.get("unit") is not None else None
+                            ),
+                            context_scope=attribute.get("context_scope", "unknown"),
+                            applies_to_outcomes=normalize_objective_terms(
+                                attribute.get("applies_to_outcomes", ())
+                            ),
+                        )
+                        for attribute in context.get(group, ())
+                    )
+                    for group in ("material", "sample", "process", "test")
+                }),
+                confidence=record["confidence"],
+                selection_status=record.get("selection_status", "extracted"),
+                selection_reason=record.get("selection_reason"),
+                attribution_scope=record.get("attribution_scope", "not_attributable"),
+                resolution_status=record.get("resolution_status", "unknown"),
+                failure_reason=record.get("failure_reason"),
+                status=record["status"],
+                source_refs=source_refs,
+                derived_from_observation_ids=tuple(record.get("derived_from_observation_ids", ())),
+            ))
         if fallback_unit is not None:
             route_units.append(fallback_unit)
         for unit in route_units:
@@ -7002,258 +7115,3 @@ def _tree_node_in_reference_branch(
         parent_id = getattr(current, "parent_id", None)
         current = document_tree.nodes.get(parent_id) if parent_id else None
     return False
-
-
-def _observation_from_extraction(payload: Mapping[str, Any]) -> "SourceObservation":
-    source_refs = tuple(
-        dict(item)
-        for item in payload.get("source_refs") or ()
-        if isinstance(item, Mapping)
-    )
-    first_source_ref = source_refs[0] if source_refs else {}
-    observation_id = str(
-        payload.get("observation_id") or payload.get("evidence_id") or ""
-    ).strip()
-    if not observation_id:
-        observation_id = build_source_observation_id(
-            objective_id=payload.get("objective_id"),
-            document_id=payload.get("document_id"),
-            source_kind=payload.get("source_kind")
-            or first_source_ref.get("source_kind"),
-            source_ref=payload.get("source_ref") or first_source_ref.get("source_ref"),
-            observation_role=payload.get("observation_role")
-            or payload.get("evidence_role"),
-            reported_result=payload.get("reported_result"),
-            scientific_context=payload.get("scientific_context"),
-        )
-    selection_status = str(payload.get("selection_status") or "extracted").strip()
-    status = str(payload.get("status") or "").strip()
-    if not status:
-        status = "unvalidated"
-    source_excerpt = str(
-        payload.get("source_excerpt") or first_source_ref.get("source_excerpt") or ""
-    ).strip()
-    return SourceObservation(
-        observation_id=observation_id,
-        collection_id=str(payload.get("collection_id") or "unknown").strip(),
-        objective_id=str(payload.get("objective_id") or "").strip(),
-        document_id=str(payload.get("document_id") or "").strip(),
-        source_kind=str(
-            payload.get("source_kind")
-            or first_source_ref.get("source_kind")
-            or "text_window"
-        ).strip(),
-        source_ref=str(
-            payload.get("source_ref")
-            or first_source_ref.get("source_ref")
-            or (observation_id if status == "rejected" else "")
-        ).strip(),
-        observation_role=str(
-            payload.get("observation_role") or payload.get("evidence_role") or "unknown"
-        ).strip(),
-        source_excerpt=source_excerpt,
-        changed_variables=tuple(
-            ScientificVariable(
-                name=scientific_text(item.get("name")) or "",
-                baseline_value=scientific_scalar(item.get("baseline_value")),
-                target_value=scientific_scalar(item.get("target_value")),
-                unit=scientific_text(item.get("unit")),
-            )
-            for item in payload.get("changed_variables") or ()
-            if isinstance(item, Mapping)
-        ),
-        comparison=(
-            ScientificComparison(
-                baseline_label=scientific_text(
-                    payload["comparison"].get("baseline_label")
-                )
-                or "",
-                target_label=scientific_text(payload["comparison"].get("target_label"))
-                or "",
-                axis_names=scientific_terms(payload["comparison"].get("axis_names")),
-                comparable=payload["comparison"].get("comparable") is True,
-                incomparability_reasons=scientific_terms(
-                    payload["comparison"].get("incomparability_reasons")
-                ),
-            )
-            if isinstance(payload.get("comparison"), Mapping)
-            else None
-        ),
-        reported_result=(
-            ScientificResult(
-                outcome=scientific_text(payload["reported_result"].get("outcome"))
-                or "",
-                value=scientific_scalar(payload["reported_result"].get("value")),
-                unit=scientific_text(payload["reported_result"].get("unit")),
-                direction=scientific_choice(
-                    payload["reported_result"].get("direction"),
-                    SCIENTIFIC_RESULT_DIRECTIONS,
-                    "unknown",
-                ),
-                result_text=scientific_text(
-                    payload["reported_result"].get("result_text")
-                )
-                or "",
-                baseline_value=scientific_scalar(
-                    payload["reported_result"].get("baseline_value")
-                ),
-                target_value=scientific_scalar(
-                    payload["reported_result"].get("target_value")
-                ),
-                result_kind=scientific_choice(
-                    payload["reported_result"].get("result_kind"),
-                    SCIENTIFIC_RESULT_KINDS,
-                    "observed",
-                ),
-            )
-            if isinstance(payload.get("reported_result"), Mapping)
-            else None
-        ),
-        scientific_context=(
-            ScientificContext(
-                material=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            payload["scientific_context"].get("material")
-                            if isinstance(
-                                payload["scientific_context"].get("material"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-                sample=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            payload["scientific_context"].get("sample")
-                            if isinstance(
-                                payload["scientific_context"].get("sample"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-                process=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            payload["scientific_context"].get("process")
-                            if isinstance(
-                                payload["scientific_context"].get("process"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-                test=tuple(
-                    (
-                        ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
-                            value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
-                                else ""
-                            ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
-                        )
-                        for attribute in (
-                            payload["scientific_context"].get("test")
-                            if isinstance(
-                                payload["scientific_context"].get("test"),
-                                (list, tuple),
-                            )
-                            else ()
-                        )
-                        if isinstance(attribute, Mapping)
-                    )
-                ),
-            )
-            if isinstance(payload.get("scientific_context"), Mapping)
-            else ScientificContext()
-        ),
-        confidence=float(payload.get("confidence") or 0),
-        selection_status=selection_status,
-        selection_reason=(
-            str(payload["selection_reason"]).strip()
-            if payload.get("selection_reason")
-            else None
-        ),
-        attribution_scope=str(
-            payload.get("attribution_scope") or "not_attributable"
-        ).strip(),
-        resolution_status=str(payload.get("resolution_status") or "unknown").strip(),
-        failure_reason=(
-            str(payload["failure_reason"]).strip()
-            if payload.get("failure_reason")
-            else None
-        ),
-        status=status,
-        source_refs=source_refs,
-        derived_from_observation_ids=tuple(
-            payload.get("derived_from_observation_ids") or ()
-        ),
-    )

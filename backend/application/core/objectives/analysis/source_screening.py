@@ -12,7 +12,7 @@ from typing import Annotated, Any, Callable, Iterable, Literal, Mapping
 
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
-from domain.core import PaperResearchMap, ResearchObjective, normalize_objective_terms
+from domain.core import PaperResearchMap, ResearchObjective
 from domain.source import SourceDocumentTree
 from pydantic import (
     BaseModel,
@@ -1239,17 +1239,20 @@ def _aggregate_objective_paper_frame_batches(
         {},
     )
 
-    def values(field: str) -> list[str]:
-        return list(
-            dict.fromkeys(
-                text
-                for record, _decision_origin, _errors in results
-                for value in record.get(field) or ()
-                if (text := str(value).strip())
-            )
-        )
+    def values(field: str) -> tuple[str, ...]:
+        terms: list[str] = []
+        seen: set[str] = set()
+        for record, _decision_origin, _errors in results:
+            for value in record.get(field, ()):
+                text = value.strip()
+                key = text.casefold()
+                if text and key not in seen:
+                    seen.add(key)
+                    terms.append(text)
+        return tuple(terms)
 
     relevant_sections: list[str] = []
+    section_labels: set[str] = set()
     relevant_text_source_refs: list[str] = []
     relevant_tables: list[str] = []
     excluded_tables: list[str] = []
@@ -1257,15 +1260,16 @@ def _aggregate_objective_paper_frame_batches(
         source_unit_id = str(unit.get("source_unit_id") or "")
         source_kind = str(unit.get("source_kind") or "")
         if source_kind == "section" and source_unit_id in relevant_ids:
-            label = str(unit.get("section_label") or "").strip()
-            if label and label not in relevant_sections:
+            label = unit.get("section_label", "").strip()
+            if label and label.casefold() not in section_labels:
+                section_labels.add(label.casefold())
                 relevant_sections.append(label)
-            source_ref = str(unit.get("source_ref") or "").strip()
+            source_ref = unit["source_ref"]
             if source_ref and source_ref not in relevant_text_source_refs:
                 relevant_text_source_refs.append(source_ref)
         if source_kind != "table":
             continue
-        table_id = str(unit.get("source_ref") or "").strip()
+        table_id = unit["source_ref"]
         if not table_id:
             continue
         if source_unit_id in relevant_ids and table_id not in relevant_tables:
@@ -1308,14 +1312,14 @@ def _aggregate_objective_paper_frame_batches(
         relevance=relevance,
         paper_role=paper_role,
         screening_note=str(screening_note_record.get('screening_note') or '').strip() or None,
-        material_match=normalize_objective_terms(values('material_match')),
-        changed_variables=normalize_objective_terms(values('changed_variables')),
-        measured_property_scope=normalize_objective_terms(values('measured_property_scope')),
-        test_environment_scope=normalize_objective_terms(values('test_environment_scope')),
-        relevant_sections=normalize_objective_terms(relevant_sections),
-        relevant_text_source_refs=normalize_objective_terms(relevant_text_source_refs),
-        relevant_tables=normalize_objective_terms(relevant_tables),
-        excluded_tables=normalize_objective_terms(excluded_tables),
+        material_match=values('material_match'),
+        changed_variables=values('changed_variables'),
+        measured_property_scope=values('measured_property_scope'),
+        test_environment_scope=values('test_environment_scope'),
+        relevant_sections=tuple(relevant_sections),
+        relevant_text_source_refs=tuple(relevant_text_source_refs),
+        relevant_tables=tuple(relevant_tables),
+        excluded_tables=tuple(excluded_tables),
         source_dispositions=source_dispositions,
         lineage_source_refs=normalized_lineage_source_refs,
     )

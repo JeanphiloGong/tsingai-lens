@@ -41,6 +41,38 @@ from tests.support.research_objective_service import (
 )
 
 
+def test_frame_aggregation_keeps_source_identity_case_and_deduplicates_terms() -> None:
+    units = (
+        {"source_unit_id": "S1", "source_kind": "section", "source_ref": "Results-A", "section_label": "Results"},
+        {"source_unit_id": "S2", "source_kind": "section", "source_ref": "results-a", "section_label": "results"},
+        {"source_unit_id": "S3", "source_kind": "table", "source_ref": "Table-A"},
+        {"source_unit_id": "S4", "source_kind": "table", "source_ref": "table-a"},
+    )
+    frame = source_screening._aggregate_objective_paper_frame_batches(
+        objective_id="obj-porosity",
+        document_id="paper-1",
+        source_units=units,
+        batch_results=(({
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": [" Ti-6Al-4V ", "ti-6al-4v"],
+            "changed_variables": ["laser power", "Laser power"],
+            "measured_property_scope": ["porosity"],
+            "test_environment_scope": [],
+            "relevant_source_unit_ids": ["S1", "S2", "S3", "S4"],
+            "excluded_source_unit_ids": [],
+        }, "model", ()),),
+        paper_map=None,
+    )
+
+    assert frame.material_match == ("Ti-6Al-4V",)
+    assert frame.changed_variables == ("laser power",)
+    assert frame.relevant_sections == ("Results",)
+    assert frame.relevant_text_source_refs == ("Results-A", "results-a")
+    assert frame.relevant_tables == ("Table-A", "table-a")
+    assert tuple(item.source_unit_id for item in frame.source_dispositions) == ("S1", "S2", "S3", "S4")
+
+
 def test_route_without_confidence_gets_conservative_fallback() -> None:
     objective = _research_objective(
         {

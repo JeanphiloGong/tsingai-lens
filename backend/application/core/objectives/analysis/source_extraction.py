@@ -60,7 +60,6 @@ from application.core.paper_facts.extraction import (
 from domain.core import (
     ResearchObjective,
     SourceObservation,
-    normalize_objective_terms,
 )
 from domain.core.research_process import build_source_observation_id
 from domain.core.scientific_fact import (
@@ -2697,7 +2696,7 @@ def _build_adaptive_context_routes(
                     column_roles={},
                     join_plan={},
                     confidence=0.8,
-                    context_fields=normalize_objective_terms(scoped_route_fields),
+                    context_fields=scoped_route_fields,
                 )
                 adaptive_routes.append(route)
                 source_key = (
@@ -6473,8 +6472,8 @@ def _objective_seed_context_routes(
                 seed_role = (
                     _text(source_ref_record.get("role")) or "background_context"
                 )
-                seed_context_fields = normalize_objective_terms(
-                    source_ref_record.get("context_fields")
+                seed_context_fields = tuple(
+                    source_ref_record.get("context_fields", ())
                 ) or _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS.get(
                     seed_role.casefold(),
                     (),
@@ -6492,7 +6491,7 @@ def _objective_seed_context_routes(
                     column_roles={},
                     join_plan={},
                     confidence=1,
-                    context_fields=normalize_objective_terms(seed_context_fields),
+                    context_fields=seed_context_fields,
                 )
             )
     for audit in read_audits:
@@ -6519,7 +6518,7 @@ def _objective_seed_context_routes(
                 column_roles={},
                 join_plan={},
                 confidence=1,
-                context_fields=normalize_objective_terms(audit.context_fields or _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS.get(audit.role, ())),
+                context_fields=audit.context_fields or _OBJECTIVE_ROUTE_DEFAULT_CONTEXT_FIELDS.get(audit.role, ()),
             )
         )
     return tuple(routes)

@@ -18,8 +18,6 @@ from application.core.objectives.analysis.source_screening import (
 )
 from domain.core import (
     ResearchObjective,
-    normalize_objective_confidence,
-    normalize_objective_terms,
 )
 from domain.source import SourceDocumentTree
 
@@ -392,7 +390,7 @@ def route_sources(
                     objective_context=objective_context,
                     route_candidate=route_candidate,
                 )
-                role = str(record.get("role") or "low_value_or_irrelevant")
+                role = record["role"]
                 route_key = (
                     frame.objective_id,
                     frame.document_id,
@@ -404,19 +402,18 @@ def route_sources(
                     continue
                 seen.add(route_key)
                 routes.append(EvidenceCandidate(
-                    objective_id=str(record.get('objective_id') or '').strip(),
-                    document_id=str(record.get('document_id') or '').strip(),
-                    source_kind=str(record.get('source_kind') or '').strip() or 'text_window',
-                    source_ref=str(record.get('source_ref') or '').strip(),
-                    role=str(record.get('role') or '').strip() or 'low_value_or_irrelevant',
-                    extractable=bool(record.get('extractable')),
-                    reason=str(record.get('reason') or '').strip() or None,
-                    table_schema=dict(record.get('table_schema') or {}),
-                    column_roles=dict(record.get('column_roles') or {}),
-                    join_plan=dict(record.get('join_plan') or {}),
-                    confidence=normalize_objective_confidence(record.get('confidence')),
-                    used_fallback=bool(record.get('used_fallback')),
-                    context_fields=normalize_objective_terms(record.get('context_fields')),
+                    objective_id=record['objective_id'],
+                    document_id=record['document_id'],
+                    source_kind=record['source_kind'],
+                    source_ref=record['source_ref'],
+                    role=role,
+                    extractable=record['extractable'],
+                    reason=record.get('reason'),
+                    table_schema=record['table_schema'],
+                    column_roles=record['column_roles'],
+                    join_plan=record['join_plan'],
+                    confidence=record['confidence'],
+                    used_fallback=record['used_fallback'],
                 ))
         _append_objective_context_hint_routes(
             routes=routes,
@@ -574,6 +571,11 @@ def _finalize_objective_route_record(
     )
     source_kind = str(route_candidate.get("source_kind") or "")
     source_ref = str(route_candidate.get("source_ref") or "")
+    role = finalized["role"]
+    if role == "low_value_or_irrelevant":
+        finalized["extractable"] = False
+    elif role in _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES:
+        finalized["extractable"] = True
     finalized.update(
         {
             "objective_id": frame.objective_id,
@@ -583,7 +585,6 @@ def _finalize_objective_route_record(
             "table_schema": _route_table_schema_record(
                 candidate=dict(route_candidate),
             ),
-            "extractable": _normalize_route_extractable(finalized),
         }
     )
     if evidence_role == "direct_support" and not finalized.get("reason"):
@@ -668,7 +669,7 @@ def _append_objective_context_hint_routes(
                 table_schema=dict(table_schema or {}),
                 column_roles=dict(_objective_context_hint_column_roles(objective_context=objective_context, hint_role=hint.role, table_schema=table_schema) or {}),
                 join_plan={},
-                confidence=normalize_objective_confidence(objective_context.confidence),
+                confidence=round(objective_context.confidence, 4),
             )
         )
 
@@ -2458,15 +2459,6 @@ def _route_table_schema_record(
     return dict(candidate_schema) if isinstance(candidate_schema, dict) else {}
 
 
-def _normalize_route_extractable(record: dict[str, Any]) -> bool:
-    role = str(record.get("role") or "").strip()
-    if role == "low_value_or_irrelevant":
-        return False
-    if role in _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES:
-        return True
-    return bool(record.get("extractable"))
-
-
 def _block_section_label(block: Any) -> str:
     block_type = str(getattr(block, "block_type", "") or "")
     if block_type == "heading":
@@ -2533,8 +2525,8 @@ def _build_objective_table_routing_hints(
                 caption_text=str(getattr(table, 'caption_text', None) or '').strip() or None,
                 role=str(role or '').strip(),
                 strength=str(strength or '').strip() or None,
-                matched_outcomes=normalize_objective_terms(matched_outcomes),
-                matched_variables=normalize_objective_terms(matched_variable_axes),
+                matched_outcomes=tuple(matched_outcomes),
+                matched_variables=tuple(matched_variable_axes),
                 reason=str(_build_objective_table_routing_reason(role, matched_variable_axes=matched_variable_axes) or '').strip() or None,
             )
         )

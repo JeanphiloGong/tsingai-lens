@@ -13,23 +13,12 @@ from typing import (
 
 from domain.core import PaperStudyDisposition
 from domain.core.finding import (
-    EVIDENCE_ATTRIBUTION_SCOPES,
-    PAPER_CONTRIBUTION_STATUSES,
     Finding,
     FindingMechanismRelation,
     FindingPaperContribution,
 )
-from domain.core.finding import _choice as finding_choice
 from domain.core.finding import _stable_id as finding_stable_id
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
-    EVIDENCE_ORIGINS,
-    EVIDENCE_RESOLUTION_STATUS_VALUES,
-    EVIDENCE_ROLE_VALUES,
-    OBJECTIVE_EVIDENCE_STATES,
-    PAPER_RELEVANCE_VALUES,
-    PAPER_ROLE_VALUES,
-    SOURCE_KIND_VALUES,
     InspectedObjectiveSourceRef,
     Mapping,
     ObjectiveEvidence,
@@ -40,35 +29,21 @@ from domain.core.research_objective import (
     ResearchObjective,
     _choice,
 )
-from domain.core.research_objective import _non_negative_int_or_none
-from domain.core.research_objective import (
-    _non_negative_int_or_none as objective_non_negative_int_or_none,
-)
 from domain.core.research_objective import (
     _objective_derivation_basis,
 )
 from domain.core.research_objective import _positive_int_or_none
-from domain.core.research_objective import (
-    _positive_int_or_none as objective_positive_int_or_none,
-)
-from domain.core.research_objective import _positive_ints as objective_positive_ints
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.research_objective import (
     _text,
 )
 from domain.core.scientific_fact import (
-    SCIENTIFIC_RESULT_DIRECTIONS,
-    SCIENTIFIC_RESULT_KINDS,
     ScientificAttribute,
     ScientificComparison,
     ScientificContext,
     ScientificResult,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
@@ -3110,64 +3085,39 @@ class ObjectiveRepository:
                 return ()
             return tuple(
                 PaperContribution(
-                    collection_id=finding_text(item.get("collection_id")) or "",
-                    objective_id=finding_text(item.get("objective_id")) or "",
-                    analysis_version=objective_positive_int_or_none(
-                        item.get("analysis_version")
-                    )
-                    or 0,
-                    document_id=finding_text(item.get("document_id")) or "",
-                    analysis_status=finding_choice(
-                        item.get("analysis_status"),
-                        PAPER_CONTRIBUTION_STATUSES,
-                        "pending",
-                    ),
-                    relevance=finding_choice(
-                        item.get("relevance"), PAPER_RELEVANCE_VALUES, "uncertain"
-                    ),
-                    paper_role=finding_choice(
-                        item.get("paper_role"), PAPER_ROLE_VALUES, "uncertain"
-                    ),
-                    contribution_summary=finding_text(item.get("contribution_summary")),
+                    collection_id=item.get("collection_id", ""),
+                    objective_id=item.get("objective_id", ""),
+                    analysis_version=item.get("analysis_version", 0),
+                    document_id=item.get("document_id", ""),
+                    analysis_status=item.get("analysis_status", "pending"),
+                    relevance=item.get("relevance", "uncertain"),
+                    paper_role=item.get("paper_role", "uncertain"),
+                    contribution_summary=item.get("contribution_summary"),
                     material_match=tuple(item.get("material_match", ())),
                     changed_variables=tuple(item.get("changed_variables", ())),
                     measured_property_scope=tuple(item.get("measured_property_scope", ())),
                     test_environment_scope=tuple(item.get("test_environment_scope", ())),
-                    exclusion_reason=finding_text(item.get("exclusion_reason")),
+                    exclusion_reason=item.get("exclusion_reason"),
                     warnings=tuple(item.get("warnings", ())),
                     confidence=round(item.get("confidence", 0.0), 4),
-                    evidence_disposition=finding_text(item.get("evidence_disposition")),
-                    routed_source_count=objective_non_negative_int_or_none(
-                        item.get("routed_source_count")
-                    ),
-                    extracted_source_count=objective_non_negative_int_or_none(
-                        item.get("extracted_source_count")
-                    ),
-                    comparable_evidence_count=objective_non_negative_int_or_none(
-                        item.get("comparable_evidence_count")
-                    ),
-                    failed_source_count=objective_non_negative_int_or_none(
-                        item.get("failed_source_count")
-                    ),
-                    uninspected_source_count=objective_non_negative_int_or_none(
-                        item.get("uninspected_source_count")
-                    ),
-                    evidence_disposition_reason=finding_text(
-                        item.get("evidence_disposition_reason")
-                    ),
-                    evidence_status_counts=_evidence_status_counts(
-                        item.get("evidence_status_counts")
+                    evidence_disposition=item.get("evidence_disposition"),
+                    routed_source_count=item.get("routed_source_count"),
+                    extracted_source_count=item.get("extracted_source_count"),
+                    comparable_evidence_count=item.get("comparable_evidence_count"),
+                    failed_source_count=item.get("failed_source_count"),
+                    uninspected_source_count=item.get("uninspected_source_count"),
+                    evidence_disposition_reason=item.get("evidence_disposition_reason"),
+                    evidence_status_counts=tuple(
+                        sorted(item.get("evidence_status_counts", {}).items())
                     ),
                     inspected_source_refs=tuple(
                         (
                             InspectedObjectiveSourceRef(
-                                source_kind=finding_text(source.get("source_kind"))
-                                or "",
-                                source_ref=finding_text(source.get("source_ref")) or "",
-                                source_digest=finding_text(source.get("source_digest")),
+                                source_kind=source["source_kind"],
+                                source_ref=source["source_ref"],
+                                source_digest=source.get("source_digest"),
                             )
-                            for source in item.get("inspected_source_refs") or ()
-                            if isinstance(source, Mapping)
+                            for source in item.get("inspected_source_refs", ())
                         )
                     ),
                 )
@@ -3590,356 +3540,103 @@ class ObjectiveRepository:
             records.sort(key=lambda item: str(item.get("evidence_id") or ""))
             total = len(records)
             page = records[max(0, offset) : max(0, offset) + max(1, min(limit, 500))]
-            return (
-                tuple(
-                    ObjectiveEvidence(
-                        collection_id=finding_text(item.get("collection_id")) or "",
-                        objective_id=finding_text(item.get("objective_id")) or "",
-                        analysis_version=objective_positive_int_or_none(
-                            item.get("analysis_version")
-                        )
-                        or 0,
-                        evidence_id=finding_text(item.get("evidence_id"))
-                        or objective_scoped_id(
-                            "oev",
-                            finding_text(item.get("collection_id")) or "",
-                            finding_text(item.get("objective_id")) or "",
-                            objective_positive_int_or_none(item.get("analysis_version"))
-                            or 0,
-                            finding_text(item.get("document_id")) or "",
-                            finding_choice(
-                                item.get("source_kind"),
-                                SOURCE_KIND_VALUES,
-                                "text_window",
-                            ),
-                            finding_text(item.get("source_ref")) or "",
-                            finding_choice(
-                                item.get("evidence_role"),
-                                EVIDENCE_ROLE_VALUES,
-                                "irrelevant",
-                            ),
-                            item.get("semantic_slot")
-                            or (
-                                (
-                                    ScientificResult(
-                                        outcome=scientific_text(
-                                            item.get("reported_result").get("outcome")
-                                        )
-                                        or "",
-                                        value=scientific_scalar(
-                                            item.get("reported_result").get("value")
-                                        ),
-                                        unit=scientific_text(
-                                            item.get("reported_result").get("unit")
-                                        ),
-                                        direction=scientific_choice(
-                                            item.get("reported_result").get(
-                                                "direction"
-                                            ),
-                                            SCIENTIFIC_RESULT_DIRECTIONS,
-                                            "unknown",
-                                        ),
-                                        result_text=scientific_text(
-                                            item.get("reported_result").get(
-                                                "result_text"
-                                            )
-                                        )
-                                        or "",
-                                        baseline_value=scientific_scalar(
-                                            item.get("reported_result").get(
-                                                "baseline_value"
-                                            )
-                                        ),
-                                        target_value=scientific_scalar(
-                                            item.get("reported_result").get(
-                                                "target_value"
-                                            )
-                                        ),
-                                        result_kind=scientific_choice(
-                                            item.get("reported_result").get(
-                                                "result_kind"
-                                            ),
-                                            SCIENTIFIC_RESULT_KINDS,
-                                            "observed",
-                                        ),
-                                    )
-                                    if isinstance(item.get("reported_result"), Mapping)
-                                    else None
-                                ).outcome
-                                if (
-                                    ScientificResult(
-                                        outcome=scientific_text(
-                                            item.get("reported_result").get("outcome")
-                                        )
-                                        or "",
-                                        value=scientific_scalar(
-                                            item.get("reported_result").get("value")
-                                        ),
-                                        unit=scientific_text(
-                                            item.get("reported_result").get("unit")
-                                        ),
-                                        direction=scientific_choice(
-                                            item.get("reported_result").get(
-                                                "direction"
-                                            ),
-                                            SCIENTIFIC_RESULT_DIRECTIONS,
-                                            "unknown",
-                                        ),
-                                        result_text=scientific_text(
-                                            item.get("reported_result").get(
-                                                "result_text"
-                                            )
-                                        )
-                                        or "",
-                                        baseline_value=scientific_scalar(
-                                            item.get("reported_result").get(
-                                                "baseline_value"
-                                            )
-                                        ),
-                                        target_value=scientific_scalar(
-                                            item.get("reported_result").get(
-                                                "target_value"
-                                            )
-                                        ),
-                                        result_kind=scientific_choice(
-                                            item.get("reported_result").get(
-                                                "result_kind"
-                                            ),
-                                            SCIENTIFIC_RESULT_KINDS,
-                                            "observed",
-                                        ),
-                                    )
-                                    if isinstance(item.get("reported_result"), Mapping)
-                                    else None
-                                )
-                                is not None
-                                else None
-                            ),
-                        ),
-                        document_id=finding_text(item.get("document_id")) or "",
-                        source_kind=finding_choice(
-                            item.get("source_kind"), SOURCE_KIND_VALUES, "text_window"
-                        ),
-                        source_ref=finding_text(item.get("source_ref")) or "",
-                        source_excerpt=finding_text(item.get("source_excerpt")) or "",
-                        page_numbers=objective_positive_ints(item.get("page_numbers")),
-                        related_source_refs=tuple(
-                            (
-                                dict(item)
-                                for item in (
-                                    item.get("related_source_refs")
-                                    if isinstance(
-                                        item.get("related_source_refs"), (list, tuple)
-                                    )
-                                    else ()
-                                )
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        evidence_role=finding_choice(
-                            item.get("evidence_role"),
-                            EVIDENCE_ROLE_VALUES,
-                            "irrelevant",
-                        ),
-                        selection_status=finding_choice(
-                            item.get("selection_status"),
-                            OBJECTIVE_EVIDENCE_STATES,
-                            "candidate",
-                        ),
-                        selection_reason=finding_text(item.get("selection_reason")),
-                        changed_variables=tuple(
-                            (
-                                ScientificVariable(
-                                    name=scientific_text(item.get("name")) or "",
-                                    baseline_value=scientific_scalar(
-                                        item.get("baseline_value")
-                                    ),
-                                    target_value=scientific_scalar(
-                                        item.get("target_value")
-                                    ),
-                                    unit=scientific_text(item.get("unit")),
-                                )
-                                for item in (
-                                    item.get("changed_variables")
-                                    if isinstance(
-                                        item.get("changed_variables"), (list, tuple)
-                                    )
-                                    else ()
-                                )
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        comparison=(
-                            ScientificComparison(
-                                baseline_label=scientific_text(
-                                    item["comparison"].get("baseline_label")
-                                )
-                                or "",
-                                target_label=scientific_text(
-                                    item["comparison"].get("target_label")
-                                )
-                                or "",
-                                axis_names=scientific_terms(
-                                    item["comparison"].get("axis_names")
-                                ),
-                                comparable=item["comparison"].get("comparable") is True,
-                                incomparability_reasons=scientific_terms(
-                                    item["comparison"].get("incomparability_reasons")
-                                ),
-                            )
-                            if isinstance(item.get("comparison"), Mapping)
-                            else None
-                        ),
-                        reported_result=(
-                            ScientificResult(
-                                outcome=scientific_text(
-                                    item.get("reported_result").get("outcome")
-                                )
-                                or "",
-                                value=scientific_scalar(
-                                    item.get("reported_result").get("value")
-                                ),
-                                unit=scientific_text(
-                                    item.get("reported_result").get("unit")
-                                ),
-                                direction=scientific_choice(
-                                    item.get("reported_result").get("direction"),
-                                    SCIENTIFIC_RESULT_DIRECTIONS,
-                                    "unknown",
-                                ),
-                                result_text=scientific_text(
-                                    item.get("reported_result").get("result_text")
-                                )
-                                or "",
-                                baseline_value=scientific_scalar(
-                                    item.get("reported_result").get("baseline_value")
-                                ),
-                                target_value=scientific_scalar(
-                                    item.get("reported_result").get("target_value")
-                                ),
-                                result_kind=scientific_choice(
-                                    item.get("reported_result").get("result_kind"),
-                                    SCIENTIFIC_RESULT_KINDS,
-                                    "observed",
-                                ),
-                            )
-                            if isinstance(item.get("reported_result"), Mapping)
-                            else None
-                        ),
-                        attribution_scope=finding_choice(
-                            item.get("attribution_scope"),
-                            EVIDENCE_ATTRIBUTION_SCOPES,
-                            "not_attributable",
-                        ),
-                        scientific_context=(
-                            ScientificContext(
-                                material=tuple(
-                                    (
-                                        ScientificAttribute(
-                                            name=attribute["name"],
-                                            value=attribute["value"],
-                                            unit=attribute.get("unit"),
-                                            context_scope=attribute.get(
-                                                "context_scope", "unknown"
-                                            ),
-                                            applies_to_outcomes=tuple(
-                                                attribute.get("applies_to_outcomes", ())
-                                            ),
-                                        )
-                                        for attribute in (
-                                            item.get("scientific_context") or {}
-                                        ).get("material", ())
-                                    )
-                                ),
-                                sample=tuple(
-                                    (
-                                        ScientificAttribute(
-                                            name=attribute["name"],
-                                            value=attribute["value"],
-                                            unit=attribute.get("unit"),
-                                            context_scope=attribute.get(
-                                                "context_scope", "unknown"
-                                            ),
-                                            applies_to_outcomes=tuple(
-                                                attribute.get("applies_to_outcomes", ())
-                                            ),
-                                        )
-                                        for attribute in (
-                                            item.get("scientific_context") or {}
-                                        ).get("sample", ())
-                                    )
-                                ),
-                                process=tuple(
-                                    (
-                                        ScientificAttribute(
-                                            name=attribute["name"],
-                                            value=attribute["value"],
-                                            unit=attribute.get("unit"),
-                                            context_scope=attribute.get(
-                                                "context_scope", "unknown"
-                                            ),
-                                            applies_to_outcomes=tuple(
-                                                attribute.get("applies_to_outcomes", ())
-                                            ),
-                                        )
-                                        for attribute in (
-                                            item.get("scientific_context") or {}
-                                        ).get("process", ())
-                                    )
-                                ),
-                                test=tuple(
-                                    (
-                                        ScientificAttribute(
-                                            name=attribute["name"],
-                                            value=attribute["value"],
-                                            unit=attribute.get("unit"),
-                                            context_scope=attribute.get(
-                                                "context_scope", "unknown"
-                                            ),
-                                            applies_to_outcomes=tuple(
-                                                attribute.get("applies_to_outcomes", ())
-                                            ),
-                                        )
-                                        for attribute in (
-                                            item.get("scientific_context") or {}
-                                        ).get("test", ())
-                                    )
-                                ),
-                            )
-                        ),
-                        resolution_status=finding_choice(
-                            item.get("resolution_status"),
-                            EVIDENCE_RESOLUTION_STATUS_VALUES,
-                            "unknown",
-                        ),
-                        failure_reason=finding_text(item.get("failure_reason")),
-                        confidence=round(item.get("confidence", 0.0), 4),
-                        related_source_refs_explicit="related_source_refs" in item,
-                        origin=finding_choice(
-                            item.get("origin"), EVIDENCE_ORIGINS, "system_generated"
-                        ),
-                        source_analysis_version=objective_positive_int_or_none(
-                            item.get("source_analysis_version")
-                        ),
-                        supersedes_evidence_id=finding_text(
-                            item.get("supersedes_evidence_id")
-                        ),
-                        superseded_by_evidence_id=finding_text(
-                            item.get("superseded_by_evidence_id")
-                        ),
-                        created_by_user_id=finding_text(item.get("created_by_user_id")),
-                        created_by_tool_call_id=finding_text(
-                            item.get("created_by_tool_call_id")
-                        ),
-                        created_at=_finding_creation_time(item.get("created_at")),
-                        authoring_note=finding_text(item.get("authoring_note")),
-                        warnings=tuple(item.get("warnings", ())),
+            evidence = []
+            for item in page:
+                stored_result = item.get("reported_result")
+                result = (
+                    ScientificResult(
+                        outcome=stored_result["outcome"],
+                        value=stored_result.get("value"),
+                        unit=stored_result.get("unit"),
+                        direction=stored_result.get("direction", "unknown"),
+                        result_text=stored_result["result_text"],
+                        baseline_value=stored_result.get("baseline_value"),
+                        target_value=stored_result.get("target_value"),
+                        result_kind=stored_result.get("result_kind", "observed"),
                     )
-                    for item in page
-                ),
-                total,
-            )
-
+                    if stored_result is not None else None
+                )
+                comparison = item.get("comparison")
+                context = item.get("scientific_context") or {}
+                evidence.append(ObjectiveEvidence(
+                    collection_id=item.get("collection_id", ""),
+                    objective_id=item.get("objective_id", ""),
+                    analysis_version=item.get("analysis_version", 0),
+                    evidence_id=item.get("evidence_id") or objective_scoped_id(
+                        "oev",
+                        item.get("collection_id", ""),
+                        item.get("objective_id", ""),
+                        item.get("analysis_version", 0),
+                        item.get("document_id", ""),
+                        item.get("source_kind", "text_window"),
+                        item.get("source_ref", ""),
+                        item.get("evidence_role", "irrelevant"),
+                        item.get("semantic_slot") or (result.outcome if result else None),
+                    ),
+                    document_id=item.get("document_id", ""),
+                    source_kind=item.get("source_kind", "text_window"),
+                    source_ref=item.get("source_ref", ""),
+                    source_excerpt=item.get("source_excerpt", ""),
+                    page_numbers=tuple(item.get("page_numbers", ())),
+                    related_source_refs=tuple(
+                        dict(ref) for ref in item.get("related_source_refs", ())
+                    ),
+                    evidence_role=item.get("evidence_role", "irrelevant"),
+                    selection_status=item.get("selection_status", "candidate"),
+                    selection_reason=item.get("selection_reason"),
+                    changed_variables=tuple(
+                        ScientificVariable(
+                            name=variable["name"],
+                            baseline_value=variable.get("baseline_value"),
+                            target_value=variable.get("target_value"),
+                            unit=variable.get("unit"),
+                        )
+                        for variable in item.get("changed_variables", ())
+                    ),
+                    comparison=(
+                        ScientificComparison(
+                            baseline_label=comparison["baseline_label"],
+                            target_label=comparison["target_label"],
+                            axis_names=tuple(comparison["axis_names"]),
+                            comparable=comparison["comparable"],
+                            incomparability_reasons=tuple(
+                                comparison.get("incomparability_reasons", ())
+                            ),
+                        )
+                        if comparison is not None else None
+                    ),
+                    reported_result=result,
+                    attribution_scope=item.get("attribution_scope", "not_attributable"),
+                    scientific_context=ScientificContext(**{
+                        group: tuple(
+                            ScientificAttribute(
+                                name=attribute["name"],
+                                value=attribute["value"],
+                                unit=attribute.get("unit"),
+                                context_scope=attribute.get("context_scope", "unknown"),
+                                applies_to_outcomes=tuple(
+                                    attribute.get("applies_to_outcomes", ())
+                                ),
+                            )
+                            for attribute in context.get(group, ())
+                        )
+                        for group in ("material", "sample", "process", "test")
+                    }),
+                    resolution_status=item.get("resolution_status", "unknown"),
+                    failure_reason=item.get("failure_reason"),
+                    confidence=round(item.get("confidence", 0.0), 4),
+                    related_source_refs_explicit="related_source_refs" in item,
+                    origin=item.get("origin", "system_generated"),
+                    source_analysis_version=item.get("source_analysis_version"),
+                    supersedes_evidence_id=item.get("supersedes_evidence_id"),
+                    superseded_by_evidence_id=item.get("superseded_by_evidence_id"),
+                    created_by_user_id=item.get("created_by_user_id"),
+                    created_by_tool_call_id=item.get("created_by_tool_call_id"),
+                    created_at=_finding_creation_time(item.get("created_at")),
+                    authoring_note=item.get("authoring_note"),
+                    warnings=tuple(item.get("warnings", ())),
+                ))
+            return tuple(evidence), total
     @staticmethod
     def _write_contributions(
         row: ObjectiveAnalysisRecord,
@@ -4410,21 +4107,6 @@ def _sorted_finding_records(values: Any) -> list[dict[str, Any]]:
 
 
 __all__ = ['ObjectiveRepository']
-
-
-def _evidence_status_counts(value: Any) -> tuple[tuple[str, int], ...]:
-    if not isinstance(value, Mapping):
-        return ()
-    counts: list[tuple[str, int]] = []
-    for status, count in sorted(value.items(), key=lambda item: str(item[0])):
-        normalized_status = str(status or "").strip()
-        if not normalized_status:
-            continue
-        normalized_count = _non_negative_int_or_none(count)
-        if normalized_count is None:
-            raise ValueError("evidence status count must be a non-negative integer")
-        counts.append((normalized_status, normalized_count))
-    return tuple(counts)
 
 
 def _finding_creation_time(value: Any) -> datetime | None:

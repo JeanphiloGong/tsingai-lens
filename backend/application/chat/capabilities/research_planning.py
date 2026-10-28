@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping
 from copy import deepcopy
 from hashlib import sha256
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -28,11 +28,11 @@ class ProposeResearchPlanToolRequest(ResearchPlanStructure):
 
     objective_id: str = Field(min_length=1, max_length=240)
     title: str = Field(min_length=1, max_length=400)
-    finding_ids: list[str] = Field(
+    finding_ids: list[Annotated[str, Field(min_length=1)]] = Field(
         min_length=1, max_length=8,
         description="Exact published Findings whose inspected evidence supports this plan.",
     )
-    evidence_ids: list[str] = Field(
+    evidence_ids: list[Annotated[str, Field(min_length=1)]] = Field(
         min_length=1, max_length=32,
         description=(
             "Use only Evidence returned by inspecting one of the selected finding_ids. "
@@ -47,26 +47,10 @@ class ProposeResearchPlanToolRequest(ResearchPlanStructure):
     )
     @classmethod
     def _normalize_source_ids(cls, values: list[str]) -> list[str]:
-        return _unique_text(values)
+        return list(dict.fromkeys(values))
 
     @model_validator(mode="after")
     def _validate_variable_evidence_scope(self) -> "ProposeResearchPlanToolRequest":
-        required_lists = {
-            "controls": self.controls,
-            "fixed_conditions": self.fixed_conditions,
-            "measurements": self.measurements,
-            "acceptance_criteria": self.acceptance_criteria,
-            "feasibility_checks": self.feasibility_checks,
-            "safety_considerations": self.safety_considerations,
-            "limitations": self.limitations,
-            "finding_ids": self.finding_ids,
-            "evidence_ids": self.evidence_ids,
-        }
-        empty_fields = [name for name, values in required_lists.items() if not values]
-        if empty_fields:
-            raise ValueError(
-                "research plan requires non-empty " + ", ".join(empty_fields)
-            )
         selected = set(self.evidence_ids)
         outside_scope = sorted(
             {
@@ -91,15 +75,12 @@ class ResearchPlanSourceSnapshot(BaseModel):
     analysis_version: int = Field(ge=1)
     finding_fingerprint: str = Field(min_length=1, max_length=240)
     evidence_fingerprint: str = Field(min_length=1, max_length=240)
-    evidence_ids: list[str] = Field(min_length=1, max_length=100)
+    evidence_ids: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1, max_length=100)
 
     @field_validator("evidence_ids")
     @classmethod
     def _normalize_evidence_ids(cls, values: list[str]) -> list[str]:
-        normalized = _unique_text(values)
-        if not normalized:
-            raise ValueError("source snapshot requires at least one Evidence ID")
-        return normalized
+        return list(dict.fromkeys(values))
 
 
 class CreateResearchPlanToolRequest(ProposeResearchPlanToolRequest):
@@ -899,21 +880,6 @@ def _draft_id(
         separators=(",", ":"),
     )
     return f"plan_draft_{sha256(identity.encode('utf-8')).hexdigest()[:20]}"
-
-
-def _unique_text(values: list[str]) -> list[str]:
-    result: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        text = str(value or "").strip()
-        if not text:
-            continue
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(text)
-    return result
 
 
 def _text(value: Any) -> str:

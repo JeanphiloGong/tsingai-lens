@@ -20,6 +20,7 @@ from application.chat.capabilities import (
     ReviseResearchPlanCapability,
 )
 from application.chat.capabilities.contracts import CapabilityExecutionContext
+from application.chat.capabilities.research_planning import ProposeResearchPlanToolRequest
 
 
 pytestmark = pytest.mark.anyio
@@ -277,6 +278,31 @@ def _source_snapshots() -> list[dict]:
             "evidence_ids": ["evidence-result", "evidence-method"],
         }
     ]
+
+
+def test_plan_input_preserves_exact_evidence_identities() -> None:
+    arguments = _plan_arguments()
+    arguments["evidence_ids"] = ["Evidence-A", "evidence-a", "Evidence-A"]
+    arguments["variables"][0]["basis_evidence_ids"] = ["Evidence-A", "evidence-a"]
+    arguments["variables"][1]["basis_evidence_ids"] = ["Evidence-A"]
+    request = ProposeResearchPlanToolRequest.model_validate(arguments)
+    assert request.evidence_ids == ["Evidence-A", "evidence-a"]
+    assert request.variables[0].basis_evidence_ids == ["Evidence-A", "evidence-a"]
+
+
+@pytest.mark.parametrize("field", ["controls", "evidence_ids", "finding_ids"])
+def test_plan_input_rejects_blank_entries(field: str) -> None:
+    arguments = _plan_arguments()
+    arguments[field].append("  ")
+    with pytest.raises(ValueError):
+        ProposeResearchPlanToolRequest.model_validate(arguments)
+
+
+def test_plan_variable_rejects_blank_planned_value() -> None:
+    arguments = _plan_arguments()
+    arguments["variables"][0]["planned_values"].append("  ")
+    with pytest.raises(ValueError):
+        ProposeResearchPlanToolRequest.model_validate(arguments)
 
 
 async def test_research_plan_draft_is_structured_traceable_and_transient() -> None:

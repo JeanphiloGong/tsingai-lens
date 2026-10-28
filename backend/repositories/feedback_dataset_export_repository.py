@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from repositories.feedback_dataset_sample_repository import revision_content_json
 
 import hashlib
 import json
@@ -22,7 +21,10 @@ from domain.feedback.dataset_export import (
     ExportPreview,
     member_digest,
 )
-from repositories.feedback_dataset_sample_repository import revision_content_from_json
+from domain.feedback.sample_revision import (
+    SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
+    SFT_SCHEMA_VERSION, PREFERENCE_SCHEMA_VERSION, EVALUATION_SCHEMA_VERSION,
+)
 from infra.persistence.postgres.models.feedback import FeedbackCaseRow
 from infra.persistence.postgres.models.feedback_dataset import (
     FeedbackDatasetExportMemberRow,
@@ -82,28 +84,69 @@ class FeedbackDatasetExportRepository:
 
     async def save_preview(self, preview: ExportPreview) -> ExportPreview:
         async with self.session_factory.begin() as session:
+            member_values = []
+            for member in preview.members:
+                content_value = member.content
+                if isinstance(content_value, SftRevisionContent):
+                    content_payload = {
+                        "schema_version": content_value.schema_version,
+                        "messages": [dict(item) for item in content_value.messages],
+                        "context": [dict(item) for item in content_value.context],
+                        "evidence": [dict(item) for item in content_value.evidence],
+                        "target": content_value.target,
+                    }
+                elif isinstance(content_value, PreferenceRevisionContent):
+                    content_payload = {
+                        "schema_version": content_value.schema_version,
+                        "messages": [dict(item) for item in content_value.messages],
+                        "context": [dict(item) for item in content_value.context],
+                        "evidence": [dict(item) for item in content_value.evidence],
+                        "response_a": content_value.response_a,
+                        "response_b": content_value.response_b,
+                        "suggested_preference": content_value.suggested_preference,
+                        "rationale": content_value.rationale,
+                        "human_preference": content_value.human_preference,
+                    }
+                elif isinstance(content_value, EvaluationRevisionContent):
+                    content_payload = {
+                        "schema_version": content_value.schema_version,
+                        "messages": [dict(item) for item in content_value.messages],
+                        "context": [dict(item) for item in content_value.context],
+                        "evidence": [dict(item) for item in content_value.evidence],
+                        "reference": content_value.reference,
+                        "criteria": list(content_value.criteria),
+                        "evaluation_mode": content_value.evaluation_mode,
+                    }
+                else:
+                    raise ValueError("unsupported sample revision content")
+                member_values.append(
+                    {
+                        "sample_id": member.sample_id,
+                        "source_case_id": member.source_case_id,
+                        "revision_id": member.revision_id,
+                        "revision_no": member.revision_no,
+                        "content": content_payload,
+                        "content_digest": member.content_digest,
+                        "input_digest": member.input_digest,
+                        "provenance": deepcopy(member.provenance),
+                        "row_key": member.row_key,
+                    }
+                )
             session.add(
                 FeedbackDatasetExportPreviewRow(
                     preview_id=preview.preview_id,
                     dataset_id=preview.dataset_id,
-                    members=[{
-                        'sample_id': member.sample_id,
-                        'source_case_id': member.source_case_id,
-                        'revision_id': member.revision_id,
-                        'revision_no': member.revision_no,
-                        'content': revision_content_json(member.content),
-                        'content_digest': member.content_digest,
-                        'input_digest': member.input_digest,
-                        'provenance': deepcopy(member.provenance),
-                        'row_key': member.row_key,
-                    } for member in preview.members],
-                    issues=[{
-                        'sample_id': issue.sample_id,
-                        'revision_id': issue.revision_id,
-                        'code': issue.code,
-                        'message': issue.message,
-                        'question': issue.question,
-                    } for issue in preview.issues],
+                    members=member_values,
+                    issues=[
+                        {
+                            "sample_id": issue.sample_id,
+                            "revision_id": issue.revision_id,
+                            "code": issue.code,
+                            "message": issue.message,
+                            "question": issue.question,
+                        }
+                        for issue in preview.issues
+                    ],
                     preview_digest=preview.preview_digest,
                     requested_count=preview.requested_count,
                     exportable_count=preview.exportable_count,
@@ -119,7 +162,73 @@ class FeedbackDatasetExportRepository:
             row = await session.get(FeedbackDatasetExportPreviewRow, preview_id)
             if row is None:
                 return None
-            return _preview(row)
+            member_values = []
+            for item in row.members or ():
+                content_value = item["content"]
+                if content_value["schema_version"] == SFT_SCHEMA_VERSION:
+                    content = SftRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        target=content_value["target"],
+                    )
+                elif content_value["schema_version"] == PREFERENCE_SCHEMA_VERSION:
+                    content = PreferenceRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        response_a=content_value["response_a"],
+                        response_b=content_value["response_b"],
+                        suggested_preference=content_value["suggested_preference"],
+                        rationale=content_value["rationale"],
+                        human_preference=content_value["human_preference"],
+                    )
+                elif content_value["schema_version"] == EVALUATION_SCHEMA_VERSION:
+                    content = EvaluationRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        reference=content_value["reference"],
+                        criteria=tuple(content_value["criteria"]),
+                        evaluation_mode=content_value["evaluation_mode"],
+                    )
+                else:
+                    raise ValueError("unsupported sample revision schema")
+                member_values.append(
+                    ExportMember(
+                        sample_id=item["sample_id"],
+                        source_case_id=item["source_case_id"],
+                        revision_id=item["revision_id"],
+                        revision_no=item["revision_no"],
+                        content=content,
+                        content_digest=item["content_digest"],
+                        input_digest=item["input_digest"],
+                        provenance=deepcopy(item["provenance"]),
+                    )
+                )
+            return ExportPreview(
+                preview_id=row.preview_id,
+                dataset_id=row.dataset_id,
+                members=tuple(member_values),
+                issues=tuple(
+                    (
+                        ExportIssue(
+                            sample_id=item["sample_id"],
+                            revision_id=item["revision_id"],
+                            code=item["code"],
+                            message=item["message"],
+                            question=item["question"],
+                        )
+                        for item in row.issues or ()
+                    )
+                ),
+                preview_digest=row.preview_digest,
+                created_at=_iso(row.created_at),
+                expires_at=_iso(row.expires_at),
+            )
 
     async def list_exports(
         self, *, dataset_id: str, limit: int = 50, offset: int = 0
@@ -136,7 +245,20 @@ class FeedbackDatasetExportRepository:
         )
         async with self.session_factory() as session:
             rows = await session.scalars(statement)
-            return tuple(_summary(row) for row in rows)
+            return tuple(
+                DatasetExportSummary(
+                    export_id=row.export_id,
+                    dataset_id=row.dataset_id,
+                    export_no=row.export_no,
+                    schema_version=row.schema_version,
+                    row_count=row.row_count,
+                    content_digest=row.content_digest,
+                    provenance_digest=row.provenance_digest,
+                    manifest_digest=row.manifest_digest,
+                    created_at=_iso(row.created_at),
+                )
+                for row in rows
+            )
 
     async def publish_if_current(self, *, draft: DatasetExportDraft) -> DatasetExport:
         async with self.session_factory.begin() as session:
@@ -169,7 +291,54 @@ class FeedbackDatasetExportRepository:
             if preview.expires_at <= now:
                 raise DatasetExportConflict("export_preview_expired")
 
-            preview_members = tuple(_member(record) for record in (preview.members or ()))
+            member_values = []
+            for record in preview.members or ():
+                content_value = record["content"]
+                if content_value["schema_version"] == SFT_SCHEMA_VERSION:
+                    content = SftRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        target=content_value["target"],
+                    )
+                elif content_value["schema_version"] == PREFERENCE_SCHEMA_VERSION:
+                    content = PreferenceRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        response_a=content_value["response_a"],
+                        response_b=content_value["response_b"],
+                        suggested_preference=content_value["suggested_preference"],
+                        rationale=content_value["rationale"],
+                        human_preference=content_value["human_preference"],
+                    )
+                elif content_value["schema_version"] == EVALUATION_SCHEMA_VERSION:
+                    content = EvaluationRevisionContent(
+                        schema_version=content_value["schema_version"],
+                        messages=tuple(content_value["messages"]),
+                        context=tuple(content_value["context"]),
+                        evidence=tuple(content_value["evidence"]),
+                        reference=content_value["reference"],
+                        criteria=tuple(content_value["criteria"]),
+                        evaluation_mode=content_value["evaluation_mode"],
+                    )
+                else:
+                    raise ValueError("unsupported sample revision schema")
+                member_values.append(
+                    ExportMember(
+                        sample_id=record["sample_id"],
+                        source_case_id=record["source_case_id"],
+                        revision_id=record["revision_id"],
+                        revision_no=record["revision_no"],
+                        content=content,
+                        content_digest=record["content_digest"],
+                        input_digest=record["input_digest"],
+                        provenance=deepcopy(record["provenance"]),
+                    )
+                )
+            preview_members = tuplemember_values
             selected = {member.sample_id for member in preview_members}
             current_members = await _read_current_members(session, draft.dataset_id, sample_ids=tuple(selected))
             if member_digest(current_members) != draft.member_digest:
@@ -274,19 +443,54 @@ async def _read_current_members(
             raise DatasetExportConflict("sample_source_stale")
         if source_digest_for_case(case) != sample.source_digest:
             raise DatasetExportConflict("sample_source_stale")
-    return tuple(
-        ExportMember(
-            sample_id=sample.sample_id,
-            source_case_id=sample.source_case_id,
-            revision_id=revision.revision_id,
-            revision_no=revision.revision_no,
-            content=revision_content_from_json(revision.content),
-            content_digest=revision.content_digest,
-            input_digest=revision.input_digest,
-            provenance=deepcopy(revision.provenance or {}),
+    member_values = []
+    for sample, revision, _case in rows:
+        content_value = revision.content
+        if content_value["schema_version"] == SFT_SCHEMA_VERSION:
+            content = SftRevisionContent(
+                schema_version=content_value["schema_version"],
+                messages=tuple(content_value["messages"]),
+                context=tuple(content_value["context"]),
+                evidence=tuple(content_value["evidence"]),
+                target=content_value["target"],
+            )
+        elif content_value["schema_version"] == PREFERENCE_SCHEMA_VERSION:
+            content = PreferenceRevisionContent(
+                schema_version=content_value["schema_version"],
+                messages=tuple(content_value["messages"]),
+                context=tuple(content_value["context"]),
+                evidence=tuple(content_value["evidence"]),
+                response_a=content_value["response_a"],
+                response_b=content_value["response_b"],
+                suggested_preference=content_value["suggested_preference"],
+                rationale=content_value["rationale"],
+                human_preference=content_value["human_preference"],
+            )
+        elif content_value["schema_version"] == EVALUATION_SCHEMA_VERSION:
+            content = EvaluationRevisionContent(
+                schema_version=content_value["schema_version"],
+                messages=tuple(content_value["messages"]),
+                context=tuple(content_value["context"]),
+                evidence=tuple(content_value["evidence"]),
+                reference=content_value["reference"],
+                criteria=tuple(content_value["criteria"]),
+                evaluation_mode=content_value["evaluation_mode"],
+            )
+        else:
+            raise ValueError("unsupported sample revision schema")
+        member_values.append(
+            ExportMember(
+                sample_id=sample.sample_id,
+                source_case_id=sample.source_case_id,
+                revision_id=revision.revision_id,
+                revision_no=revision.revision_no,
+                content=content,
+                content_digest=revision.content_digest,
+                input_digest=revision.input_digest,
+                provenance=deepcopy(revision.provenance or {}),
+            )
         )
-        for sample, revision, _case in rows
-    )
+    return tuplemember_values
 
 
 async def _read_export_locked(
@@ -313,19 +517,54 @@ async def _read_export_locked(
             )
         )
         samples = {sample.sample_id: sample for sample in sample_rows}
-        members = tuple(
-            ExportMember(
-                sample_id=member.sample_id,
-                source_case_id=samples[member.sample_id].source_case_id,
-                revision_id=member.revision_id,
-                revision_no=revisions[member.revision_id].revision_no,
-                content=revision_content_from_json(revisions[member.revision_id].content),
-                content_digest=member.content_digest,
-                input_digest=member.input_digest,
-                provenance=deepcopy(revisions[member.revision_id].provenance or {}),
+        member_values = []
+        for member in member_rows:
+            content_value = revisions[member.revision_id].content
+            if content_value["schema_version"] == SFT_SCHEMA_VERSION:
+                content = SftRevisionContent(
+                    schema_version=content_value["schema_version"],
+                    messages=tuple(content_value["messages"]),
+                    context=tuple(content_value["context"]),
+                    evidence=tuple(content_value["evidence"]),
+                    target=content_value["target"],
+                )
+            elif content_value["schema_version"] == PREFERENCE_SCHEMA_VERSION:
+                content = PreferenceRevisionContent(
+                    schema_version=content_value["schema_version"],
+                    messages=tuple(content_value["messages"]),
+                    context=tuple(content_value["context"]),
+                    evidence=tuple(content_value["evidence"]),
+                    response_a=content_value["response_a"],
+                    response_b=content_value["response_b"],
+                    suggested_preference=content_value["suggested_preference"],
+                    rationale=content_value["rationale"],
+                    human_preference=content_value["human_preference"],
+                )
+            elif content_value["schema_version"] == EVALUATION_SCHEMA_VERSION:
+                content = EvaluationRevisionContent(
+                    schema_version=content_value["schema_version"],
+                    messages=tuple(content_value["messages"]),
+                    context=tuple(content_value["context"]),
+                    evidence=tuple(content_value["evidence"]),
+                    reference=content_value["reference"],
+                    criteria=tuple(content_value["criteria"]),
+                    evaluation_mode=content_value["evaluation_mode"],
+                )
+            else:
+                raise ValueError("unsupported sample revision schema")
+            member_values.append(
+                ExportMember(
+                    sample_id=member.sample_id,
+                    source_case_id=samples[member.sample_id].source_case_id,
+                    revision_id=member.revision_id,
+                    revision_no=revisions[member.revision_id].revision_no,
+                    content=content,
+                    content_digest=member.content_digest,
+                    input_digest=member.input_digest,
+                    provenance=deepcopy(revisions[member.revision_id].provenance or {}),
+                )
             )
-            for member in member_rows
-        )
+        members = tuplemember_values
     else:
         members = ()
     return DatasetExport(
@@ -345,57 +584,6 @@ async def _read_export_locked(
         manifest=deepcopy(row.manifest or {}),
         created_by=row.created_by,
         idempotency_key=row.idempotency_key,
-        created_at=_iso(row.created_at),
-    )
-
-
-def _preview(row: FeedbackDatasetExportPreviewRow) -> ExportPreview:
-    return ExportPreview(
-        preview_id=row.preview_id,
-        dataset_id=row.dataset_id,
-        members=tuple(_member(item) for item in (row.members or ())),
-        issues=tuple(_issue(item) for item in (row.issues or ())),
-        preview_digest=row.preview_digest,
-        created_at=_iso(row.created_at),
-        expires_at=_iso(row.expires_at),
-    )
-
-
-def _member(value: dict[str, Any]) -> ExportMember:
-    return ExportMember(
-        sample_id=str(value["sample_id"]),
-        source_case_id=str(value["source_case_id"]),
-        revision_id=str(value["revision_id"]),
-        revision_no=int(value["revision_no"]),
-        content=revision_content_from_json(value["content"]),
-        content_digest=str(value["content_digest"]),
-        input_digest=str(value["input_digest"]),
-        provenance=deepcopy(value.get("provenance") or {}),
-    )
-
-
-
-
-def _issue(value: dict[str, Any]) -> ExportIssue:
-    return ExportIssue(
-        sample_id=str(value["sample_id"]),
-        revision_id=str(value.get("revision_id")) if value.get("revision_id") else None,
-        code=str(value["code"]),
-        message=str(value["message"]),
-        question=str(value.get("question") or ""),
-    )
-
-
-def _summary(row: FeedbackDatasetExportRow) -> DatasetExportSummary:
-    return DatasetExportSummary(
-        export_id=row.export_id,
-        dataset_id=row.dataset_id,
-        export_no=row.export_no,
-        schema_version=row.schema_version,
-        row_count=row.row_count,
-        content_digest=row.content_digest,
-        provenance_digest=row.provenance_digest,
-        manifest_digest=row.manifest_digest,
         created_at=_iso(row.created_at),
     )
 

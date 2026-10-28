@@ -57,22 +57,3 @@ class FeedbackCase:
         object.__setattr__(
             self, "context_snapshot", deepcopy(dict(self.context_snapshot))
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "case_id": self.case_id,
-            "collection_id": self.collection_id,
-            "session_id": self.session_id,
-            "anchor_message_id": self.anchor_message_id,
-            "source_signal_ids": list(self.source_signal_ids),
-            "analysis_result_ids": list(self.analysis_result_ids),
-            "context_snapshot": deepcopy(self.context_snapshot),
-            "status": self.status,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "annotation_digest": self.annotation_digest,
-            "signal_analysis_result_ids": list(self.signal_analysis_result_ids),
-            "tool_failure_analysis_result_ids": list(
-                self.tool_failure_analysis_result_ids
-            ),
-        }

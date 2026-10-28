@@ -464,7 +464,25 @@ def _detail(
         "gaps": coverage.get("gaps", case.context_snapshot.get("gaps", [])),
         "coverage_status": coverage.get("coverage_status", "unknown"),
         "analysis": (_analysis_projection(latest) if latest else None),
-        "annotation": annotation.to_record() if annotation is not None else None,
+        "annotation": (
+            {
+                "annotation_id": annotation.annotation_id,
+                "case_id": annotation.case_id,
+                "version": annotation.version,
+                "problem_type": annotation.problem_type,
+                "severity": annotation.severity,
+                "target": annotation.target,
+                "support_source_refs": list(annotation.support_source_refs),
+                "dataset_uses": list(annotation.dataset_uses),
+                "reason": annotation.reason,
+                "annotation_digest": annotation.annotation_digest,
+                "created_by": annotation.created_by,
+                "created_at": annotation.created_at,
+                "updated_at": annotation.updated_at,
+            }
+            if annotation is not None
+            else None
+        ),
         "review_decisions": [asdict(item) for item in decisions],
         "current_annotation_digest": case.annotation_digest,
         "technical_error": case.context_snapshot.get("technical_error"),

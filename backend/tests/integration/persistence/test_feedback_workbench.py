@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import subprocess
 import sys
@@ -335,7 +336,28 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
 
     # Consume the actual persisted export through the offline CLI boundary.
     source = tmp_path / "snapshot.json"
-    source.write_text(json.dumps(loaded_snapshot.to_record()), encoding="utf-8")
+    source.write_text(
+        json.dumps(
+            {
+                "dataset_id": loaded_snapshot.dataset_id,
+                "owner_id": loaded_snapshot.owner_id,
+                "collection_id": loaded_snapshot.collection_id,
+                "dataset_type": loaded_snapshot.dataset_type,
+                "rows": [deepcopy(row) for row in loaded_snapshot.rows],
+                "exclusions": [deepcopy(item) for item in loaded_snapshot.exclusions],
+                "provenance": deepcopy(loaded_snapshot.provenance),
+                "manifest": deepcopy(loaded_snapshot.manifest),
+                "manifest_digest": loaded_snapshot.manifest_digest,
+                "provenance_digest": loaded_snapshot.provenance_digest,
+                "content_digest": loaded_snapshot.content_digest,
+                "row_count": loaded_snapshot.row_count,
+                "excluded_count": loaded_snapshot.excluded_count,
+                "is_empty": loaded_snapshot.is_empty,
+                "created_at": loaded_snapshot.created_at,
+            }
+        ),
+        encoding="utf-8",
+    )
     scripts = Path(__file__).resolve().parents[3] / "scripts/evaluation/feedback_dataset"
     prepared = tmp_path / "experiment"
     result = subprocess.run(

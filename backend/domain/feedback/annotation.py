@@ -174,23 +174,6 @@ class FeedbackAnnotation:
             self.reason,
         )
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "annotation_id": self.annotation_id,
-            "case_id": self.case_id,
-            "version": self.version,
-            "problem_type": self.problem_type,
-            "severity": self.severity,
-            "target": self.target,
-            "support_source_refs": list(self.support_source_refs),
-            "dataset_uses": list(self.dataset_uses),
-            "reason": self.reason,
-            "annotation_digest": self.annotation_digest,
-            "created_by": self.created_by,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
-
 
 __all__ = ["AnnotationSeverity", "DatasetUse", "FeedbackAnnotation"]
 

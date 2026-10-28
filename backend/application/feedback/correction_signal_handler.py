@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.feedback.correction_signal import CORRECTION_SIGNAL_TYPE
+
 import json
 import re
 from dataclasses import asdict, dataclass
@@ -195,11 +197,22 @@ class CorrectionSignalAnalysisHandler:
             "followup": canonical_trigger_content,
         }
         input_payload = {
-            "signal": signal.to_record(),
+            "signal": {
+                "signal_id": signal.signal_id,
+                "signal_type": CORRECTION_SIGNAL_TYPE,
+                "session_id": signal.session_id,
+                "anchor_message_id": signal.anchor_message_id,
+                "trigger_message_id": signal.trigger_message_id,
+                "trigger_digest": signal.trigger_digest,
+                "content": signal.content,
+                "created_at": signal.created_at,
+            },
             "anchor": feedback_message_record(anchor),
             "coverage": asdict(coverage),
             "related_message_ids": [item.message_id for item in related_messages],
-            "corrected_answer": feedback_message_record(corrected) if corrected else None,
+            "corrected_answer": (
+                feedback_message_record(corrected) if corrected else None
+            ),
             "corrected_coverage": (
                 asdict(corrected_coverage) if corrected_coverage else None
             ),
@@ -238,10 +251,20 @@ class CorrectionSignalAnalysisHandler:
             "question": original_question,
             "messages": conversation_before_answer(messages, anchor),
             "answer": anchor.content,
-            "correction_signal": signal.to_record(),
+            "correction_signal": {
+                "signal_id": signal.signal_id,
+                "signal_type": CORRECTION_SIGNAL_TYPE,
+                "session_id": signal.session_id,
+                "anchor_message_id": signal.anchor_message_id,
+                "trigger_message_id": signal.trigger_message_id,
+                "trigger_digest": signal.trigger_digest,
+                "content": signal.content,
+                "created_at": signal.created_at,
+            },
             "pairing_assessment": pairing_assessment,
             "requested_scope": list(coverage.requested_scope),
-            "inspected_sources": list(coverage.inspected_sources) + (
+            "inspected_sources": list(coverage.inspected_sources)
+            + (
                 list(corrected_coverage.inspected_sources) if corrected_coverage else []
             ),
             "omitted_candidates": list(coverage.omitted_candidates),
@@ -256,11 +279,15 @@ class CorrectionSignalAnalysisHandler:
                 "resolution": (
                     "correction_response_available"
                     if corrected
-                    else "unresolved_candidate"
-                    if same_task
-                    else "task_scope_changed"
-                    if task_relation == "different_task"
-                    else "task_scope_uncertain"
+                    else (
+                        "unresolved_candidate"
+                        if same_task
+                        else (
+                            "task_scope_changed"
+                            if task_relation == "different_task"
+                            else "task_scope_uncertain"
+                        )
+                    )
                 ),
             },
         }

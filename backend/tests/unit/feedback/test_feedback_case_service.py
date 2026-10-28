@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from application.feedback.feedback_case_service import FeedbackCaseService
@@ -212,12 +214,10 @@ async def test_case_service_exposes_message_correction_signal_without_claiming_t
         input_digest="b" * 64,
         created_at="2026-09-24T00:00:06+00:00",
     )
-    signal_case = FeedbackCase(
-        **{
-            **case.to_record(),
-            "source_signal_ids": (feedback.feedback_id, signal_result.signal_id),
-            "signal_analysis_result_ids": (signal_result.result_id,),
-        }
+    signal_case = replace(
+        case,
+        source_signal_ids=(feedback.feedback_id, signal_result.signal_id),
+        signal_analysis_result_ids=(signal_result.result_id,),
     )
     service = FeedbackCaseService(
         case_repository=_Cases(signal_case, result, signal_result),

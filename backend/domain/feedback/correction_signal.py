@@ -8,9 +8,8 @@ it is never treated as a correction or a training target by this module.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
 
 from domain.feedback.analysis_result import FeedbackProblemType
 from domain.feedback.evidence_coverage import EvidenceCoverage
@@ -107,39 +106,6 @@ class CorrectionSignal:
             raise ValueError("trigger_digest does not match content")
         object.__setattr__(self, "trigger_digest", digest)
 
-    @classmethod
-    def from_message(
-        cls,
-        *,
-        session_id: str,
-        anchor_message_id: str,
-        trigger_message_id: str,
-        content: str,
-        created_at: str,
-    ) -> "CorrectionSignal":
-        digest = sha256(str(content or "").strip().encode("utf-8")).hexdigest()
-        return cls(
-            signal_id=correction_signal_id(trigger_message_id),
-            session_id=session_id,
-            anchor_message_id=anchor_message_id,
-            trigger_message_id=trigger_message_id,
-            trigger_digest=digest,
-            content=str(content or "").strip(),
-            created_at=created_at,
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "signal_id": self.signal_id,
-            "signal_type": CORRECTION_SIGNAL_TYPE,
-            "session_id": self.session_id,
-            "anchor_message_id": self.anchor_message_id,
-            "trigger_message_id": self.trigger_message_id,
-            "trigger_digest": self.trigger_digest,
-            "content": self.content,
-            "created_at": self.created_at,
-        }
-
 
 @dataclass(frozen=True)
 class CorrectionSignalAnalysisResult:
@@ -192,27 +158,6 @@ class CorrectionSignalAnalysisResult:
             raise ValueError("analysis input digest must be sha256") from exc
         object.__setattr__(self, "related_message_ids", tuple(self.related_message_ids))
         object.__setattr__(self, "suggested_evidence", tuple(self.suggested_evidence))
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "result_id": self.result_id,
-            "job_id": self.job_id,
-            "signal_id": self.signal_id,
-            "signal_type": self.signal_type,
-            "session_id": self.session_id,
-            "collection_id": self.collection_id,
-            "anchor_message_id": self.anchor_message_id,
-            "trigger_message_id": self.trigger_message_id,
-            "problem_type": self.problem_type,
-            "confidence": self.confidence,
-            "related_message_ids": list(self.related_message_ids),
-            "suggested_evidence": list(self.suggested_evidence),
-            "suggested_target": self.suggested_target,
-            "evidence_coverage": asdict(self.evidence_coverage),
-            "model": self.model,
-            "input_digest": self.input_digest,
-            "created_at": self.created_at,
-        }
 
 
 __all__ = [

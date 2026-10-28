@@ -9,7 +9,7 @@ instead of borrowing the thumbs-up/thumbs-down ``feedback_id`` contract.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
@@ -81,18 +81,6 @@ class ToolFailureSignal:
         ):
             raise ValueError("tool failure signal identity does not match references")
 
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "signal_id": self.signal_id,
-            "signal_type": TOOL_FAILURE_SIGNAL_TYPE,
-            "session_id": self.session_id,
-            "tool_call_id": self.tool_call_id,
-            "assistant_message_id": self.assistant_message_id,
-            "result_message_id": self.result_message_id,
-            "result_digest": self.result_digest,
-            "created_at": self.created_at,
-        }
-
 
 @dataclass(frozen=True)
 class ToolFailureAnalysisResult:
@@ -157,30 +145,6 @@ class ToolFailureAnalysisResult:
         object.__setattr__(self, "input_digest", digest)
         object.__setattr__(self, "related_message_ids", tuple(self.related_message_ids))
         object.__setattr__(self, "suggested_evidence", tuple(self.suggested_evidence))
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "result_id": self.result_id,
-            "job_id": self.job_id,
-            "signal_id": self.signal_id,
-            "signal_type": self.signal_type,
-            "session_id": self.session_id,
-            "collection_id": self.collection_id,
-            "tool_call_id": self.tool_call_id,
-            "assistant_message_id": self.assistant_message_id,
-            "result_message_id": self.result_message_id,
-            "tool_name": self.tool_name,
-            "error_code": self.error_code,
-            "problem_type": self.problem_type,
-            "confidence": self.confidence,
-            "related_message_ids": list(self.related_message_ids),
-            "suggested_evidence": list(self.suggested_evidence),
-            "suggested_target": self.suggested_target,
-            "evidence_coverage": asdict(self.evidence_coverage),
-            "model": self.model,
-            "input_digest": self.input_digest,
-            "created_at": self.created_at,
-        }
 
 
 __all__ = [

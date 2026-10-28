@@ -40,7 +40,7 @@ from domain.chat import (
 )
 from domain.chat.feedback import ChatMessageFeedback, FeedbackRating, FeedbackReason
 from domain.chat.permissions import permits_automatic
-from domain.feedback.correction_signal import CorrectionSignal, is_correction_challenge
+from domain.feedback.correction_signal import CorrectionSignal, correction_signal_id, is_correction_challenge
 from domain.feedback.tool_failure import tool_result_digest
 from infra.source.artifact_bundle import source_table_payload
 from repositories.analysis_job_repository import (
@@ -863,12 +863,14 @@ class ChatSessionService:
             return None
         # The new user message must be immediately after the anchor in the
         # durable trajectory.  The worker repeats this check from storage.
-        signal = CorrectionSignal.from_message(
+        signal = CorrectionSignal(
             session_id=session.session_id,
             anchor_message_id=anchor.message_id,
             trigger_message_id=trigger.message_id,
-            content=trigger.content,
+            content=trigger.content.strip(),
             created_at=trigger.created_at,
+            trigger_digest=sha256(trigger.content.strip().encode("utf-8")).hexdigest(),
+            signal_id=correction_signal_id(trigger.message_id),
         )
         key = correction_signal_idempotency_key(
             session_id=session.session_id,

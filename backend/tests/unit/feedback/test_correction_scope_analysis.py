@@ -1,3 +1,5 @@
+from hashlib import sha256
+from domain.feedback.correction_signal import correction_signal_id
 from types import SimpleNamespace
 import json
 
@@ -19,10 +21,14 @@ def anyio_backend():
 @pytest.mark.parametrize("relation", ["same_task", "different_task", "uncertain"])
 async def test_scope_analysis_receives_original_task_and_preserves_decision(relation):
     messages = _messages(trigger_text="不对，只总结 B。")
-    signal = CorrectionSignal.from_message(
-        session_id="session-1", anchor_message_id=messages[1].message_id,
-        trigger_message_id=messages[2].message_id, content=messages[2].content,
+    signal = CorrectionSignal(
+        session_id="session-1",
+        anchor_message_id=messages[1].message_id,
+        trigger_message_id=messages[2].message_id,
+        content=messages[2].content.strip(),
         created_at=messages[2].created_at,
+        trigger_digest=sha256(messages[2].content.strip().encode("utf-8")).hexdigest(),
+        signal_id=correction_signal_id(messages[2].message_id),
     )
 
     class Completions:

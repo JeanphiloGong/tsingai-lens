@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from domain.feedback.sample_revision import SftRevisionContent
 
-from dataclasses import asdict
+from dataclasses import replace, asdict
 
 
 import asyncio
@@ -152,14 +152,12 @@ class _Service:
         return _sample()
 
     async def confirm_sample(self, **kwargs):
-        return DatasetSample(
-            **{
-                **_sample().to_record(),
-                "status": "confirmed",
-                "confirmed_revision_id": "revision-1",
-                "confirmed_by": "user-1",
-                "confirmed_at": "2026-09-29T01:00:00+00:00",
-            }
+        return replace(
+            _sample(),
+            status="confirmed",
+            confirmed_revision_id="revision-1",
+            confirmed_by="user-1",
+            confirmed_at="2026-09-29T01:00:00+00:00",
         )
 
 

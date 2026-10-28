@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 DatasetSampleStatus = Literal[
     "pending",
@@ -106,24 +106,6 @@ class DatasetSample:
             created_at=now,
             updated_at=now,
         )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "sample_id": self.sample_id,
-            "dataset_id": self.dataset_id,
-            "source_case_id": self.source_case_id,
-            "status": self.status,
-            "current_revision_id": self.current_revision_id,
-            "confirmed_revision_id": self.confirmed_revision_id,
-            "generation": self.generation,
-            "source_digest": self.source_digest,
-            "active_job_id": self.active_job_id,
-            "missing_reasons": list(self.missing_reasons),
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "confirmed_by": self.confirmed_by,
-            "confirmed_at": self.confirmed_at,
-        }
 
 
 def _is_sha256(value: str) -> bool:

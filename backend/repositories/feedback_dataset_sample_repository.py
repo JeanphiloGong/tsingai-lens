@@ -771,7 +771,22 @@ class FeedbackDatasetSampleRepository:
                     generation=generation,
                     reason=reason,
                     job_id=job.job_id if job else None,
-                    result_sample=result.to_record(),
+                    result_sample={
+                        "sample_id": result.sample_id,
+                        "dataset_id": result.dataset_id,
+                        "source_case_id": result.source_case_id,
+                        "status": result.status,
+                        "current_revision_id": result.current_revision_id,
+                        "confirmed_revision_id": result.confirmed_revision_id,
+                        "generation": result.generation,
+                        "source_digest": result.source_digest,
+                        "active_job_id": result.active_job_id,
+                        "missing_reasons": list(result.missing_reasons),
+                        "created_at": result.created_at,
+                        "updated_at": result.updated_at,
+                        "confirmed_by": result.confirmed_by,
+                        "confirmed_at": result.confirmed_at,
+                    },
                     created_at=timestamp,
                 )
             )

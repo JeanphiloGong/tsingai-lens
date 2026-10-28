@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import asyncio
 import hashlib
 import json
@@ -19,7 +21,6 @@ from domain.feedback import (
     FeedbackAnnotation,
     FeedbackCase,
     ReviewDecision,
-    DatasetSnapshot,
 )
 
 
@@ -142,7 +143,7 @@ def _fixture(*, target: str | None = "A corrected answer"):
         created_by="user-1",
         created_at="2026-09-24T00:00:04+00:00",
     )
-    case = FeedbackCase(**{**case.to_record(), "annotation_digest": annotation.annotation_digest})
+    case = replace(case, annotation_digest=annotation.annotation_digest)
     review = ReviewDecision(
         decision_id="review-1",
         case_id=case.case_id,
@@ -260,14 +261,12 @@ def test_download_rows_keep_readable_evidence_but_hide_internal_ids() -> None:
 
 def test_sft_is_excluded_when_support_source_has_no_readable_content() -> None:
     service, _ = _fixture()
-    service.case_repository.case = FeedbackCase(
-        **{
-            **service.case_repository.case.to_record(),
-            "context_snapshot": {
-                "requested_scope": [{"document_id": "doc-b", "document_title": "Paper B"}],
-                "source_refs": ["source-b-caption"],
-            },
-        }
+    service.case_repository.case = replace(
+        service.case_repository.case,
+        context_snapshot={
+            "requested_scope": [{"document_id": "doc-b", "document_title": "Paper B"}],
+            "source_refs": ["source-b-caption"],
+        },
     )
     snapshot = asyncio.run(
         service.create_for_user(
@@ -284,23 +283,21 @@ def test_sft_is_excluded_when_support_source_has_no_readable_content() -> None:
 
 def test_sft_is_excluded_when_evidence_has_no_readable_document_title() -> None:
     service, _ = _fixture()
-    service.case_repository.case = FeedbackCase(
-        **{
-            **service.case_repository.case.to_record(),
-            "context_snapshot": {
-                "requested_scope": [{"document_id": "doc-b"}],
-                "source_refs": ["source-b-caption"],
-                "evidence_coverage": {
-                    "inspected_sources": [
-                        {
-                            "document_id": "doc-b",
-                            "source_ref": "source-b-caption",
-                            "quote": "A quote without a document title.",
-                        }
-                    ]
-                },
+    service.case_repository.case = replace(
+        service.case_repository.case,
+        context_snapshot={
+            "requested_scope": [{"document_id": "doc-b"}],
+            "source_refs": ["source-b-caption"],
+            "evidence_coverage": {
+                "inspected_sources": [
+                    {
+                        "document_id": "doc-b",
+                        "source_ref": "source-b-caption",
+                        "quote": "A quote without a document title.",
+                    }
+                ]
             },
-        }
+        },
     )
 
     snapshot = asyncio.run(
@@ -374,12 +371,9 @@ def test_historical_snapshot_download_preserves_bytes_and_digests() -> None:
     payload = jsonl_bytes_for_rows(rows)
     manifest = {**snapshot.manifest, **basis, "manifest_digest": _digest(basis),
                 "content_digest": hashlib.sha256(payload).hexdigest()}
-    record = snapshot.to_record()
-    for key in ("row_count", "excluded_count", "is_empty"):
-        record.pop(key)
-    historical = DatasetSnapshot(**{**record, "rows": tuple(rows), "provenance": provenance,
-        "manifest": manifest, "manifest_digest": manifest["manifest_digest"],
-        "provenance_digest": basis["provenance_digest"], "content_digest": manifest["content_digest"]})
+    historical = replace(snapshot, rows=tuple(rows), provenance=provenance,
+        manifest=manifest, manifest_digest=manifest["manifest_digest"],
+        provenance_digest=basis["provenance_digest"], content_digest=manifest["content_digest"])
     snapshots.saved = [historical]
     read, downloaded = asyncio.run(service.jsonl_for_user(owner_id="user-1", dataset_id=historical.dataset_id))
     assert downloaded == payload
@@ -416,7 +410,7 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
         created_by=annotation.created_by,
         created_at=annotation.created_at,
     )
-    case = FeedbackCase(**{**case.to_record(), "annotation_digest": annotation.annotation_digest})
+    case = replace(case, annotation_digest=annotation.annotation_digest)
     review = ReviewDecision(
         decision_id="review-suggested",
         case_id=case.case_id,

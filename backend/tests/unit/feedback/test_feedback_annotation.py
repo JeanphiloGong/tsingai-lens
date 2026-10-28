@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import asyncio
 
 import pytest
@@ -66,8 +68,11 @@ class _Cases:
         if annotation.version != expected_version:
             raise ValueError("annotation_version_conflict")
         self.annotation = annotation
-        self.case = FeedbackCase(
-            **{**self.case.to_record(), "status": "ready_for_review", "annotation_digest": annotation.annotation_digest, "updated_at": now}
+        self.case = replace(
+            self.case,
+            status="ready_for_review",
+            annotation_digest=annotation.annotation_digest,
+            updated_at=now,
         )
         return annotation
 
@@ -138,7 +143,7 @@ async def test_rejected_case_can_be_revised_without_erasing_review_history() -> 
         reason="Initial review needs a better explanation.",
         now="2026-09-24T00:01:00+00:00",
     )
-    repo.case = FeedbackCase(**{**repo.case.to_record(), "status": "rejected"})
+    repo.case = replace(repo.case, status="rejected")
     second = await service.save_annotation_for_user(
         case_id="case-1", user_id="user-1", expected_digest=first.annotation_digest,
         problem_type="source_missing", severity="critical", target=None,
@@ -159,7 +164,7 @@ async def test_annotation_revision_rejects_terminal_accepted_case() -> None:
         support_source_refs=("source-a",), dataset_uses=("evaluation",),
         reason="Accepted baseline.", now="2026-09-24T00:01:00+00:00",
     )
-    repo.case = FeedbackCase(**{**repo.case.to_record(), "status": "accepted"})
+    repo.case = replace(repo.case, status="accepted")
     with pytest.raises(ValueError, match="feedback_case_not_annotatable"):
         await service.save_annotation_for_user(
             case_id="case-1", user_id="user-1", expected_digest=first.annotation_digest,

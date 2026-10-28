@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.feedback.tool_failure import TOOL_FAILURE_SIGNAL_TYPE
+
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -179,7 +181,16 @@ class ToolFailureAnalysisHandler:
         answer_message_id = answer.message_id if answer is not None else assistant.message_id
         related = tuple(message.message_id for message in messages[: result_position + 1])
         input_payload = {
-            "signal": signal.to_record(),
+            "signal": {
+                "signal_id": signal.signal_id,
+                "signal_type": TOOL_FAILURE_SIGNAL_TYPE,
+                "session_id": signal.session_id,
+                "tool_call_id": signal.tool_call_id,
+                "assistant_message_id": signal.assistant_message_id,
+                "result_message_id": signal.result_message_id,
+                "result_digest": signal.result_digest,
+                "created_at": signal.created_at,
+            },
             "call": {
                 "tool_call_id": call.tool_call_id,
                 "assistant_message_id": call.assistant_message_id,
@@ -225,7 +236,16 @@ class ToolFailureAnalysisHandler:
             # is the user-facing case anchor when the run produced one.
             "answer_message_id": answer_message_id,
             "tool_failure": {
-                **signal.to_record(),
+                **{
+                    "signal_id": signal.signal_id,
+                    "signal_type": TOOL_FAILURE_SIGNAL_TYPE,
+                    "session_id": signal.session_id,
+                    "tool_call_id": signal.tool_call_id,
+                    "assistant_message_id": signal.assistant_message_id,
+                    "result_message_id": signal.result_message_id,
+                    "result_digest": signal.result_digest,
+                    "created_at": signal.created_at,
+                },
                 "tool_name": call.name,
                 "error_code": result.error_code,
                 "error_message": result.error_message,

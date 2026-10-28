@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import asyncio
 
 import pytest
@@ -84,7 +86,7 @@ class _Cases:
         )
         self.decisions.append(actual)
         status = {"accept": "accepted", "reject": "rejected", "insufficient": "insufficient", "withdraw": "withdrawn"}[actual.decision]
-        self.case = FeedbackCase(**{**self.case.to_record(), "status": status, "updated_at": now})
+        self.case = replace(self.case, status=status, updated_at=now)
         return actual
 
 
@@ -95,7 +97,7 @@ def _fixture():
     result = AnalysisResult(result_id="result-1", job_id="job-1", feedback_id="feedback-1", session_id=session.session_id, collection_id=session.collection_id, anchor_message_id=answer.message_id, problem_type="source_missing", confidence=.8, related_message_ids=(question.message_id,), suggested_evidence=(), suggested_target=None, evidence_coverage=EvidenceCoverage(coverage_status="partial"), model="test", input_digest="a" * 64, created_at="2026-09-24T00:00:03+00:00")
     case = FeedbackCase(case_id="case-1", collection_id=session.collection_id, session_id=session.session_id, anchor_message_id=answer.message_id, source_signal_ids=(), analysis_result_ids=(result.result_id,), context_snapshot={}, status="ready_for_review", created_at="2026-09-24T00:00:03+00:00", updated_at="2026-09-24T00:00:03+00:00")
     annotation = FeedbackAnnotation.build(annotation_id="annotation-1", case_id=case.case_id, version=1, problem_type="source_missing", severity="high", target=None, support_source_refs=(), dataset_uses=("evaluation",), reason="checked", created_by="user-1", created_at="2026-09-24T00:00:04+00:00")
-    case = FeedbackCase(**{**case.to_record(), "annotation_digest": annotation.annotation_digest})
+    case = replace(case, annotation_digest=annotation.annotation_digest)
     repo = _Cases(case, result, annotation)
     service = FeedbackCaseService(case_repository=repo, chat_repository=_Chat(session, (question, answer)), collection_service=_Collections())
     return service, repo, annotation
@@ -129,7 +131,7 @@ async def test_accept_requires_a_declared_dataset_use() -> None:
         created_at=annotation.created_at,
     )
     repo.annotation = empty
-    repo.case = FeedbackCase(**{**repo.case.to_record(), "annotation_digest": empty.annotation_digest})
+    repo.case = replace(repo.case, annotation_digest=empty.annotation_digest)
     with pytest.raises(ValueError, match="review_dataset_use_missing"):
         await service.submit_review_for_user(
             case_id="case-1", user_id="user-1",
@@ -149,7 +151,7 @@ async def test_preference_accept_requires_a_distinct_corrected_answer() -> None:
         created_at=annotation.created_at,
     )
     repo.annotation = preference
-    repo.case = FeedbackCase(**{**repo.case.to_record(), "annotation_digest": preference.annotation_digest})
+    repo.case = replace(repo.case, annotation_digest=preference.annotation_digest)
     with pytest.raises(ValueError, match="review_preference_pair_missing"):
         await service.submit_review_for_user(
             case_id="case-1", user_id="user-1",
@@ -174,10 +176,9 @@ async def test_review_history_keeps_old_digest_when_new_annotation_is_reviewed()
         created_at="2026-09-24T00:06:00+00:00",
     )
     repo.annotation = second
-    repo.case = FeedbackCase(**{
-        **repo.case.to_record(), "status": "ready_for_review",
-        "annotation_digest": second.annotation_digest,
-    })
+    repo.case = replace(
+        repo.case, status="ready_for_review", annotation_digest=second.annotation_digest
+    )
     accepted = await service.submit_review_for_user(
         case_id="case-1", user_id="user-1",
         expected_annotation_digest=second.annotation_digest,

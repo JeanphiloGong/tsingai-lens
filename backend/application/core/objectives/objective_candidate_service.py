@@ -672,16 +672,8 @@ class ObjectiveCandidateService:
             'experiment_label': study.experiment_label,
             'material_scope': list(study.material_scope),
             'process_context': list(study.process_context),
-            'relationships': [{
-                'relationship_id': item.relationship_id,
-                'varied_factors': list(item.varied_factors),
-                'outcome': item.outcome,
-                'source_refs': [{'source_kind': item.source_kind, 'source_ref': item.source_ref} for item in item.source_refs],
-                'confidence': item.confidence,
-            } for item in study.relationships],
             'confidence': study.confidence,
         }
-        study_record.pop("relationships", None)
         return {
             "document_id": paper_map.document_id,
             "doc_role": paper_map.doc_role,

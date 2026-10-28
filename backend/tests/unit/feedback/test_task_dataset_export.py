@@ -1,12 +1,5 @@
 from __future__ import annotations
 
-from domain.feedback.sample_revision import (
-    EvaluationRevisionContent,
-    PreferenceRevisionContent,
-    SftRevisionContent,
-)
-
-
 import json
 from dataclasses import replace
 

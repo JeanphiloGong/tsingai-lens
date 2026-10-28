@@ -338,7 +338,7 @@ class FeedbackDatasetExportRepository:
                         provenance=deepcopy(record["provenance"]),
                     )
                 )
-            preview_members = tuplemember_values
+            preview_members = tuple(member_values)
             selected = {member.sample_id for member in preview_members}
             current_members = await _read_current_members(session, draft.dataset_id, sample_ids=tuple(selected))
             if member_digest(current_members) != draft.member_digest:
@@ -490,7 +490,7 @@ async def _read_current_members(
                 provenance=deepcopy(revision.provenance or {}),
             )
         )
-    return tuplemember_values
+    return tuple(member_values)
 
 
 async def _read_export_locked(
@@ -564,7 +564,7 @@ async def _read_export_locked(
                     provenance=deepcopy(revisions[member.revision_id].provenance or {}),
                 )
             )
-        members = tuplemember_values
+        members = tuple(member_values)
     else:
         members = ()
     return DatasetExport(

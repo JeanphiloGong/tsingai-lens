@@ -19,6 +19,7 @@ from application.feedback.sample_build_worker import DatasetSampleBuildWorker
 from application.feedback.sft_sample_builder import SftSampleBuilder
 from domain.feedback.sample_revision import (
     SampleRevision,
+    SftRevisionContent,
 )
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.feedback import (

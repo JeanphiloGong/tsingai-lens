@@ -40,7 +40,6 @@ from domain.core.research_objective import (
     _positive_int_or_none,
     _text,
     build_research_objective_id,
-    normalize_objective_confidence,
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (
@@ -1061,7 +1060,7 @@ def _ranked_objective(rank: int) -> ResearchObjective:
         requested_comparator=None,
         seed_document_ids=normalize_objective_terms([f"paper-{rank}"]),
         excluded_document_ids=(),
-        confidence=normalize_objective_confidence(1 - rank / 100),
+        confidence=1 - rank / 100,
         reason=None,
         source_relationship_ids=normalize_objective_terms([f"relationship-{rank}"]),
         rank=_positive_int_or_none(rank),

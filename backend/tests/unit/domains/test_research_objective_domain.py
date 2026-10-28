@@ -34,7 +34,6 @@ from domain.core import (
     ReviewSynthesisMap,
     build_research_objective_id,
     is_question_shaped_objective,
-    normalize_objective_confidence,
     normalize_objective_terms,
 )
 from domain.core.finding import (
@@ -69,7 +68,6 @@ from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.research_objective import (
     _text,
     build_research_objective_id,
-    normalize_objective_confidence,
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (
@@ -302,11 +300,11 @@ def _objective(**overrides) -> ResearchObjective:
         objective_id=_text(payload.get("objective_id"))
         or build_research_objective_id(
             question=_text(payload.get("question")) or "",
-            material_scope=normalize_objective_terms(payload.get("material_scope")),
-            variables=normalize_objective_terms(payload.get("variables")),
-            outcomes=normalize_objective_terms(payload.get("outcomes")),
-            mechanisms=normalize_objective_terms(payload.get("mechanisms")),
-            constraints=normalize_objective_terms(payload.get("constraints")),
+            material_scope=normalize_objective_terms(payload.get('material_scope', ())),
+            variables=normalize_objective_terms(payload.get('variables', ())),
+            outcomes=normalize_objective_terms(payload.get('outcomes', ())),
+            mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
+            constraints=normalize_objective_terms(payload.get('constraints', ())),
             requested_comparator=_text(payload.get("requested_comparator")),
             parent_objective_id=_text(payload.get("parent_objective_id")),
             parent_analysis_version=_positive_int_or_none(
@@ -314,20 +312,20 @@ def _objective(**overrides) -> ResearchObjective:
             ),
         ),
         question=_text(payload.get("question")) or "",
-        material_scope=normalize_objective_terms(payload.get("material_scope")),
-        variables=normalize_objective_terms(payload.get("variables")),
-        outcomes=normalize_objective_terms(payload.get("outcomes")),
-        mechanisms=normalize_objective_terms(payload.get("mechanisms")),
-        constraints=normalize_objective_terms(payload.get("constraints")),
+        material_scope=normalize_objective_terms(payload.get('material_scope', ())),
+        variables=normalize_objective_terms(payload.get('variables', ())),
+        outcomes=normalize_objective_terms(payload.get('outcomes', ())),
+        mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
+        constraints=normalize_objective_terms(payload.get('constraints', ())),
         requested_comparator=_text(payload.get("requested_comparator")),
-        seed_document_ids=normalize_objective_terms(payload.get("seed_document_ids")),
+        seed_document_ids=normalize_objective_terms(payload.get('seed_document_ids', ())),
         excluded_document_ids=normalize_objective_terms(
-            payload.get("excluded_document_ids")
+            payload.get('excluded_document_ids', ())
         ),
-        confidence=normalize_objective_confidence(payload.get("confidence")),
+        confidence=payload.get('confidence', 0.0),
         reason=_text(payload.get("reason")),
         source_relationship_ids=normalize_objective_terms(
-            payload.get("source_relationship_ids")
+            payload.get('source_relationship_ids', ())
         ),
         parent_objective_id=_text(payload.get("parent_objective_id")),
         parent_analysis_version=_positive_int_or_none(
@@ -914,19 +912,19 @@ def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting(
                 base.get("paper_role", None), PAPER_ROLE_VALUES, "uncertain"
             ),
             contribution_summary=finding_text(base.get("contribution_summary", None)),
-            material_match=normalize_objective_terms(base.get("material_match", None)),
+            material_match=normalize_objective_terms(base.get('material_match', ())),
             changed_variables=normalize_objective_terms(
-                base.get("changed_variables", None)
+                base.get('changed_variables', ())
             ),
             measured_property_scope=normalize_objective_terms(
-                base.get("measured_property_scope", None)
+                base.get('measured_property_scope', ())
             ),
             test_environment_scope=normalize_objective_terms(
-                base.get("test_environment_scope", None)
+                base.get('test_environment_scope', ())
             ),
             exclusion_reason=finding_text(base.get("exclusion_reason", None)),
-            warnings=normalize_objective_terms(base.get("warnings", None)),
-            confidence=normalize_objective_confidence(base.get("confidence", None)),
+            warnings=normalize_objective_terms(base.get('warnings', ())),
+            confidence=base.get('confidence', 0.0),
             evidence_disposition="no_routable_evidence",
             routed_source_count=0,
             extracted_source_count=objective_non_negative_int_or_none(
@@ -980,19 +978,19 @@ def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting(
                 base.get("paper_role", None), PAPER_ROLE_VALUES, "uncertain"
             ),
             contribution_summary=finding_text(base.get("contribution_summary", None)),
-            material_match=normalize_objective_terms(base.get("material_match", None)),
+            material_match=normalize_objective_terms(base.get('material_match', ())),
             changed_variables=normalize_objective_terms(
-                base.get("changed_variables", None)
+                base.get('changed_variables', ())
             ),
             measured_property_scope=normalize_objective_terms(
-                base.get("measured_property_scope", None)
+                base.get('measured_property_scope', ())
             ),
             test_environment_scope=normalize_objective_terms(
-                base.get("test_environment_scope", None)
+                base.get('test_environment_scope', ())
             ),
             exclusion_reason=finding_text(base.get("exclusion_reason", None)),
-            warnings=normalize_objective_terms(base.get("warnings", None)),
-            confidence=normalize_objective_confidence(base.get("confidence", None)),
+            warnings=normalize_objective_terms(base.get('warnings', ())),
+            confidence=base.get('confidence', 0.0),
             evidence_disposition="comparable_evidence",
             routed_source_count=1,
             extracted_source_count=1,
@@ -1456,7 +1454,6 @@ def test_normalizers_remain_stable() -> None:
         "LPBF",
         "SLM",
     )
-    assert normalize_objective_confidence(float("nan")) == 0.0
 
 
 def test_paper_research_map_retains_scope_and_unresolved_signals() -> None:

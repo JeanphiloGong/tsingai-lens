@@ -9,7 +9,6 @@ from domain.core.research_objective import (
     _positive_int_or_none,
     _text,
     build_research_objective_id,
-    normalize_objective_confidence,
     normalize_objective_terms,
 )
 
@@ -47,7 +46,7 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
             )
             or "",
             material_scope=normalize_objective_terms(
-                payload.get("material_scope", None)
+                payload.get('material_scope', ())
             ),
             variables=normalize_objective_terms(
                 payload.get("variables", ["process condition"])
@@ -55,8 +54,8 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
             outcomes=normalize_objective_terms(
                 payload.get("outcomes", ["target outcome"])
             ),
-            mechanisms=normalize_objective_terms(payload.get("mechanisms", None)),
-            constraints=normalize_objective_terms(payload.get("constraints", None)),
+            mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
+            constraints=normalize_objective_terms(payload.get('constraints', ())),
             requested_comparator=_text(payload.get("requested_comparator", None)),
             parent_objective_id=_text(payload.get("parent_objective_id", None)),
             parent_analysis_version=_positive_int_or_none(
@@ -69,24 +68,24 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
             )
         )
         or "",
-        material_scope=normalize_objective_terms(payload.get("material_scope", None)),
+        material_scope=normalize_objective_terms(payload.get('material_scope', ())),
         variables=normalize_objective_terms(
             payload.get("variables", ["process condition"])
         ),
         outcomes=normalize_objective_terms(payload.get("outcomes", ["target outcome"])),
-        mechanisms=normalize_objective_terms(payload.get("mechanisms", None)),
-        constraints=normalize_objective_terms(payload.get("constraints", None)),
+        mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
+        constraints=normalize_objective_terms(payload.get('constraints', ())),
         requested_comparator=_text(payload.get("requested_comparator", None)),
         seed_document_ids=normalize_objective_terms(
-            payload.get("seed_document_ids", None)
+            payload.get('seed_document_ids', ())
         ),
         excluded_document_ids=normalize_objective_terms(
-            payload.get("excluded_document_ids", None)
+            payload.get('excluded_document_ids', ())
         ),
-        confidence=normalize_objective_confidence(payload.get("confidence", None)),
+        confidence=payload.get('confidence', 0.0),
         reason=_text(payload.get("reason", None)),
         source_relationship_ids=normalize_objective_terms(
-            payload.get("source_relationship_ids", None)
+            payload.get('source_relationship_ids', ())
         ),
         parent_objective_id=_text(payload.get("parent_objective_id", None)),
         parent_analysis_version=_positive_int_or_none(

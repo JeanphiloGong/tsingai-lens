@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import math
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha1
-from typing import Any, Final, Mapping
+from typing import Any, Final, Iterable, Mapping
 
 from domain.core.scientific_fact import (
     ScientificComparison,
@@ -1288,19 +1287,11 @@ def is_question_shaped_objective(objective: ResearchObjective) -> bool:
     return _is_question_shaped(objective.question)
 
 
-def normalize_objective_terms(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, Mapping):
-        items = value.values()
-    elif isinstance(value, (list, tuple, set)):
-        items = value
-    else:
-        items = (value,)
+def normalize_objective_terms(values: Iterable[str]) -> tuple[str, ...]:
     normalized: list[str] = []
     seen: set[str] = set()
-    for item in items:
-        text = _text(item)
+    for value in values:
+        text = value.strip()
         if not text:
             continue
         key = text.casefold()
@@ -1309,16 +1300,6 @@ def normalize_objective_terms(value: Any) -> tuple[str, ...]:
         seen.add(key)
         normalized.append(text)
     return tuple(normalized)
-
-
-def normalize_objective_confidence(value: Any) -> float:
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    if math.isnan(numeric):
-        return 0.0
-    return round(min(1.0, max(0.0, numeric)), 4)
 
 
 def _choice(value: Any, allowed: frozenset[str], default: str) -> str:

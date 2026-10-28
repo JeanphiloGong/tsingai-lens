@@ -72,7 +72,6 @@ from domain.core.research_objective import (
     ReviewSynthesisMap,
     build_research_objective_id,
     is_question_shaped_objective,
-    normalize_objective_confidence,
     normalize_objective_terms,
 )
 from domain.core.research_process import SOURCE_OBSERVATION_STATUSES, SourceObservation
@@ -163,7 +162,6 @@ __all__ = [
     "ScientificVariable",
     "build_research_objective_id",
     "is_question_shaped_objective",
-    "normalize_objective_confidence",
     "normalize_objective_terms",
     "summarize_document_profile_collection",
 ]

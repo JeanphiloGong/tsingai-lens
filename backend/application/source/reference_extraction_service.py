@@ -198,7 +198,7 @@ class SourceReferenceExtractionService:
 
 
 def _normalize_text(value: str) -> str:
-    return _SPACE_PATTERN.sub(" ", value or "").strip()
+    return _SPACE_PATTERN.sub(" ", value).strip()
 
 
 def _expand_citation_numbers(value: str) -> list[str]:

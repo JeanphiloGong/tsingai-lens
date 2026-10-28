@@ -460,7 +460,7 @@ def build_source_table_rows_from_cells(
         row_indices = sorted({cell.row_index for cell in table_cells})
         for row_index in row_indices:
             row_cells = [cell for cell in table_cells if cell.row_index == row_index]
-            if all(not normalize_optional_text(cell.header_path) for cell in row_cells):
+            if all(not cell.header_path or not cell.header_path.strip() for cell in row_cells):
                 continue
             ordered_cells = sorted(row_cells, key=lambda cell: cell.col_index)
             row_text = " | ".join(
@@ -524,7 +524,7 @@ def render_markdown_table(
     normalized_header_row_count = max(0, min(header_row_count, len(normalized_rows)))
     header = _normalize_table_row(column_headers, col_count)
     if not any(header) and normalized_rows:
-        header = _normalize_table_row(normalized_rows[0], col_count)
+        header = normalized_rows[0]
         normalized_header_row_count = max(1, normalized_header_row_count)
     if not any(header):
         header = [f"column_{index + 1}" for index in range(col_count)]
@@ -546,7 +546,7 @@ def render_plain_table_text(matrix: list[list[str]]) -> str | None:
         return None
     lines = []
     for row in matrix:
-        line = " | ".join(str(cell).strip() for cell in row if str(cell).strip())
+        line = " | ".join(cell.strip() for cell in row if cell.strip())
         if line:
             lines.append(line)
     return "\n".join(lines) or None
@@ -636,10 +636,9 @@ def _tree_order(kind: str, source_order: int) -> int:
 
 
 def _heading_path_tuple(value: str | None) -> tuple[str, ...]:
-    text = normalize_optional_text(value)
-    if text is None:
+    if value is None:
         return ()
-    return tuple(part.strip() for part in text.split(">") if part.strip())
+    return tuple(part.strip() for part in value.split(">") if part.strip())
 
 
 def _section_semantic_role(title: str | None) -> str:
@@ -976,14 +975,14 @@ class _SourceDocumentTreeBuilder:
 
 
 def _normalize_table_row(row: list[str], col_count: int) -> list[str]:
-    values = [" ".join(str(value or "").split()) for value in row[:col_count]]
+    values = [" ".join(value.split()) for value in row[:col_count]]
     if len(values) < col_count:
         values.extend([""] * (col_count - len(values)))
     return values
 
 
 def _escape_markdown_cell(value: str) -> str:
-    return str(value or "").replace("|", "\\|").strip()
+    return value.replace("|", "\\|").strip()
 
 
 __all__ = [

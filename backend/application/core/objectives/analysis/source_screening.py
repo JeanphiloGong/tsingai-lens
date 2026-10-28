@@ -19,7 +19,6 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
-    field_validator,
     model_validator,
 )
 
@@ -42,17 +41,6 @@ OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
 OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v4"
 
 _FRAME_MAX_COMPLETION_TOKENS = 1024
-_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
-_FRAME_PAPER_ROLES = {
-    "primary_experiment",
-    "supporting_method",
-    "supporting_background",
-    "review",
-    "modeling_only",
-    "irrelevant",
-    "mixed",
-    "uncertain",
-}
 _FRAME_SYSTEM_PROMPT = """
 You are the source-relevance judge for one bounded neighborhood of a paper under one confirmed research objective.
 
@@ -69,7 +57,7 @@ Non-negotiable rules:
 
 
 class _SourceScreeningContractBase(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class PaperFrameBatchResult(_SourceScreeningContractBase):
@@ -113,19 +101,6 @@ class PaperFrameBatchResult(_SourceScreeningContractBase):
         max_length=8,
     )
 
-    @field_validator(
-        "material_match",
-        "changed_variables",
-        "measured_property_scope",
-        "test_environment_scope",
-        "relevant_source_unit_ids",
-        "excluded_source_unit_ids",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return [] if value is None else value
-
     @model_validator(mode="after")
     def _validate_source_partition(self) -> "PaperFrameBatchResult":
         relevant = self.relevant_source_unit_ids
@@ -151,16 +126,6 @@ class PaperFrameBatchResult(_SourceScreeningContractBase):
         self._source_accounting_errors = tuple(
             str(error).strip() for error in errors if str(error).strip()
         )
-
-    @field_validator("relevance", mode="before")
-    @classmethod
-    def _normalize_relevance(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_FRAME_RELEVANCE, default="uncertain")
-
-    @field_validator("paper_role", mode="before")
-    @classmethod
-    def _normalize_paper_role(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_FRAME_PAPER_ROLES, default="uncertain")
 
 
 class PaperFrameBatchModelOutput(_SourceScreeningContractBase):
@@ -203,19 +168,6 @@ class PaperFrameBatchModelOutput(_SourceScreeningContractBase):
         max_length=8,
     )
 
-    @field_validator(
-        "material_match",
-        "changed_variables",
-        "measured_property_scope",
-        "test_environment_scope",
-        "relevant_source_labels",
-        "excluded_source_labels",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return [] if value is None else value
-
     @model_validator(mode="after")
     def _validate_source_partition(self) -> "PaperFrameBatchModelOutput":
         relevant = self.relevant_source_labels
@@ -227,21 +179,6 @@ class PaperFrameBatchModelOutput(_SourceScreeningContractBase):
                 "paper frame Source labels cannot be both relevant and excluded"
             )
         return self
-
-    @field_validator("relevance", mode="before")
-    @classmethod
-    def _normalize_relevance(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_FRAME_RELEVANCE, default="uncertain")
-
-    @field_validator("paper_role", mode="before")
-    @classmethod
-    def _normalize_paper_role(cls, value: object) -> str:
-        return _normalize_choice(value, allowed=_FRAME_PAPER_ROLES, default="uncertain")
-
-
-def _normalize_choice(value: object, *, allowed: set[str], default: str) -> str:
-    lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-    return lowered if lowered in allowed else default
 
 
 def _objective_paper_frame_model_payload(

@@ -2397,6 +2397,32 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
 
 
+@pytest.mark.parametrize(("field", "value"), [
+    ("relevance", "INVALID"), ("relevance", None), ("paper_role", "other"),
+    ("changed_variables", None), ("relevant_source_labels", None),
+])
+def test_objective_paper_frame_rejects_invalid_model_fields(field, value):
+    response = {"relevance": "uncertain", "relevant_source_labels": ["S1"], field: value}
+    client = _FakeOpenAIClient(json.dumps(response))
+
+    with pytest.raises(ValidationError):
+        ObjectiveSourceScreener(_response_client(client)).screen_batch({
+            "source_units": [{"source_unit_id": "source-1", "source_kind": "section", "source_ref": "methods", "text": "Laser power was varied."}]
+        })
+
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_objective_paper_frame_keeps_explicit_scientific_uncertainty():
+    client = _FakeOpenAIClient(json.dumps({"relevance": "uncertain", "paper_role": "uncertain", "relevant_source_labels": ["S1"]}))
+    frame = ObjectiveSourceScreener(_response_client(client)).screen_batch({
+        "source_units": [{"source_unit_id": "source-1", "source_kind": "section", "source_ref": "methods", "text": "The outcome is unclear."}]
+    })
+
+    assert frame.relevance == frame.paper_role == "uncertain"
+    assert frame.relevant_source_unit_ids == ["source-1"]
+
+
 def test_objective_paper_frame_preserves_more_than_eight_explicit_outcomes():
     client = _FakeOpenAIClient(
         json.dumps(

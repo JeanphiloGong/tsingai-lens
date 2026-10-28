@@ -153,6 +153,10 @@ class FindingFeedback:
     created_at: str
 
     def __post_init__(self) -> None:
+        if self.note is not None:
+            object.__setattr__(self, "note", self.note.strip() or None)
+        if self.reviewer is not None:
+            object.__setattr__(self, "reviewer", self.reviewer.strip() or None)
         if not self.collection_id or not self.objective_id or not self.finding_id:
             raise ValueError("finding feedback requires objective and finding identity")
         if self.analysis_version < 1:
@@ -181,6 +185,10 @@ class FindingCuration:
     updated_at: str
 
     def __post_init__(self) -> None:
+        if self.note is not None:
+            object.__setattr__(self, "note", self.note.strip() or None)
+        if self.reviewer is not None:
+            object.__setattr__(self, "reviewer", self.reviewer.strip() or None)
         if not self.collection_id or not self.objective_id or not self.finding_id:
             raise ValueError("finding curation requires objective and finding identity")
         if self.analysis_version < 1:
@@ -196,10 +204,3 @@ class FindingCuration:
             self.finding_id,
         ):
             raise ValueError("curated Finding identity differs from curation identity")
-
-
-def _normalize_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None

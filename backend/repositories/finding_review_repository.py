@@ -9,7 +9,7 @@ from typing import Any
 from domain.core.finding import Finding, FindingMechanismRelation, FindingPaperContribution
 from domain.core.finding import _stable_id as finding_stable_id
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
-from domain.evaluation.records import FindingCuration, FindingFeedback, _normalize_text
+from domain.evaluation.records import FindingCuration, FindingFeedback
 from infra.persistence.postgres.models.evaluation import (
     FindingCurationRecord,
     FindingFeedbackRecord,
@@ -55,8 +55,8 @@ class FindingReviewRepository:
             await session.flush()
             return replace(
                 feedback,
-                note=_normalize_text(row.note),
-                reviewer=_normalize_text(row.reviewer),
+                note=row.note,
+                reviewer=row.reviewer,
                 created_at=_isoformat(row.created_at),
             )
 
@@ -98,8 +98,8 @@ class FindingReviewRepository:
                     finding_id=row.finding_id,
                     review_status=row.review_status,
                     issue_type=row.issue_type,
-                    note=_normalize_text(row.note),
-                    reviewer=_normalize_text(row.reviewer),
+                    note=row.note,
+                    reviewer=row.reviewer,
                     created_at=_isoformat(row.created_at),
                 )
                 for row in rows
@@ -206,8 +206,8 @@ class FindingReviewRepository:
             return replace(
                 curation,
                 curated_finding=replace(finding, certainty=round(finding.certainty, 2)),
-                note=_normalize_text(row.note),
-                reviewer=_normalize_text(row.reviewer),
+                note=row.note,
+                reviewer=row.reviewer,
                 updated_at=_isoformat(row.updated_at),
             )
 
@@ -321,8 +321,8 @@ class FindingReviewRepository:
                     finding_id=row.finding_id,
                     curated_status=row.curated_status,
                     curated_finding=finding,
-                    note=_normalize_text(row.note),
-                    reviewer=_normalize_text(row.reviewer),
+                    note=row.note,
+                    reviewer=row.reviewer,
                     updated_at=_isoformat(row.updated_at),
                 ))
             return tuple(records)

@@ -44,7 +44,6 @@ from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
 from domain.core.scientific_fact import _terms as scientific_terms
 from domain.core.scientific_fact import _text as scientific_text
 from domain.evaluation import FindingCuration, FindingFeedback
-from domain.evaluation.records import _normalize_text
 from repositories.finding_review_repository import FindingReviewRepository
 from repositories.objective_repository import ObjectiveRepository
 
@@ -101,14 +100,14 @@ class FindingFeedbackService:
                 reviewer or "",
                 created_at,
             ),
-            collection_id=_normalize_text(collection_id) or "",
-            objective_id=_normalize_text(objective_id) or "",
+            collection_id=collection_id,
+            objective_id=objective_id,
             analysis_version=analysis_version,
-            finding_id=_normalize_text(finding_id) or "",
-            review_status=(_normalize_text(review_status) or "").lower(),
-            issue_type=(_normalize_text(issue_type) or "").lower(),
-            note=_normalize_text(note),
-            reviewer=_normalize_text(reviewer),
+            finding_id=finding_id,
+            review_status=review_status,
+            issue_type=issue_type,
+            note=note,
+            reviewer=reviewer,
             created_at=created_at,
         )
         return await self.review_repository.upsert_feedback(feedback)

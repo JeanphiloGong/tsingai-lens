@@ -901,10 +901,6 @@ async def _local_objective_bundle(
             paper_contribution_response,
             objective_analysis_response,
         )
-        from repositories.finding_review_repository import (
-            finding_feedback_record,
-            finding_curation_record,
-        )
         from application.evaluation import FindingFeedbackService  # noqa: PLC0415
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
@@ -965,13 +961,123 @@ async def _local_objective_bundle(
                     objective_evidence_response(item) for item in finding_evidence
                 ]
                 feedback_by_finding[finding.finding_id] = [
-                    finding_feedback_record(item)
+                    {
+                        'feedback_id': item.feedback_id,
+                        'collection_id': item.collection_id,
+                        'objective_id': item.objective_id,
+                        'analysis_version': item.analysis_version,
+                        'finding_id': item.finding_id,
+                        'review_status': item.review_status,
+                        'issue_type': item.issue_type,
+                        'note': item.note,
+                        'reviewer': item.reviewer,
+                        'created_at': item.created_at,
+                    }
                     for item in await review_repository.list_feedback(
                         collection_id, objective_id, version, finding.finding_id
                     )
                 ]
                 curations_by_finding[finding.finding_id] = [
-                    finding_curation_record(item)
+                    {
+                        'curation_id': item.curation_id,
+                        'collection_id': item.collection_id,
+                        'objective_id': item.objective_id,
+                        'analysis_version': item.analysis_version,
+                        'finding_id': item.finding_id,
+                        'curated_status': item.curated_status,
+                        'curated_finding': {
+                            'collection_id': item.curated_finding.collection_id,
+                            'objective_id': item.curated_finding.objective_id,
+                            'analysis_version': item.curated_finding.analysis_version,
+                            'finding_id': item.curated_finding.finding_id,
+                            'statement': item.curated_finding.statement,
+                            'factors': list(item.curated_finding.factors),
+                            'outcome': item.curated_finding.outcome,
+                            'direction': item.curated_finding.direction,
+                            'assertion_strength': item.curated_finding.assertion_strength,
+                            'attribution_scope': item.curated_finding.attribution_scope,
+                            'synthesis_status': item.curated_finding.synthesis_status,
+                            'certainty': item.curated_finding.certainty,
+                            'display_rank': item.curated_finding.display_rank,
+                            'mechanisms': [
+                                {
+                                    'source_term': mechanism.source_term,
+                                    'relation_type': mechanism.relation_type,
+                                    'target_term': mechanism.target_term,
+                                    'direction': mechanism.direction,
+                                    'assertion_strength': mechanism.assertion_strength,
+                                    'supporting_evidence_ids': list(mechanism.supporting_evidence_ids),
+                                }
+                                for mechanism in item.curated_finding.mechanisms
+                            ],
+                            'scientific_context': {
+                                'material': [
+                                    {
+                                        'name': attribute.name,
+                                        'value': attribute.value,
+                                        'unit': attribute.unit,
+                                        **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
+                                        **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.material
+                                ],
+                                'sample': [
+                                    {
+                                        'name': attribute.name,
+                                        'value': attribute.value,
+                                        'unit': attribute.unit,
+                                        **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
+                                        **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.sample
+                                ],
+                                'process': [
+                                    {
+                                        'name': attribute.name,
+                                        'value': attribute.value,
+                                        'unit': attribute.unit,
+                                        **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
+                                        **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.process
+                                ],
+                                'test': [
+                                    {
+                                        'name': attribute.name,
+                                        'value': attribute.value,
+                                        'unit': attribute.unit,
+                                        **({'context_scope': attribute.context_scope} if attribute.context_scope != 'unknown' else {}),
+                                        **({'applies_to_outcomes': list(attribute.applies_to_outcomes)} if attribute.applies_to_outcomes else {}),
+                                    }
+                                    for attribute in item.curated_finding.scientific_context.test
+                                ],
+                            },
+                            'limitations': list(item.curated_finding.limitations),
+                            'paper_contributions': [
+                                {
+                                    'document_id': contribution.document_id,
+                                    'analysis_status': contribution.analysis_status,
+                                    'supporting_evidence_ids': list(contribution.supporting_evidence_ids),
+                                    'contradicting_evidence_ids': list(contribution.contradicting_evidence_ids),
+                                    'context_evidence_ids': list(contribution.context_evidence_ids),
+                                    'condition_boundary_evidence_ids': list(contribution.condition_boundary_evidence_ids),
+                                }
+                                for contribution in item.curated_finding.paper_contributions
+                            ],
+                            'origin': item.curated_finding.origin,
+                            'source_analysis_version': item.curated_finding.source_analysis_version,
+                            'parent_finding_id': item.curated_finding.parent_finding_id,
+                            'created_by_user_id': item.curated_finding.created_by_user_id,
+                            'created_by_tool_call_id': item.curated_finding.created_by_tool_call_id,
+                            'created_at': item.curated_finding.created_at.isoformat() if item.curated_finding.created_at else None,
+                            **({'selection_ids': list(item.curated_finding.selection_ids)} if item.curated_finding.selection_ids else {}),
+                            **({'comparison_group_ids': list(item.curated_finding.comparison_group_ids)} if item.curated_finding.comparison_group_ids else {}),
+                            **({'warnings': list(item.curated_finding.warnings)} if item.curated_finding.warnings else {}),
+                        },
+                        'note': item.note,
+                        'reviewer': item.reviewer,
+                        'updated_at': item.updated_at,
+                    }
                     for item in await review_repository.list_curations(
                         collection_id, objective_id, version, finding.finding_id
                     )

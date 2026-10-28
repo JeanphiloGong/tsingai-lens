@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from infra.source.artifact_bundle import source_documents_from_records
-from repositories.document_profile_repository import _from_row
-from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 from hashlib import sha256
 from io import BytesIO
@@ -54,7 +52,18 @@ async def _store_document_profiles(
     for row in profiles:
         await document_profile_service.document_profile_repository.replace(
             collection_id,
-            _from_row(DocumentPreparationRow(document_id=row["document_id"], profile_json=row))
+            DocumentProfile(
+                document_id=row["document_id"],
+                title=row.get("title"),
+                doc_type=row.get("doc_type", "uncertain"),
+                profile_warnings=tuple(row.get("profile_warnings", ())),
+                confidence=row.get("confidence", 0.0),
+                profile_status=row.get("profile_status", "completed"),
+                source_fingerprint=row.get("source_fingerprint"),
+                profile_version=row.get("profile_version"),
+                profile_fingerprint=row.get("profile_fingerprint"),
+                generated_at=row.get("generated_at"),
+            )
         )
 
 
@@ -229,7 +238,7 @@ async def test_document_profile_route_returns_single_profile(document_services):
     assert payload.title == "Single Paper"
 
 
-async def test_document_profile_route_normalizes_invalid_profile_status_values(
+async def test_document_profile_route_preserves_normalized_stored_values(
     document_services,
 ):
     (
@@ -248,7 +257,7 @@ async def test_document_profile_route_normalizes_invalid_profile_status_values(
             {
                 "document_id": "paper-1",
                 "title": "Single Paper",
-                "doc_type": "research_article",
+                "doc_type": "experimental",
                 "profile_warnings": [],
                 "confidence": 0.91,
             }

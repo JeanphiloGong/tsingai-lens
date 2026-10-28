@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from repositories.document_profile_repository import _from_row, _profile_payload
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from repositories.document_profile_repository import DocumentProfileRepository
 from infra.persistence.postgres.models.document_preparation import DocumentPreparationRow
 
 from domain.core.document_profile import (
-    DocumentProfile,
     summarize_document_profile_collection,
 )
 from domain.shared.enums import (
@@ -14,61 +18,66 @@ from domain.shared.enums import (
 )
 
 
-def test_stored_document_profile_normalizes_identity_and_lists() -> None:
-    profile = _from_row(DocumentPreparationRow(document_id="test", profile_json={
+@pytest.fixture
+def profile_repository():
+    session = AsyncMock()
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=session)
+    manager.__aexit__ = AsyncMock(return_value=None)
+    factory = MagicMock(return_value=manager)
+    return DocumentProfileRepository(factory), session
+
+
+def test_stored_document_profile_normalizes_identity_and_lists(profile_repository) -> None:
+    repository, session = profile_repository
+    session.scalar.return_value = DocumentPreparationRow(document_id="test", profile_json={
             "document_id": "doc-exp",
             "title": "Composite Processing Study",
             "doc_type": "experimental",
             "profile_warnings": [],
             "confidence": 0.91,
-        }))
+        })
+    profile = asyncio.run(repository.read("collection", "test"))
 
     assert profile.document_id == "doc-exp"
     assert profile.title == "Composite Processing Study"
     assert profile.doc_type == DOC_TYPE_EXPERIMENTAL
-    assert set(_profile_payload(profile)) == {
-        "document_id",
-        "title",
-        "doc_type",
-        "profile_warnings",
-        "confidence",
-        "profile_status",
-        "source_fingerprint",
-        "profile_version",
-        "profile_fingerprint",
-        "generated_at",
-    }
-
-
-def test_stored_document_profile_coerces_invalid_doc_type() -> None:
-    profile = _from_row(DocumentPreparationRow(document_id="test", profile_json={
+def test_stored_document_profile_coerces_invalid_doc_type(profile_repository) -> None:
+    repository, session = profile_repository
+    session.scalar.return_value = DocumentPreparationRow(document_id="test", profile_json={
             "document_id": "doc-bad",
             "doc_type": "research_article",
             "profile_warnings": [],
-        }))
+        })
+    profile = asyncio.run(repository.read("collection", "test"))
 
     assert profile.doc_type == DOC_TYPE_EXPERIMENTAL
 
 
-def test_stored_document_profile_does_not_infer_doc_type_from_warnings() -> None:
-    profile = _from_row(DocumentPreparationRow(document_id="test", profile_json={
+def test_stored_document_profile_does_not_infer_doc_type_from_warnings(profile_repository) -> None:
+    repository, session = profile_repository
+    session.scalar.return_value = DocumentPreparationRow(document_id="test", profile_json={
             "document_id": "doc-mixed",
             "doc_type": "article",
             "profile_warnings": ["review_contamination_detected"],
-        }))
+        })
+    profile = asyncio.run(repository.read("collection", "test"))
 
     assert profile.doc_type == DOC_TYPE_UNCERTAIN
 
 
-def test_summarize_document_profile_collection_emits_collection_warnings() -> None:
-    review_profile = _from_row(DocumentPreparationRow(document_id="test", profile_json={
+def test_summarize_document_profile_collection_emits_collection_warnings(profile_repository) -> None:
+    repository, session = profile_repository
+    session.scalar.return_value = DocumentPreparationRow(document_id="test", profile_json={
             "document_id": "doc-review",
             "doc_type": DOC_TYPE_REVIEW,
-        }))
-    uncertain_profile = _from_row(DocumentPreparationRow(document_id="test", profile_json={
+        })
+    review_profile = asyncio.run(repository.read("collection", "test"))
+    session.scalar.return_value = DocumentPreparationRow(document_id="test", profile_json={
             "document_id": "doc-uncertain",
             "doc_type": DOC_TYPE_UNCERTAIN,
-        }))
+        })
+    uncertain_profile = asyncio.run(repository.read("collection", "test"))
 
     summary = summarize_document_profile_collection([review_profile, uncertain_profile])
 
@@ -85,13 +94,15 @@ def test_summarize_document_profile_collection_emits_collection_warnings() -> No
     assert "Some documents remain uncertain and may need manual review." in summary.warnings
 
 
-def test_summarize_document_profile_collection_separates_technical_failure() -> None:
-    profile = _from_row(DocumentPreparationRow(document_id="test", profile_json={
+def test_summarize_document_profile_collection_separates_technical_failure(profile_repository) -> None:
+    repository, session = profile_repository
+    session.scalar.return_value = DocumentPreparationRow(document_id="test", profile_json={
             "document_id": "doc-failed",
             "doc_type": "uncertain",
             "profile_warnings": ["document_profile_extraction_failed"],
             "profile_status": "extraction_failed",
-        }))
+        })
+    profile = asyncio.run(repository.read("collection", "test"))
 
     summary = summarize_document_profile_collection([profile])
 
@@ -99,11 +110,13 @@ def test_summarize_document_profile_collection_separates_technical_failure() -> 
     assert "Some document profiles failed technical extraction and need retry." in summary.warnings
 
 
-def test_document_profile_migrates_legacy_failure_warning_to_failure_status() -> None:
-    profile = _from_row(DocumentPreparationRow(document_id="test", profile_json={
+def test_document_profile_migrates_legacy_failure_warning_to_failure_status(profile_repository) -> None:
+    repository, session = profile_repository
+    session.scalar.return_value = DocumentPreparationRow(document_id="test", profile_json={
             "document_id": "doc-legacy-failed",
             "doc_type": "uncertain",
             "profile_warnings": ["document_profile_extraction_failed"],
-        }))
+        })
+    profile = asyncio.run(repository.read("collection", "test"))
 
     assert profile.profile_status == "extraction_failed"

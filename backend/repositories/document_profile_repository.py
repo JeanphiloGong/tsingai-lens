@@ -32,6 +32,18 @@ class DocumentProfileRepository:
         self.session_factory = session_factory
 
     async def replace(self, collection_id: str, profile: DocumentProfile) -> None:
+        next_profile = {
+            "document_id": profile.document_id,
+            "title": profile.title,
+            "doc_type": profile.doc_type,
+            "profile_warnings": list(profile.profile_warnings),
+            "confidence": round(float(profile.confidence), 2),
+            "profile_status": profile.profile_status,
+            "source_fingerprint": profile.source_fingerprint,
+            "profile_version": profile.profile_version,
+            "profile_fingerprint": profile.profile_fingerprint,
+            "generated_at": profile.generated_at,
+        }
         async with self.session_factory.begin() as session:
             document = await session.get(Document, profile.document_id)
             if document is None or document.collection_id != collection_id:
@@ -45,13 +57,13 @@ class DocumentProfileRepository:
                 session.add(
                     DocumentPreparationRow(
                         document_id=profile.document_id,
-                        profile_json=_profile_payload(profile),
+                        profile_json=next_profile,
                         created_at=now,
                         updated_at=now,
                     )
                 )
                 return
-            row.profile_json = _profile_payload(profile)
+            row.profile_json = next_profile
             row.updated_at = datetime.now(timezone.utc)
 
     async def read(
@@ -71,7 +83,26 @@ class DocumentProfileRepository:
                     Document.collection_id == collection_id,
                 )
             )
-            return _from_row(row) if row is not None and row.profile_json else None
+            if row is None or not row.profile_json:
+                return None
+            payload = dict(row.profile_json or {})
+            payload.setdefault("document_id", row.document_id)
+            warnings = _normalize_string_tuple(payload.get("profile_warnings"))
+            profile = DocumentProfile(
+                document_id=str(payload.get("document_id") or ""),
+                title=_normalize_optional_text(payload.get("title")),
+                doc_type=_normalize_doc_type(payload.get("doc_type")),
+                profile_warnings=warnings,
+                confidence=round(float(payload.get("confidence") or 0.0), 2),
+                profile_status=_normalize_profile_status(
+                    payload.get("profile_status"), warnings=warnings
+                ),
+                source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
+                profile_version=_normalize_optional_text(payload.get("profile_version")),
+                profile_fingerprint=_normalize_optional_text(payload.get("profile_fingerprint")),
+                generated_at=_normalize_optional_text(payload.get("generated_at")),
+            )
+            return profile
 
     async def list_collection(
         self,
@@ -96,42 +127,29 @@ class DocumentProfileRepository:
             rows = await session.scalars(
                 statement.order_by(DocumentPreparationRow.document_id)
             )
-            return tuple(_from_row(row) for row in rows if row.profile_json)
-
-
-def _profile_payload(profile: DocumentProfile) -> dict[str, object]:
-    return {
-        "document_id": profile.document_id,
-        "title": profile.title,
-        "doc_type": profile.doc_type,
-        "profile_warnings": list(profile.profile_warnings),
-        "confidence": round(float(profile.confidence), 2),
-        "profile_status": profile.profile_status,
-        "source_fingerprint": profile.source_fingerprint,
-        "profile_version": profile.profile_version,
-        "profile_fingerprint": profile.profile_fingerprint,
-        "generated_at": profile.generated_at,
-    }
-
-
-def _from_row(row: DocumentPreparationRow) -> DocumentProfile:
-    payload = dict(row.profile_json or {})
-    payload.setdefault("document_id", row.document_id)
-    warnings = _normalize_string_tuple(payload.get("profile_warnings"))
-    return DocumentProfile(
-        document_id=str(payload.get("document_id") or ""),
-        title=_normalize_optional_text(payload.get("title")),
-        doc_type=_normalize_doc_type(payload.get("doc_type")),
-        profile_warnings=warnings,
-        confidence=round(float(payload.get("confidence") or 0.0), 2),
-        profile_status=_normalize_profile_status(
-            payload.get("profile_status"), warnings=warnings
-        ),
-        source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
-        profile_version=_normalize_optional_text(payload.get("profile_version")),
-        profile_fingerprint=_normalize_optional_text(payload.get("profile_fingerprint")),
-        generated_at=_normalize_optional_text(payload.get("generated_at")),
-    )
+            profiles = []
+            for row in rows:
+                if not row.profile_json:
+                    continue
+                payload = dict(row.profile_json or {})
+                payload.setdefault("document_id", row.document_id)
+                warnings = _normalize_string_tuple(payload.get("profile_warnings"))
+                profile = DocumentProfile(
+                    document_id=str(payload.get("document_id") or ""),
+                    title=_normalize_optional_text(payload.get("title")),
+                    doc_type=_normalize_doc_type(payload.get("doc_type")),
+                    profile_warnings=warnings,
+                    confidence=round(float(payload.get("confidence") or 0.0), 2),
+                    profile_status=_normalize_profile_status(
+                        payload.get("profile_status"), warnings=warnings
+                    ),
+                    source_fingerprint=_normalize_optional_text(payload.get("source_fingerprint")),
+                    profile_version=_normalize_optional_text(payload.get("profile_version")),
+                    profile_fingerprint=_normalize_optional_text(payload.get("profile_fingerprint")),
+                    generated_at=_normalize_optional_text(payload.get("generated_at")),
+                )
+                profiles.append(profile)
+            return tuple(profiles)
 
 
 def _normalize_optional_text(value: Any) -> str | None:

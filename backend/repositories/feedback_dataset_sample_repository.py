@@ -25,6 +25,7 @@ from domain.feedback.dataset_sample import (
     ensure_action_allowed,
 )
 from domain.feedback.sample_revision import SampleRevision
+from domain.feedback.feedback_case import FeedbackCase
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.feedback import AnalysisJobRow, FeedbackCaseRow
 from infra.persistence.postgres.models.feedback_dataset import (
@@ -53,37 +54,22 @@ def sample_action_digest(
     return sha256(encoded).hexdigest()
 
 
-_SOURCE_DIGEST_FIELDS = (
-    "case_id",
-    "collection_id",
-    "session_id",
-    "anchor_message_id",
-    "source_signal_ids",
-    "analysis_result_ids",
-    "signal_analysis_result_ids",
-    "tool_failure_analysis_result_ids",
-    "context_snapshot",
-    "annotation_digest",
-)
-
-
-def source_digest_for_case(case_record: Mapping[str, Any]) -> str:
-    """Hash the case content that can change a generated sample.
-
-    Timestamps and workflow status are deliberately excluded.  A review state
-    transition must not invalidate training content; a changed question,
-    answer, evidence snapshot, or annotation must.
-    """
+def source_digest_for_case(case: FeedbackCase | FeedbackCaseRow) -> str:
+    """Hash sample source content, excluding workflow status and timestamps."""
     canonical = {
-        field: case_record.get(field)
-        for field in _SOURCE_DIGEST_FIELDS
-        if field in case_record
+        "case_id": case.case_id,
+        "collection_id": case.collection_id,
+        "session_id": case.session_id,
+        "anchor_message_id": case.anchor_message_id,
+        "source_signal_ids": list(case.source_signal_ids),
+        "analysis_result_ids": list(case.analysis_result_ids),
+        "signal_analysis_result_ids": list(case.signal_analysis_result_ids),
+        "tool_failure_analysis_result_ids": list(case.tool_failure_analysis_result_ids),
+        "context_snapshot": case.context_snapshot,
+        "annotation_digest": case.annotation_digest,
     }
     encoded = json.dumps(
-        canonical,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")
     return sha256(encoded).hexdigest()
 
@@ -213,7 +199,7 @@ class FeedbackDatasetSampleRepository:
                 case = cases.get(sample.source_case_id)
                 if (
                     case is None or case.status == "withdrawn"
-                    or source_digest_for_case(_case_record(case)) != sample.source_digest
+                    or source_digest_for_case(case) != sample.source_digest
                 ):
                     raise DatasetSampleRevisionConflict("sample_source_stale")
                 collected.append(await _collect_sample(session, sample, job))
@@ -311,7 +297,7 @@ class FeedbackDatasetSampleRepository:
                     # not make one stale row break the whole workbench or
                     # prevent other confirmed samples from being exported.
                     continue
-                if source_digest_for_case(_case_record(case)) != sample.source_digest:
+                if source_digest_for_case(case) != sample.source_digest:
                     raise DatasetSampleRevisionConflict("sample_source_stale")
                 members.append(
                     ConfirmedDatasetMember(sample=_sample(sample), revision=_revision(revision))
@@ -341,7 +327,7 @@ class FeedbackDatasetSampleRepository:
                 raise DatasetSampleRevisionConflict("sample_not_editable")
             if case is None or case.status == "withdrawn":
                 raise DatasetSampleRevisionConflict("sample_source_stale")
-            if source_digest_for_case(_case_record(case)) != expected_source_digest:
+            if source_digest_for_case(case) != expected_source_digest:
                 raise DatasetSampleRevisionConflict("sample_source_stale")
             if expected_revision_id is None and expected_generation is None:
                 raise ValueError("sample_generation_required")
@@ -371,7 +357,7 @@ class FeedbackDatasetSampleRepository:
             row, case = await _lock_sample_source(session, sample_id)
             if (
                 case is None or case.status == "withdrawn"
-                or source_digest_for_case(_case_record(case)) != expected_source_digest
+                or source_digest_for_case(case) != expected_source_digest
             ):
                 raise DatasetSampleRevisionConflict("sample_source_stale")
             if row.confirmed_revision_id == expected_revision_id and row.status == "confirmed":
@@ -565,7 +551,7 @@ class FeedbackDatasetSampleRepository:
 
             if (
                 case is None or case.status == "withdrawn"
-                or source_digest_for_case(_case_record(case)) != row.source_digest
+                or source_digest_for_case(case) != row.source_digest
             ):
                 row.status = "needs_input"
                 row.active_job_id = None
@@ -673,7 +659,7 @@ async def enqueue_case_samples(session: AsyncSession, case: FeedbackCaseRow, *, 
         ).exists(),
     ).order_by(FeedbackDatasetRow.dataset_id))
     datasets = (*datasets, *additional)
-    source_digest = source_digest_for_case(_case_record(case))
+    source_digest = source_digest_for_case(case)
     for dataset in datasets:
         sample_id = f"sample_{uuid4().hex[:32]}"
         job_id = f"job_{uuid4().hex[:32]}"
@@ -813,21 +799,6 @@ def _lease_matches(row: AnalysisJobRow, job: AnalysisJob, timestamp: datetime) -
     )
 
 
-def _case_record(row: FeedbackCaseRow) -> dict[str, object]:
-    return {
-        "case_id": row.case_id,
-        "collection_id": row.collection_id,
-        "session_id": row.session_id,
-        "anchor_message_id": row.anchor_message_id,
-        "source_signal_ids": list(row.source_signal_ids or ()),
-        "analysis_result_ids": list(row.analysis_result_ids or ()),
-        "signal_analysis_result_ids": list(row.signal_analysis_result_ids or ()),
-        "tool_failure_analysis_result_ids": list(
-            row.tool_failure_analysis_result_ids or ()
-        ),
-        "context_snapshot": row.context_snapshot or {},
-        "annotation_digest": row.annotation_digest,
-    }
 
 
 def _sample(row: FeedbackDatasetSampleRow) -> DatasetSample:

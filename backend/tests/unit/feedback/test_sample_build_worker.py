@@ -98,7 +98,7 @@ def _sample() -> DatasetSample:
         sample_id="sample-1",
         dataset_id="fdset-1",
         source_case_id="case-1",
-        source_digest=source_digest_for_case(_case().to_record()),
+        source_digest=source_digest_for_case(_case()),
         active_job_id="job-1",
         now="2026-09-29T00:00:00+00:00",
     )
@@ -127,7 +127,7 @@ def _case() -> FeedbackCase:
 
 
 def _job() -> AnalysisJob:
-    source_digest = source_digest_for_case(_case().to_record())
+    source_digest = source_digest_for_case(_case())
     payload = build_job_payload(
         dataset_id="fdset-1",
         sample_id="sample-1",
@@ -178,7 +178,7 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
     case = replace(_case(), context_snapshot={
         key: value for key, value in _case().context_snapshot.items() if key != "candidate_target"
     })
-    sample = replace(_sample(), source_digest=source_digest_for_case(case.to_record()))
+    sample = replace(_sample(), source_digest=source_digest_for_case(case))
     samples = _Samples(sample)
     if task_type == "preference":
         previous = SampleRevision.build_worker(
@@ -297,7 +297,7 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
         sample_id="sample-1",
         dataset_id="fdset-1",
         source_case_id="case-1",
-        source_digest=source_digest_for_case(case.to_record()),
+        source_digest=source_digest_for_case(case),
         active_job_id="job-1",
         now="2026-09-29T00:00:00+00:00",
     )
@@ -334,7 +334,7 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
 
 
 def _job_for_case(case: FeedbackCase) -> AnalysisJob:
-    source_digest = source_digest_for_case(case.to_record())
+    source_digest = source_digest_for_case(case)
     payload = build_job_payload(
         dataset_id="fdset-1",
         sample_id="sample-1",

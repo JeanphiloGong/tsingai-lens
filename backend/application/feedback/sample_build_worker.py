@@ -124,7 +124,7 @@ class DatasetSampleBuildWorker:
             case = await self.case_repository.read_case(sample.source_case_id)
             if case is None or case.collection_id != dataset.collection_id:
                 raise ValueError("dataset_sample_build_case_missing")
-            if case.status == "withdrawn" or source_digest_for_case(case.to_record()) != source_digest:
+            if case.status == "withdrawn" or source_digest_for_case(case) != source_digest:
                 await self.sample_repository.complete_build(
                     job=job,
                     sample_id=sample_id,

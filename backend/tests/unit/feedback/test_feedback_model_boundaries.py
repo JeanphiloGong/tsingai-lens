@@ -1,12 +1,9 @@
-from dataclasses import asdict
+import asyncio
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 
 from domain.feedback import Dataset, EvidenceCoverage, FeedbackCase
-from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetRow
-from repositories.feedback_dataset_repository import (
-    _row_values,
-    _to_record,
-)
+from repositories.feedback_dataset_repository import FeedbackDatasetRepository
 from repositories.feedback_dataset_sample_repository import (
     source_digest_for_case,
 )
@@ -16,14 +13,25 @@ def test_dataset_storage_timestamps_do_not_enter_domain_or_construction_rules() 
     dataset = Dataset(
         "ds-1", "col-1", "Preheating", "sft", {"language": "en"}, 1, "user-1"
     )
-    values = _row_values(dataset)
-    stored = _to_record(FeedbackDatasetRow(**values))
+    class Sessions:
+        def __call__(self): return self
+        def begin(self): return self
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def add(self, row): self.row = row
+        async def flush(self): pass
+        async def get(self, *args): return self.row
+
+    sessions = Sessions()
+    repository = FeedbackDatasetRepository(sessions)
+    asyncio.run(repository.create(dataset))
+    stored = asyncio.run(repository.read_record(dataset.dataset_id))
 
     assert stored.dataset == dataset
     assert not hasattr(dataset, "created_at")
     assert not hasattr(dataset, "updated_at")
-    assert stored.created_at == values["created_at"]
-    assert stored.updated_at == values["updated_at"]
+    assert stored.created_at == sessions.row.created_at
+    assert stored.updated_at == sessions.row.updated_at
     assert stored.created_at.tzinfo is not None
     assert dataset.construction_spec == {"language": "en"}
 
@@ -47,9 +55,9 @@ def test_reading_or_mutating_supplied_evidence_does_not_change_case_digest() -> 
         created_at=now,
         updated_at=now,
     )
-    original_digest = source_digest_for_case(case.to_record())
+    original_digest = source_digest_for_case(case)
     quote["quote"] = "Changed outside the workbench."
-    returned_record = case.to_record()
+    returned_record = asdict(case)
     returned_record["context_snapshot"]["inspected_sources"][0][
         "quote"
     ] = "Changed by a reader."
@@ -57,7 +65,7 @@ def test_reading_or_mutating_supplied_evidence_does_not_change_case_digest() -> 
     assert (
         case.context_snapshot["inspected_sources"][0]["quote"] == "Preheated at 200 C."
     )
-    assert source_digest_for_case(case.to_record()) == original_digest
+    assert source_digest_for_case(case) == original_digest
 
 
 def test_case_digest_ignores_workflow_timestamps_and_status() -> None:
@@ -74,15 +82,12 @@ def test_case_digest_ignores_workflow_timestamps_and_status() -> None:
         created_at=now,
         updated_at=now,
     )
-    changed_workflow = case.to_record() | {
-        "status": "accepted",
-        "updated_at": "2026-10-01T01:00:00+00:00",
-    }
+    changed_workflow = replace(case, status="accepted", updated_at="2026-10-01T01:00:00+00:00")
 
-    assert source_digest_for_case(changed_workflow) == source_digest_for_case(case.to_record())
+    assert source_digest_for_case(changed_workflow) == source_digest_for_case(case)
     assert source_digest_for_case(
-        case.to_record() | {"context_snapshot": {"question": "A different question."}}
-    ) != source_digest_for_case(case.to_record())
+        replace(case, context_snapshot={"question": "A different question."})
+    ) != source_digest_for_case(case)
 
 
 def test_coverage_preserves_nested_source_evidence_when_input_is_reused() -> None:

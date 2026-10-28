@@ -149,7 +149,7 @@ async def test_needs_input_can_save_its_first_complete_human_revision(excerpt: s
     dataset = await service.create_for_user(user_id="user-1", collection_id="collection-1", name="SFT",
                                            task_type="sft", construction_spec={})
     samples.sample = replace(DatasetSample.pending(sample_id="sample-1", dataset_id=dataset.dataset_id,
-        source_case_id="case-1", source_digest=source_digest_for_case(case.to_record()), active_job_id="job-1", now=datetime.now(timezone.utc).isoformat()),
+        source_case_id="case-1", source_digest=source_digest_for_case(case), active_job_id="job-1", now=datetime.now(timezone.utc).isoformat()),
         status="needs_input", active_job_id=None)
     content = {"schema_version": "literature-sft.v1", "messages": [{"role": "user", "content": "Compare A and B."}],
                "context": [{"document_title": "B", "text": excerpt}],

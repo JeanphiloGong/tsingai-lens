@@ -36,10 +36,8 @@ from repositories.document_profile_repository import (  # noqa: E402
 from repositories.objective_repository import (  # noqa: E402
     ObjectiveRepository,
 )
-from repositories.paper_map_repository import (  # noqa: E402
-    PaperMapRepository,
-    paper_map_payload,
-)
+
+from repositories.paper_map_repository import PaperMapRepository
 from repositories.source_artifact_repository import (  # noqa: E402
     SourceArtifactRepository,
 )
@@ -238,7 +236,110 @@ async def _load_artifacts(collection_id: str) -> dict[str, pd.DataFrame]:
             }
             for item in profiles
         ],
-        "paper_maps": [paper_map_payload(item) for item in paper_maps],
+        "paper_maps": [
+            {
+                "document_id": item.document_id,
+                "doc_role": item.doc_role,
+                "studies": [
+                    {
+                        "study_id": study.study_id,
+                        "document_id": study.document_id,
+                        "design_type": study.design_type,
+                        "claim_scope": study.claim_scope,
+                        "experiment_label": study.experiment_label,
+                        "material_scope": list(study.material_scope),
+                        "process_context": list(study.process_context),
+                        "relationships": [
+                            {
+                                "relationship_id": item.relationship_id,
+                                "varied_factors": list(item.varied_factors),
+                                "outcome": item.outcome,
+                                "source_refs": [
+                                    {
+                                        "source_kind": item.source_kind,
+                                        "source_ref": item.source_ref,
+                                    }
+                                    for item in item.source_refs
+                                ],
+                                "confidence": item.confidence,
+                            }
+                            for item in study.relationships
+                        ],
+                        "confidence": study.confidence,
+                    }
+                    for study in item.studies
+                ],
+                "evidence_density": item.evidence_density,
+                "confidence": item.confidence,
+                "warnings": list(item.warnings),
+                "unresolved_signals": [
+                    {
+                        "signal_id": signal.signal_id,
+                        "signal_type": signal.signal_type,
+                        "label": signal.label,
+                        "variable_role": signal.variable_role,
+                        "design_type": signal.design_type,
+                        "claim_scope": signal.claim_scope,
+                        "experiment_label": signal.experiment_label,
+                        "material_scope": list(signal.material_scope),
+                        "process_context": list(signal.process_context),
+                        "source_refs": [
+                            {
+                                "source_kind": item.source_kind,
+                                "source_ref": item.source_ref,
+                            }
+                            for item in signal.source_refs
+                        ],
+                        "confidence": signal.confidence,
+                        "reason": signal.reason,
+                    }
+                    for signal in item.unresolved_signals
+                ],
+                "source_unit_coverage": [
+                    {
+                        "source_unit_id": item.source_unit_id,
+                        "window_id": item.window_id,
+                        "source_kind": item.source_kind,
+                        "source_ref": item.source_ref,
+                        "status": item.status.value,
+                        "reason": item.reason,
+                    }
+                    for item in item.source_unit_coverage
+                ],
+                "map_status": item.map_status,
+                "map_limitations": list(item.map_limitations),
+                "review_synthesis": {
+                    field_name: [
+                        {
+                            "content": item.content,
+                            "material_scope": list(item.material_scope),
+                            "variables": list(item.variables),
+                            "outcomes": list(item.outcomes),
+                            "conditions": list(item.conditions),
+                            "source_refs": [
+                                {
+                                    "source_kind": item.source_kind,
+                                    "source_ref": item.source_ref,
+                                }
+                                for item in item.source_refs
+                            ],
+                            "confidence": item.confidence,
+                        }
+                        for item in getattr(item.review_synthesis, field_name)
+                    ]
+                    for field_name in (
+                        "synthesis_claims",
+                        "disputes",
+                        "evidence_gaps",
+                        "citation_leads",
+                    )
+                },
+                "input_fingerprint": item.input_fingerprint,
+                "map_version": item.map_version,
+                "generated_at": item.generated_at,
+            }
+            for item in paper_maps
+        ],
         "objective_evidence": evidence,
         "objective_findings": findings,
     }

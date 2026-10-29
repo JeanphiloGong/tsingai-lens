@@ -11,12 +11,12 @@ def test_selection_keeps_fixed_version_and_explicit_result_keys() -> None:
         experiment_id='exp-1',
         experiment_version=3,
         outcome='elongation',
-        measurement_keys=('m2', 'm1', 'm1'),
+        measurement_keys=('m-A', 'm-a', '001'),
         missing_context=('test temperature',),
     )
 
     assert selection.experiment_version == 3
-    assert selection.measurement_keys == ("m2", "m1")
+    assert selection.measurement_keys == ("m-A", "m-a", "001")
     assert selection.comparison_keys == ()
 
 

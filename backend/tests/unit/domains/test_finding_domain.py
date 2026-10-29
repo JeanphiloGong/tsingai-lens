@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import asyncio
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 from domain.core import (
     Finding,
@@ -17,9 +18,6 @@ from domain.core.finding import (
     FindingMechanismRelation,
     FindingPaperContribution,
 )
-from domain.core.finding import _choice
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     PAPER_RELEVANCE_VALUES,
     PAPER_ROLE_VALUES,
@@ -108,28 +106,16 @@ def _contribution(
         collection_id="collection-1",
         objective_id="objective-1",
         analysis_version=1,
-        document_id=finding_text(document_id) or "",
-        analysis_status=finding_choice(
-            analysis_status, PAPER_CONTRIBUTION_STATUSES, "pending"
-        ),
-        relevance=finding_choice(
-            "high" if analysis_status == "analyzed" else "irrelevant",
-            PAPER_RELEVANCE_VALUES,
-            "uncertain",
-        ),
-        paper_role=finding_choice(
-            "primary_experiment" if analysis_status == "analyzed" else "irrelevant",
-            PAPER_ROLE_VALUES,
-            "uncertain",
-        ),
+        document_id=document_id or "",
+        analysis_status=analysis_status,
+        relevance='high' if analysis_status == 'analyzed' else 'irrelevant',
+        paper_role='primary_experiment' if analysis_status == 'analyzed' else 'irrelevant',
         contribution_summary="Direct preheating experiment.",
         material_match=(),
         changed_variables=(),
         measured_property_scope=(),
         test_environment_scope=(),
-        exclusion_reason=finding_text(
-            None if analysis_status == "analyzed" else "No relevant experiment."
-        ),
+        exclusion_reason=None if analysis_status == 'analyzed' else 'No relevant experiment.',
         warnings=(),
         confidence=0.9,
     )
@@ -146,11 +132,7 @@ def _finding(**overrides) -> Finding:
         "outcome": "ductility",
         "direction": "increase",
         "assertion_strength": "associative",
-        "attribution_scope": _choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        "attribution_scope": 'isolated_effect',
         "synthesis_status": "insufficient_confirmation",
         "certainty": 0.5,
         "display_rank": 0,
@@ -208,11 +190,7 @@ def test_experiment_backed_finding_keeps_selection_and_optional_group_refs(monke
         outcome="elongation",
         direction="mixed",
         assertion_strength="descriptive",
-        attribution_scope=finding_choice(
-            "descriptive_only",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='descriptive_only',
         synthesis_status="single_study",
         certainty=0.4,
         display_rank=0,
@@ -241,6 +219,25 @@ def test_experiment_backed_finding_keeps_selection_and_optional_group_refs(monke
     assert restored.selection_ids == ("selection-1",)
     assert restored.comparison_group_ids == ()
     assert restored.support_scope == "paper"
+
+
+def test_finding_preserves_case_distinct_references() -> None:
+    finding = replace(
+        _finding(),
+        selection_ids=("selection-A", "selection-a", "001"),
+        comparison_group_ids=("group-A", "group-a"),
+        paper_contributions=(
+            FindingPaperContribution(
+                document_id="paper-1",
+                analysis_status="analyzed",
+                supporting_evidence_ids=("evidence-A", "evidence-a", "001"),
+            ),
+        ),
+    )
+
+    assert finding.selection_ids == ("selection-A", "selection-a", "001")
+    assert finding.comparison_group_ids == ("group-A", "group-a")
+    assert finding.supporting_evidence_ids == ("evidence-A", "evidence-a", "001")
 
 
 def test_finding_validates_direct_evidence_and_complete_paper_coverage() -> None:

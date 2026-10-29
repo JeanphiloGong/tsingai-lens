@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha1
-from typing import Any, Final, Mapping
+from typing import Any, Final, Iterable, Literal, Mapping
 
 from domain.core.research_objective import (
     EVIDENCE_ATTRIBUTION_SCOPES,
@@ -75,20 +75,10 @@ class FindingMechanismRelation:
     relation_type: str
     target_term: str
     direction: str | None
-    assertion_strength: str
+    assertion_strength: Literal["causal", "associative", "descriptive"]
     supporting_evidence_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not all(
-            _text(value)
-            for value in (self.source_term, self.relation_type, self.target_term)
-        ):
-            raise ValueError("finding mechanism requires source, relation, and target")
-        if self.assertion_strength not in FINDING_ASSERTION_STRENGTHS:
-            raise ValueError(
-                "unsupported finding mechanism assertion strength: "
-                f"{self.assertion_strength}"
-            )
         if not self.supporting_evidence_ids:
             raise ValueError("finding mechanism requires supporting evidence")
 
@@ -96,20 +86,13 @@ class FindingMechanismRelation:
 @dataclass(frozen=True)
 class FindingPaperContribution:
     document_id: str
-    analysis_status: str
+    analysis_status: Literal["pending", "analyzed", "excluded", "failed"]
     supporting_evidence_ids: tuple[str, ...] = ()
     contradicting_evidence_ids: tuple[str, ...] = ()
     context_evidence_ids: tuple[str, ...] = ()
     condition_boundary_evidence_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not _text(self.document_id):
-            raise ValueError("finding paper contribution requires document_id")
-        if self.analysis_status not in PAPER_CONTRIBUTION_STATUSES:
-            raise ValueError(
-                "unsupported finding paper contribution status: "
-                f"{self.analysis_status}"
-            )
         if self.analysis_status == "pending":
             raise ValueError("completed Finding cannot contain pending paper analysis")
         supporting = set(self.supporting_evidence_ids)
@@ -140,17 +123,17 @@ class Finding:
     statement: str
     factors: tuple[str, ...]
     outcome: str
-    direction: str
-    assertion_strength: str
+    direction: Literal["increase", "decrease", "improve", "worsen", "changed", "no_change", "mixed", "unknown"]
+    assertion_strength: Literal["causal", "associative", "descriptive"]
     attribution_scope: str
-    synthesis_status: str
+    synthesis_status: Literal["single_study", "agreement", "conflict", "condition_dependent", "insufficient_confirmation"]
     certainty: float
     display_rank: int
     mechanisms: tuple[FindingMechanismRelation, ...]
     scientific_context: ScientificContext
     limitations: tuple[str, ...]
     paper_contributions: tuple[FindingPaperContribution, ...]
-    origin: str = "system_generated"
+    origin: Literal["system_generated", "human_authored", "agent_authored", "hybrid"] = "system_generated"
     source_analysis_version: int | None = None
     parent_finding_id: str | None = None
     created_by_user_id: str | None = None
@@ -166,26 +149,14 @@ class Finding:
     comparison_group_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not all(
-            _text(value)
-            for value in (
-                self.collection_id,
-                self.objective_id,
-                self.finding_id,
-                self.statement,
-                self.outcome,
-            )
-        ):
+        if not all((self.collection_id, self.objective_id, self.finding_id,
+                    self.statement, self.outcome)):
             raise ValueError("finding requires scoped identity and one outcome")
         if len(self.finding_id) > 128:
             raise ValueError("finding ID exceeds 128 characters")
         if self.analysis_version < 1:
             raise ValueError("finding requires positive analysis_version")
-        selection_ids = _strings(self.selection_ids)
-        comparison_group_ids = _strings(self.comparison_group_ids)
-        object.__setattr__(self, "selection_ids", selection_ids)
-        object.__setattr__(self, "comparison_group_ids", comparison_group_ids)
-        if not self.paper_contributions and not selection_ids:
+        if not self.paper_contributions and not self.selection_ids:
             raise ValueError("finding requires paper coverage or experiment selections")
         if not self.factors:
             raise ValueError("finding requires factors")
@@ -194,22 +165,8 @@ class Finding:
             set(factor_keys)
         ):
             raise ValueError("finding factors must be non-empty and unique")
-        if self.direction not in SCIENTIFIC_RESULT_DIRECTIONS:
-            raise ValueError(f"unsupported finding direction: {self.direction}")
-        if self.assertion_strength not in FINDING_ASSERTION_STRENGTHS:
-            raise ValueError(
-                f"unsupported finding assertion strength: {self.assertion_strength}"
-            )
-        if self.attribution_scope not in EVIDENCE_ATTRIBUTION_SCOPES - {
-            "not_attributable"
-        }:
-            raise ValueError(
-                f"unsupported finding attribution scope: {self.attribution_scope}"
-            )
-        if self.synthesis_status not in FINDING_SYNTHESIS_STATUSES:
-            raise ValueError(
-                f"unsupported finding synthesis status: {self.synthesis_status}"
-            )
+        if self.attribution_scope == "not_attributable":
+            raise ValueError("Finding requires attributable scientific content")
         if not math.isfinite(self.certainty) or not 0 <= self.certainty <= 1:
             raise ValueError("finding certainty must be between 0 and 1")
         if self.display_rank < 0:
@@ -243,8 +200,6 @@ class Finding:
             self.assertion_strength != "descriptive"
         ):
             raise ValueError("descriptive Finding requires descriptive assertion")
-        if self.origin not in FINDING_ORIGINS:
-            raise ValueError(f"unsupported finding origin: {self.origin}")
         if self.origin == "system_generated":
             if (
                 self.created_by_user_id
@@ -259,15 +214,13 @@ class Finding:
                 raise ValueError("authored Finding requires source_analysis_version")
             if self.source_analysis_version >= self.analysis_version:
                 raise ValueError("authored Finding source must be an older version")
-            if not _text(self.created_by_user_id) or self.created_at is None:
+            if not self.created_by_user_id or self.created_at is None:
                 raise ValueError("authored Finding requires creator and creation time")
-            if self.origin == "agent_authored" and not _text(
-                self.created_by_tool_call_id
-            ):
+            if self.origin == "agent_authored" and not self.created_by_tool_call_id:
                 raise ValueError(
                     "agent-authored Finding requires tool-call provenance"
                 )
-        if self.origin == "hybrid" and not _text(self.parent_finding_id):
+        if self.origin == "hybrid" and not self.parent_finding_id:
             raise ValueError("hybrid Finding requires parent_finding_id")
         if self.origin in {"human_authored", "agent_authored"} and (
             self.parent_finding_id is not None
@@ -645,8 +598,8 @@ def _attribute_key(attribute: ScientificAttribute) -> tuple[str, str, str]:
     )
 
 
-def _ordered_union(values: Any) -> tuple[str, ...]:
-    return _strings(item for group in values for item in group)
+def _ordered_union(values: Iterable[Iterable[str]]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(item for group in values for item in group))
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:

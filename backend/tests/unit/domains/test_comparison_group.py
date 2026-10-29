@@ -30,3 +30,13 @@ def test_group_preserves_members_and_limits_without_measurement_values() -> None
 def test_comparable_group_requires_comparable_included_members() -> None:
     with pytest.raises(ValueError, match="comparable included"):
         replace(_group(), status='comparable')
+
+
+def test_group_keeps_prepared_normalizations_and_limitations() -> None:
+    normalizations = ({"unit": "%", "source_refs": ["S001"]},)
+    limitations = ("Source A omits temperature.", "source a omits temperature.")
+
+    group = replace(_group(), normalizations=normalizations, limitations=limitations)
+
+    assert group.normalizations == normalizations
+    assert group.limitations == limitations

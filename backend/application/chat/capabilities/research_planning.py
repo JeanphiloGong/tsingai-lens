@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 import json
 from collections.abc import Mapping
-from copy import deepcopy
 from hashlib import sha256
 from typing import Annotated, Any
 from urllib.parse import urlencode
@@ -150,14 +151,14 @@ class InspectResearchPlansCapability:
                     "updated_at": item.updated_at,
                     "plan_version": item.plan_version,
                     "parent_plan_id": item.parent_plan_id,
-                    "structured_plan": deepcopy(dict(item.structured_plan)) if item.structured_plan is not None else None,
+                    "structured_plan": item.structured_plan,
                     "updated_by": item.updated_by,
                 }
                 for item in plans
             ]
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="succeeded",
+                status=ToolResultStatus.SUCCEEDED,
                 data={
                     "objective_id": arguments.objective_id,
                     "plans": records,
@@ -178,7 +179,7 @@ class InspectResearchPlansCapability:
         except ExperimentPlanNotFoundError:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     "objective_id": arguments.objective_id,
                     "plan_id": arguments.plan_id,
@@ -201,12 +202,12 @@ class InspectResearchPlansCapability:
             "updated_at": plan.updated_at,
             "plan_version": plan.plan_version,
             "parent_plan_id": plan.parent_plan_id,
-            "structured_plan": deepcopy(dict(plan.structured_plan)) if plan.structured_plan is not None else None,
+            "structured_plan": plan.structured_plan,
             "updated_by": plan.updated_by,
         }
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": arguments.objective_id,
                 "plan": record,
@@ -259,20 +260,18 @@ class ProposeResearchPlanCapability:
             context.collection_id,
             context.user_id,
         )
-        dataset = await self.finding_feedback_service.export_dataset(
-            collection_id=context.collection_id,
-            objective_id=arguments.objective_id,
-        )
-        items = [
-            dict(item)
-            for item in dataset.get("items") or ()
-            if isinstance(item, Mapping)
-        ]
-        findings = {
-            finding_id: item
-            for item in items
-            if (finding_id := _text(item.get("finding_id")))
-        }
+        try:
+            dataset = await self.finding_feedback_service.export_dataset(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+            )
+        except (ValueError, FileNotFoundError):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="finding_dataset_unavailable",
+                error_message="The review dataset is unavailable. Check that the Objective has a published analysis.",
+            )
+        findings = {item["finding_id"]: item for item in dataset["items"]}
         missing_finding_ids = [
             item for item in arguments.finding_ids if item not in findings
         ]
@@ -289,19 +288,17 @@ class ProposeResearchPlanCapability:
             finding_id
             for finding_id in arguments.finding_ids
             if finding_id in findings
-            and _text(findings[finding_id].get("label_status")) == "rejected"
+            and findings[finding_id]["label_status"] == "rejected"
         ]
         failed_evidence_ids = [
             evidence_id
             for evidence_id in arguments.evidence_ids
             if evidence_id in evidence
-            and _text(evidence[evidence_id].get("evidence_status"))
+            and evidence[evidence_id]["evidence_status"]
             == "extraction_failed"
         ]
         analysis_versions = {
-            int(item["analysis_version"])
-            for item in selected_findings
-            if item.get("analysis_version") is not None
+            item["analysis_version"] for item in selected_findings
         }
         invalid_versions = len(analysis_versions) != 1
         if (
@@ -331,7 +328,7 @@ class ProposeResearchPlanCapability:
                 )
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="succeeded",
+                status=ToolResultStatus.SUCCEEDED,
                 data={
                     "objective_id": arguments.objective_id,
                     "draft_status": "abstained",
@@ -370,7 +367,7 @@ class ProposeResearchPlanCapability:
         unreviewed_finding_ids = [
             finding_id
             for finding_id in arguments.finding_ids
-            if _text(findings[finding_id].get("label_status")) != "gold"
+            if findings[finding_id]["label_status"] != "gold"
         ]
         draft_status = (
             "needs_finding_review"
@@ -419,14 +416,14 @@ class ProposeResearchPlanCapability:
                     href=_evidence_href(context.collection_id, item),
                 )
             )
-            document_id = _text(item.get("document_id"))
-            source_ref = _text(item.get("source_ref"))
+            document_id = item["document_id"]
+            source_ref = item["source_ref"]
             if document_id and source_ref:
                 refs.append(
                     ChatResourceRef(
                         resource_type="source",
                         resource_id=(
-                            f"{document_id}:{_text(item.get('source_kind'))}:"
+                            f"{document_id}:{item['source_kind']}:"
                             f"{source_ref}"
                         ),
                         href=(
@@ -446,7 +443,7 @@ class ProposeResearchPlanCapability:
         ) if unreviewed_finding_ids else ()
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "draft_id": draft_id,
                 "objective_id": arguments.objective_id,
@@ -514,7 +511,7 @@ class CreateResearchPlanCapability:
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 title=arguments.title,
-                content=str(current.data["content"]),
+                content=current.data["content"],
                 source_links=list(current.data["source_links"]),
                 source_findings=current_snapshots,
                 structured_plan=dict(current.data["structured_plan"]),
@@ -584,7 +581,7 @@ class ReviseResearchPlanCapability:
                 objective_id=arguments.objective_id,
                 plan_id=arguments.parent_plan_id,
                 title=arguments.title,
-                content=str(current.data["content"]),
+                content=current.data["content"],
                 status="draft",
                 structured_plan=dict(current.data["structured_plan"]),
                 updated_by=context.user_id,
@@ -595,7 +592,7 @@ class ReviseResearchPlanCapability:
         except ExperimentPlanNotFoundError:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     "objective_id": arguments.objective_id,
                     "plan_id": arguments.parent_plan_id,
@@ -635,7 +632,7 @@ async def _approved_plan_draft(
     if current.data.get("draft_status") == "abstained":
         return current, current_snapshots, ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="failed",
+            status=ToolResultStatus.FAILED,
             data=dict(current.data),
             resource_refs=current.resource_refs,
             warnings=current.warnings,
@@ -649,7 +646,7 @@ async def _approved_plan_draft(
     if approved_snapshots != current_snapshots:
         return current, current_snapshots, ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="failed",
+            status=ToolResultStatus.FAILED,
             data={
                 "objective_id": arguments.objective_id,
                 "approved_source_snapshots": approved_snapshots,
@@ -676,7 +673,7 @@ def _stale_plan_write(
 ) -> ChatToolResult:
     return ChatToolResult(
         tool_call_id=context.tool_call_id,
-        status="failed",
+        status=ToolResultStatus.FAILED,
         data={
             "objective_id": objective_id,
             "source_snapshots_current": False,
@@ -716,7 +713,7 @@ def _saved_plan_result(
         "updated_at": plan.updated_at,
         "plan_version": plan.plan_version,
         "parent_plan_id": plan.parent_plan_id,
-        "structured_plan": deepcopy(dict(plan.structured_plan)) if plan.structured_plan is not None else None,
+        "structured_plan": plan.structured_plan,
         "updated_by": plan.updated_by,
     }
     refs = [_plan_ref(context.collection_id, objective_id, record)]
@@ -725,7 +722,7 @@ def _saved_plan_result(
     )
     return ChatToolResult(
         tool_call_id=context.tool_call_id,
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "plan": record,
             "source_snapshots_current": True,
@@ -739,26 +736,19 @@ def _saved_plan_result(
 def _evidence_index(findings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for finding in findings:
-        for item in finding.get("evidence") or ():
-            if not isinstance(item, Mapping):
-                continue
-            evidence_id = _text(item.get("evidence_id"))
-            if evidence_id:
-                result.setdefault(evidence_id, dict(item))
+        for item in finding["evidence"]:
+            result.setdefault(item["evidence_id"], item)
     return result
 
 
 def _source_snapshot(finding: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "finding_id": _text(finding.get("finding_id")),
-        "analysis_version": int(finding.get("analysis_version") or 0),
-        "finding_fingerprint": _text(finding.get("finding_fingerprint")),
-        "evidence_fingerprint": _text(finding.get("evidence_fingerprint")),
+        "finding_id": finding["finding_id"],
+        "analysis_version": finding["analysis_version"],
+        "finding_fingerprint": finding["finding_fingerprint"],
+        "evidence_fingerprint": finding["evidence_fingerprint"],
         "evidence_ids": [
-            evidence_id
-            for item in finding.get("evidence") or ()
-            if isinstance(item, Mapping)
-            and (evidence_id := _text(item.get("evidence_id")))
+            item["evidence_id"] for item in finding["evidence"]
         ],
     }
 
@@ -819,18 +809,17 @@ def _render_plan(
         lines.extend(_section("Limitations and open decisions", arguments.limitations))
     lines.extend(["", "## Source basis"])
     for finding in selected_findings:
-        finding_id = _text(finding.get("finding_id"))
-        target = finding.get("training_target")
-        target = dict(target) if isinstance(target, Mapping) else {}
+        finding_id = finding["finding_id"]
+        target = finding["training_target"]
         lines.append(
             f"- [{finding_labels[finding_id]}] "
-            + (_text(target.get("statement")) or "Published research conclusion.")
+            + (target["statement"] or "Published research conclusion.")
         )
     for item in selected_evidence:
-        evidence_id = _text(item.get("evidence_id"))
+        evidence_id = item["evidence_id"]
         lines.append(
             f"- [{evidence_labels[evidence_id]}] "
-            f"{_text(item.get('source_excerpt')) or 'Source-linked Evidence.'}"
+            f"{item['source_excerpt'] or 'Source-linked Evidence.'}"
         )
     return "\n".join(lines).strip()
 
@@ -840,13 +829,13 @@ def _section(title: str, items: list[str]) -> list[str]:
 
 
 def _cell(value: str) -> str:
-    return " ".join(str(value).replace("|", "\\|").split())
+    return " ".join(value.replace("|", "\\|").split())
 
 
 def _evidence_href(collection_id: str, evidence: Mapping[str, Any]) -> str:
     return (
-        f"/collections/{collection_id}/documents/{_text(evidence.get('document_id'))}"
-        f"?evidence_id={_text(evidence.get('evidence_id'))}"
+        f"/collections/{collection_id}/documents/{evidence['document_id']}"
+        f"?evidence_id={evidence['evidence_id']}"
     )
 
 
@@ -855,7 +844,7 @@ def _plan_ref(
     objective_id: str,
     plan: Mapping[str, Any],
 ) -> ChatResourceRef:
-    plan_id = _text(plan.get("plan_id"))
+    plan_id = plan["plan_id"]
     return ChatResourceRef(
         resource_type="research_plan",
         resource_id=plan_id,
@@ -880,10 +869,6 @@ def _draft_id(
         separators=(",", ":"),
     )
     return f"plan_draft_{sha256(identity.encode('utf-8')).hexdigest()[:20]}"
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _deduplicate_refs(refs: list[ChatResourceRef]) -> tuple[ChatResourceRef, ...]:

@@ -313,11 +313,6 @@ async def test_missing_provider_message_is_reported_as_invalid_response_shape(ca
         )
 
     assert caught.value.reason == "invalid_response_shape"
-    assert "missing_field=message" in caplog.text
-    assert "choice_fields=finish_reason,provider_payload" in caplog.text
-    assert "message_attribute_present=False message_is_none=True" in caplog.text
-    assert "response_fields=choices,model,usage" in caplog.text
-    assert "message=research model returned an invalid response shape" in caplog.text
     assert "private-provider-content" not in caplog.text
 
 
@@ -333,8 +328,6 @@ async def test_missing_stream_delta_is_reported_as_invalid_stream(caplog) -> Non
         )
 
     assert caught.value.reason == "invalid_stream"
-    assert "missing_field=delta" in caplog.text
-    assert "choice_fields=finish_reason" in caplog.text
 
 
 @pytest.mark.parametrize("required", [False, True])
@@ -755,8 +748,11 @@ async def test_other_provider_errors_are_not_context_rejections(status, code):
         status, json={"error": {"code": code, "message": "context window exceeded"}},
     ))) as http_client:
         async with AsyncOpenAI(api_key="test", base_url="https://provider.invalid/v1", http_client=http_client) as client:
-            with pytest.raises(APIStatusError):
+            with pytest.raises(ModelResponseError) as caught:
                 await OpenAIChatModel(client=client).respond(context=ChatModelContext((_message(),)), tool_specs=())
+            assert caught.value.reason == "http_status"
+            assert caught.value.http_status == status
+            assert caught.value.retryable is (status == 429 or status >= 500)
 
 
 async def test_context_rejection_after_streamed_text_preserves_partial_content():
@@ -782,3 +778,49 @@ async def test_context_rejection_after_streamed_text_preserves_partial_content()
     assert caught.value.partial_content
     assert caught.value.reason == "context_window_exceeded"
     assert text == ["Already visible"] and stream.closed
+
+
+@pytest.mark.parametrize("status,code,retryable", [
+    (408, "timeout", True), (429, "rate_limit_exceeded", True), (503, "server_error", True),
+    (429, "insufficient_quota", False), (401, "invalid_api_key", False), (400, "invalid_request_error", False),
+])
+async def test_sdk_failure_is_interpreted_once_without_body_text(status, code, retryable, caplog):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(
+        status, headers={"retry-after": "2.5"},
+        json={"error": {"code": code, "message": "credential-private-value"}},
+    ))) as http_client:
+        async with AsyncOpenAI(api_key="test", base_url="https://provider.invalid/v1", http_client=http_client) as client:
+            with pytest.raises(ModelResponseError) as caught:
+                await OpenAIChatModel(client=client).respond(context=ChatModelContext((_message(),)), tool_specs=())
+    error = caught.value
+    assert error.http_status == status
+    assert error.retry_after_seconds == 2.5
+    assert error.retryable is retryable
+    assert error.reason == ("quota_exhausted" if code == "insufficient_quota" else "provider_timeout" if status == 408 else "http_status")
+    assert "credential-private-value" not in str(error) + caplog.text
+
+
+@pytest.mark.parametrize("body,retryable", [
+    ({"code": "internal_server_error"}, True), ({"type": "server_error"}, True),
+    ({"error": {"code": "rate_limit_exceeded"}}, True),
+    ({"code": "insufficient_quota", "type": "server_error"}, False),
+    ({"code": "invalid_api_key"}, False), ({"code": ["malformed"]}, False),
+    ({"message": "unknown provider error"}, True),
+])
+async def test_statusless_sdk_stream_failure_keeps_bounded_retry_contract(body, retryable):
+    from openai import APIError
+    class FailedStream(_Stream):
+        async def __aiter__(self):
+            if False:
+                yield None
+            raise APIError("private-stream-body", request=httpx.Request("POST", "https://provider.invalid"), body=body)
+    client, completions = _client([])
+    async def create(**_kwargs):
+        return FailedStream([])
+    completions.create = create
+    model = OpenAIChatModel(client=client, model="test")
+    with pytest.raises(ModelResponseError) as caught:
+        await model.respond(context=ChatModelContext((_message(),)), tool_specs=(), text_delta_callback=lambda _: None)
+    assert caught.value.retryable is retryable
+    assert caught.value.http_status is None
+    assert "private-stream-body" not in str(caught.value)

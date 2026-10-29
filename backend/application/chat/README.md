@@ -194,10 +194,11 @@ when the target needs identification. After an approved feedback or curation
 write, the runner resumes the same research loop so remaining requested work
 can finish. If response generation then fails, the saved result remains
 authoritative while the turn stays `failed` with the technical error.
-Before a curation write, the runner carries forward the complete Finding envelope
-from the exact inspection. Only the proposed scientific wording and other
-reviewed fields may change; identity, Evidence bindings, paper coverage, and
-lineage remain subject to the canonical validator and the user's approval.
+Before a curation write, the capability validates the complete canonical Finding
+arguments. Missing fields and the retired singular `limitation` alias are rejected
+before approval; the runner does not fill them from earlier inspections. Identity,
+Evidence bindings, paper coverage, and lineage remain subject to the canonical
+validator and the user's approval.
 
 Discovery also records whether the request needs a particular paper's claims
 or measurements inspected. That model-selected obligation survives later
@@ -301,8 +302,9 @@ At mandatory action stages the model context requests a provider tool call
 action occurred, and suppresses answer deltas that would otherwise appear
 before that check. Provider failures remain failures: the deterministic reply
 preserves the reading ledger and distinguishes unread papers and failed reads
-from scientific absence. Empty-response diagnostics contain only model name,
-normalized stop reason, reasoning presence, and token count.
+from scientific absence. Invalid-response logs contain the known model name and
+normalized reason; structured errors retain reported usage and partial-response
+state for the runner.
 
 Answer finalization separates the current request's reading ledger from earlier
 complete Source inspections. Zero new reads cannot erase the preceding research
@@ -375,8 +377,9 @@ JSON, the runner keeps bounded raw records with their message IDs and
 continues from the durable trajectory. A failed compaction counter is reset
 for each approval or Continue slice so a recoverable context failure cannot
 block later work.
-Provider failures use structured HTTP status, known stream error codes and
-chained transport exceptions. HTTP 408/429/5xx and known transient stream or
+The OpenAI request and stream boundaries classify supported SDK failures once
+and expose reason, retryability, HTTP status, and retry delay through
+`ModelResponseError`. The runner consumes these fields directly. HTTP 408/429/5xx and known transient stream or
 connection failures receive up to five retries with exponential jittered
 backoff and `Retry-After`. The retry allowance is shared across the turn and its
 approval continuations. Missing streamed tool arguments retry without streaming
@@ -384,10 +387,12 @@ before executing any tool; partial visible text is not replayed as a new answer.
 Authentication, malformed requests, exhausted quota and unclassified
 errors stop visibly. Successful tool observations remain in the trajectory
 during retries. Trace records contain normalized reasons, status, attempt and
-delay. Failure logs may add a bounded message only for low-risk structural
-exceptions, plus a message fingerprint, exception-chain types and the final
-source location; provider messages, response bodies, prompt text, credentials
-and full tracebacks are never retained.
+delay. Failure logs use operation, call identity, known reason, and exception
+type, without scanning arbitrary exception messages, causes, or tracebacks.
+Known capability business rejections return explicit tool error codes at their
+owning operation; unexpected internal failures use a fixed technical message.
+Permission denials retain their distinct error code. Provider bodies and
+credentials do not enter these diagnostics.
 Model requests recheck the remaining output allowance after context preparation;
 an exhausted optional cumulative allowance cannot produce a zero or negative
 provider output limit.
@@ -554,10 +559,11 @@ checks, certify a scientific stage, or automatically restart interrupted work.
 Each complex run may expose a model-authored `execution_plan` in progress
 snapshots and the turn response. The Agent updates it through the registered
 `update_execution_plan` capability after framing the request and when new
-observations change the remaining work. The runtime recovers the latest plan
-from the ordered trajectory and assigns `plan_version` from durable capability
-request/result events, including pending and failed events, then adds approval,
-resource, and technical status without inventing a version;
+observations change the remaining work. On entry or resume, the runtime restores
+the latest plan once from successful durable plan updates. Each successful plan
+result then updates the current plan and its version directly. Final result
+assembly applies approval, resource, and technical status to that current plan
+without rescanning the trajectory or inventing a version;
 it does not infer research steps from a metadata read or a local draft result.
 Simple answers may have no plan. It is operational state only; it never becomes
 Evidence, permission, or a Finding.

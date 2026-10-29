@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import httpx
+from openai import APIStatusError
 import pytest
 
 from application.chat.context_builder import ChatModelContext
+from application.chat.model import ModelResponseError
 from domain.chat import ChatMessage
 from infra.llm.chat_model import OpenAIChatModel
 from repositories.chat_repository import ModelCallInput, ModelCallOutcome
@@ -82,12 +85,17 @@ async def test_audit_snapshot_is_identical_to_provider_request() -> None:
 
 
 async def test_audit_records_provider_failure_without_persisting_error_body() -> None:
-    completions = _Completions(error=TimeoutError("secret provider body"))
+    completions = _Completions(error=APIStatusError(
+        "secret provider body",
+        response=httpx.Response(408, request=httpx.Request("POST", "https://provider.invalid")),
+        body={"error": {"message": "secret provider body"}},
+    ))
     observer = _Observer()
-    with pytest.raises(TimeoutError):
+    with pytest.raises(ModelResponseError) as failure:
         await OpenAIChatModel(client=_client(completions), model="audit-model").respond(
             context=_context(observer), tool_specs=()
         )
+    assert failure.value.reason == "provider_timeout"
     assert observer.finished[0][1].status == "provider_failed"
     assert observer.finished[0][1].error_code == "provider_timeout"
     assert "secret" not in str(observer.finished[0][1])

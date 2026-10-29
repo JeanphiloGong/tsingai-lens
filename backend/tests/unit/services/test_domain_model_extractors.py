@@ -10,6 +10,7 @@ import tiktoken
 from openai import LengthFinishReasonError
 from pydantic import BaseModel, ValidationError
 
+from application.core.structured_extraction.json_support import StructuredOutputError
 from application.core.document_profiles.extraction import (
     DocumentProfileExtractionError,
     DocumentProfileExtractor,
@@ -22,7 +23,6 @@ from application.core.objectives.analysis.source_extraction import (
     EvidenceExtractionsModelOutput,
     ObjectiveSourceExtractor,
     RequestedContextFactsModelOutput,
-    _normalize_objective_evidence_payload,
     _objective_evidence_repair_instruction,
     build_objective_evidence_prompt,
 )
@@ -336,9 +336,22 @@ def test_paper_research_map_contract_bounds_diagnostic_warnings():
         },
     ],
 )
-def test_paper_research_map_contract_rejects_duplicate_source_unit_ids(payload):
-    with pytest.raises(ValidationError, match="source-unit ids must be unique"):
-        StructuredPaperResearchMap.model_validate(payload)
+def test_paper_research_map_contract_rejects_duplicate_source_labels(payload):
+    with pytest.raises(ValidationError, match="Source labels must be unique"):
+        if "studies" in payload:
+            relationship = payload["studies"][0]["relationships"][0]
+            relationship["factor_assertions"] = [{
+                "label": relationship.pop("varied_factors")[0], "role": "varied",
+                "source_labels": ["S1"],
+            }]
+            relationship.pop("source_unit_ids")
+            relationship["source_labels"] = ["S1", "S1"]
+        else:
+            signal = payload["unresolved_signals"][0]
+            signal.pop("source_unit_ids")
+            signal["source_labels"] = ["S1", "S1"]
+            signal["variable_role"] = "varied"
+        ExperimentalPaperMapModelOutput.model_validate(payload)
 
 
 def test_paper_research_map_prompt_defines_lightweight_research_map_contract():
@@ -1267,7 +1280,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
     invalid_output = "classification: experimental"
     extractor = _response_client(_FakeOpenAIClient(invalid_output))
 
-    with pytest.raises(RuntimeError, match="returned no JSON object"):
+    with pytest.raises(ValueError, match="returned no JSON object"):
         extractor.complete(
             system_prompt="Return structured axis decisions.",
             user_prompt="No Source content is needed for this transport test.",
@@ -1279,7 +1292,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["trace_status"] == "failed"
-    assert trace["error_type"] == "RuntimeError"
+    assert trace["error_type"] == "StructuredOutputError"
     assert trace["error"] == "structured extraction returned no JSON object"
     assert trace["raw_output"] == invalid_output
     assert trace["attempts"] == [
@@ -1288,7 +1301,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
             "finish_reason": "stop",
             "response_chars": len(invalid_output),
             "response_preview": invalid_output,
-            "error_type": "RuntimeError",
+            "error_type": "StructuredOutputError",
             "error": "structured extraction returned no JSON object",
         },
         {
@@ -1296,7 +1309,7 @@ def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
             "finish_reason": "stop",
             "response_chars": len(invalid_output),
             "response_preview": invalid_output,
-            "error_type": "RuntimeError",
+            "error_type": "StructuredOutputError",
             "error": "structured extraction returned no JSON object",
         },
     ]
@@ -3366,7 +3379,7 @@ def test_evidence_extractor_preserves_rejections_when_removing_fixed_variables(f
 def test_structured_objective_evidence_rejects_single_variable_joint_effect():
     with pytest.raises(
         ValidationError,
-        match="joint effect requires multiple changed variables",
+        match="joint effect requires at least two changed variables",
     ):
         EvidenceExtractionModelOutput.model_validate(
             {
@@ -3403,7 +3416,7 @@ def test_structured_objective_evidence_rejects_single_variable_joint_effect():
 def test_structured_objective_evidence_rejects_repeated_variable_intervals():
     with pytest.raises(
         ValidationError,
-        match="changed variable names must be unique per extraction",
+        match="objective evidence changed variables must be unique",
     ):
         EvidenceExtractionModelOutput.model_validate(
             {
@@ -3660,7 +3673,7 @@ def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
     client = _FakeOpenAIClient(response)
     extractor = _response_client(client)
 
-    with pytest.raises(ValueError, match="echoed input fields"):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         ObjectiveSourceExtractor(extractor).extract_source(
             {
                 "objective": {
@@ -4192,7 +4205,7 @@ def test_domain_model_extractors_repairs_layered_structured_validation_errors(
     assert parsed.extractions[0].comparison is not None
     assert len(client.chat.completions.calls) == 3
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "experimental attribution requires comparison" in repair_prompt
+    assert "experimental attribution requires a comparable comparison" in repair_prompt
     invalid_item = json.dumps(
         json.loads(invalid)["extractions"][0],
         ensure_ascii=False,
@@ -4219,7 +4232,7 @@ def test_domain_model_extractors_repairs_layered_structured_validation_errors(
     assert still_invalid_item in second_repair_prompt
 
 
-def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_repair():
+def test_objective_evidence_retries_fixed_factor_and_preserves_reported_context():
     invalid = json.dumps(
         {
             "extractions": [
@@ -4260,7 +4273,15 @@ def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_re
             ]
         }
     )
-    client = _FakeOpenAIClient(invalid)
+    corrected = json.loads(invalid)
+    extraction = corrected["extractions"][0]
+    extraction["changed_variables"] = extraction["changed_variables"][:1]
+    extraction["comparison"]["axis_names"] = ["laser power"]
+    extraction["attribution_scope"] = "isolated_effect"
+    extraction["scientific_context"] = {"process": [
+        {"name": "scan speed", "value": 100, "unit": "mm/s"}
+    ]}
+    client = _FakeOpenAIClient([invalid, json.dumps(corrected)])
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -4293,10 +4314,11 @@ def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_re
     assert parsed.extractions[0].attribution_scope == "isolated_effect"
     assert parsed.extractions[0].comparison is not None
     assert parsed.extractions[0].comparison.axis_names == ["laser power"]
-    assert len(client.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 2
+    assert parsed.extractions[0].scientific_context.process[0].value == 100
 
 
-def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variables():
+def test_objective_evidence_retries_missing_comparison_axes():
     response = json.dumps(
         {
             "extractions": [
@@ -4331,7 +4353,9 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
             ]
         }
     )
-    client = _FakeOpenAIClient(response)
+    corrected = json.loads(response)
+    corrected["extractions"][0]["comparison"]["axis_names"] = ["laser power"]
+    client = _FakeOpenAIClient([response, json.dumps(corrected)])
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -4361,7 +4385,7 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
     comparison = parsed.extractions[0].comparison
     assert comparison is not None
     assert comparison.axis_names == ["laser power"]
-    assert len(client.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 2
 
 
 @pytest.mark.parametrize(
@@ -4382,7 +4406,7 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
     ),
     ids=("all-variables-are-fixed", "model-returned-no-axis"),
 )
-def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
+def test_objective_evidence_retries_axisless_result_without_rewriting_it(
     changed_variables,
     axis_names,
 ):
@@ -4413,7 +4437,12 @@ def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
             ]
         }
     )
-    client = _FakeOpenAIClient(response)
+    corrected = json.loads(response)
+    extraction = corrected["extractions"][0]
+    extraction["changed_variables"] = []
+    extraction["comparison"] = None
+    extraction["attribution_scope"] = "descriptive_only"
+    client = _FakeOpenAIClient([response, json.dumps(corrected)])
     extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
@@ -4440,7 +4469,7 @@ def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
     assert extraction.comparison is None
     assert extraction.attribution_scope == "descriptive_only"
     assert extraction.reported_result is not None
-    assert len(client.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 2
 
 
 @pytest.mark.parametrize("baseline_value", (None, "", [], {}))
@@ -4463,12 +4492,11 @@ def test_objective_evidence_does_not_invent_axes_for_incomplete_variables(
         ]
     }
 
-    normalized = _normalize_objective_evidence_payload(payload)
+    with pytest.raises(ValidationError):
+        EvidenceExtractionsModelOutput.model_validate(payload)
 
-    assert normalized == payload
 
-
-def test_objective_evidence_demotes_unbound_experimental_result_without_repair():
+def test_objective_evidence_rejects_unbound_experimental_result():
     payload = {
         "extractions": [
             {
@@ -4502,18 +4530,8 @@ def test_objective_evidence_demotes_unbound_experimental_result_without_repair()
         ]
     }
 
-    normalized = _normalize_objective_evidence_payload(payload)
-
-    extraction = normalized["extractions"][0]
-    assert extraction["attribution_scope"] == "association_only"
-    assert extraction["resolution_status"] == "partial"
-    assert extraction["changed_variables"] == payload["extractions"][0][
-        "changed_variables"
-    ]
-    assert extraction["comparison"] == payload["extractions"][0]["comparison"]
-    assert extraction["reported_result"] == payload["extractions"][0][
-        "reported_result"
-    ]
+    with pytest.raises(ValidationError):
+        EvidenceExtractionsModelOutput.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -4545,9 +4563,8 @@ def test_objective_evidence_does_not_normalize_invalid_fixed_endpoints(
         ]
     }
 
-    normalized = _normalize_objective_evidence_payload(payload)
-
-    assert normalized == payload
+    with pytest.raises(ValidationError):
+        EvidenceExtractionsModelOutput.model_validate(payload)
 
 
 def test_objective_evidence_repair_prompt_requires_role_result_consistency():
@@ -4642,7 +4659,7 @@ def test_table_repair_rejects_unknown_extra_keys_after_bounded_retry():
 def test_table_repair_falls_back_to_json_when_provider_parse_is_unavailable():
     client = _FakeOpenAIClient(
         '{"repaired_table_matrix":[["Sample","Strength (MPa)"],["A","560"]]}',
-        parse_error=RuntimeError("provider parse unavailable"),
+        parse_error=StructuredOutputError("invalid provider output"),
     )
     extractor = PaperFactsExtractor(
         client=client, model="fake-model", extraction_mode="provider_parse"
@@ -4668,3 +4685,123 @@ def test_domain_model_extractors_falls_back_to_default_for_invalid_mode(monkeypa
 
     assert extractor.extraction_mode == "provider_parse"
     assert "Invalid CORE_LLM_EXTRACTION_MODE=not-a-mode" in caplog.text
+
+
+@pytest.mark.parametrize("mode", ["provider_parse", "json_text"])
+def test_deadline_options_apply_to_each_structured_request(mode):
+    client = _FakeOpenAIClient(["not JSON", '{"decisions":[]}'], parsed=AxisCanonicalizationPlanModelOutput())
+    options = []
+    def with_options(**kwargs):
+        options.append(kwargs)
+        return client
+    client.with_options = with_options
+    timeouts = iter([4.0, 2.0])
+    response = StructuredResponseClient(client=client, model="test", extraction_mode=mode)
+    response.complete(
+        system_prompt="Classify axes", user_prompt="No pairs", response_model=AxisCanonicalizationPlanModelOutput,
+        before_request=lambda: next(timeouts),
+    )
+    assert options == ([{"timeout": 4.0, "max_retries": 0}] if mode == "provider_parse" else [
+        {"timeout": 4.0, "max_retries": 0}, {"timeout": 2.0, "max_retries": 0},
+    ])
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("internal bug"), TypeError("invalid SDK argument"), ValueError("invalid request option")])
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+def test_provider_programming_failure_does_not_issue_a_json_repair(owner, failure):
+    client = _FakeOpenAIClient('{"decisions":[]}', parse_error=failure)
+    if owner == "objective":
+        invoke = lambda: StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse").complete(
+            system_prompt="Classify axes", user_prompt="No pairs", response_model=AxisCanonicalizationPlanModelOutput,
+        )
+    else:
+        invoke = lambda: PaperFactsExtractor(client=client, model="test", extraction_mode="provider_parse").repair_table_matrix({"source": {}})
+    with pytest.raises(type(failure), match=str(failure)):
+        invoke()
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("postprocess bug"), TypeError("bad implementation"), ValueError("not an output rejection")])
+def test_postprocess_programming_error_does_not_issue_a_json_repair(failure):
+    client = _FakeOpenAIClient('{"decisions":[]}', parsed=AxisCanonicalizationPlanModelOutput())
+    def postprocess(_response):
+        raise failure
+    response = StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse")
+    with pytest.raises(type(failure), match=str(failure)):
+        response.complete(
+            system_prompt="Classify axes", user_prompt="No pairs", response_model=AxisCanonicalizationPlanModelOutput,
+            postprocess_response=postprocess,
+        )
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
+
+
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+def test_provider_malformed_json_can_be_repaired(owner):
+    client = _FakeOpenAIClient('{}', parse_error=json.JSONDecodeError("invalid output", "{", 1))
+    if owner == "objective":
+        parsed = StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse").complete(
+            system_prompt="Classify axes", user_prompt="No pairs",
+            response_model=AxisCanonicalizationPlanModelOutput,
+        )
+        assert parsed == AxisCanonicalizationPlanModelOutput()
+    else:
+        parsed = PaperFactsExtractor(client=client, model="test", extraction_mode="provider_parse").repair_table_matrix({"source": {}})
+        assert parsed == TableMatrixRepairModelOutput()
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+
+
+@pytest.mark.parametrize("mode", ["provider_parse", "json_text"])
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+def test_provider_refusal_does_not_issue_a_json_repair(owner, mode):
+    client = _FakeOpenAIClient('{}')
+    completions = client.beta.chat.completions if mode == "provider_parse" else client.chat.completions
+    request = completions.parse if mode == "provider_parse" else completions.create
+
+    def refuse(**kwargs):
+        completion = request(**kwargs)
+        completion.choices[0].message.refusal = "The provider declined the request"
+        return completion
+
+    if mode == "provider_parse":
+        completions.parse = refuse
+    else:
+        completions.create = refuse
+    with pytest.raises(RuntimeError, match="provider refused"):
+        if owner == "objective":
+            StructuredResponseClient(client=client, model="test", extraction_mode=mode).complete(
+                system_prompt="Classify axes", user_prompt="No pairs",
+                response_model=AxisCanonicalizationPlanModelOutput,
+            )
+        else:
+            PaperFactsExtractor(client=client, model="test", extraction_mode=mode).repair_table_matrix({"source": {}})
+    assert len(completions.calls) == 1
+    if mode == "provider_parse":
+        assert client.chat.completions.calls == []
+
+
+@pytest.mark.parametrize("owner", ["objective", "paper_facts"])
+@pytest.mark.parametrize("status", [None, 401, 429])
+def test_provider_transport_and_http_errors_do_not_issue_output_repair(owner, status):
+    import httpx
+    from openai import APIConnectionError, APIStatusError
+
+    request = httpx.Request("POST", "https://provider.invalid/chat/completions")
+    failure = (
+        APIConnectionError(request=request)
+        if status is None
+        else APIStatusError("provider failure", response=httpx.Response(status, request=request), body=None)
+    )
+    client = _FakeOpenAIClient('{}', parse_error=failure)
+    with pytest.raises(type(failure)):
+        if owner == "objective":
+            StructuredResponseClient(client=client, model="test", extraction_mode="provider_parse").complete(
+                system_prompt="Classify axes", user_prompt="No pairs",
+                response_model=AxisCanonicalizationPlanModelOutput,
+            )
+        else:
+            PaperFactsExtractor(client=client, model="test", extraction_mode="provider_parse").repair_table_matrix({"source": {}})
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []

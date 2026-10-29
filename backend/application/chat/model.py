@@ -560,10 +560,6 @@ class ModelToolCall:
     name: str
     arguments: Mapping[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        if not self.name.strip():
-            raise ValueError("model tool call requires name")
-        object.__setattr__(self, "arguments", dict(self.arguments))
 
 
 class ModelResponseError(RuntimeError):
@@ -577,12 +573,16 @@ class ModelResponseError(RuntimeError):
         retryable: bool = True,
         partial_content: bool = False,
         usage: ModelUsage | None = None,
+        http_status: int | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.reason = str(reason).strip() or "invalid_response"
         self.retryable = bool(retryable)
         self.partial_content = bool(partial_content)
         self.usage = usage
+        self.http_status = http_status
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True)
@@ -605,8 +605,6 @@ class ModelTurn:
     usage: ModelUsage | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "content", str(self.content or "").strip())
-        object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
         if not self.content and not self.tool_calls:
             raise ValueError("model turn requires content or tool calls")
 

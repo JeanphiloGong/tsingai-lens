@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from typing import Any, Literal
 
 from application.chat.capabilities.contracts import (
@@ -44,13 +46,6 @@ class RecordFindingFeedbackToolRequest(BaseModel):
     issue_type: IssueType = "none"
     note: str | None = Field(default=None, max_length=2_000)
 
-    @model_validator(mode="after")
-    def _validate_decision(self) -> "RecordFindingFeedbackToolRequest":
-        if self.review_status == "correct" and self.issue_type != "none":
-            raise ValueError("correct feedback cannot report an issue")
-        if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
-            raise ValueError(f"{self.review_status} feedback requires an issue")
-        return self
 
 
 class CurateFindingToolRequest(BaseModel):
@@ -132,19 +127,26 @@ class RecordFindingFeedbackCapability:
             context.collection_id,
             context.user_id,
         )
-        feedback = await self.finding_feedback_service.record_feedback(
-            collection_id=context.collection_id,
-            objective_id=arguments.objective_id,
-            analysis_version=arguments.analysis_version,
-            finding_id=arguments.finding_id,
-            review_status=arguments.review_status,
-            issue_type=arguments.issue_type,
-            note=arguments.note,
-            reviewer=context.user_id,
-        )
+        try:
+            feedback = await self.finding_feedback_service.record_feedback(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                analysis_version=arguments.analysis_version,
+                finding_id=arguments.finding_id,
+                review_status=arguments.review_status,
+                issue_type=arguments.issue_type,
+                note=arguments.note,
+                reviewer=context.user_id,
+            )
+        except (ValueError, FileNotFoundError):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="finding_feedback_rejected",
+                error_message="The Finding feedback was rejected. Reopen the current published Finding and review its analysis version.",
+            )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 'feedback_id': feedback.feedback_id,
                 'collection_id': feedback.collection_id,
@@ -200,20 +202,32 @@ class CurateFindingCapability:
         if candidate is None:  # pragma: no cover - Pydantic runs the validator.
             raise ValueError("curated Finding was not validated")
         if candidate.collection_id != context.collection_id:
-            raise ValueError("curated Finding belongs to another collection")
-        curation = await self.finding_feedback_service.record_curation(
-            collection_id=context.collection_id,
-            objective_id=arguments.objective_id,
-            analysis_version=arguments.analysis_version,
-            finding_id=arguments.finding_id,
-            curated_status=arguments.curated_status,
-            curated_finding=candidate,
-            note=arguments.note,
-            reviewer=context.user_id,
-        )
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="finding_collection_mismatch",
+                error_message="The curated Finding belongs to another collection. Reopen the target Finding in the current collection.",
+            )
+        try:
+            curation = await self.finding_feedback_service.record_curation(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                analysis_version=arguments.analysis_version,
+                finding_id=arguments.finding_id,
+                curated_status=arguments.curated_status,
+                curated_finding=candidate,
+                note=arguments.note,
+                reviewer=context.user_id,
+            )
+        except (ValueError, FileNotFoundError):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="finding_curation_rejected",
+                error_message="The Finding curation was rejected. Preserve its identity, published version and paper coverage.",
+            )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 'curation_id': curation.curation_id,
                 'collection_id': curation.collection_id,

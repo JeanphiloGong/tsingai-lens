@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict, replace
 import json
 import pytest
@@ -8,6 +10,7 @@ from domain.chat import ChatToolRequest
 from domain.chat import ChatMessage, ChatResourceRef, ChatSourceContext, ChatToolResult
 
 from application.chat import ChatContextBuilder
+from application.chat.model import ModelResponseError
 
 
 @pytest.fixture
@@ -479,13 +482,13 @@ def _tool_pair(
     )
     tool_result = ChatToolResult(
         tool_call_id=call_id,
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data=payload or {"collection_id": "col-1"},
     )
     result = ChatMessage(
         message_id=f"msg-result-{call_id}",
         session_id="chat-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(tool_result),
             ensure_ascii=True,
@@ -549,13 +552,13 @@ def test_context_builder_budgets_tool_result_once_for_model_wire_content() -> No
     )
     first_tool_result = ChatToolResult(
         tool_call_id="call-scope",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={"scope_records": ["x" * 4000]},
     )
     result = ChatMessage(
         message_id="msg-scope-result",
         session_id="chat-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(first_tool_result),
             ensure_ascii=True,
@@ -679,12 +682,12 @@ def test_complete_batch_is_indivisible_under_message_budget() -> None:
     second_request = ChatToolRequest("call-2", "read_source", {}, 1)
     first = replace(first, tool_calls=(*first.tool_calls, second_request))
     second_tool_result = ChatToolResult(
-        tool_call_id="call-2", status="succeeded", data={"document_id": "paper-2"}
+        tool_call_id="call-2", status=ToolResultStatus.SUCCEEDED, data={"document_id": "paper-2"}
     )
     second_result = ChatMessage(
         message_id="result-2",
         session_id="chat-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(second_tool_result),
             ensure_ascii=True,
@@ -715,7 +718,7 @@ def test_default_context_keeps_eight_findings_for_a_constrained_research_plan() 
         }, index))
         third_tool_result = ChatToolResult(
             tool_call_id=call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "finding": {
                     "finding_id": f"finding-{index}",
@@ -737,7 +740,7 @@ def test_default_context_keeps_eight_findings_for_a_constrained_research_plan() 
             ChatMessage(
                 message_id=f"result-{index}",
                 session_id="chat-1",
-                role="tool",
+                role=ChatMessageRole.TOOL,
                 content=json.dumps(
                     asdict(third_tool_result),
                     ensure_ascii=True,
@@ -769,7 +772,7 @@ async def test_failed_compaction_does_not_publish_new_notes_or_retired_ids():
     progress = _RunProgress(runner.limits)
     active = _user("active", "Compare only matching test conditions.")
     messages = (active, *_tool_pair(call_id="old"), *_tool_pair(call_id="recent"))
-    with pytest.raises(TimeoutError):
+    with pytest.raises(ModelResponseError, match="timed out"):
         await runner._prepare_model_context(messages, (), progress, active_user_message_id="active")
     assert progress.working_summary == ""
     assert not progress.compacted_message_ids

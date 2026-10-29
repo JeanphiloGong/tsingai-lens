@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole
+
 from domain.chat import ChatToolRequest
 
 from collections import deque
@@ -53,31 +55,8 @@ def skip_retry_delays(monkeypatch):
     monkeypatch.setattr(agent_runner_module, "sleep", no_wait)
 
 
-def test_provider_overload_without_http_status_is_retryable() -> None:
-    import httpx
-    from openai import APIError
-    error = APIError("Our servers are currently overloaded. Please try again later.",
-                     request=httpx.Request("POST", "https://example.test"), body=None)
-
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["retryable"] is True
-    assert details["reason"] == "transient_provider_error"
 
 
-def test_provider_retry_after_is_preserved_without_exposing_response_body() -> None:
-    class Response:
-        status_code = 503
-        headers = {"retry-after": "2.5"}
-
-    class ProviderError(RuntimeError):
-        response = Response()
-
-    details = agent_runner_module._provider_failure_details(ProviderError("temporary failure"))
-
-    assert details["retryable"] is True
-    assert details["http_status"] == 503
-    assert details["retry_after_seconds"] == 2.5
 
 
 def test_default_run_limits_bound_an_unconfigured_turn() -> None:
@@ -304,7 +283,7 @@ def test_reconstruct_active_trajectory_retains_completed_write_observations() ->
         ChatMessage(
             message_id="msg-result",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(result),
                 ensure_ascii=True,
@@ -360,10 +339,10 @@ def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> N
         decided_at="2026-09-29T00:02:45+00:00",
     ).start("2026-09-29T00:03:00+00:00").succeed("2026-09-29T00:03:01+00:00")
     first_tool_result = ChatToolResult(
-        tool_call_id=first.tool_call_id, status="succeeded", data={"saved": True}
+        tool_call_id=first.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={"saved": True}
     )
     second_tool_result = ChatToolResult(
-        tool_call_id=second.tool_call_id, status="succeeded", data={"saved": True}
+        tool_call_id=second.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={"saved": True}
     )
     messages = (
         ChatMessage.user(
@@ -405,7 +384,7 @@ def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> N
         ChatMessage(
             message_id="msg-first-result",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(first_tool_result),
                 ensure_ascii=True,
@@ -418,7 +397,7 @@ def test_reconstruct_active_trajectory_keeps_each_write_approval_identity() -> N
         ChatMessage(
             message_id="msg-second-result",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(second_tool_result),
                 ensure_ascii=True,
@@ -626,7 +605,7 @@ def test_source_coverage_uses_canonical_identity_and_marks_duplicate_batches():
         risk=ToolRisk.READ,
     )
     result = ChatToolResult(
-        tool_call_id="call-1", status="succeeded",
+        tool_call_id="call-1", status=ToolResultStatus.SUCCEEDED,
         data={"document": {"document_id": "doc-1"}, "batch_token_budget": 16000, "sources": [{
             "source_kind": "text_window", "source_ref": "block-1", "source_digest": "digest-1",
             "content_truncated": False, "content": "Methods and results",
@@ -959,91 +938,18 @@ async def test_transient_provider_timeout_is_retried_up_to_success() -> None:
     assert len(model.request_limits) == 2
 
 
-@pytest.mark.parametrize("status,retryable", [(408, True), (429, True), (503, True), (401, False), (403, False), (400, False), (None, False)])
-def test_generic_provider_errors_use_structured_status(status, retryable):
-    class APIError(Exception):
-        status_code = status
-
-    details = agent_runner_module._provider_failure_details(APIError("private provider request"))
-    assert details["retryable"] is retryable
-    assert details["http_status"] == status
-    assert "private provider request" not in json.dumps(details)
 
 
-def test_provider_failure_details_keep_safe_message_and_fingerprint_only() -> None:
-    error = AttributeError("response has no attribute message")
-
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["message"] == "response has no attribute message"
-    assert len(details["message_fingerprint"]) == 16
-    assert details["exception_chain"] == ["AttributeError"]
 
 
-def test_provider_failure_details_do_not_keep_provider_error_message() -> None:
-    error = RuntimeError("provider response contained private-token-value")
-
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["message"] is None
-    assert details["message_fingerprint"]
-    assert "private-token-value" not in json.dumps(details)
 
 
-@pytest.mark.parametrize("error", [
-    TypeError("provider parameter contained private-value"),
-    ValueError("provider response contained private-value"),
-])
-def test_provider_failure_details_do_not_keep_argument_error_text(error: Exception) -> None:
-    details = agent_runner_module._provider_failure_details(error)
-
-    assert details["message"] is None
-    assert "private-value" not in json.dumps(details)
 
 
-def test_provider_failure_details_redact_sensitive_structural_message() -> None:
-    details = agent_runner_module._provider_failure_details(
-        AttributeError("api_key=private-key-value")
-    )
-
-    assert details["message"] is None
-    assert "private-key-value" not in json.dumps(details)
 
 
-def test_provider_error_cause_and_permanent_quota_are_distinguished():
-    import httpx
-
-    class APIError(Exception):
-        status_code = None
-
-    error = APIError("private response")
-    error.__cause__ = httpx.RemoteProtocolError("private connection")
-    assert agent_runner_module._provider_failure_details(error)["retryable"]
-    error.status_code = 429
-    error.body = {"error": {"code": "insufficient_quota", "message": "private account"}}
-    details = agent_runner_module._provider_failure_details(error)
-    assert not details["retryable"]
-    assert details["reason"] == "quota_exhausted"
 
 
-@pytest.mark.parametrize("body,retryable", [
-    ({"code": "internal_server_error"}, True),
-    ({"type": "server_error"}, True),
-    ({"error": {"code": "rate_limit_exceeded"}}, True),
-    ({"code": "insufficient_quota", "type": "server_error"}, False),
-    ({"code": "invalid_api_key"}, False),
-    ({"code": ["malformed"]}, False),
-    ({"message": "unknown provider error"}, True),
-])
-def test_stream_api_error_uses_known_structured_codes_without_status(body, retryable):
-    import httpx
-    from openai import APIError
-
-    error = APIError("private stream response", request=httpx.Request("POST", "https://example.test"), body=body)
-    details = agent_runner_module._provider_failure_details(error)
-    assert details["retryable"] is retryable
-    assert details["http_status"] is None
-    assert "private stream response" not in json.dumps(details)
 
 
 async def test_generic_provider_failure_recovers_after_five_retries_without_repeating_read(monkeypatch, caplog):
@@ -1059,7 +965,7 @@ async def test_generic_provider_failure_recovers_after_five_retries_without_repe
     read = _Capability("test_source", ToolRisk.READ, result_data={"content": "Known paper result"})
     model = _Model(
         ModelTurn(tool_calls=(ModelToolCall("test_source", {}),)),
-        *(APIError("private request and credential") for _ in range(5)),
+        *(ModelResponseError("Provider unavailable", reason="http_status", http_status=503) for _ in range(5)),
         ModelTurn(content="The inspected paper result is retained."),
     )
     events = []
@@ -1085,8 +991,7 @@ async def test_retryable_api_error_stops_after_initial_attempt_and_five_retries(
         pass
 
     monkeypatch.setattr(agent_runner_module, "sleep", wait)
-    error = APIError("private response", request=httpx.Request("POST", "https://example.test"),
-                     body={"type": "server_error"})
+    error = ModelResponseError("Provider unavailable", reason="transient_provider_error")
     model = _Model(*(error for _ in range(7)))
     events = []
     result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry(())).run_turn(
@@ -1103,7 +1008,7 @@ async def test_provider_stream_failure_retries_as_non_streaming_request():
     import httpx
     from openai import APIError
     model = _Model(
-        APIError("stream upstream overloaded", request=httpx.Request("POST", "https://example.test"), body={"type": "upstream_error"}),
+        ModelResponseError("Provider unavailable", reason="transient_provider_error"),
         ModelTurn(content="The provider recovered without streaming."),
     )
     callbacks = []
@@ -1166,11 +1071,22 @@ async def test_finalization_timeout_cancels_the_only_summary_request() -> None:
     assert _results_for(result, read.spec.name)[0].status is ToolResultStatus.SUCCEEDED
 
 
-async def test_read_deadline_preserves_successes_without_starting_a_summary() -> None:
+async def test_read_deadline_preserves_successes_without_starting_a_summary(monkeypatch) -> None:
     cancelled = asyncio.Event()
+    clock = agent_runner_module.monotonic
+    reads_started_at = None
+
+    # Exercise a deadline during reads, independent of tokenizer/schema startup.
+    monkeypatch.setattr(
+        agent_runner_module, "monotonic",
+        lambda: 0.0 if reads_started_at is None else clock() - reads_started_at,
+    )
 
     class SourceRead(_Capability):
         async def execute(self, context, arguments):
+            nonlocal reads_started_at
+            if reads_started_at is None:
+                reads_started_at = clock()
             if arguments.question == "paper-b":
                 try:
                     await asyncio.Event().wait()
@@ -1473,7 +1389,7 @@ async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() ->
         position=1,
     )
     third_tool_result = ChatToolResult(
-        tool_call_id="read-1", status="succeeded", data=read.result_data
+        tool_call_id="read-1", status=ToolResultStatus.SUCCEEDED, data=read.result_data
     )
     prior_messages = (
         ChatMessage.user(
@@ -1492,7 +1408,7 @@ async def test_approval_resume_retains_prior_source_reads_in_failure_ledger() ->
         ChatMessage(
             message_id="tool-1",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(third_tool_result),
                 ensure_ascii=True,
@@ -2861,7 +2777,7 @@ async def test_capability_exception_is_sanitized_before_returning_to_model(caplo
     assert "exception_type=RuntimeError" in caplog.text
 
 
-async def test_capability_validation_exception_is_actionable_for_model_repair() -> None:
+async def test_arbitrary_capability_value_error_does_not_expose_internal_text() -> None:
     capability = _Capability(
         "get_collection_context",
         ToolRisk.DRAFT,
@@ -2888,8 +2804,8 @@ async def test_capability_validation_exception_is_actionable_for_model_repair() 
         if item.error_code == "capability_execution_failed"
     )
     assert failure.error_code == "capability_execution_failed"
-    assert "unknown source labels" in failure.error_message
-    assert "S001=methods-1" in failure.error_message
+    assert "unknown source labels" not in failure.error_message
+    assert "S001=methods-1" not in failure.error_message
 
 
 async def test_paper_experiment_validation_failure_is_structured_for_model_repair() -> None:
@@ -3189,7 +3105,13 @@ async def test_plan_version_stays_on_model_updates_after_approved_write(write_st
     assert recovered.blocking_reason == after["blocking_reason"]
 
 
-async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
+async def test_model_authored_execution_plan_is_loaded_and_revised(monkeypatch) -> None:
+    restores = []
+    original = agent_runner_module.ResearchExecutionPlan.from_messages
+    def restore(**kwargs):
+        restores.append(1)
+        return original(**kwargs)
+    monkeypatch.setattr(agent_runner_module.ResearchExecutionPlan, "from_messages", restore)
     read = _Capability("read_source", ToolRisk.READ, _QuestionArguments,
                        result_data={"document_id": "paper-1", "source_ref": "results"})
     model = _Model(
@@ -3260,6 +3182,8 @@ async def test_model_authored_execution_plan_is_loaded_and_revised() -> None:
         "completed", "completed",
     ]
     assert any("update_execution_plan" in names for names in model.tool_spec_names)
+
+    assert len(restores) == 1
 
 
 @pytest.mark.parametrize("model_status, expected", [
@@ -3623,13 +3547,13 @@ def test_reading_ledger_retains_failed_and_unread_document_scope() -> None:
         ))
     ]
     results = [
-        ChatToolResult(tool_call_id="call-0", status="succeeded", data={
+        ChatToolResult(tool_call_id="call-0", status=ToolResultStatus.SUCCEEDED, data={
             "paper_total": 3,
             "papers": [{"document_id": f"paper-{i}"} for i in (1, 2, 3)],
         }),
-        ChatToolResult(tool_call_id="call-1", status="failed",
+        ChatToolResult(tool_call_id="call-1", status=ToolResultStatus.FAILED,
                        error_code="source_not_found", error_message="Source unavailable"),
-        ChatToolResult(tool_call_id="call-2", status="failed",
+        ChatToolResult(tool_call_id="call-2", status=ToolResultStatus.FAILED,
                        error_code="resource_budget", error_message="Not executed"),
     ]
 
@@ -4549,154 +4473,6 @@ def test_failed_curation_retains_failure_observation() -> None:
     }
 
 
-def test_curation_call_preserves_inspected_identity_and_provenance() -> None:
-    from tests.unit.application.test_finding_review_import_service import _finding
-
-    canonical = _finding()
-    inspect_request = ChatToolRequest(
-        tool_call_id=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .tool_call_id,
-        name=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .name,
-        arguments=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .arguments,
-        position=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .position,
-        decision_user_id=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .decision_user_id,
-        decision_arguments_digest=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .decision_arguments_digest,
-        decided_at=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .decided_at,
-        decision_basis=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .decision_basis,
-        authorization_revision=ChatToolCall.requested(
-            tool_call_id="inspect-1",
-            session_id="chat-1",
-            assistant_message_id="inspect-call",
-            name="inspect_published_finding",
-            arguments={},
-            risk=ToolRisk.READ,
-        )
-        .start("2026-09-10T00:00:00Z")
-        .succeed("2026-09-10T00:00:01Z")
-        .authorization_revision,
-    )
-    inspect_call = ChatMessage.assistant_tool_calls(
-        message_id="inspect-call", session_id="chat-1", content="", tool_calls=(
-            inspect_request,
-        ), created_at="2026-09-10T00:00:00Z",
-    )
-    tool_result = ChatToolResult(
-        tool_call_id="inspect-1",
-        status=ToolResultStatus.SUCCEEDED,
-        data={"finding": canonical},
-    )
-    inspected = ChatMessage(
-        message_id="inspect-result",
-        session_id="chat-1",
-        role="tool",
-        content=json.dumps(
-            asdict(tool_result),
-            ensure_ascii=True,
-            separators=(",", ":"),
-        ),
-        created_at="2026-09-10T00:00:00Z",
-        tool_call_id=tool_result.tool_call_id,
-        tool_result=tool_result,
-    )
-    candidate = {
-        "objective_id": canonical["objective_id"],
-        "analysis_version": canonical["analysis_version"],
-        "finding_id": canonical["finding_id"],
-        "curated_finding": {
-            "statement": "The reported effect is limited to the inspected condition.",
-            "limitation": ["Only one paper was checked."],
-        },
-    }
-    repaired = ResearchAgentRunner._complete_curation_shape(
-        candidate, [ChatMessage.user(
-            message_id="user-1", session_id="chat-1", content="Revise this Finding.",
-            created_at="2026-09-10T00:00:00Z",
-        ), inspect_call, inspected],
-    )
-    finding = repaired["curated_finding"]
-    assert finding["collection_id"] == canonical["collection_id"]
-    assert finding["paper_contributions"] == canonical["paper_contributions"]
-    assert finding["limitations"] == ["Only one paper was checked."]
-    assert "limitation" not in finding
 
 
 @pytest.mark.parametrize("name", ["record_finding_feedback", "curate_finding"])
@@ -5106,17 +4882,8 @@ async def test_unexpected_model_failure_remains_model_unavailable(exception: Exc
 
     assert result.status is AgentRunStatus.FAILED
     assert result.error_code == "model_unavailable"
-    if isinstance(exception, AttributeError):
-        assert str(exception) in caplog.text
-    else:
-        assert str(exception) not in caplog.text
-    record = next(record for record in caplog.records if "Research Agent model call failed" in record.message)
-    details = json.loads(record.message.split("details=", 1)[1])
-    assert details["exception_type"] == type(exception).__name__
-    assert details["http_status"] is None
-    assert details["retryable"] is False
-    assert details["reason"] == "unclassified_provider_error"
-    assert details["message_fingerprint"]
+    assert str(exception) not in caplog.text
+    assert f"exception_type={type(exception).__name__}" in caplog.text
 
 
 def test_context_recovery_budget_survives_approval_continuation():
@@ -5160,7 +4927,7 @@ async def test_original_inconel_request_survives_reading_compaction_and_provider
             self.executed_arguments.append(arguments.model_dump())
             content = ("Synthetic test passage: as-built Inconel 718, liquid-floating process; "
                        "tensile orientation and comparable elongation remain unknown. ") * 150
-            return ChatToolResult(tool_call_id=context.tool_call_id, status="succeeded", data={
+            return ChatToolResult(tool_call_id=context.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={
                 **arguments.model_dump(), "content": content,
                 "source_digest": sha256(content.encode()).hexdigest(),
                 "content_truncated": False, "next_offset": None,
@@ -5247,3 +5014,81 @@ def test_source_inspection_preserves_exact_ids_and_normalizes_search_text() -> N
     assert request.source_ref == "Block  B"
     assert request.query == "laser power"
     assert request.heading_path == "Methods > LPBF"
+
+
+async def test_incomplete_curation_is_rejected_before_approval_without_alias_repair():
+    from application.chat.capabilities.finding_review import CurateFindingToolRequest
+    capability = _Capability("curate_finding", ToolRisk.WRITE, CurateFindingToolRequest)
+    raw = {
+        "objective_id": "obj-1", "analysis_version": 1, "finding_id": "finding-1",
+        "curated_status": "accepted",
+        "curated_finding": {"statement": "Revised", "direction": "mixed", "limitation": ["condition unresolved"]},
+    }
+    model = _Model(
+        ModelTurn(tool_calls=(ModelToolCall("curate_finding", raw),)),
+        ModelTurn(content="The complete canonical Finding is required before approval."),
+    )
+    result = await ResearchAgentRunner(model=model, capabilities=CapabilityRegistry((capability,))).run_turn(
+        context=_context(), previous_messages=(), user_message="Revise this Finding.",
+    )
+    call = next(call for call in result.tool_calls if call.name == "curate_finding")
+    assert call.arguments == raw
+    assert result.pending_approval is None
+    assert any(item.error_code == "invalid_tool_arguments" for item in result.tool_results)
+    assert not capability.executed_arguments
+
+
+async def test_capability_permission_failure_keeps_a_distinct_error_contract():
+    capability = _Capability("get_collection_context", ToolRisk.READ, fail_with=PermissionError("private authority details"))
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(tool_calls=(ModelToolCall(name="get_collection_context", arguments={}),)),
+            ModelTurn(content="当前权限不允许读取该集合。"),
+        ),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+    result = await runner.run_turn(context=_context(), previous_messages=(), user_message="读取集合")
+    failure = next(item for item in result.tool_results if item.error_code == "tool_permission_denied")
+    assert failure.status is ToolResultStatus.FAILED
+    assert "private authority" not in failure.error_message
+
+
+@pytest.mark.parametrize("confirmation", [None, "candidate"])
+async def test_analysis_prerequisites_return_actionable_rejections_without_scheduling(confirmation):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from application.chat.capabilities.objective_analysis import StartObjectiveAnalysisCapability, StartObjectiveAnalysisToolRequest
+
+    analysis = SimpleNamespace(start_analysis=AsyncMock())
+    capability = StartObjectiveAnalysisCapability(
+        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock()),
+        objective_repository=SimpleNamespace(read_objective=AsyncMock(return_value=(
+            None if confirmation is None else SimpleNamespace(confirmation_status=confirmation)
+        ))),
+        objective_analysis_service=analysis,
+    )
+    result = await capability.execute(
+        CapabilityExecutionContext.for_call(_context(), "start-1"),
+        StartObjectiveAnalysisToolRequest(objective_id="objective-1", document_ids=["paper-1"]),
+    )
+    assert result.error_code == ("objective_not_found" if confirmation is None else "objective_confirmation_required")
+    assert result.status is ToolResultStatus.FAILED
+    analysis.start_analysis.assert_not_awaited()
+
+
+async def test_finding_draft_rejects_unavailable_selection_without_returning_a_draft():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability, CreateFindingDraftToolRequest
+
+    capability = CreateFindingDraftCapability(finding_authoring_service=SimpleNamespace(
+        validate_selection_references=AsyncMock(side_effect=ValueError("internal storage details")),
+    ))
+    result = await capability.execute(
+        CapabilityExecutionContext.for_call(_context(), "draft-1"),
+        CreateFindingDraftToolRequest(draft_id="draft-1", objective_id="objective-1", source_analysis_version=1, selection_ids=["missing"]),
+    )
+    assert result.error_code == "finding_selection_rejected"
+    assert result.status is ToolResultStatus.FAILED
+    assert not result.data
+    assert "internal storage" not in result.error_message

@@ -6,11 +6,12 @@ import os
 from time import perf_counter
 from typing import Any, TypeVar
 
-from openai import OpenAI
+from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 import tiktoken
 
 from application.core.structured_extraction.json_support import (
+    StructuredOutputError,
     coerce_message_content,
     extract_json_object,
     load_json_payload,
@@ -231,7 +232,7 @@ class PaperFactsExtractor:
                         response_model,
                         max_completion_tokens=provider_max_completion_tokens,
                     )
-                except Exception:
+                except (ValidationError, StructuredOutputError, json.JSONDecodeError, LengthFinishReasonError):
                     logger.warning(
                         "Paper-fact provider parse failed; retrying with json_text "
                         "model=%s response_model=%s",
@@ -325,32 +326,30 @@ class PaperFactsExtractor:
             attempt_kwargs = dict(request_kwargs)
             attempt_kwargs["messages"] = attempt_messages
             try:
-                try:
-                    completion = self.client.chat.completions.create(**attempt_kwargs)
-                except Exception as exc:
-                    record_llm_completion(
-                        getattr(exc, "completion", None),
-                        requested_model=self.model,
-                    )
-                    raise
-                record_llm_completion(completion, requested_model=self.model)
-                raw_content = coerce_message_content(
-                    completion.choices[0].message.content
-                    if completion.choices
-                    else None
+                completion = self.client.chat.completions.create(**attempt_kwargs)
+            except Exception as exc:
+                record_llm_completion(
+                    getattr(exc, "completion", None),
+                    requested_model=self.model,
                 )
+                raise
+            record_llm_completion(completion, requested_model=self.model)
+            try:
+                message = completion.choices[0].message if completion.choices else None
+                raw_content = coerce_message_content(message.content if message else None)
+                if message is not None and getattr(message, "refusal", None):
+                    raise RuntimeError("The provider refused the paper-fact extraction request")
                 if not raw_content:
-                    raise RuntimeError(
+                    raise StructuredOutputError(
                         "structured extraction returned empty response content"
                     )
-                payload = load_json_payload(extract_json_object(raw_content))
+                try:
+                    json_text = extract_json_object(raw_content)
+                except RuntimeError as exc:
+                    raise StructuredOutputError(str(exc)) from exc
+                payload = load_json_payload(json_text)
                 return response_model.model_validate(payload), raw_content
-            except (
-                RuntimeError,
-                ValueError,
-                ValidationError,
-                json.JSONDecodeError,
-            ) as error:
+            except (StructuredOutputError, ValidationError, json.JSONDecodeError) as error:
                 last_error = error
                 if attempt == 0:
                     continue
@@ -383,12 +382,14 @@ class PaperFactsExtractor:
             raise
         record_llm_completion(completion, requested_model=self.model)
         if not completion.choices:
-            raise RuntimeError("structured extraction returned no completion choices")
+            raise StructuredOutputError("structured extraction returned no completion choices")
         message = completion.choices[0].message
         parsed = getattr(message, "parsed", None)
+        if getattr(message, "refusal", None):
+            raise RuntimeError("The provider refused the paper-fact extraction request")
         if parsed is None:
             raw_content = coerce_message_content(getattr(message, "content", None))
-            raise RuntimeError(
+            raise StructuredOutputError(
                 "structured extraction returned no parsed response content"
                 + (f": {raw_content[:500]}" if raw_content else "")
             )

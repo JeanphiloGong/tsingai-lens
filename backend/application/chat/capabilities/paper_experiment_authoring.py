@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -11,6 +13,7 @@ from application.chat.capabilities.contracts import CapabilityExecutionContext, 
 
 from application.core.objectives.paper_experiment_authoring_service import (
     PaperExperimentAuthoringService,
+    PaperExperimentAuthoringError,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -285,11 +288,6 @@ class _PaperExperimentMeasurementToolField(BaseModel):
         description="Other source-grounded limitations for this measurement.",
     )
 
-    @model_validator(mode="after")
-    def _require_reported_result(self) -> "_PaperExperimentMeasurementToolField":
-        if self.value is None and not self.result_text:
-            raise ValueError("measurement requires value or result_text")
-        return self
 
 
 class _PaperExperimentComparisonToolField(BaseModel):
@@ -606,7 +604,7 @@ class ProposePaperExperimentDraftCapability:
                 missing.append({"source_label": label, "source_kind": source["source_kind"], "source_ref": source["source_ref"]})
         if missing:
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status="failed", error_code="source_read_incomplete",
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED, error_code="source_read_incomplete",
                 error_message=("Read the current complete canonical Sources listed in sources_to_read. "
                                "Keep the experiment facts and resubmit the full draft; do not delete measurements or comparisons to bypass reading."),
                 data={"document_id": arguments.document_id, "sources_to_read": missing},
@@ -630,7 +628,7 @@ class ProposePaperExperimentDraftCapability:
         draft_id = _draft_id(context, prepared.draft_digest)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "draft_id": draft_id,
                 "draft_digest": prepared.draft_digest,
@@ -691,7 +689,7 @@ class CreatePaperExperimentRevisionCapability:
         arguments: PaperExperimentRevisionToolRequest,
     ) -> tuple[str, dict[str, Any]]:
         if self.chat_repository is None:
-            raise ValueError("paper experiment draft store is unavailable")
+            raise PaperExperimentAuthoringError("paper experiment draft store is unavailable")
         messages = await self.chat_repository.read_messages(context.session_id)
         for message in reversed(messages):
             result = getattr(message, "tool_result", None)
@@ -703,7 +701,7 @@ class CreatePaperExperimentRevisionCapability:
             if getattr(result, "status", None) != "succeeded":
                 continue
             if str(data.get("draft_digest") or "").casefold() != arguments.draft_digest.casefold():
-                raise ValueError("stored paper experiment draft digest does not match approval")
+                raise PaperExperimentAuthoringError("stored paper experiment draft digest does not match approval")
             created_at = str(data.get("draft_created_at") or "")
             try:
                 is_expired = datetime.now(timezone.utc) - datetime.fromisoformat(
@@ -712,7 +710,7 @@ class CreatePaperExperimentRevisionCapability:
             except (ValueError, TypeError):
                 is_expired = True
             if is_expired:
-                raise ValueError("paper experiment draft has expired; propose it again")
+                raise PaperExperimentAuthoringError("paper experiment draft has expired; propose it again")
             draft = data.get("draft")
             if not isinstance(draft, dict):
                 continue
@@ -720,7 +718,7 @@ class CreatePaperExperimentRevisionCapability:
                 str(data.get("document_id") or ""),
                 draft,
             )
-        raise ValueError("paper experiment draft was not found in this session")
+        raise PaperExperimentAuthoringError("paper experiment draft was not found in this session")
 
     async def execute(
         self,
@@ -731,7 +729,7 @@ class CreatePaperExperimentRevisionCapability:
             context, arguments
         )
         if not document_id:
-            raise ValueError("stored paper experiment draft is missing its scope")
+            raise PaperExperimentAuthoringError("stored paper experiment draft is missing its scope")
         prepared = await self.authoring_service.prepare(
             collection_id=context.collection_id,
             user_id=context.user_id,
@@ -739,7 +737,7 @@ class CreatePaperExperimentRevisionCapability:
             raw_draft=raw_draft,
         )
         if prepared.draft_digest.casefold() != arguments.draft_digest.casefold():
-            raise ValueError("paper experiment draft digest changed; review it again")
+            raise PaperExperimentAuthoringError("paper experiment draft digest changed; review it again")
         result = await self.authoring_service.write(
             prepared=prepared,
             collection_id=context.collection_id,
@@ -1082,7 +1080,7 @@ class CreatePaperExperimentRevisionCapability:
         ]
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "revision_saved": True,
                 "revisions": revisions,

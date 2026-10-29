@@ -6,13 +6,11 @@ from domain.chat import ChatToolRequest
 
 import json
 import logging
-import traceback
 from asyncio import Semaphore, gather, sleep, wait_for
 from collections.abc import Awaitable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
-from email.utils import parsedate_to_datetime
 from hashlib import sha256
 from math import isfinite
 from random import uniform
@@ -65,32 +63,6 @@ from utils.logger import get_request_id
 
 logger = logging.getLogger(__name__)
 
-_ACTIONABLE_CAPABILITY_EXCEPTIONS = (
-    ValueError,
-    FileNotFoundError,
-    LookupError,
-    PermissionError,
-)
-_SENSITIVE_ERROR_MARKERS = (
-    "password",
-    "secret",
-    "api_key",
-    "apikey",
-    "access_token",
-    "authorization",
-    "bearer",
-)
-
-
-def _safe_capability_error_message(exc: BaseException) -> str:
-    """Keep domain validation details while hiding arbitrary internal errors."""
-    if not isinstance(exc, _ACTIONABLE_CAPABILITY_EXCEPTIONS):
-        return "The capability raised an internal error. Review the request and retry."
-    detail = " ".join(str(exc).split())[:500]
-    if not detail or any(marker in detail.casefold() for marker in _SENSITIVE_ERROR_MARKERS):
-        return "The capability rejected the request. Review the arguments and retry."
-    return detail
-
 _TrajectoryCheckpoint = Callable[
     [
         tuple[ChatMessage, ...],
@@ -100,152 +72,11 @@ _TrajectoryCheckpoint = Callable[
     Awaitable[None],
 ]
 
-_MAX_TOOL_CALLS_PER_RESPONSE = 32
-# Token estimates use a local tokenizer while the provider counts its own
-# serialized request. Keep a small provider-side margin so compaction cannot
-# fill the entire advertised window before output tokens and framing are added.
-_CONTEXT_SAFETY_MARGIN_TOKENS = 4_096
-_MAX_CONTEXT_RECOVERIES = 2
-_CONTEXT_SHRINK_RATIO = 0.8
-# A long trajectory can contain one protocol unit per Source page plus large
-# structured write results. Sending each omitted unit to the model for a
-# runtime summary makes recovery compete with the actual research request.
-# Keep model-authored notes for short histories and use the bounded archive
-# record for longer histories; exact Sources remain available through the
-# deterministic prior-reading projection.
-_MAX_MODEL_COMPACTION_UNITS = 8
-_MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION = 120.0
 _WORKING_NOTES_LOSS_NOTICE = (
     "Some archived details are omitted or truncated in these notes. "
     "Full records remain in the trajectory; reopen exact Sources for missing details."
 )
-_SAFE_DIAGNOSTIC_EXCEPTION_TYPES = (
-    AttributeError,
-    IndexError,
-    KeyError,
-)
-_MAX_SAFE_EXCEPTION_MESSAGE_LENGTH = 240
 
-
-def _exception_text(exc: BaseException) -> str:
-    try:
-        return " ".join(str(exc).split())
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def _safe_exception_message(exc: BaseException) -> str | None:
-    """Keep a short structural error hint without provider or credential text."""
-    if not isinstance(exc, _SAFE_DIAGNOSTIC_EXCEPTION_TYPES):
-        return None
-    message = _exception_text(exc)
-    normalized = message.casefold()
-    if (
-        not message
-        or any(marker in normalized for marker in _SENSITIVE_ERROR_MARKERS)
-        or "http://" in normalized
-        or "https://" in normalized
-    ):
-        return None
-    return message[:_MAX_SAFE_EXCEPTION_MESSAGE_LENGTH]
-
-
-def _failure_site(exc: BaseException) -> str | None:
-    if exc.__traceback__ is None:
-        return None
-    frame = traceback.extract_tb(exc.__traceback__)[-1]
-    filename = frame.filename.rsplit("/", 1)[-1]
-    return f"{filename}:{frame.lineno}:{frame.name}"
-
-
-def _provider_failure_details(exc: BaseException) -> dict[str, Any]:
-    """Classify failures with bounded diagnostics and no provider bodies."""
-    chain: list[BaseException] = []
-    current: BaseException | None = exc
-    while current is not None and all(current is not item for item in chain):
-        chain.append(current)
-        current = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
-    status = None
-    retry_after_seconds: float | None = None
-    codes: set[str] = set()
-    has_code_field = False
-    names = {base.__name__ for item in chain for base in type(item).__mro__}
-    for item in chain:
-        value = getattr(item, "status_code", None)
-        if value is None:
-            value = getattr(getattr(item, "response", None), "status_code", None)
-        if status is None and type(value) is int and 100 <= value <= 599:
-            status = value
-        headers = getattr(getattr(item, "response", None), "headers", None)
-        if headers is None:
-            headers = getattr(item, "headers", None)
-        if isinstance(headers, Mapping):
-            raw_retry_after = headers.get("retry-after") or headers.get("Retry-After")
-            try:
-                parsed_retry_after = float(raw_retry_after)
-            except (TypeError, ValueError):
-                try:
-                    parsed_retry_after = max(0.0, (parsedate_to_datetime(str(raw_retry_after)) - datetime.now(timezone.utc)).total_seconds())
-                except (TypeError, ValueError, OverflowError):
-                    parsed_retry_after = None
-            if parsed_retry_after is not None and isfinite(parsed_retry_after) and parsed_retry_after >= 0:
-                retry_after_seconds = parsed_retry_after
-        body = getattr(item, "body", None)
-        error = body.get("error", body) if isinstance(body, Mapping) else {}
-        if isinstance(error, Mapping):
-            has_code_field = has_code_field or error.get("code") is not None
-            codes.update(value for key in ("code", "type")
-                         if isinstance(value := error.get(key), str))
-    timeout = bool(names.intersection({"TimeoutError", "TimeoutException", "APITimeoutError"}))
-    transport = timeout or bool(names.intersection({
-        "ConnectionError", "TransportError", "APIConnectionError",
-    }))
-    if codes.intersection({"insufficient_quota", "quota_exceeded", "billing_hard_limit_reached"}):
-        retryable, reason = False, "quota_exhausted"
-    elif status is not None:
-        retryable = status in {408, 429} or status >= 500
-        reason = "provider_timeout" if status == 408 else "http_status"
-    elif transport:
-        retryable, reason = True, "provider_timeout" if timeout else "transport_error"
-    elif codes.intersection({"rate_limit_exceeded", "server_error", "internal_server_error",
-                             "overloaded_error", "temporarily_unavailable"}):
-        retryable, reason = True, "transient_provider_error"
-    else:
-        # Some compatible providers emit an SDK APIError inside a successful
-        # HTTP stream without a status or code. Bound its retry as a transport
-        # failure; never apply this rule to arbitrary application exceptions.
-        retryable, reason = (
-            (True, "transient_provider_error")
-            if any(base.__name__ == "APIError" and base.__module__.startswith("openai")
-                   for item in chain for base in type(item).__mro__) and not has_code_field
-            else (False, "unclassified_provider_error")
-        )
-    raw_message = _exception_text(exc)
-    fingerprint = sha256(
-        f"{type(exc).__name__}\x00{raw_message}".encode("utf-8", "replace")
-    ).hexdigest()[:16]
-    return {
-        "exception_type": type(exc).__name__,
-        "exception_chain": [type(item).__name__ for item in chain],
-        "failure_site": _failure_site(exc),
-        "message": _safe_exception_message(exc),
-        "message_fingerprint": fingerprint,
-        "http_status": status,
-        "retry_after_seconds": retry_after_seconds,
-        "retryable": retryable,
-        "reason": reason,
-    }
-_FINAL_ANSWER_INSTRUCTION = (
-    "The bounded research-reading budget is now exhausted. Give the researcher "
-    "the best useful final answer supported by the completed trajectory. State "
-    "what was inspected, what remains unread or failed, the scientific "
-    "uncertainty, and one practical next step. Do not request another tool and "
-    "do not mention internal budgets, tool schemas, or hidden reasoning. A paper "
-    "identity survey or a search match is not an exact Source read. Do not claim "
-    "that a paper was read unless the reading ledger below records an exact Source. "
-    "If the researcher requested more papers than the collection contains, state "
-    "the actual collection total and do not invent missing or unread papers."
-)
 _INCOMPLETE_SCOPE_WARNING = (
     "The answer covers only inspected Sources; unread or failed work remains unresolved."
 )
@@ -452,15 +283,34 @@ class AgentRunLimits:
     max_finalization_output_tokens: int = 8_192
 
     def __post_init__(self) -> None:
-        for name, value in vars(self).items():
-            if value is None and name in {
-                "max_elapsed_seconds", "max_tool_calls", "max_model_tokens", "emergency_max_model_cycles",
-            }:
-                continue
+        for name, value in (
+            ("max_tool_calls", self.max_tool_calls),
+            ("max_model_tokens", self.max_model_tokens),
+            ("emergency_max_model_cycles", self.emergency_max_model_cycles),
+        ):
+            if value is not None and (type(value) is not int or value <= 0):
+                raise ValueError(f"{name} must be a positive integer")
+        for name, value in (
+            ("max_consecutive_no_progress", self.max_consecutive_no_progress),
+            ("max_model_retries", self.max_model_retries),
+            ("max_context_tokens", self.max_context_tokens),
+            ("max_parallel_reads", self.max_parallel_reads),
+            ("max_model_output_tokens", self.max_model_output_tokens),
+            ("max_finalization_output_tokens", self.max_finalization_output_tokens),
+        ):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.max_elapsed_seconds is not None and (
+            isinstance(self.max_elapsed_seconds, bool)
+            or not isfinite(self.max_elapsed_seconds) or self.max_elapsed_seconds <= 0
+        ):
+            raise ValueError("max_elapsed_seconds must be finite and positive")
+        for name, value in (
+            ("max_request_seconds", self.max_request_seconds),
+            ("max_finalization_seconds", self.max_finalization_seconds),
+        ):
             if isinstance(value, bool) or not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
-            if not name.endswith("_seconds") and not isinstance(value, int):
-                raise ValueError(f"{name} must be an integer")
 
 
 @dataclass
@@ -502,18 +352,31 @@ class _RunProgress:
     ) -> None:
         self.execution_plan = ResearchExecutionPlan.from_messages(messages=tuple(messages))
 
-    def accept_plan_update(self, result: ChatToolResult) -> bool:
-        """Allow one changed plan between observations without clearing a stall."""
-        if result.status is not ToolResultStatus.SUCCEEDED or not self.plan_update_available:
+    def accept_plan_update(self, result: ChatToolResult, *, request: ChatMessage) -> bool:
+        """Apply the successful tool result without replaying the trajectory."""
+        if result.status is not ToolResultStatus.SUCCEEDED:
             return False
-        candidate_steps = tuple(dict(step) for step in result.data.get("steps", ()))
-        if self.execution_plan is not None and (
-            self.execution_plan.steps == candidate_steps
-            and self.execution_plan.model_status.value == result.data["status"]
-        ):
-            return False
-        self.plan_update_available = False
-        return True
+        candidate_steps = tuple(dict(step) for step in result.data["steps"])
+        model_status = ResearchExecutionStatus(result.data["status"])
+        changed = self.execution_plan is None or (
+            self.execution_plan.steps != candidate_steps
+            or self.execution_plan.model_status is not model_status
+        )
+        self.execution_plan = ResearchExecutionPlan(
+            plan_id=sha256(f"{request.session_id}\x00{request.message_id}".encode()).hexdigest()[:20],
+            version=self.execution_plan.version + 1 if self.execution_plan else 1,
+            request=request.content[:4_000], status=model_status,
+            steps=candidate_steps, model_status=model_status,
+            explanation=result.data["explanation"],
+            blocking_reason=result.data["explanation"] if model_status in {
+                ResearchExecutionStatus.WAITING_FOR_CLARIFICATION,
+                ResearchExecutionStatus.SCIENTIFIC_REFUSAL,
+            } else None,
+        )
+        accepted = changed and self.plan_update_available
+        if accepted:
+            self.plan_update_available = False
+        return accepted
 
     def start_response(self) -> None:
         self.response_message_id = f"msg_{uuid4().hex[:16]}"
@@ -769,7 +632,7 @@ class AgentRunResult:
     warnings: tuple[str, ...] = ()
     pending_approval: ChatToolCall | None = None
     error_code: str | None = None
-    execution_plan: Mapping[str, Any] | None = field(init=False)
+    execution_plan: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.status is AgentRunStatus.COMPLETED:
@@ -777,31 +640,6 @@ class AgentRunResult:
                 raise ValueError("completed run requires a reason and no error code")
         elif self.completion_reason is not None:
             raise ValueError("only completed runs have a completion reason")
-        plan = ResearchExecutionPlan.from_messages(
-            messages=self.messages,
-            run_status=self.status,
-            completion_reason=self.completion_reason,
-            error_code=self.error_code,
-            pending_approval=self.pending_approval,
-        )
-        object.__setattr__(
-            self,
-            "execution_plan",
-            (
-                {
-                    "plan_id": plan.plan_id,
-                    "plan_version": plan.version,
-                    "request": plan.request,
-                    "status": plan.status.value,
-                    "model_status": plan.model_status.value,
-                    "explanation": plan.explanation,
-                    "steps": [dict(step) for step in plan.steps],
-                    "blocking_reason": plan.blocking_reason,
-                }
-                if plan is not None
-                else None
-            ),
-        )
 
 class ResearchAgentRunner:
     def __init__(
@@ -961,7 +799,7 @@ class ResearchAgentRunner:
             ChatMessage(
                 message_id=ResearchAgentRunner._message_id(),
                 session_id=context.session_id,
-                role="tool",
+                role=ChatMessageRole.TOOL,
                 content=json.dumps(
                     asdict(result), ensure_ascii=True, separators=(",", ":")
                 ),
@@ -970,7 +808,6 @@ class ResearchAgentRunner:
                 tool_result=result,
             )
         )
-        progress.refresh_execution_plan(messages)
         await self._checkpoint(checkpoint, messages, calls, results)
         return await self._continue(
             context,
@@ -1028,7 +865,7 @@ class ResearchAgentRunner:
             ChatMessage(
                 message_id=ResearchAgentRunner._message_id(),
                 session_id=context.session_id,
-                role="tool",
+                role=ChatMessageRole.TOOL,
                 content=json.dumps(
                     asdict(tool_result), ensure_ascii=True, separators=(",", ":")
                 ),
@@ -1148,7 +985,7 @@ class ResearchAgentRunner:
                         ),
                     )
                 except ModelResponseError as exc:
-                    if exc.reason == "model_allowance_exhausted":
+                    if exc.reason == "model_allowance_exhausted" or progress.remaining_seconds() <= 0:
                         return await self._finalize_with_current_evidence(
                             AgentCompletionReason.RESOURCE_BUDGET, progress, context, messages, calls, results,
                             checkpoint=checkpoint, text_delta_callback=text_delta_callback,
@@ -1173,15 +1010,18 @@ class ResearchAgentRunner:
                     ):
                         response_retries += 1
                         progress.retry_count += 1
-                        if exc.reason in {"invalid_stream", "stream_tool_arguments_missing"}:
+                        if exc.reason in {"invalid_stream", "stream_tool_arguments_missing",
+                                          "http_status", "provider_timeout", "transport_error",
+                                          "transient_provider_error"}:
                             non_streaming_retry = True
-                        delay = min(0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1),
-                                    progress.remaining_seconds())
+                        backoff = 0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1)
+                        delay = min(max(backoff, exc.retry_after_seconds or 0.0), progress.remaining_seconds())
                         progress.trace(
                             context,
                             phase="model_retry",
                             retry_attempt=response_retries,
                             retry_reason=exc.reason,
+                            http_status=exc.http_status,
                             retry_delay_ms=round(delay * 1000),
                         )
                         logger.info(
@@ -1216,17 +1056,22 @@ class ResearchAgentRunner:
                     )
                     await self._checkpoint(checkpoint, messages, calls, results)
                     error_code = _permission_denial_code(results) or (
-                        exc.reason if exc.reason.startswith(("research_", "context_"))
-                        else "model_response_invalid"
+                        exc.reason if exc.reason.startswith(("research_", "context_")) or exc.reason == "provider_timeout"
+                        else "model_unavailable" if exc.reason in {
+                            "http_status", "transport_error", "quota_exhausted",
+                            "transient_provider_error", "unclassified_provider_error",
+                        } else "model_response_invalid"
                     )
                     progress.trace(context, phase="terminal", termination_reason=error_code,
-                                   run_status=AgentRunStatus.FAILED)
+                                   run_status=AgentRunStatus.FAILED,
+                                   retry_reason=exc.reason, http_status=exc.http_status)
                     return self._result(
                         AgentRunStatus.FAILED,
                         messages,
                         calls,
                         results,
                         error_code,
+                        execution_plan=progress.execution_plan,
                     )
                 except Exception as exc:  # noqa: BLE001
                     if progress.remaining_seconds() <= 0:
@@ -1238,41 +1083,10 @@ class ResearchAgentRunner:
                         getattr(self.model, "model", None)
                         or type(self.model).__name__
                     )
-                    failure = _provider_failure_details(exc)
                     logger.warning(
-                        "Research Agent model call failed model=%s details=%s",
-                        model_name, json.dumps(failure, separators=(",", ":")),
+                        "Research Agent model call failed model=%s exception_type=%s",
+                        model_name, type(exc).__name__,
                     )
-                    if (
-                        failure["retryable"]
-                        and progress.retry_count < self.limits.max_model_retries
-                        and progress.remaining_seconds() > 0
-                    ):
-                        response_retries += 1
-                        progress.retry_count += 1
-                        # A provider can reject only the SSE transport while
-                        # accepting the same request as a normal completion.
-                        # Retry once without streaming before consuming the
-                        # remaining provider budget.
-                        non_streaming_retry = True
-                        retry_after = failure.get("retry_after_seconds")
-                        backoff = 0.5 * 2 ** (response_retries - 1) * uniform(0.9, 1.1)
-                        delay = min(max(backoff, float(retry_after or 0.0)), progress.remaining_seconds())
-                        progress.trace(
-                            context,
-                            phase="model_retry",
-                            retry_attempt=response_retries,
-                            retry_reason=failure["reason"], http_status=failure["http_status"],
-                            retry_delay_ms=round(delay * 1000),
-                        )
-                        logger.info(
-                            "Retrying Research Agent provider response model=%s "
-                            "attempt=%d",
-                            model_name,
-                            response_retries + 1,
-                        )
-                        await sleep(delay)
-                        continue
                     write_completion = await self._complete_after_successful_write_response_failure(
                         context,
                         messages,
@@ -1281,11 +1095,10 @@ class ResearchAgentRunner:
                         progress,
                         checkpoint=checkpoint,
                         phase="terminal",
-                        technical_reason=failure["reason"],
+                        technical_reason="unclassified_provider_error",
                     )
                     if write_completion is not None:
                         return write_completion
-                    provider_timeout = failure["reason"] == "provider_timeout"
                     messages.append(
                         self._assistant(
                             context,
@@ -1301,10 +1114,8 @@ class ResearchAgentRunner:
                         context,
                         phase="terminal",
                         run_status=AgentRunStatus.FAILED,
-                        termination_reason=(
-                            "provider_timeout" if provider_timeout else "model_unavailable"
-                        ),
-                        retry_reason=failure["reason"], http_status=failure["http_status"],
+                        termination_reason="model_unavailable",
+                        retry_reason="unclassified_provider_error",
                     )
                     return self._result(
                         AgentRunStatus.FAILED,
@@ -1312,7 +1123,8 @@ class ResearchAgentRunner:
                         calls,
                         results,
                         _permission_denial_code(results)
-                        or ("provider_timeout" if provider_timeout else "model_unavailable"),
+                        or "model_unavailable",
+                        execution_plan=progress.execution_plan,
                     )
                 break
 
@@ -1345,6 +1157,7 @@ class ResearchAgentRunner:
                     error_code=permission_error,
                     completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
                     warnings=(_INCOMPLETE_SCOPE_WARNING,) if reason is not AgentCompletionReason.MODEL_ANSWER else (),
+                    execution_plan=progress.execution_plan,
                 )
 
             requested = self._requested_calls(
@@ -1378,6 +1191,7 @@ class ResearchAgentRunner:
                         calls,
                         results,
                         completion_reason=AgentCompletionReason.MODEL_ANSWER,
+                        execution_plan=progress.execution_plan,
                     )
                 return await self._finalize_with_current_evidence(
                     AgentCompletionReason.MODEL_ANSWER,
@@ -1499,14 +1313,13 @@ class ResearchAgentRunner:
             elif len(requested) == 1 and capability_policy.evaluate_authorization(requested[0][0].risk).requires_approval:
                 pending = requested[0][0].require_approval()
                 calls[-1] = pending
-                progress.refresh_execution_plan(messages)
                 await self._checkpoint(checkpoint, messages, calls, results)
                 progress.trace(context, phase="terminal", termination_reason="approval_required",
                                run_status=AgentRunStatus.APPROVAL_REQUIRED)
-                return AgentRunResult(
-                    status=AgentRunStatus.APPROVAL_REQUIRED,
-                    messages=tuple(messages), tool_calls=tuple(calls),
-                    tool_results=tuple(results), pending_approval=pending,
+                return self._result(
+                    AgentRunStatus.APPROVAL_REQUIRED, messages, calls, results,
+                    pending_approval=pending,
+                    execution_plan=progress.execution_plan,
                 )
             else:
                 requested = tuple((call.start(_now_iso()), handler) for call, handler in requested)
@@ -1537,7 +1350,7 @@ class ResearchAgentRunner:
                     ChatMessage(
                         message_id=ResearchAgentRunner._message_id(),
                         session_id=context.session_id,
-                        role="tool",
+                        role=ChatMessageRole.TOOL,
                         content=json.dumps(
                             asdict(capability_result),
                             ensure_ascii=True,
@@ -1549,10 +1362,11 @@ class ResearchAgentRunner:
                     )
                 )
                 if call.name == "update_execution_plan":
-                    plan_update_accepted = progress.accept_plan_update(capability_result) or plan_update_accepted
+                    plan_update_accepted = progress.accept_plan_update(
+                        capability_result, request=next(message for message in reversed(messages) if message.role is ChatMessageRole.USER),
+                    ) or plan_update_accepted
                 else:
                     progress_increased = progress.observe(call, capability_result) or progress_increased
-            progress.refresh_execution_plan(messages)
             if progress_increased:
                 progress.consecutive_no_progress = 0
                 progress.plan_update_available = True
@@ -1575,6 +1389,8 @@ class ResearchAgentRunner:
         *, active_user_message_id: str, finalizing: bool = False,
     ) -> ModelTurn:
         """Build and send one decision, shrinking only rejected context without replaying tools."""
+        max_context_recoveries = 2
+        context_shrink_ratio = 0.8
         rejected: tuple[int, ModelResponseError] | None = None
         while True:
             model_context = await self._prepare_model_context(
@@ -1593,13 +1409,13 @@ class ResearchAgentRunner:
                                            finalizing=finalizing)
             except ModelResponseError as exc:
                 if (exc.reason != "context_window_exceeded" or exc.partial_content
-                        or progress.context_recovery_attempts >= _MAX_CONTEXT_RECOVERIES
+                        or progress.context_recovery_attempts >= max_context_recoveries
                         or progress.retry_count >= self.limits.max_model_retries
                         or progress.remaining_seconds() <= 0
                         or (not finalizing and progress.stop_before_model() is not None)):
                     raise
                 previous_limit = self._effective_context_tokens(progress)
-                reduced_limit = int(previous_limit * _CONTEXT_SHRINK_RATIO)
+                reduced_limit = int(previous_limit * context_shrink_ratio)
                 if reduced_limit <= self.limits.max_model_output_tokens + 2048:
                     raise
                 progress.context_token_limit = reduced_limit
@@ -1684,6 +1500,12 @@ class ResearchAgentRunner:
             progress.record_model_usage(exc.usage)
             exc.partial_content = exc.partial_content or visible_content
             raise
+        except TimeoutError as exc:
+            progress.record_model_usage(None)
+            raise ModelResponseError(
+                "The model request timed out.", reason="provider_timeout",
+                partial_content=visible_content,
+            ) from exc
         except BaseException as exc:
             # Cancellation may prevent the provider's usage trailer from arriving.
             progress.record_model_usage(None)
@@ -1715,6 +1537,8 @@ class ResearchAgentRunner:
             if progress.execution_plan
             else None
         )
+        max_model_compaction_units = 8
+        min_seconds_for_model_compaction = 120.0
         context_limit = self._effective_context_tokens(progress)
         input_budget = self.context_builder.input_budget(
             context_limit=context_limit, output_limit=self.limits.max_model_output_tokens,
@@ -1755,9 +1579,9 @@ class ResearchAgentRunner:
                                          reason="context_compaction_unavailable", retryable=False)
             notes_budget = min(6000, input_budget // 3)
             if (
-                len(units) > _MAX_MODEL_COMPACTION_UNITS
+                len(units) > max_model_compaction_units
                 or bool(progress.compacted_message_ids)
-                or progress.remaining_seconds() <= _MIN_REMAINING_SECONDS_FOR_MODEL_COMPACTION
+                or progress.remaining_seconds() <= min_seconds_for_model_compaction
             ):
                 batch = [message for unit in units for message in unit]
                 summary = self._fallback_working_notes(
@@ -1835,7 +1659,9 @@ class ResearchAgentRunner:
         return summary
 
     def _effective_context_tokens(self, progress: _RunProgress | None = None) -> int:
-        configured = max(1_024, self.limits.max_context_tokens - _CONTEXT_SAFETY_MARGIN_TOKENS)
+        # Local token estimates differ from the provider's serialized request.
+        provider_safety_margin_tokens = 4_096
+        configured = max(1_024, self.limits.max_context_tokens - provider_safety_margin_tokens)
         return min(configured, progress.context_token_limit) if progress and progress.context_token_limit else configured
 
     def _prior_source_reading(
@@ -2061,10 +1887,12 @@ class ResearchAgentRunner:
                     calls,
                     results,
                     permission_error or "final_answer_unavailable",
+                    execution_plan=progress.execution_plan,
                 )
             return self._result(
                 AgentRunStatus.COMPLETED, messages, calls, results,
                 completion_reason=reason, warnings=(_INCOMPLETE_SCOPE_WARNING,),
+                execution_plan=progress.execution_plan,
             )
         messages.append(
             self._assistant(
@@ -2092,6 +1920,7 @@ class ResearchAgentRunner:
             error_code=permission_error,
             completion_reason=reason if terminal_status is AgentRunStatus.COMPLETED else None,
             warnings=(_INCOMPLETE_SCOPE_WARNING,),
+            execution_plan=progress.execution_plan,
         )
 
     def _answer_instruction(
@@ -2117,7 +1946,17 @@ class ResearchAgentRunner:
             else ""
         )
         lead = (
-            _FINAL_ANSWER_INSTRUCTION
+            (
+                "The bounded research-reading budget is now exhausted. Give the researcher "
+                "the best useful final answer supported by the completed trajectory. State "
+                "what was inspected, what remains unread or failed, the scientific "
+                "uncertainty, and one practical next step. Do not request another tool and "
+                "do not mention internal budgets, tool schemas, or hidden reasoning. A paper "
+                "identity survey or a search match is not an exact Source read. Do not claim "
+                "that a paper was read unless the reading ledger below records an exact Source. "
+                "If the researcher requested more papers than the collection contains, state "
+                "the actual collection total and do not invent missing or unread papers."
+            )
             if budget_exhausted
             else (
                 "The requested structured research action is complete. Give the "
@@ -2168,6 +2007,7 @@ class ResearchAgentRunner:
         completed_calls: tuple[ChatToolCall, ...] | list[ChatToolCall] = (),
         completed_results: tuple[ChatToolResult, ...] | list[ChatToolResult] = (),
     ) -> tuple[tuple[ChatToolCall, Any], ...]:
+        max_tool_calls_per_response = 32
         assistant_message_id = progress.response_message_id
         requested = []
         seen_requests: set[tuple[str, str]] = set()
@@ -2178,8 +2018,6 @@ class ResearchAgentRunner:
         )
         for model_call in turn.tool_calls:
             arguments = dict(model_call.arguments)
-            if model_call.name == "curate_finding":
-                arguments = self._complete_curation_shape(arguments, messages)
             if model_call.name == "create_finding_draft":
                 # Structural cleanup is deterministic; scientific classifications
                 # must remain the model's explicit decision or a validation error.
@@ -2202,10 +2040,10 @@ class ResearchAgentRunner:
                     model_call.name,
                 )
                 continue
-            if len(requested) >= _MAX_TOOL_CALLS_PER_RESPONSE:
+            if len(requested) >= max_tool_calls_per_response:
                 logger.warning(
                     "Research Agent tool batch truncated requested=%d retained=%d limit=%d",
-                    len(turn.tool_calls), len(requested), _MAX_TOOL_CALLS_PER_RESPONSE,
+                    len(turn.tool_calls), len(requested), max_tool_calls_per_response,
                 )
                 break
             seen_requests.add(request_key)
@@ -2313,47 +2151,6 @@ class ResearchAgentRunner:
                 )
             )
         return completed
-
-    @staticmethod
-    def _complete_curation_shape(
-        arguments: dict[str, Any], messages: list[ChatMessage],
-    ) -> dict[str, Any]:
-        """Preserve the canonical Finding envelope after it was read.
-
-        Curation may revise the researcher's requested statement and limitations,
-        but identity, lineage, evidence bindings, and context serialization come
-        from the exact Finding inspection. This prevents a model from losing
-        provenance while still leaving scientific text subject to normal
-        validation and approval.
-        """
-        # Curation commonly follows a separate feedback/approval turn. Keep the
-        # exact Finding inspection from the full trajectory available; active
-        # turn scoping would discard it before the second approval.
-        inspected = capability_policy._successful_results_by_name(messages).get(
-            "inspect_published_finding", ()
-        )
-        canonical = next(
-            (result.get("finding") for result in reversed(inspected)
-             if isinstance(result.get("finding"), Mapping)
-             and str(result["finding"].get("objective_id") or "") == str(arguments.get("objective_id") or "")
-             and str(result["finding"].get("finding_id") or "") == str(arguments.get("finding_id") or "")
-             and str(result["finding"].get("analysis_version") or "") == str(arguments.get("analysis_version") or "")),
-            None,
-        )
-        candidate = dict(arguments.get("curated_finding") or {})
-        if not canonical or not candidate:
-            return arguments
-        # A common model typo is singular ``limitation``. It is a structural
-        # alias only; no scientific value is synthesized.
-        if "limitations" not in candidate and "limitation" in candidate:
-            candidate["limitations"] = candidate.pop("limitation")
-        editable = {"statement", "limitations", "certainty", "direction",
-                    "assertion_strength", "attribution_scope", "synthesis_status",
-                    "factors", "outcome"}
-        for key, value in canonical.items():
-            if key not in editable or key not in candidate:
-                candidate[key] = value
-        return {**arguments, "curated_finding": candidate}
 
     async def _execute_read_batch(
         self,
@@ -2600,6 +2397,7 @@ class ResearchAgentRunner:
             results,
             error_code=technical_reason,
             warnings=(_SUCCESSFUL_WRITE_RESPONSE_UNAVAILABLE_WARNING,),
+            execution_plan=progress.execution_plan,
         )
 
     @staticmethod
@@ -2818,7 +2616,7 @@ class ResearchAgentRunner:
             call, result = ResearchAgentRunner._failure(
                 call,
                 exc.error_code,
-                _safe_capability_error_message(exc),
+                str(exc)[:500],
                 data=data,
             )
         except PaperExperimentAuthoringError as exc:
@@ -2830,20 +2628,24 @@ class ResearchAgentRunner:
             call, result = ResearchAgentRunner._failure(
                 call,
                 exc.error_code,
-                _safe_capability_error_message(exc),
+                str(exc)[:500],
                 data={"recoverable": True},
+            )
+        except PermissionError:
+            call, result = ResearchAgentRunner._failure(
+                call, "tool_permission_denied", "The current authority does not permit this research action.",
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "Research capability failed tool=%s exception_type=%s",
+                "Research capability failed tool=%s call_id=%s exception_type=%s",
                 call.name,
+                call.tool_call_id,
                 type(exc).__name__,
             )
             call, result = ResearchAgentRunner._failure(
                 call,
                 "capability_execution_failed",
-                "The research capability could not be completed: "
-                + _safe_capability_error_message(exc),
+                "The research capability could not be completed because of an internal error.",
             )
         return call, result
 
@@ -2922,7 +2724,16 @@ class ResearchAgentRunner:
         *,
         completion_reason: AgentCompletionReason | None = None,
         warnings: tuple[str, ...] = (),
+        pending_approval: ChatToolCall | None = None,
+        execution_plan: ResearchExecutionPlan | None = None,
     ) -> AgentRunResult:
+        plan = execution_plan
+        if plan is not None:
+            plan = plan.with_runtime_status(_research_plan_status(
+                run_status=status, completion_reason=completion_reason,
+                pending_approval=pending_approval is not None,
+                model_status=plan.model_status, error_code=error_code,
+            ), error_code)
         return AgentRunResult(
             status=status,
             messages=tuple(messages),
@@ -2931,6 +2742,20 @@ class ResearchAgentRunner:
             error_code=error_code,
             completion_reason=completion_reason,
             warnings=warnings,
+            pending_approval=pending_approval,
+            execution_plan=(
+                {
+                    "plan_id": plan.plan_id,
+                    "plan_version": plan.version,
+                    "request": plan.request,
+                    "status": plan.status.value,
+                    "model_status": plan.model_status.value,
+                    "explanation": plan.explanation,
+                    "steps": [dict(step) for step in plan.steps],
+                    "blocking_reason": plan.blocking_reason,
+                }
+                if plan is not None else None
+            ),
         )
 
     @staticmethod

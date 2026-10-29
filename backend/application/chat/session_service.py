@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+from domain.chat import ChatMessageRole
+
 
 import asyncio
 import json
@@ -99,7 +100,7 @@ def resolve_canonical_objective_source(
         if source is not None:
             record = source_table_payload(source)
             return _CanonicalObjectiveSource(
-                str(record["table_markdown"] or "").strip(),
+                (record["table_markdown"] or "").strip(),
                 source.page,
                 source.heading_path,
                 {**record, "source_kind": source_kind},
@@ -110,7 +111,7 @@ def resolve_canonical_objective_source(
         )
         if source is not None:
             return _CanonicalObjectiveSource(
-                str(source.caption_text or ""),
+                source.caption_text or "",
                 source.page,
                 source.heading_path,
                 {
@@ -238,28 +239,14 @@ class ChatSessionService:
         # Collection settings are defaults for newly created conversations. A
         # session stores its own revision so later collection changes cannot
         # silently change an active conversation's authority.
-        read_default = getattr(
-            self.collection_service,
-            "get_agent_default_permission_for_user",
-            None,
-        )
-        default: dict[str, Any] = {}
-        mode = "confirm"
-        should_seed = False
-        if callable(read_default):
-            default = await read_default(collection_id, user_id)
-            mode = str(default.get("mode") or "confirm")
-            should_seed = mode == "read_only" or (
-                mode == "auto"
-                and any(
-                    permits_automatic(
-                        default,
-                        action,
-                        now=_now_iso(),
-                    )
-                    for action in default.get("actions") or ()
-                )
+        default = await self.collection_service.get_agent_default_permission_for_user(collection_id, user_id)
+        mode = str(default.get("mode") or "confirm")
+        should_seed = mode == "read_only" or (
+            mode == "auto" and any(
+                permits_automatic(default, action, now=_now_iso())
+                for action in default.get("actions") or ()
             )
+        )
         await self.repository.add_session(session)
         if should_seed:
             await self.repository.set_permission(
@@ -849,8 +836,7 @@ class ChatSessionService:
         """
 
         repository = self.analysis_job_repository
-        enqueue = getattr(repository, "enqueue_correction_signal_analysis", None)
-        if enqueue is None or not previous_messages:
+        if repository is None or not previous_messages:
             return None
         anchor = previous_messages[-1]
         if (
@@ -893,7 +879,7 @@ class ChatSessionService:
             trigger_digest=signal.trigger_digest,
         )
         try:
-            await enqueue(
+            await repository.enqueue_correction_signal_analysis(
                 session_id=signal.session_id,
                 anchor_message_id=signal.anchor_message_id,
                 trigger_message_id=signal.trigger_message_id,
@@ -919,8 +905,7 @@ class ChatSessionService:
         """Queue failed tool observations after their trajectory checkpoint."""
 
         repository = self.analysis_job_repository
-        enqueue = getattr(repository, "enqueue_tool_failure_analysis", None)
-        if enqueue is None:
+        if repository is None:
             return None
         calls = {call.tool_call_id: call for call in result.tool_calls}
         messages = {message.message_id: message for message in result.messages}
@@ -957,7 +942,7 @@ class ChatSessionService:
             digest = tool_result_digest({
                 "tool_call_id": tool_result.tool_call_id,
                 "status": tool_result.status.value,
-                "data": deepcopy(dict(tool_result.data)),
+                "data": tool_result.data,
                 "resource_refs": [
                     {
                         "resource_type": item.resource_type,
@@ -979,7 +964,7 @@ class ChatSessionService:
             )
             queued = True
             try:
-                await enqueue(
+                await repository.enqueue_tool_failure_analysis(
                     session_id=session.session_id,
                     tool_call_id=call.tool_call_id,
                     assistant_message_id=call.assistant_message_id,
@@ -1168,7 +1153,7 @@ class ChatSessionService:
                     )
                     observation = ChatToolResult(
                         tool_call_id=denied.tool_call_id,
-                        status="failed",
+                        status=ToolResultStatus.FAILED,
                         error_code="permission_write_denied",
                         error_message=(
                             "The current permission or request prohibits this write. "
@@ -1240,7 +1225,7 @@ class ChatSessionService:
                             ChatMessage(
                                 message_id=f"msg_{uuid4().hex}",
                                 session_id=session.session_id,
-                                role="tool",
+                                role=ChatMessageRole.TOOL,
                                 content=json.dumps(
                                     asdict(result),
                                     ensure_ascii=True,
@@ -1322,7 +1307,7 @@ class ChatSessionService:
                 ChatMessage(
                     message_id=f"msg_{uuid4().hex}",
                     session_id=session.session_id,
-                    role="tool",
+                    role=ChatMessageRole.TOOL,
                     content=json.dumps(
                         asdict(result),
                         ensure_ascii=True,
@@ -1410,7 +1395,7 @@ class ChatSessionService:
                     "selected Source document identity does not match its "
                     "canonical Source"
                 )
-            document_title = str(document.title or document.document_id).strip()[:500]
+            document_title = (document.title or document.document_id).strip()[:500]
             try:
                 canonical = resolve_canonical_objective_source(
                     document,
@@ -1428,11 +1413,11 @@ class ChatSessionService:
                 ) from exc
 
             heading_path = (
-                str(canonical.heading_path).strip()[:1000]
+                canonical.heading_path.strip()[:1000]
                 if canonical.heading_path is not None
                 else None
             )
-            canonical_content = str(canonical.content or "")
+            canonical_content = canonical.content
             normalized_content = normalize_source_text(canonical_content)
             normalized_quote = normalize_source_text(item.quote)
             if not normalized_quote or normalized_quote not in normalized_content:
@@ -1440,7 +1425,7 @@ class ChatSessionService:
                     "selected Source quote is not contained in the canonical Source"
                 )
             digest = sha256(canonical_content.encode("utf-8")).hexdigest()
-            if item.source_digest is not None and item.source_digest != digest:
+            if item.source_digest is not None and item.source_digest.lower() != digest:
                 raise ChatSourceContextError(
                     "selected Source digest does not match the canonical Source"
                 )

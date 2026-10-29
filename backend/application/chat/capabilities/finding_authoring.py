@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from dataclasses import asdict
 
 from application.chat.capabilities.contracts import (
@@ -66,14 +68,22 @@ class CreateFindingDraftCapability:
         arguments: CreateFindingDraftToolRequest,
     ) -> ChatToolResult:
         if self.finding_authoring_service is not None:
-            await self.finding_authoring_service.validate_selection_references(
-                collection_id=context.collection_id,
-                objective_id=arguments.objective_id,
-                source_analysis_version=arguments.source_analysis_version,
-                selection_ids=tuple(arguments.selection_ids),
-                comparison_group_ids=tuple(arguments.comparison_group_ids),
-                user_id=context.user_id,
-            )
+            try:
+                await self.finding_authoring_service.validate_selection_references(
+                    collection_id=context.collection_id,
+                    objective_id=arguments.objective_id,
+                    source_analysis_version=arguments.source_analysis_version,
+                    selection_ids=tuple(arguments.selection_ids),
+                    comparison_group_ids=tuple(arguments.comparison_group_ids),
+                    user_id=context.user_id,
+                )
+            except (ValueError, FileNotFoundError):
+                return ChatToolResult(
+                    tool_call_id=context.tool_call_id,
+                    status=ToolResultStatus.FAILED,
+                    error_code="finding_selection_rejected",
+                    error_message="The Finding selections were rejected. Inspect the current published analysis and use its eligible selection and ComparisonGroup IDs.",
+                )
         draft = arguments.model_dump()
         refs = [
             ChatResourceRef(
@@ -113,7 +123,7 @@ class CreateFindingDraftCapability:
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "draft": draft,
                 "persistence": "transient_chat_result",
@@ -149,15 +159,22 @@ class CreateFindingVersionCapability:
         context: CapabilityExecutionContext,
         arguments: CreateFindingVersionToolRequest,
     ) -> ChatToolResult:
-        result = await self.finding_authoring_service.create_selection_version(
-            collection_id=context.collection_id,
-            objective_id=arguments.objective_id,
-            source_analysis_version=arguments.source_analysis_version,
-            created_by_user_id=context.user_id,
-            selection_ids=tuple(arguments.selection_ids),
-            comparison_group_ids=tuple(arguments.comparison_group_ids),
-            parent_finding_id=arguments.parent_finding_id,
-        )
+        try:
+            result = await self.finding_authoring_service.create_selection_version(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                source_analysis_version=arguments.source_analysis_version,
+                created_by_user_id=context.user_id,
+                selection_ids=tuple(arguments.selection_ids),
+                comparison_group_ids=tuple(arguments.comparison_group_ids),
+                parent_finding_id=arguments.parent_finding_id,
+            )
+        except (ValueError, FileNotFoundError):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="finding_version_rejected",
+                error_message="The Finding version was rejected. Check the published analysis version, experiment selections and comparison groups.",
+            )
         finding = result.finding
         refs = [
             ChatResourceRef(
@@ -187,7 +204,7 @@ class CreateFindingVersionCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "analysis": {
                     "collection_id": result.analysis.collection_id,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from collections.abc import Mapping
 from typing import Any, Annotated
 from urllib.parse import urlencode
@@ -69,14 +71,21 @@ class ConfirmObjectiveCapability:
         context: CapabilityExecutionContext,
         arguments: ConfirmObjectiveToolRequest,
     ) -> ChatToolResult:
-        objective = await self.objective_authoring_service.confirm_objective(
-            collection_id=context.collection_id,
-            user_id=context.user_id,
-            objective_id=arguments.objective_id,
-        )
+        try:
+            objective = await self.objective_authoring_service.confirm_objective(
+                collection_id=context.collection_id,
+                user_id=context.user_id,
+                objective_id=arguments.objective_id,
+            )
+        except (ValueError, FileNotFoundError):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
+                error_code="objective_confirmation_rejected",
+                error_message="The Objective could not be confirmed. Check that it exists, has one outcome and still meets its derivation prerequisites.",
+            )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": objective.objective_id,
                 "confirmation_status": objective.confirmation_status,
@@ -133,13 +142,18 @@ class StartObjectiveAnalysisCapability:
             arguments.objective_id,
         )
         if objective is None:
-            raise FileNotFoundError(
-                "research objective not found: "
-                f"{context.collection_id}/{arguments.objective_id}"
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="objective_not_found",
+                error_message="The research Objective was not found in this collection. Inspect the current Objectives before starting analysis.",
             )
         if objective.confirmation_status != "confirmed":
-            raise ValueError(
-                "confirm the research objective before starting analysis"
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="objective_confirmation_required",
+                error_message="Confirm the research Objective before starting analysis.",
             )
         try:
             payload = await self.objective_analysis_service.start_analysis(
@@ -158,7 +172,7 @@ class StartObjectiveAnalysisCapability:
         if status == "failed":
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data=projection,
                 resource_refs=(ref,),
                 error_code=(
@@ -172,7 +186,7 @@ class StartObjectiveAnalysisCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="queued" if status in {"queued", "running"} else "succeeded",
+            status=ToolResultStatus.QUEUED if status in {"queued", "running"} else ToolResultStatus.SUCCEEDED,
             data=projection,
             resource_refs=(ref,),
             warnings=tuple(payload.get("warnings") or ()),
@@ -211,7 +225,7 @@ class InspectObjectiveAnalysisCapability:
         projection = _project_analysis(payload)
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data=projection,
             resource_refs=(
                 _analysis_ref(
@@ -365,7 +379,7 @@ class AssessObjectiveQualityCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": arguments.objective_id,
                 "published_analysis_version": published_version,

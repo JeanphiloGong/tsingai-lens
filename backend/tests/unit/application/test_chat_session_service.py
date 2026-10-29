@@ -81,7 +81,7 @@ class _WriteCapability:
         self.executed.append(arguments.model_dump())
         return ChatToolResult(
             tool_call_id="rebound-by-runner",
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={"objective_id": "obj-1"},
         )
 
@@ -89,6 +89,9 @@ class _WriteCapability:
 class _CollectionService:
     def __init__(self) -> None:
         self.full_reads = 0
+
+    async def get_agent_default_permission_for_user(self, collection_id, user_id):
+        return {"mode": "confirm"}
 
     async def collection_belongs_to_user(
         self,

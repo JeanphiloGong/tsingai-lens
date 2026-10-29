@@ -7,9 +7,11 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from math import isfinite
 from typing import Any, Callable, Mapping
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 
 from application.chat.capabilities import ToolSpec
 from application.chat.context_builder import ChatContextBuilder, ChatModelContext
@@ -155,17 +157,23 @@ class OpenAIChatModel:
                 await finish("provider_succeeded", usage=usage)
                 return turn
             except ModelResponseError as exc:
-                await finish("response_invalid", error_code=exc.reason, usage=exc.usage)
+                await finish(
+                    "provider_failed" if exc.http_status is not None or exc.reason in {
+                        "context_window_exceeded", "quota_exhausted", "provider_timeout", "transport_error",
+                        "transient_provider_error", "unclassified_provider_error",
+                    } else "response_invalid",
+                    error_code=exc.reason, usage=exc.usage,
+                )
                 raise
             except asyncio.CancelledError:
                 await finish("cancelled", error_code="request_cancelled", usage=usage)
                 raise
-            except Exception as exc:  # noqa: BLE001
-                reason = _provider_error_code(exc)
-                await finish("provider_failed", error_code=reason, usage=usage)
-                if reason == "context_window_exceeded":
-                    raise ModelResponseError("The provider rejected the context size.",
-                                             reason=reason, retryable=False, usage=usage) from exc
+            except APIError as exc:
+                failure = _provider_failure(exc, usage=usage)
+                await finish("provider_failed", error_code=failure.reason, usage=usage)
+                raise failure from exc
+            except Exception:  # noqa: BLE001
+                await finish("provider_failed", error_code="provider_error", usage=usage)
                 raise
 
         usage = None
@@ -178,20 +186,8 @@ class OpenAIChatModel:
             usage = _model_usage(getattr(completion, "usage", None))
             choices = getattr(completion, "choices", None)
             if not choices:
-                logger.warning(
-                    "Research model response shape invalid model=%s reason=%s "
-                    "message=%s response_type=%s choices_type=%s choices_count=%s "
-                    "response_fields=%s usage_present=%s",
-                    self.model,
-                    "empty_response",
-                    "research model returned no choices",
-                    type(completion).__name__,
-                    type(choices).__name__,
-                    _safe_length(choices),
-                    _safe_shape_fields(completion),
-                    usage is not None,
-                )
-                raise _invalid_response(
+                logger.warning("Research model response invalid model=%s reason=%s", self.model, "empty_response")
+                raise ModelResponseError(
                     "research model returned no choices",
                     reason="empty_response",
                     usage=usage,
@@ -199,46 +195,16 @@ class OpenAIChatModel:
             try:
                 choice = choices[0]
             except (AttributeError, IndexError, KeyError, TypeError) as exc:
-                logger.warning(
-                    "Research model response shape invalid model=%s reason=%s "
-                    "message=%s response_type=%s choices_type=%s choices_count=%s "
-                    "response_fields=%s",
-                    self.model,
-                    "invalid_response_shape",
-                    "research model returned an invalid response shape",
-                    type(completion).__name__,
-                    type(choices).__name__,
-                    _safe_length(choices),
-                    _safe_shape_fields(completion),
-                )
-                raise _invalid_response(
+                logger.warning("Research model response invalid model=%s reason=%s", self.model, "invalid_response_shape")
+                raise ModelResponseError(
                     "research model returned an invalid response shape",
                     reason="invalid_response_shape",
                     usage=usage,
                 ) from exc
             message = getattr(choice, "message", None)
             if message is None:
-                logger.warning(
-                    "Research model response shape invalid model=%s reason=%s "
-                    "message=%s missing_field=message response_type=%s "
-                    "choices_type=%s choices_count=%s choice_type=%s choice_fields=%s "
-                    "message_attribute_present=%s message_is_none=%s finish_reason=%s "
-                    "response_fields=%s usage_present=%s",
-                    self.model,
-                    "invalid_response_shape",
-                    "research model returned an invalid response shape",
-                    type(completion).__name__,
-                    type(choices).__name__,
-                    _safe_length(choices),
-                    type(choice).__name__,
-                    _safe_shape_fields(choice),
-                    _safe_has_field(choice, "message"),
-                    message is None,
-                    _safe_finish_reason(getattr(choice, "finish_reason", None)),
-                    _safe_shape_fields(completion),
-                    usage is not None,
-                )
-                raise _invalid_response(
+                logger.warning("Research model response invalid model=%s reason=%s", self.model, "invalid_response_shape")
+                raise ModelResponseError(
                     "research model returned an invalid response shape",
                     reason="invalid_response_shape",
                     usage=usage,
@@ -257,7 +223,7 @@ class OpenAIChatModel:
                     context.require_tool_call,
                 )
             if getattr(choice, "finish_reason", None) == "length":
-                raise _invalid_response(
+                raise ModelResponseError(
                     "research model exhausted its output allowance",
                     reason="output_token_limit", retryable=False,
                     partial_content=bool(content), usage=usage,
@@ -266,7 +232,7 @@ class OpenAIChatModel:
                 try:
                     turn = ModelTurn(content=content, usage=usage)
                 except ValueError as exc:
-                    raise _invalid_response(
+                    raise ModelResponseError(
                         "research model returned no usable content",
                         reason=(
                             "reasoning_only_response"
@@ -281,7 +247,7 @@ class OpenAIChatModel:
             parsed = []
             for raw_call in tool_calls:
                 if getattr(raw_call, "type", "function") != "function":
-                    raise _invalid_response("unsupported tool call", reason="unsupported_tool_call", partial_content=bool(content))
+                    raise ModelResponseError("unsupported tool call", reason="unsupported_tool_call", partial_content=bool(content))
                 function = getattr(raw_call, "function", None)
                 parsed.append(_parse_call(
                     str(getattr(function, "name", None) or ""),
@@ -292,17 +258,23 @@ class OpenAIChatModel:
             await finish("provider_succeeded", usage=usage)
             return turn
         except ModelResponseError as exc:
-            await finish("response_invalid", error_code=exc.reason, usage=exc.usage)
+            await finish(
+                "provider_failed" if exc.http_status is not None or exc.reason in {
+                    "context_window_exceeded", "quota_exhausted", "provider_timeout", "transport_error",
+                    "transient_provider_error", "unclassified_provider_error",
+                } else "response_invalid",
+                error_code=exc.reason, usage=exc.usage,
+            )
             raise
         except asyncio.CancelledError:
             await finish("cancelled", error_code="request_cancelled", usage=usage)
             raise
-        except Exception as exc:  # noqa: BLE001
-            reason = _provider_error_code(exc)
-            await finish("provider_failed", error_code=reason, usage=usage)
-            if reason == "context_window_exceeded":
-                raise ModelResponseError("The provider rejected the context size.",
-                                         reason=reason, retryable=False, usage=usage) from exc
+        except APIError as exc:
+            failure = _provider_failure(exc, usage=usage)
+            await finish("provider_failed", error_code=failure.reason, usage=usage)
+            raise failure from exc
+        except Exception:  # noqa: BLE001
+            await finish("provider_failed", error_code="provider_error", usage=usage)
             raise
 
     async def _stream_turn(
@@ -329,43 +301,16 @@ class OpenAIChatModel:
                     finish_reason = getattr(choice, "finish_reason", None) or finish_reason
                     delta = getattr(choice, "delta", None)
                 except (AttributeError, IndexError, KeyError, TypeError) as exc:
-                    logger.warning(
-                        "Research model stream response shape invalid model=%s reason=%s "
-                        "message=%s chunk_type=%s choices_type=%s choices_count=%s "
-                        "chunk_fields=%s",
-                        self.model,
-                        "invalid_stream",
-                        "research model returned an invalid streamed response",
-                        type(chunk).__name__,
-                        type(getattr(chunk, "choices", None)).__name__,
-                        _safe_length(getattr(chunk, "choices", None)),
-                        _safe_shape_fields(chunk),
-                    )
-                    raise _invalid_response(
+                    logger.warning("Research model response invalid model=%s reason=%s", self.model, "invalid_stream")
+                    raise ModelResponseError(
                         "research model returned an invalid streamed response",
                         reason="invalid_stream",
                         partial_content=bool(content_parts),
                         usage=usage,
                     ) from exc
                 if delta is None:
-                    logger.warning(
-                        "Research model stream response shape invalid model=%s reason=%s "
-                        "message=%s missing_field=delta chunk_type=%s choices_type=%s "
-                        "choices_count=%s choice_type=%s choice_fields=%s finish_reason=%s "
-                        "chunk_fields=%s usage_present=%s",
-                        self.model,
-                        "invalid_stream",
-                        "research model returned an invalid streamed response",
-                        type(chunk).__name__,
-                        type(getattr(chunk, "choices", None)).__name__,
-                        _safe_length(getattr(chunk, "choices", None)),
-                        type(choice).__name__,
-                        _safe_shape_fields(choice),
-                        _safe_finish_reason(getattr(choice, "finish_reason", None)),
-                        _safe_shape_fields(chunk),
-                        usage is not None,
-                    )
-                    raise _invalid_response(
+                    logger.warning("Research model response invalid model=%s reason=%s", self.model, "invalid_stream")
+                    raise ModelResponseError(
                         "research model returned an invalid streamed response",
                         reason="invalid_stream",
                         partial_content=bool(content_parts),
@@ -388,7 +333,7 @@ class OpenAIChatModel:
                         raise ValueError("negative tool call index")
                     tool_name_parts, tool_argument_parts = parts_by_index.setdefault(index, ([], []))
                     if (getattr(raw_call, "type", None) or "function") != "function":
-                        raise _invalid_response(
+                        raise ModelResponseError(
                             "research model returned an unsupported tool call type",
                             reason="unsupported_tool_call",
                             partial_content=bool(content_parts),
@@ -404,20 +349,15 @@ class OpenAIChatModel:
             exc.usage = usage
             raise
         except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
-            raise _invalid_response(
+            raise ModelResponseError(
                 "research model returned an invalid streamed response",
                 reason="invalid_stream",
                 partial_content=bool(content_parts),
                 usage=usage,
             ) from exc
 
-        except Exception as exc:
-            if _provider_error_code(exc) == "context_window_exceeded":
-                raise ModelResponseError(
-                    "The provider rejected the context size.", reason="context_window_exceeded",
-                    retryable=False, partial_content=bool(content_parts), usage=usage,
-                ) from exc
-            raise
+        except APIError as exc:
+            raise _provider_failure(exc, partial_content=bool(content_parts), usage=usage) from exc
 
         record_llm_prompt_version(
             "research_agent", RESEARCH_AGENT_PROMPT_VERSION,
@@ -425,14 +365,14 @@ class OpenAIChatModel:
         record_llm_completion(last_chunk, requested_model=self.model)
         content = "".join(content_parts).strip()
         if finish_reason == "length":
-            raise _invalid_response(
+            raise ModelResponseError(
                 "research model exhausted its output allowance",
                 reason="output_token_limit", retryable=False,
                 partial_content=bool(content), usage=usage,
             )
         if not parts_by_index:
             if not content:
-                raise _invalid_response(
+                raise ModelResponseError(
                     "research model returned no usable streamed content",
                     reason=(
                         "reasoning_only_response"
@@ -444,7 +384,7 @@ class OpenAIChatModel:
             try:
                 return ModelTurn(content=content, usage=usage)
             except ValueError as exc:
-                raise _invalid_response(
+                raise ModelResponseError(
                     "research model returned no usable streamed content",
                     reason="empty_response",
                     usage=usage,
@@ -452,7 +392,7 @@ class OpenAIChatModel:
 
         try:
             if any(not "".join(arguments).strip() for _, arguments in parts_by_index.values()):
-                raise _invalid_response(
+                raise ModelResponseError(
                     "research model stream omitted tool arguments",
                     reason="stream_tool_arguments_missing", partial_content=bool(content), usage=usage,
                 )
@@ -469,16 +409,15 @@ class OpenAIChatModel:
 
 
 def _parse_call(name: str, raw_arguments: str, *, partial_content: bool) -> ModelToolCall:
+    if not name.strip():
+        raise ModelResponseError("invalid tool call", reason="invalid_tool_call", partial_content=partial_content)
     try:
         arguments = json.loads(raw_arguments)
         if not isinstance(arguments, Mapping):
             raise ValueError("arguments must be an object")
     except (TypeError, ValueError) as exc:
-        raise _invalid_response("invalid tool arguments", reason="invalid_tool_arguments", partial_content=partial_content) from exc
-    try:
-        return ModelToolCall(name=name, arguments=arguments)
-    except (TypeError, ValueError) as exc:
-        raise _invalid_response("invalid tool call", reason="invalid_tool_call", partial_content=partial_content) from exc
+        raise ModelResponseError("invalid tool arguments", reason="invalid_tool_arguments", partial_content=partial_content) from exc
+    return ModelToolCall(name=name, arguments=arguments)
 
 
 def _model_usage(raw_usage: Any) -> ModelUsage | None:
@@ -488,48 +427,6 @@ def _model_usage(raw_usage: Any) -> ModelUsage | None:
     completion = int(getattr(raw_usage, "completion_tokens", 0) or 0)
     total = int(getattr(raw_usage, "total_tokens", 0) or 0)
     return ModelUsage(prompt, completion, max(total, prompt + completion))
-
-
-def _safe_length(value: Any) -> int | None:
-    try:
-        return len(value)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _safe_shape_fields(value: Any) -> str:
-    if isinstance(value, Mapping):
-        raw_names = value.keys()
-    else:
-        try:
-            raw_names = vars(value).keys()
-        except Exception:  # noqa: BLE001
-            return "unknown"
-    names: set[str] = set()
-    for raw_name in raw_names:
-        name = str(raw_name)[:40]
-        sanitized = "".join(
-            character if character.isascii() and (character.isalnum() or character in "_.-") else "_"
-            for character in name
-        )
-        if sanitized:
-            names.add(sanitized)
-    return ",".join(sorted(names)[:16]) or "none"
-
-
-def _safe_has_field(value: Any, name: str) -> bool:
-    try:
-        if isinstance(value, Mapping):
-            return name in value
-        return hasattr(value, name)
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _safe_finish_reason(value: Any) -> str:
-    return value if isinstance(value, str) and value in {
-        "stop", "length", "tool_calls", "content_filter",
-    } else "unknown"
 
 
 def _json_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -544,39 +441,46 @@ def _json_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
         ) from exc
 
 
-def _provider_error_code(exc: BaseException) -> str:
-    """Persist a stable transport class without provider bodies or credentials."""
-    body = getattr(exc, "body", None)
-    if isinstance(body, Mapping):
-        detail = body.get("error", body)
-        if (isinstance(detail, Mapping)
-                and getattr(exc, "status_code", None) in {400, 413, 422}
-                and detail.get("code") in {"context_length_exceeded", "context_window_exceeded"}):
-            return "context_window_exceeded"
-    name = type(exc).__name__.lower()
-    if "timeout" in name:
-        return "provider_timeout"
-    if "rate" in name or "429" in str(getattr(exc, "status_code", "")):
-        return "provider_rate_limited"
-    if "connection" in name:
-        return "provider_connection_error"
-    return "provider_error"
-
-
-def _invalid_response(
-    message: str,
-    *,
-    reason: str,
-    partial_content: bool = False,
-    retryable: bool = True,
-    usage: ModelUsage | None = None,
+def _provider_failure(
+    exc: APIError, *, partial_content: bool = False, usage: ModelUsage | None = None,
 ) -> ModelResponseError:
+    """Interpret the supported SDK failure at the request boundary."""
+    status = exc.status_code if isinstance(exc, APIStatusError) else None
+    body = exc.body
+    detail = body.get("error", body) if isinstance(body, Mapping) else {}
+    codes = {detail.get(key) for key in ("code", "type")
+             if isinstance(detail, Mapping) and isinstance(detail.get(key), str)}
+    retry_after = None
+    if isinstance(exc, APIStatusError):
+        raw = exc.response.headers.get("retry-after")
+        if raw is not None:
+            try:
+                retry_after = float(raw)
+            except ValueError:
+                try:
+                    retry_after = max(0.0, (parsedate_to_datetime(raw) - datetime.now(timezone.utc)).total_seconds())
+                except (TypeError, ValueError, OverflowError):
+                    pass
+            if retry_after is not None and (not isfinite(retry_after) or retry_after < 0):
+                retry_after = None
+    if status in {400, 413, 422} and codes.intersection({"context_length_exceeded", "context_window_exceeded"}):
+        reason, retryable = "context_window_exceeded", False
+    elif codes.intersection({"insufficient_quota", "quota_exceeded", "billing_hard_limit_reached"}):
+        reason, retryable = "quota_exhausted", False
+    elif isinstance(exc, APITimeoutError) or status == 408:
+        reason, retryable = "provider_timeout", True
+    elif isinstance(exc, APIConnectionError):
+        reason, retryable = "transport_error", True
+    elif status is not None:
+        reason, retryable = "http_status", status == 429 or status >= 500
+    elif codes.intersection({"rate_limit_exceeded", "server_error", "internal_server_error", "overloaded_error", "temporarily_unavailable"}) or not (isinstance(detail, Mapping) and detail.get("code") is not None):
+        reason, retryable = "transient_provider_error", True
+    else:
+        reason, retryable = "unclassified_provider_error", False
     return ModelResponseError(
-        message,
-        reason=reason,
-        partial_content=partial_content,
-        retryable=retryable,
-        usage=usage,
+        "The model provider request failed.", reason=reason, retryable=retryable,
+        partial_content=partial_content, usage=usage,
+        http_status=status, retry_after_seconds=retry_after,
     )
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 import json
@@ -215,26 +217,25 @@ def test_agent_request_rejects_missing_interpretation_kind_and_experiment_scope(
         )
 
 
-def test_agent_request_rejects_measurement_without_a_reported_result() -> None:
-    with pytest.raises(ValidationError, match="measurement requires value or result_text"):
-        PaperExperimentDraftToolRequest(
-            objective_id="objective-1",
-            document_id="paper-1",
-            experiments=[
-                {
-                    "label": "Tensile series",
-                    "scope_description": "One tensile test condition.",
-                    "measurements": [
-                        {
-                            "measurement_key": "m1",
-                            "outcome": "elongation",
-                            "value": None,
-                            "result_text": None,
-                            "source_labels": ["S001"],
-                        }
-                    ],
-                }
-            ],
+@pytest.mark.parametrize("missing_result", [{"value": None, "result_text": None}, {}])
+async def test_authoring_prepare_rejects_measurement_without_a_reported_result(missing_result) -> None:
+    draft = _draft()
+    draft["experiments"][0]["measurements"] = [{
+        "measurement_key": "m1", "outcome": "elongation",
+        "source_labels": ["S001"], **missing_result,
+    }]
+    request = PaperExperimentDraftToolRequest(
+        objective_id="objective-1", document_id="paper-1", **draft
+    )
+    service = PaperExperimentAuthoringService(
+        collection_service=_CollectionService(),
+        source_artifact_repository=_SourceRepository(),
+        experiment_analysis_writer=object(),
+    )
+    with pytest.raises(PaperExperimentDraftValidationError, match="has no result"):
+        await service.prepare(
+            collection_id="collection-1", user_id="user-1",
+            document_id=request.document_id, raw_draft=request.raw_draft(),
         )
 
 
@@ -256,15 +257,6 @@ def test_agent_request_accepts_numeric_or_qualitative_result_without_unused_fiel
     assert all(measurement[key] == value for key, value in reported_result.items())
 
 
-def test_agent_request_rejects_omitted_numeric_and_qualitative_result() -> None:
-    with pytest.raises(ValidationError, match="measurement requires value or result_text"):
-        PaperExperimentDraftToolRequest(
-            objective_id="objective-1", document_id="paper-1",
-            experiments=[{
-                "label": "316L tensile series", "scope_description": "One specimen cohort.",
-                "measurements": [{"measurement_key": "m1", "outcome": "elongation", "source_labels": ["S001"]}],
-            }],
-        )
 
 
 @pytest.mark.anyio
@@ -567,7 +559,7 @@ def _prepared_for_capability(draft):
 def _read_messages(content="Methods", complete=True):
     tool_result = ChatToolResult(
         tool_call_id="read-1",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "document_id": "paper-1",
             "source_kind": "text_window",
@@ -592,7 +584,7 @@ def _read_messages(content="Methods", complete=True):
         ChatMessage(
             message_id="read-result",
             session_id="session-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(tool_result),
                 ensure_ascii=True,
@@ -666,7 +658,7 @@ async def test_agent_experiment_draft_can_only_be_saved_from_stored_digest():
     message = ChatMessage(
         message_id="message-1",
         session_id="session-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(proposed),
             ensure_ascii=True,
@@ -721,7 +713,7 @@ async def test_agent_save_rejects_stale_or_unapproved_draft(change):
     message = ChatMessage(
         message_id="draft-result",
         session_id="session-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(proposed),
             ensure_ascii=True,

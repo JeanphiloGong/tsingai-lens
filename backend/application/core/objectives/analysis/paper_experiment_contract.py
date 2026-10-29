@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 from domain.core.scientific_fact import (
-    SCIENTIFIC_CONTEXT_SCOPES,
-    _text as scientific_text,
-    _terms as scientific_terms,
-    _scientific_scalar as scientific_scalar,
-    _choice as scientific_choice,
     ScientificAttribute,
     ScientificVariable,
 )
@@ -25,6 +20,11 @@ from typing import (
 import unicodedata
 
 from domain.core.paper_experiment import (
+    PAPER_EXPERIMENT_DESIGN_TYPES,
+    MEASUREMENT_RESULT_KINDS,
+    COMPARISON_BASIS,
+    COMPARISON_DIRECTIONS,
+    INTERPRETATION_KINDS,
     SourceReference,
     ExperimentalVariant,
     ExperimentTestCondition,
@@ -280,29 +280,6 @@ class PaperExperimentDraft:
     source_labels: tuple[str, ...] = ()
     unresolved_issues: tuple[Mapping[str, Any], ...] = ()
 
-    def __post_init__(self) -> None:
-        forbidden_path = _first_forbidden_field(self.payload)
-        if forbidden_path is None:
-            forbidden_path = _first_forbidden_field(
-                self.unresolved_issues, "unresolved_issues"
-            )
-        if forbidden_path is not None:
-            raise ValueError(
-                "draft cannot contain formal identity, request ownership, or "
-                f"validation fields: {forbidden_path}"
-            )
-        object.__setattr__(self, "payload", dict(self.payload))
-        object.__setattr__(
-            self,
-            "source_labels",
-            tuple(str(item).strip() for item in self.source_labels if str(item).strip()),
-        )
-        object.__setattr__(
-            self,
-            "unresolved_issues",
-            tuple(dict(item) for item in self.unresolved_issues),
-        )
-
 
 @dataclass(frozen=True)
 class PaperExperimentModelOutput:
@@ -317,24 +294,6 @@ class PaperExperimentModelOutput:
     experiments: tuple[PaperExperimentDraft, ...] = ()
     source_labels: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     unresolved_issues: tuple[Mapping[str, Any], ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.document_id.strip() or not self.source_fingerprint.strip():
-            raise ValueError("model output requires document_id and source_fingerprint")
-        forbidden_path = _first_forbidden_field(
-            self.unresolved_issues, "unresolved_issues"
-        )
-        if forbidden_path is not None:
-            raise ValueError(
-                "model output cannot contain formal identity, request ownership, "
-                f"or validation fields: {forbidden_path}"
-            )
-        object.__setattr__(self, "source_labels", dict(self.source_labels or {}))
-        object.__setattr__(
-            self,
-            "unresolved_issues",
-            tuple(dict(item) for item in self.unresolved_issues),
-        )
 
 
 def parse_paper_experiment_response(
@@ -393,6 +352,73 @@ def parse_paper_experiment_response(
             "raw model output cannot contain formal identity, request "
             f"ownership, source reference, or validation fields: {forbidden}"
         )
+    for experiment in experiment_items:
+        for name in ("label", "scope_description"):
+            if name in experiment and (not isinstance(experiment[name], str) or not experiment[name].strip()):
+                raise ValueError(f"experiment {name} must be non-empty text")
+        if experiment.get("design_type", "unknown") not in PAPER_EXPERIMENT_DESIGN_TYPES:
+            raise ValueError("unsupported experiment design type")
+        variants = _mapping_items(
+            experiment.get("experimental_variants", experiment.get("variants")),
+            field="experimental_variants",
+        )
+        tests = _mapping_items(experiment.get("test_conditions"), field="test_conditions")
+        measurements = _mapping_items(experiment.get("measurements"), field="measurements")
+        comparisons = _mapping_items(experiment.get("comparisons"), field="comparisons")
+        interpretations = _mapping_items(
+            experiment.get("reported_interpretations", experiment.get("interpretations")),
+            field="reported_interpretations",
+        )
+        for variant in variants:
+            if not isinstance(variant.get("variant_key"), str) or not isinstance(variant.get("variant_label"), str):
+                raise ValueError("variant key and label must be text")
+        for test in tests:
+            if not isinstance(test.get("test_key"), str) or not isinstance(test.get("test_type"), str):
+                raise ValueError("test key and type must be text")
+            for name in ("method", "standard"):
+                if test.get(name) is not None and not isinstance(test[name], str):
+                    raise ValueError(f"test {name} must be text")
+        for measurement in measurements:
+            if not isinstance(measurement.get("measurement_key"), str) or not isinstance(measurement.get("outcome"), str):
+                raise ValueError("measurement key and outcome must be text")
+            for name in ("variant_key", "test_key", "unit", "result_text"):
+                if measurement.get(name) is not None and not isinstance(measurement[name], str):
+                    raise ValueError(f"measurement {name} must be text")
+            for name in ("statistics", "measurement_scope"):
+                if measurement.get(name) is not None and not isinstance(measurement[name], Mapping):
+                    raise ValueError(f"measurement {name} must be an object")
+            if measurement.get("result_kind", "measured") not in MEASUREMENT_RESULT_KINDS:
+                raise ValueError("unsupported measurement result kind")
+        for comparison in comparisons:
+            for name in ("comparison_key", "baseline_variant_key", "target_variant_key", "outcome"):
+                if not isinstance(comparison.get(name), str):
+                    raise ValueError(f"comparison {name} must be text")
+            _string_items(comparison.get("baseline_measurement_keys"), field="baseline_measurement_keys")
+            _string_items(comparison.get("target_measurement_keys"), field="target_measurement_keys")
+            if comparison.get("basis", "reported") not in COMPARISON_BASIS:
+                raise ValueError("unsupported comparison basis")
+            if comparison.get("direction", "unknown") not in COMPARISON_DIRECTIONS:
+                raise ValueError("unsupported comparison direction")
+        for interpretation in interpretations:
+            if not isinstance(interpretation.get("statement"), str) or interpretation.get("kind") not in INTERPRETATION_KINDS:
+                raise ValueError("interpretation requires statement and valid kind")
+            _string_items(interpretation.get("measurement_keys"), field="measurement_keys")
+            _string_items(interpretation.get("comparison_keys"), field="comparison_keys")
+        for records, text_lists, attributes in (
+            (variants, ("notes", "missing_dimensions", "identity_evidence"), ("subject_attributes", "intervention_attributes", "state")),
+            (tests, ("notes", "missing_parameters", "outcome_scope", "protocol_evidence"), ("parameters",)),
+            (measurements, ("notes",), ()),
+            (comparisons, ("reasons",), ("matched_conditions",)),
+        ):
+            for record in records:
+                for name in text_lists:
+                    _string_items(record.get(name), field=name)
+                for name in attributes:
+                    for attribute in _mapping_items(record.get(name), field=name):
+                        if not isinstance(attribute.get("name"), str) or not isinstance(attribute.get("value"), (str, int, float, bool)):
+                            raise ValueError("scientific attribute requires text name and scalar value")
+                if record.get("population_scope") is not None and not isinstance(record["population_scope"], Mapping):
+                    raise ValueError("population_scope must be an object")
     return PaperExperimentModelOutput(
         document_id=document_id,
         source_fingerprint=source_fingerprint,
@@ -437,24 +463,10 @@ class ReconciledPaperExperimentOutput:
             raise ValueError(
                 "reconciled experiment keys must match the accepted draft count"
             )
-        if any(not str(key).strip() for key in self.accepted_experiment_keys):
+        if any(not key.strip() for key in self.accepted_experiment_keys):
             raise ValueError("reconciled experiment keys must be non-empty")
         if len(set(self.accepted_experiment_keys)) != len(self.accepted_experiment_keys):
             raise ValueError("reconciled experiment keys must be unique")
-        object.__setattr__(
-            self,
-            "accepted_experiment_keys",
-            tuple(str(key).strip() for key in self.accepted_experiment_keys),
-        )
-        object.__setattr__(
-            self,
-            "audit_issues",
-            tuple(
-                dict(item)
-                for item in self.audit_issues
-                if isinstance(item, Mapping)
-            ),
-        )
 
 
 @dataclass(frozen=True)
@@ -472,23 +484,13 @@ def _draft_items(payload: Mapping[str, Any], *names: str) -> list[dict[str, Any]
     present = [name for name in names if payload.get(name) is not None]
     if len(present) > 1:
         raise ValueError("draft cannot provide both " + " and ".join(present))
-    for name in present:
-        value = payload[name]
-        if not isinstance(value, (list, tuple)):
-            raise ValueError(f"{name} must be a list")
-        if any(not isinstance(item, Mapping) for item in value):
-            raise ValueError(f"{name} must contain only objects")
-        return [dict(item) for item in value]
-    return []
+    return [dict(item) for item in payload[present[0]]] if present else []
 
 
-def _source_labels(value: Any) -> tuple[str, ...]:
-    """Normalize source-label fields while merging repeated observations."""
+def _source_labels(value: Iterable[str]) -> tuple[str, ...]:
+    """Keep exact Source labels once while merging repeated observations."""
 
-    if value is None:
-        return ()
-    values = value if isinstance(value, (list, tuple, set, frozenset)) else (value,)
-    return tuple(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
+    return tuple(dict.fromkeys(value))
 
 
 def _require_unique_local_keys(
@@ -497,7 +499,7 @@ def _require_unique_local_keys(
     field: str,
     path: str,
 ) -> tuple[str, ...]:
-    keys = tuple(str(item.get(field) or "").strip() for item in items)
+    keys = tuple(item[field] for item in items)
     if any(not key for key in keys):
         raise ValueError(f"{path} requires non-empty {field}")
     if len(set(keys)) != len(keys):
@@ -520,7 +522,7 @@ def _split_conflicting_measurements(
     seen: dict[str, dict[str, Any]] = {}
     for raw in items:
         item = dict(raw)
-        key = str(item.get("measurement_key") or "").strip()
+        key = item["measurement_key"]
         if not key or key not in seen:
             result.append(item)
             if key:
@@ -610,11 +612,7 @@ def _reference_keys(
         if raw is None:
             continue
         values = raw if isinstance(raw, (list, tuple)) else (raw,)
-        references.extend(
-            str(item).strip()
-            for item in values
-            if not isinstance(item, Mapping) and str(item).strip()
-        )
+        references.extend(values)
     return tuple(references)
 
 
@@ -747,18 +745,12 @@ def prepare_model_output(
 ) -> ReconciledPaperExperimentOutput:
     """Validate paper facts; Objective readiness is assessed separately."""
 
-    if not isinstance(output, PaperExperimentModelOutput):
-        raise TypeError("prepare_model_output requires PaperExperimentModelOutput")
     catalog = set(output.source_labels)
     prepared: list[PaperExperimentDraft] = []
     accepted: list[str] = []
     seen_series_keys: set[str] = set()
     audit: list[dict[str, Any]] = []
-    global_issues = [
-        dict(issue)
-        for issue in output.unresolved_issues
-        if isinstance(issue, Mapping)
-    ]
+    global_issues = output.unresolved_issues
     _validate_issue_references(
         global_issues,
         source_labels=catalog,
@@ -2133,31 +2125,21 @@ def bind_model_output(
     source_fingerprint: str,
 ) -> tuple[PaperExperimentRevision, ...]:
     """Resolve sources and inject formal identity after reconciliation only."""
-
     if not isinstance(output, ReconciledPaperExperimentOutput):
         raise ValueError(
-            "formal identity allocation requires boundary reconciliation; "
-            "call reconcile_model_output first"
+            "formal identity allocation requires boundary reconciliation; call reconcile_model_output first"
         )
     model_output = output.output
-
     if model_output.document_id != document_id:
         raise ValueError("model output document does not match request")
     if model_output.source_fingerprint != source_fingerprint:
         raise ValueError("model output source fingerprint does not match request")
-    if len(model_output.experiments) != len(experiment_ids) or len(model_output.experiments) != len(
-        experiment_versions
-    ):
+    if len(model_output.experiments) != len(experiment_ids) or len(
+        model_output.experiments
+    ) != len(experiment_versions):
         raise ValueError("formal identity count must match draft experiment count")
-
     labels = {
-        label: SourceReference(
-            document_id=_text(reference.get("document_id")),
-            source_fingerprint=_text(reference.get("source_fingerprint")),
-            source_kind=_text(reference.get("source_kind")),
-            source_ref=_text(reference.get("source_ref")),
-            quote=_text(reference.get("quote")),
-        )
+        label: SourceReference(**reference)
         for label, reference in model_output.source_labels.items()
     }
     revisions: list[PaperExperimentRevision] = []
@@ -2174,38 +2156,25 @@ def bind_model_output(
         content = _resolve_source_labels(draft_payload, labels)
         boundary_refs = _resolve_boundary_evidence_refs(draft_payload, labels)
         if boundary_refs:
-            # ``split_evidence`` is a Draft-only shape.  The revision schema
-            # does not need another boundary entity, but it must retain the
-            # Source lineage that justified an independent scope.  Keep those
-            # references in the experiment-level Source set and add a small
-            # audit record so a later reader can distinguish them from value
-            # or measurement evidence.
             content["source_refs"] = _dedupe_records(
-                [
-                    *(item for item in content.get("source_refs") or () if isinstance(item, Mapping)),
-                    *boundary_refs,
-                ]
+                [*(item for item in content.get("source_refs") or ()), *boundary_refs]
             )
         _validate_source_context(content, document_id, source_fingerprint)
         draft_source_refs = content.get("source_refs") or ()
-        content["source_refs"] = _dedupe_records(
-            item for item in draft_source_refs if isinstance(item, Mapping)
-        )
+        content["source_refs"] = _dedupe_records(draft_source_refs)
         relevant_issues = _issues_for_draft(
-            output,
-            draft=draft,
-            accepted_key=accepted_key,
+            output, draft=draft, accepted_key=accepted_key
         )
         content["unresolved_issues"] = _dedupe_records(
-            item
-            for item in _resolve_source_labels(
-                [*draft.unresolved_issues, *relevant_issues], labels
+            (
+                item
+                for item in _resolve_source_labels(
+                    [*draft.unresolved_issues, *relevant_issues], labels
+                )
             )
-            if isinstance(item, Mapping)
         )
         boundary_issue = _boundary_scope_issue(
-            draft_payload,
-            boundary_refs=boundary_refs,
+            draft_payload, boundary_refs=boundary_refs
         )
         if boundary_issue is not None:
             content["unresolved_issues"] = _dedupe_records(
@@ -2219,330 +2188,289 @@ def bind_model_output(
                 document_id=document_id,
                 experiment_version=experiment_version,
                 source_fingerprint=source_fingerprint,
-                label=_text(content.get("label")),
-                scope_description=_text(content.get("scope_description")),
-                design_type=_text(content.get("design_type")) or "unknown",
-                identity_status=_text(content.get("identity_status")) or "unknown",
-                binding_status=_text(content.get("binding_status")) or "draft",
+                label=content["label"],
+                scope_description=content["scope_description"],
+                design_type=content.get("design_type") or "unknown",
+                identity_status=content.get("identity_status") or "unknown",
+                binding_status=content.get("binding_status") or "draft",
                 variants=tuple(
                     (
                         ExperimentalVariant(
-                            variant_key=_text(
-                                item.get("variant_key") or item.get("variant_id")
+                            variant_key=item.get("variant_key"),
+                            variant_label=item.get("variant_label"),
+                            subject_attributes=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=value["name"],
+                                        value=value["value"],
+                                        unit=value.get("unit"),
+                                        context_scope=value.get("context_scope")
+                                        or "unknown",
+                                        applies_to_outcomes=tuple(
+                                            value.get("applies_to_outcomes") or ()
+                                        ),
+                                    )
+                                    for value in item.get("subject_attributes") or ()
+                                )
                             ),
-                            variant_label=_text(item.get("variant_label")),
-                            subject_attributes=_attributes(
-                                item.get("subject_attributes")
+                            intervention_attributes=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=value["name"],
+                                        value=value["value"],
+                                        unit=value.get("unit"),
+                                        context_scope=value.get("context_scope")
+                                        or "unknown",
+                                        applies_to_outcomes=tuple(
+                                            value.get("applies_to_outcomes") or ()
+                                        ),
+                                    )
+                                    for value in item.get("intervention_attributes")
+                                    or ()
+                                )
                             ),
-                            intervention_attributes=_attributes(
-                                item.get("intervention_attributes")
+                            state=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=value["name"],
+                                        value=value["value"],
+                                        unit=value.get("unit"),
+                                        context_scope=value.get("context_scope")
+                                        or "unknown",
+                                        applies_to_outcomes=tuple(
+                                            value.get("applies_to_outcomes") or ()
+                                        ),
+                                    )
+                                    for value in item.get("state") or ()
+                                )
                             ),
-                            state=_attributes(item.get("state")),
-                            population_scope=(
-                                _mapping(item.get("population_scope"))
-                                if item.get("population_scope") is not None
-                                else None
-                            ),
+                            population_scope=item.get("population_scope"),
                             source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
                             binding_source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("binding_source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
-                            binding_status=_text(item.get("binding_status"))
-                            or "uncertain",
-                            notes=_strings(item.get("notes")),
-                            identity_specificity=_text(item.get("identity_specificity"))
+                            binding_status=item.get("binding_status") or "uncertain",
+                            notes=tuple(item.get("notes") or ()),
+                            identity_specificity=item.get("identity_specificity")
                             or "unknown",
-                            missing_dimensions=_strings(item.get("missing_dimensions")),
-                            identity_evidence=_strings(item.get("identity_evidence")),
+                            missing_dimensions=tuple(
+                                item.get("missing_dimensions") or ()
+                            ),
+                            identity_evidence=tuple(
+                                item.get("identity_evidence") or ()
+                            ),
                         )
                         for item in content.get("variants")
                         or content.get("experimental_variants")
                         or ()
-                        if isinstance(item, Mapping)
                     )
                 ),
                 test_conditions=tuple(
                     (
                         ExperimentTestCondition(
-                            test_key=_text(
-                                item.get("test_key") or item.get("test_condition_id")
+                            test_key=item.get("test_key"),
+                            test_type=item.get("test_type"),
+                            parameters=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=value["name"],
+                                        value=value["value"],
+                                        unit=value.get("unit"),
+                                        context_scope=value.get("context_scope")
+                                        or "unknown",
+                                        applies_to_outcomes=tuple(
+                                            value.get("applies_to_outcomes") or ()
+                                        ),
+                                    )
+                                    for value in item.get("parameters") or ()
+                                )
                             ),
-                            test_type=_text(
-                                item.get("test_type") or item.get("property_type")
-                            ),
-                            parameters=_attributes(item.get("parameters")),
-                            population_scope=(
-                                _mapping(item.get("population_scope"))
-                                if item.get("population_scope") is not None
-                                else None
-                            ),
+                            population_scope=item.get("population_scope"),
                             source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
-                            binding_status=_text(item.get("binding_status"))
-                            or "uncertain",
-                            notes=_strings(item.get("notes")),
-                            protocol_specificity=_text(item.get("protocol_specificity"))
+                            binding_status=item.get("binding_status") or "uncertain",
+                            notes=tuple(item.get("notes") or ()),
+                            protocol_specificity=item.get("protocol_specificity")
                             or "unknown",
-                            test_identity_status=_text(item.get("test_identity_status"))
+                            test_identity_status=item.get("test_identity_status")
                             or "unknown",
-                            protocol_completeness=_text(
-                                item.get("protocol_completeness")
-                            )
+                            protocol_completeness=item.get("protocol_completeness")
                             or "unknown",
-                            missing_parameters=_strings(item.get("missing_parameters")),
-                            method=_text(item.get("method")) or None,
-                            standard=_text(item.get("standard")) or None,
-                            outcome_scope=_strings(item.get("outcome_scope")),
+                            missing_parameters=tuple(
+                                item.get("missing_parameters") or ()
+                            ),
+                            method=item.get("method") or None,
+                            standard=item.get("standard") or None,
+                            outcome_scope=tuple(item.get("outcome_scope") or ()),
                             binding_source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("binding_source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
-                            protocol_evidence=_strings(item.get("protocol_evidence")),
+                            protocol_evidence=tuple(
+                                item.get("protocol_evidence") or ()
+                            ),
                         )
                         for item in content.get("test_conditions") or ()
-                        if isinstance(item, Mapping)
                     )
                 ),
                 measurements=tuple(
                     (
                         ExperimentMeasurementResult(
-                            measurement_key=_text(
-                                item.get("measurement_key")
-                                or item.get("measurement_id")
-                                or item.get("result_id")
-                            ),
-                            outcome=_text(
-                                item.get("outcome") or item.get("property_normalized")
-                            ),
-                            variant_key=_text(
-                                item.get("variant_key") or item.get("variant_id")
+                            measurement_key=item.get("measurement_key"),
+                            outcome=item.get("outcome"),
+                            variant_key=(
+                                item.get("variant_key")
                             )
                             or None,
-                            test_key=_text(
-                                item.get("test_key") or item.get("test_condition_id")
+                            test_key=(
+                                item.get("test_key")
                             )
                             or None,
                             value=item.get("value", item.get("value_numeric")),
-                            unit=_text(item.get("unit")) or None,
-                            result_text=_text(
-                                item.get("result_text") or item.get("value_text")
+                            unit=item.get("unit") or None,
+                            result_text=(
+                                item.get("result_text")
                             )
                             or None,
-                            statistics=_mapping(item.get("statistics")),
-                            measurement_scope=_mapping(item.get("measurement_scope")),
-                            result_kind=_text(item.get("result_kind")) or "measured",
+                            statistics=item.get("statistics", {}),
+                            measurement_scope=item.get("measurement_scope", {}),
+                            result_kind=item.get("result_kind") or "measured",
                             source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
                             binding_source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("binding_source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
-                            binding_status=_text(item.get("binding_status"))
-                            or "uncertain",
-                            notes=_strings(item.get("notes")),
+                            binding_status=item.get("binding_status") or "uncertain",
+                            notes=tuple(item.get("notes") or ()),
                         )
                         for item in content.get("measurements") or ()
-                        if isinstance(item, Mapping)
                     )
                 ),
                 comparisons=tuple(
                     (
                         ExperimentComparison(
-                            comparison_key=_text(
-                                item.get("comparison_key") or item.get("comparison_id")
+                            comparison_key=item.get("comparison_key"),
+                            baseline_variant_key=item.get("baseline_variant_key"),
+                            target_variant_key=item.get("target_variant_key"),
+                            outcome=item.get("outcome"),
+                            baseline_measurement_keys=tuple(
+                                (
+                                    item.get("baseline_measurement_keys")
+                                )
+                                or ()
                             ),
-                            baseline_variant_key=_text(
-                                item.get("baseline_variant_key")
-                                or item.get("baseline_variant_id")
+                            target_measurement_keys=tuple(
+                                (
+                                    item.get("target_measurement_keys")
+                                )
+                                or ()
                             ),
-                            target_variant_key=_text(
-                                item.get("target_variant_key")
-                                or item.get("target_variant_id")
+                            changed_variables=tuple(
+                                (
+                                    ScientificVariable(
+                                        name=value["name"],
+                                        baseline_value=value.get("baseline_value"),
+                                        target_value=value.get("target_value"),
+                                        unit=value.get("unit"),
+                                    )
+                                    for value in item.get("changed_variables") or ()
+                                )
                             ),
-                            outcome=_text(item.get("outcome")),
-                            baseline_measurement_keys=_strings(
-                                item.get("baseline_measurement_keys")
-                                or item.get("baseline_measurement_ids")
+                            matched_conditions=tuple(
+                                (
+                                    ScientificAttribute(
+                                        name=value["name"],
+                                        value=value["value"],
+                                        unit=value.get("unit"),
+                                        context_scope=value.get("context_scope")
+                                        or "unknown",
+                                        applies_to_outcomes=tuple(
+                                            value.get("applies_to_outcomes") or ()
+                                        ),
+                                    )
+                                    for value in item.get("matched_conditions") or ()
+                                )
                             ),
-                            target_measurement_keys=_strings(
-                                item.get("target_measurement_keys")
-                                or item.get("target_measurement_ids")
-                            ),
-                            changed_variables=_variables(item.get("changed_variables")),
-                            matched_conditions=_attributes(
-                                item.get("matched_conditions")
-                            ),
-                            basis=_text(item.get("basis")) or "reported",
-                            direction=_text(item.get("direction")) or "unknown",
-                            reported_statement=_text(item.get("reported_statement"))
-                            or None,
-                            attribution_scope=_text(item.get("attribution_scope"))
+                            basis=item.get("basis") or "reported",
+                            direction=item.get("direction") or "unknown",
+                            reported_statement=item.get("reported_statement") or None,
+                            attribution_scope=item.get("attribution_scope")
                             or "undetermined",
-                            status=_text(item.get("status")) or "insufficient_context",
-                            reasons=_strings(item.get("reasons")),
+                            status=item.get("status") or "insufficient_context",
+                            reasons=tuple(item.get("reasons") or ()),
                             source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
                             binding_source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("binding_source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
-                            relation_status=_text(item.get("relation_status"))
-                            or "uncertain",
+                            relation_status=item.get("relation_status") or "uncertain",
                         )
                         for item in content.get("comparisons") or ()
-                        if isinstance(item, Mapping)
                     )
                 ),
                 reported_interpretations=tuple(
                     (
                         ReportedInterpretation(
-                            statement=_text(item.get("statement")),
-                            kind=_text(item.get("kind")) or "result_summary",
-                            measurement_keys=_strings(
-                                item.get("measurement_keys")
-                                or item.get("measurement_ids")
+                            statement=item.get("statement"),
+                            kind=item.get("kind") or "result_summary",
+                            measurement_keys=tuple(
+                                (
+                                    item.get("measurement_keys")
+                                )
+                                or ()
                             ),
-                            comparison_keys=_strings(
-                                item.get("comparison_keys")
-                                or item.get("comparison_ids")
+                            comparison_keys=tuple(
+                                (
+                                    item.get("comparison_keys")
+                                )
+                                or ()
                             ),
                             source_refs=tuple(
                                 (
-                                    SourceReference(
-                                        document_id=_text(item.get("document_id")),
-                                        source_fingerprint=_text(
-                                            item.get("source_fingerprint")
-                                        ),
-                                        source_kind=_text(item.get("source_kind")),
-                                        source_ref=_text(item.get("source_ref")),
-                                        quote=_text(item.get("quote")),
-                                    )
+                                    SourceReference(**item)
                                     for item in item.get("source_refs") or ()
-                                    if isinstance(item, Mapping)
                                 )
                             ),
                         )
                         for item in content.get("reported_interpretations") or ()
-                        if isinstance(item, Mapping)
                     )
                 ),
                 source_refs=tuple(
                     (
-                        SourceReference(
-                            document_id=_text(item.get("document_id")),
-                            source_fingerprint=_text(item.get("source_fingerprint")),
-                            source_kind=_text(item.get("source_kind")),
-                            source_ref=_text(item.get("source_ref")),
-                            quote=_text(item.get("quote")),
-                        )
+                        SourceReference(**item)
                         for item in content.get("source_refs") or ()
-                        if isinstance(item, Mapping)
                     )
                 ),
                 unresolved_issues=tuple(
-                    (
-                        dict(item)
-                        for item in content.get("unresolved_issues") or ()
-                        if isinstance(item, Mapping)
-                    )
+                    (dict(item) for item in content.get("unresolved_issues") or ())
                 ),
             )
         )
@@ -2553,9 +2481,9 @@ def _validate_source_context(
     content: Mapping[str, Any], document_id: str, source_fingerprint: str
 ) -> None:
     for reference in _iter_source_records(content):
-        if str(reference.get("document_id") or "") != document_id:
+        if reference["document_id"] != document_id:
             raise ValueError("source reference document does not match request")
-        if str(reference.get("source_fingerprint") or "") != source_fingerprint:
+        if reference["source_fingerprint"] != source_fingerprint:
             raise ValueError("source reference fingerprint does not match request")
 
 
@@ -2690,15 +2618,15 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(item, Mapping)
     ]
     variant_keys = {
-        str(item.get("variant_key") or item.get("variant_id") or "")
+        str(item.get("variant_key") or "")
         for item in variants
     }
     test_by_key = {
-        str(item.get("test_key") or item.get("test_condition_id") or ""): item
+        str(item.get("test_key") or ""): item
         for item in tests
     }
     variant_resolutions = {
-        str(item.get("variant_key") or item.get("variant_id") or ""):
+        str(item.get("variant_key") or ""):
         _variant_binding_resolution(item, variants)
         for item in variants
     }
@@ -2707,14 +2635,14 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
         for key, item in test_by_key.items()
     }
     for variant in variants:
-        key = str(variant.get("variant_key") or variant.get("variant_id") or "")
+        key = str(variant.get("variant_key") or "")
         variant["binding_status"] = (
             "direct"
             if variant_resolutions.get(key) == "exact" and variant.get("source_refs")
             else "uncertain"
         )
     for test in tests:
-        key = str(test.get("test_key") or test.get("test_condition_id") or "")
+        key = str(test.get("test_key") or "")
         resolution = test_resolutions.get(key, "unbound")
         test["binding_status"] = (
             "direct"
@@ -2751,10 +2679,10 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
             continue
         measurement = dict(raw)
         variant_key = str(
-            measurement.get("variant_key") or measurement.get("variant_id") or ""
+            measurement.get("variant_key") or ""
         )
         test_key = str(
-            measurement.get("test_key") or measurement.get("test_condition_id") or ""
+            measurement.get("test_key") or ""
         )
         variant_refs = [
             dict(item)
@@ -2772,7 +2700,7 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
             (
                 item
                 for item in variants
-                if str(item.get("variant_key") or item.get("variant_id") or "")
+                if str(item.get("variant_key") or "")
                 == variant_key
             ),
             {},
@@ -2825,9 +2753,7 @@ def _resolve_measurement_bindings(content: Mapping[str, Any]) -> dict[str, Any]:
             exact_count += 1
         else:
             measurement_key = str(
-                measurement.get("measurement_key")
-                or measurement.get("measurement_id")
-                or "measurement"
+                measurement.get("measurement_key") or "measurement"
             )
             issue = {
                 "target_ref": f"measurements/{measurement_key}",
@@ -3037,7 +2963,7 @@ def _test_has_concrete_protocol(test: Mapping[str, Any]) -> bool:
         and item.get("value") not in (None, "")
         and _normalized_label(item.get("value")) not in _BROAD_TEST_LABELS
     ]
-    test_type = _normalized_label(test.get("test_type") or test.get("property_type"))
+    test_type = _normalized_label(test.get("test_type"))
     return bool(
         (method and method not in generic_protocol_labels)
         or standard_is_concrete
@@ -3054,7 +2980,7 @@ def _test_binding_resolution(
     if not test:
         return "unbound"
     specificity = _normalized_label(test.get("protocol_specificity"))
-    category = _normalized_label(test.get("test_type") or test.get("property_type"))
+    category = _normalized_label(test.get("test_type"))
     concrete = _test_has_concrete_protocol(test)
     if not concrete:
         sibling_specific = any(
@@ -3062,8 +2988,8 @@ def _test_binding_resolution(
             and _test_has_concrete_protocol(other)
             and (
                 category
-                == _normalized_label(other.get("test_type") or other.get("property_type"))
-                or category in _normalized_label(other.get("test_type") or other.get("property_type"))
+                == _normalized_label(other.get("test_type"))
+                or category in _normalized_label(other.get("test_type"))
             )
             for other in all_tests
         )
@@ -3165,9 +3091,7 @@ def _preserve_reported_measurement_scope(
             or not measurement.get("test_key")
         ) and not has_exact_edge:
             measurement_key = str(
-                measurement.get("measurement_key")
-                or measurement.get("measurement_id")
-                or "measurement"
+                measurement.get("measurement_key") or "measurement"
             )
             candidate_refs = [
                 f"experimental_variants/{value}"
@@ -3284,54 +3208,3 @@ __all__ = [
     "prepare_model_output",
     "reconcile_model_output",
 ]
-
-
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
-
-
-def _strings(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set)):
-        return ()
-    return tuple(item for item in (_text(item) for item in value) if item)
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _attributes(value: Any) -> tuple[ScientificAttribute, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ScientificAttribute(
-            name=scientific_text(item.get("name")) or "",
-            value=(
-                scientific_scalar(item.get("value"))
-                if scientific_scalar(item.get("value")) is not None
-                else ""
-            ),
-            unit=scientific_text(item.get("unit")),
-            context_scope=scientific_choice(
-                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
-            ),
-            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
-        )
-        for item in value
-        if isinstance(item, Mapping)
-    )
-
-
-def _variables(value: Any) -> tuple[ScientificVariable, ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(
-        ScientificVariable(
-            name=scientific_text(item.get("name")) or "",
-            baseline_value=scientific_scalar(item.get("baseline_value")),
-            target_value=scientific_scalar(item.get("target_value")),
-            unit=scientific_text(item.get("unit")),
-        )
-        for item in value
-        if isinstance(item, Mapping)
-    )

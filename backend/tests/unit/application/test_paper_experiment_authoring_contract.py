@@ -108,6 +108,26 @@ def _reconciled_output(payload: dict | None = None):
     return reconcile_model_output(output, accepted_experiment_keys=("series-1",))
 
 
+@pytest.mark.parametrize(
+    ("component", "field", "invalid"),
+    [
+        ("variants", "notes", "silently iterable text"),
+        ("variants", "subject_attributes", ["not an object"]),
+        ("measurements", "measurement_key", 1),
+        ("measurements", "statistics", [1]),
+        ("measurements", "result_kind", "invented"),
+    ],
+)
+def test_raw_experiment_fields_are_rejected_before_internal_construction(component, field, invalid):
+    payload = _raw_model_payload()
+    payload["experiments"][0][component][0][field] = invalid
+    with pytest.raises(ValueError):
+        parse_paper_experiment_response(
+            payload, document_id="doc-1", source_fingerprint="prep-1",
+            source_labels=_output_payload()["source_labels"],
+        )
+
+
 def test_raw_model_output_cannot_receive_formal_identity_directly() -> None:
     output = parse_paper_experiment_response(
         _raw_model_payload(_output_payload()),

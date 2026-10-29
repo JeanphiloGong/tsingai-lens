@@ -125,7 +125,7 @@ class SourceReference:
 
     def __post_init__(self) -> None:
         if not all(
-            _text(value)
+            value.strip()
             for value in (
                 self.document_id,
                 self.source_fingerprint,
@@ -163,20 +163,6 @@ class ExperimentalVariant:
     missing_dimensions: tuple[str, ...] = ()
     identity_evidence: tuple[str, ...] = ()
 
-    def __post_init__(self) -> None:
-        if not _text(self.variant_key) or not _text(self.variant_label):
-            raise ValueError("experimental variant requires key and label")
-        if self.binding_status not in RELATION_STATUSES:
-            raise ValueError(f"unsupported variant binding status: {self.binding_status}")
-        object.__setattr__(self, "notes", _strings(self.notes))
-        object.__setattr__(
-            self,
-            "identity_specificity",
-            _text(self.identity_specificity) or "unknown",
-        )
-        object.__setattr__(self, "missing_dimensions", _strings(self.missing_dimensions))
-        object.__setattr__(self, "identity_evidence", _strings(self.identity_evidence))
-
 
 @dataclass(frozen=True)
 class ExperimentTestCondition:
@@ -205,33 +191,6 @@ class ExperimentTestCondition:
     binding_source_refs: tuple[SourceReference, ...] = ()
     protocol_evidence: tuple[str, ...] = ()
 
-    def __post_init__(self) -> None:
-        if not _text(self.test_key) or not _text(self.test_type):
-            raise ValueError("test condition requires key and type")
-        if self.binding_status not in RELATION_STATUSES:
-            raise ValueError(f"unsupported test binding status: {self.binding_status}")
-        object.__setattr__(self, "notes", _strings(self.notes))
-        object.__setattr__(
-            self,
-            "protocol_specificity",
-            _text(self.protocol_specificity) or "unknown",
-        )
-        object.__setattr__(
-            self,
-            "test_identity_status",
-            _text(self.test_identity_status) or "unknown",
-        )
-        object.__setattr__(
-            self,
-            "protocol_completeness",
-            _text(self.protocol_completeness) or "unknown",
-        )
-        object.__setattr__(self, "missing_parameters", _strings(self.missing_parameters))
-        object.__setattr__(self, "method", _text(self.method) or None)
-        object.__setattr__(self, "standard", _text(self.standard) or None)
-        object.__setattr__(self, "outcome_scope", _strings(self.outcome_scope))
-        object.__setattr__(self, "protocol_evidence", _strings(self.protocol_evidence))
-
 
 @dataclass(frozen=True)
 class ExperimentMeasurementResult:
@@ -253,15 +212,8 @@ class ExperimentMeasurementResult:
     notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not _text(self.measurement_key) or not _text(self.outcome):
-            raise ValueError("measurement requires key and outcome")
-        if self.value is None and not _text(self.result_text):
+        if self.value is None and not self.result_text:
             raise ValueError("measurement requires value or result_text")
-        if self.result_kind not in MEASUREMENT_RESULT_KINDS:
-            raise ValueError(f"unsupported measurement result kind: {self.result_kind}")
-        if self.binding_status not in RELATION_STATUSES:
-            raise ValueError(f"unsupported measurement binding status: {self.binding_status}")
-        object.__setattr__(self, "notes", _strings(self.notes))
 
 
 @dataclass(frozen=True)
@@ -287,27 +239,8 @@ class ExperimentComparison:
     relation_status: str = "uncertain"
 
     def __post_init__(self) -> None:
-        if not all(
-            _text(value)
-            for value in (
-                self.comparison_key,
-                self.baseline_variant_key,
-                self.target_variant_key,
-                self.outcome,
-            )
-        ):
-            raise ValueError("comparison requires keys and outcome")
-        if self.basis not in COMPARISON_BASIS:
-            raise ValueError(f"unsupported comparison basis: {self.basis}")
-        if self.direction not in COMPARISON_DIRECTIONS:
-            raise ValueError(f"unsupported comparison direction: {self.direction}")
-        if self.status not in COMPARISON_STATUSES:
-            raise ValueError(f"unsupported comparison status: {self.status}")
-        if self.relation_status not in RELATION_STATUSES:
-            raise ValueError(f"unsupported comparison relation status: {self.relation_status}")
         if not self.baseline_measurement_keys or not self.target_measurement_keys:
             raise ValueError("comparison requires measurements on both sides")
-        object.__setattr__(self, "reasons", _strings(self.reasons))
 
 
 @dataclass(frozen=True)
@@ -317,10 +250,6 @@ class ReportedInterpretation:
     measurement_keys: tuple[str, ...] = ()
     comparison_keys: tuple[str, ...] = ()
     source_refs: tuple[SourceReference, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not _text(self.statement) or self.kind not in INTERPRETATION_KINDS:
-            raise ValueError("reported interpretation requires statement and valid kind")
 
 
 @dataclass(frozen=True)
@@ -346,7 +275,7 @@ class PaperExperimentRevision:
 
     def __post_init__(self) -> None:
         if not all(
-            _text(value)
+            value.strip()
             for value in (
                 self.experiment_id,
                 self.document_id,
@@ -358,13 +287,6 @@ class PaperExperimentRevision:
             raise ValueError("paper experiment requires identity and scope")
         if self.experiment_version < 1:
             raise ValueError("experiment version must be positive")
-        if self.design_type not in PAPER_EXPERIMENT_DESIGN_TYPES:
-            raise ValueError(f"unsupported experiment design type: {self.design_type}")
-        if self.identity_status not in PAPER_EXPERIMENT_IDENTITY_STATUSES:
-            raise ValueError(f"unsupported experiment identity status: {self.identity_status}")
-        if self.binding_status not in PAPER_EXPERIMENT_BINDING_STATUSES:
-            raise ValueError(f"unsupported experiment binding status: {self.binding_status}")
-
         variant_keys = [item.variant_key for item in self.variants]
         test_keys = [item.test_key for item in self.test_conditions]
         measurement_keys = [item.measurement_key for item in self.measurements]
@@ -405,18 +327,6 @@ class PaperExperimentRevision:
                 raise ValueError("interpretation references a measurement outside its experiment")
             if any(key not in set(comparison_keys) for key in interpretation.comparison_keys):
                 raise ValueError("interpretation references a comparison outside its experiment")
-
-        object.__setattr__(
-            self,
-            "unresolved_issues",
-            deepcopy(
-                tuple(
-                    dict(item)
-                    for item in self.unresolved_issues
-                    if isinstance(item, Mapping)
-                )
-            ),
-        )
 
 
 __all__ = [

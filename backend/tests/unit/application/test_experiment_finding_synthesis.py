@@ -20,8 +20,6 @@ from domain.core.paper_experiment import (
     ExperimentMeasurementResult,
     ExperimentComparison,
     PaperExperimentRevision,
-    _text,
-    _strings,
 )
 from domain.core.research_objective import (
     ResearchObjective,
@@ -119,7 +117,7 @@ def _revision(
         test_conditions=(
             ExperimentTestCondition(
                 test_key="tensile",
-                test_type=_text(test_type or None),
+                test_type=test_type,
                 parameters=(
                     ScientificAttribute(
                         name="temperature",
@@ -129,7 +127,7 @@ def _revision(
                 ),
                 binding_status="direct",
                 protocol_completeness=protocol_completeness or "unknown",
-                missing_parameters=_strings(list(missing_parameters)),
+                missing_parameters=missing_parameters,
             ),
         ),
         measurements=(

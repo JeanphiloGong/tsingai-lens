@@ -243,4 +243,23 @@ def test_missing_specificity_defaults_to_unknown_instead_of_claiming_exact() -> 
     experiment = _experiment()
     assert experiment.variants[0].identity_specificity == "unknown"
     assert experiment.test_conditions[0].protocol_specificity == "unknown"
+
+
+def test_prepared_experiment_values_are_not_rewritten_by_construction() -> None:
+    experiment = _experiment()
+    notes = (" A-series ", "a-series", "001")
+    variant = replace(experiment.variants[0], notes=notes, identity_evidence=notes)
+    condition = replace(
+        experiment.test_conditions[0], notes=notes, protocol_evidence=notes,
+        method=" ISO 6892-1 ",
+    )
+    measurement = replace(experiment.measurements[0], notes=notes)
+    comparison = replace(_comparison(), reasons=notes)
+    assert variant.notes == notes
+    assert variant.identity_evidence == notes
+    assert condition.notes == notes
+    assert condition.protocol_evidence == notes
+    assert condition.method == " ISO 6892-1 "
+    assert measurement.notes == notes
+    assert comparison.reasons == notes
     assert experiment.test_conditions[0].protocol_completeness == "unknown"

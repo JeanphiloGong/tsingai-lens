@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -39,16 +38,6 @@ COMPARISON_STATUSES = frozenset(
 INTERPRETATION_KINDS = frozenset(
     {"result_summary", "mechanism_hypothesis", "limitation"}
 )
-
-
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
-
-
-def _strings(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set)):
-        return ()
-    return tuple(item for item in (_text(item) for item in value) if item)
 
 
 def outcome_labels_compatible(left: str, right: str) -> bool:

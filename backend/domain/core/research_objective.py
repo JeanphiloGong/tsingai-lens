@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
@@ -1195,91 +1194,18 @@ def normalize_objective_terms(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _choice(value: Any, allowed: frozenset[str], default: str) -> str:
-    normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
-    return normalized if normalized in allowed else default
 
 
-def _text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
-def _required_text(value: Any, message: str) -> str:
-    text = _text(value)
-    if text is None:
-        raise ValueError(message)
-    return text
 
 
-def _objective_derivation_basis(value: Any) -> tuple[dict[str, Any], ...]:
-    """Normalize scientific provenance attached to a derived Objective."""
-
-    if not isinstance(value, (list, tuple)):
-        return ()
-    records: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for item in value:
-        if not isinstance(item, Mapping):
-            raise ValueError("objective derivation basis entries must be mappings")
-        record = deepcopy(dict(item))
-        kind = _text(record.get("kind"))
-        reference_id = _text(record.get("reference_id"))
-        rationale = _text(record.get("rationale"))
-        if kind not in OBJECTIVE_DERIVATION_BASIS_KINDS:
-            raise ValueError(f"unsupported objective derivation basis kind: {kind}")
-        if reference_id is None or rationale is None:
-            raise ValueError(
-                "objective derivation basis requires reference_id and rationale"
-            )
-        identity = (kind, reference_id)
-        if identity in seen:
-            raise ValueError(
-                "objective derivation basis references must be unique"
-            )
-        seen.add(identity)
-        record["kind"] = kind
-        record["reference_id"] = reference_id
-        record["rationale"] = rationale
-        records.append(record)
-    return tuple(records)
 
 
-def _positive_int_or_none(value: Any) -> int | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError):
-        return None
-    return numeric if numeric > 0 else None
 
 
-def _non_negative_int_or_none(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        raise ValueError("paper evidence count must be an integer")
-    try:
-        numeric = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("paper evidence count must be an integer") from exc
-    if numeric < 0:
-        raise ValueError("paper evidence count cannot be negative")
-    return numeric
 
 
-def _positive_ints(value: Any) -> tuple[int, ...]:
-    if not isinstance(value, (list, tuple, set)):
-        value = () if value is None else (value,)
-    result: list[int] = []
-    for item in value:
-        numeric = _positive_int_or_none(item)
-        if numeric is not None and numeric not in result:
-            result.append(numeric)
-    return tuple(result)
 
 
 def _stable_text(value: Any) -> str:

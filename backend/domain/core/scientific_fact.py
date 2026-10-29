@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
-from typing import Any, Final, Mapping
+from typing import Final
 
 SCIENTIFIC_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
     {
@@ -110,50 +109,3 @@ class ScientificContext:
     @property
     def has_content(self) -> bool:
         return bool(self.material or self.sample or self.process or self.test)
-
-
-def _scientific_scalar(value: Any) -> ScientificScalar | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    return _text(value)
-
-
-def _terms(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, Mapping):
-        items = value.values()
-    elif isinstance(value, (list, tuple, set)):
-        items = value
-    else:
-        items = (value,)
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for item in items:
-        text = _text(item)
-        if not text:
-            continue
-        key = text.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append(text)
-    return tuple(normalized)
-
-
-def _choice(value: Any, allowed: frozenset[str], default: str) -> str:
-    normalized = (_text(value) or "").lower().replace("-", "_").replace(" ", "_")
-    return normalized if normalized in allowed else default
-
-
-def _text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None

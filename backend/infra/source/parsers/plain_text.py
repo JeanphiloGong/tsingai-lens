@@ -5,8 +5,7 @@
 
 from __future__ import annotations
 
-import ast
-from typing import Any, cast
+from typing import Any
 
 import pandas as pd
 
@@ -149,13 +148,7 @@ def _bind_text_units_to_documents(
         copy=False,
     ).reset_index(drop=True)
 
-    rejoined["id"] = rejoined["id"].astype(str)
     rejoined["document_order"] = rejoined.index
-
-    if "creation_date" not in rejoined.columns:
-        rejoined["creation_date"] = pd.Series(dtype="object")
-    if "metadata" not in rejoined.columns:
-        rejoined["metadata"] = pd.Series(dtype="object")
 
     return rejoined.loc[:, DOCUMENTS_FINAL_COLUMNS]
 
@@ -163,43 +156,8 @@ def _bind_text_units_to_documents(
 def _normalize_text_units(
     text_units: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Normalize text units into the minimal Source handoff consumed by Core."""
-    normalized = text_units.copy()
-    for column in ("id", "text", "document_ids", "n_tokens"):
-        if column not in normalized.columns:
-            normalized[column] = None
-
-    selected = normalized.loc[:, ["id", "text", "document_ids", "n_tokens"]].copy()
-    selected["id"] = selected["id"].astype(str)
-    selected["text"] = selected["text"].fillna("").astype(str)
-    selected["document_ids"] = selected["document_ids"].apply(_normalize_string_list)
+    """Add reading order to the text units produced by this parser."""
+    selected = text_units.loc[:, ["id", "text", "document_ids", "n_tokens"]].copy()
     selected["text_unit_order"] = range(len(selected))
 
     return selected.loc[:, TEXT_UNITS_FINAL_COLUMNS]
-
-
-def _normalize_string_list(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(item) for item in value]
-    if isinstance(value, tuple | set):
-        return [str(item) for item in value]
-    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, dict)):
-        converted = value.tolist()
-        if converted is not value:
-            return _normalize_string_list(converted)
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return []
-        if text.startswith("[") and text.endswith("]"):
-            try:
-                parsed = ast.literal_eval(text)
-            except (ValueError, SyntaxError):
-                return [text]
-            return _normalize_string_list(parsed)
-        return [text]
-    if isinstance(value, float) and pd.isna(value):
-        return []
-    return [str(value)]

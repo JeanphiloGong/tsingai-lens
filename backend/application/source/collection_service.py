@@ -316,8 +316,8 @@ class CollectionService:
             raise ValueError("collection path cannot be a symlink")
 
         for record in collection.documents:
-            storage_key = self._optional_text(record.storage_key)
-            stored_filename = self._optional_text(record.stored_filename)
+            storage_key = record.storage_key
+            stored_filename = record.stored_filename
             if (
                 not storage_key
                 or not stored_filename
@@ -365,9 +365,3 @@ class CollectionService:
         return (
             f"{collection_key}/objects/source/{document_key}/figures/{digest}{extension}"
         )
-
-    def _optional_text(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text or None

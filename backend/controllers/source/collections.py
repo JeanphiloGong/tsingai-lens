@@ -154,7 +154,7 @@ class CollectionSourceArchiveRequest(BaseModel):
     @field_validator("document_ids")
     @classmethod
     def validate_document_ids(cls, values: list[str]) -> list[str]:
-        normalized = [str(value).strip() for value in values]
+        normalized = [value.strip() for value in values]
         if any(not value or len(value) > 128 for value in normalized):
             raise ValueError(
                 "document_ids must contain non-empty values up to 128 characters"

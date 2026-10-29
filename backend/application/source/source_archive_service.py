@@ -71,9 +71,7 @@ class SourceArchiveService:
     ) -> dict[str, Any]:
         """Build a bounded ZIP of original uploads for failure reproduction."""
 
-        normalized_document_ids = [
-            str(document_id).strip() for document_id in document_ids
-        ]
+        normalized_document_ids = document_ids
         if not normalized_document_ids or any(
             not document_id for document_id in normalized_document_ids
         ):
@@ -86,7 +84,7 @@ class SourceArchiveService:
         collection = await self._get_collection(collection_id)
         records = collection["documents"]
         records_by_document_id = {
-            str(record.get("document_id") or "").strip(): record for record in records
+            record["document_id"]: record for record in records
         }
         selected_records: list[tuple[str, dict[str, Any]]] = []
         for document_id in normalized_document_ids:
@@ -130,7 +128,7 @@ class SourceArchiveService:
         source_filename: str | None = None,
     ) -> dict[str, Any]:
         collection = await self._get_collection(collection_id)
-        document_key = str(document_id or "").strip()
+        document_key = document_id
         if not document_key:
             raise DocumentSourceUnavailableError(collection_id, document_key)
 
@@ -248,7 +246,7 @@ class SourceArchiveService:
             record.get("original_filename"),
             record.get("stored_filename"),
             record.get("storage_key"),
-            Path(str(record.get("storage_key") or "")).name,
+            Path(record.get("storage_key") or "").name,
         )
         return any(
             self._source_match_value(candidate) in match_keys
@@ -263,13 +261,13 @@ class SourceArchiveService:
         keys = {
             self._source_match_value(document_id),
             self._source_match_value(source_filename),
-            self._source_match_value(Path(str(source_filename or "")).name),
+            self._source_match_value(Path(source_filename or "").name),
         }
         return {key for key in keys if key}
 
     @staticmethod
-    def _source_match_value(value: Any) -> str:
-        return str(value or "").strip()
+    def _source_match_value(value: str | None) -> str:
+        return (value or "").strip()
 
     def _build_source_file_payload(
         self,
@@ -278,11 +276,11 @@ class SourceArchiveService:
         document_id: str,
         record: dict[str, Any],
     ) -> dict[str, Any]:
-        storage_key = self._optional_text(record.get("storage_key"))
-        expected_sha256 = self._optional_text(record.get("sha256"))
+        storage_key = record.get("storage_key")
+        expected_sha256 = record.get("sha256")
         if not storage_key or not expected_sha256:
             raise DocumentSourceUnavailableError(collection_id, document_id)
-        stored_filename = self._optional_text(record.get("stored_filename"))
+        stored_filename = record.get("stored_filename")
         if not stored_filename or storage_key != self._input_storage_key(
             collection_id, stored_filename
         ):
@@ -311,14 +309,14 @@ class SourceArchiveService:
                 message="The stored source file failed its integrity check.",
             ) from exc
         filename = (
-            self._optional_text(record.get("original_filename"))
+            record.get("original_filename")
             or stored_filename
             or Path(storage_key).name
         )
         return {
             "content": content,
             "filename": filename,
-            "media_type": self._optional_text(record.get("media_type")),
+            "media_type": record.get("media_type"),
             "source_document_id": document_id,
         }
 
@@ -327,8 +325,8 @@ class SourceArchiveService:
         return f"{collection_id}/input/{stored_filename}"
 
     @staticmethod
-    def _safe_archive_filename(value: Any) -> str:
-        filename = PurePosixPath(str(value or "").replace("\\", "/")).name
+    def _safe_archive_filename(value: str) -> str:
+        filename = PurePosixPath(value.replace("\\", "/")).name
         filename = "".join(
             "_" if ord(character) < 32 or character in '<>:"|?*' else character
             for character in filename
@@ -341,14 +339,6 @@ class SourceArchiveService:
             "document_source_path_invalid": "collection_source_path_invalid",
             "document_source_integrity_failed": "collection_source_integrity_failed",
         }.get(document_source_code, "collection_source_file_unavailable")
-
-    @staticmethod
-    def _optional_text(value: Any) -> str | None:
-        if value is None:
-            return None
-        text = str(value).strip()
-        return text or None
-
 
 __all__ = [
     "CollectionSourceArchiveError",

@@ -29,7 +29,7 @@
 		loadedRevisionId = inputKey;
 		const content = sample.current_revision?.content as SftRevisionContent | undefined;
 		question = content?.messages.filter(item => item.role === 'user').at(-1)?.content ?? sample.source_case.question;
-		target = content?.target ?? String(sample.source_case.context_snapshot.corrected_answer ?? sample.source_case.context_snapshot.candidate_target ?? (sample.source_case.context_snapshot.rating === 'helpful' ? sample.source_case.answer : ''));
+		target = content?.target ?? (sample.source_case.context_snapshot.corrected_answer as string | undefined) ?? (sample.source_case.context_snapshot.candidate_target as string | undefined) ?? (sample.source_case.context_snapshot.rating === 'helpful' ? sample.source_case.answer : '');
 		evidence = content ? content.evidence.map((item) => ({ ...item })) : initialAnnotationEvidence(sample);
 		rebuildReason = '';
 	}
@@ -76,7 +76,7 @@
 	}
 
 	function formatSource(source: Record<string, unknown>) {
-		return String(source.document_title ?? source.title ?? $t('taskDatasets.labels.untitledPaper'));
+		return source.document_title as string | undefined ?? $t('taskDatasets.labels.untitledPaper');
 	}
 </script>
 

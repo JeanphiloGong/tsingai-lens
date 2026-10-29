@@ -61,7 +61,7 @@ const partialInternalSourceId =
 
 /** Keep transient model markers and source identities out of the live answer. */
 export function sanitizeStreamingCitationText(content: string): string {
-	const text = String(content ?? '')
+	const text = content
 		.replace(completeCitationMarker, '')
 		.replace(quotedInternalSourceId, '')
 		.replace(completeInternalSourceId, '')

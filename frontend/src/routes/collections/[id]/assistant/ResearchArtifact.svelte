@@ -16,8 +16,8 @@
 	export let artifact: ToolActivityOperation;
 	function findingStatement(message: ChatMessage) {
 		const finding = message.tool_result?.data.finding;
-		return finding && typeof finding === 'object' && 'statement' in finding
-			? String(finding.statement ?? '').trim()
+		return finding && typeof finding === 'object' && 'statement' in finding && typeof finding.statement === 'string'
+			? finding.statement
 			: '';
 	}
 
@@ -25,18 +25,7 @@
 		if (artifact.toolName !== 'inspect_research_process') return [];
 		const process = message.tool_result?.data.process;
 		if (!process || typeof process !== 'object' || !('steps' in process)) return [];
-		return Array.isArray(process.steps)
-			? process.steps.filter((step): step is ResearchProcessStep =>
-					Boolean(
-						step &&
-						typeof step === 'object' &&
-						'step_id' in step &&
-						typeof step.step_id === 'string' &&
-						'status' in step &&
-						typeof step.status === 'string'
-					)
-				)
-			: [];
+		return process.steps as ResearchProcessStep[];
 	}
 
 	function researchStepName(stepId: string) {
@@ -75,14 +64,14 @@
 		const active = 'active_document' in process ? process.active_document : null;
 		const progress = 'document_progress' in process ? process.document_progress : null;
 		const activeTitle =
-			active && typeof active === 'object' && 'title' in active && String(active.title).trim()
-				? String(active.title).trim()
+			active && typeof active === 'object' && 'title' in active && typeof active.title === 'string'
+				? active.title
 					: '';
 		if (progress && typeof progress === 'object' && 'current' in progress && 'total' in progress) {
 			return $t('researchAgent.researchProcess.documentProgress', {
 				document: activeTitle || $t('researchAgent.researchProcess.currentPaper'),
-				current: Number(progress.current) || 0,
-				total: Number(progress.total) || 0
+				current: numberValue(progress as Record<string, unknown>, 'current'),
+				total: numberValue(progress as Record<string, unknown>, 'total')
 			});
 		}
 		return activeTitle;
@@ -90,11 +79,7 @@
 
 	function resultDrafts(message: ChatMessage) {
 		const drafts = message.tool_result?.data.drafts;
-		return Array.isArray(drafts)
-			? drafts.filter((item): item is Record<string, unknown> =>
-					Boolean(item && typeof item === 'object')
-				)
-			: [];
+		return (drafts ?? []) as Record<string, unknown>[];
 	}
 
 	function resultDraft(message: ChatMessage): Record<string, unknown> | null {
@@ -113,7 +98,7 @@
 			if (formatted !== '--') details.push({ label, value: formatted });
 		};
 		if (draft.source_kind) add($t('researchAgent.capability.sourceKind'), draft.source_kind);
-		const location = [draft.heading_path, draft.page ? `p. ${String(draft.page)}` : '']
+		const location = [draft.heading_path, draft.page ? `p. ${draft.page}` : '']
 			.filter(Boolean)
 			.join(' · ');
 		if (location) add($t('researchAgent.capability.sourceReference'), location);
@@ -208,11 +193,7 @@
 	function resultSourceMatches(message: ChatMessage) {
 		if (artifact.toolName !== 'search_sources') return [];
 		const matches = message.tool_result?.data.matches;
-		return Array.isArray(matches)
-			? matches.filter((item): item is Record<string, unknown> =>
-					Boolean(item && typeof item === 'object' && !Array.isArray(item))
-				)
-			: [];
+		return (matches ?? []) as Record<string, unknown>[];
 	}
 
 	function sourceMatchLabel(match: Record<string, unknown>) {
@@ -228,7 +209,7 @@
 	}
 
 	function qualityStatusLabel(value: unknown) {
-		switch (String(value ?? '')) {
+		switch (value) {
 			case 'finding_available':
 				return $t('researchAgent.capability.qualityFindingAvailable');
 			case 'finding_available_with_gaps':
@@ -249,17 +230,12 @@
 	function draftBasisRationales(draft: Record<string, unknown>) {
 		const basis = draft.derivation_basis;
 		if (!Array.isArray(basis)) return [];
-		return basis
-			.filter((item): item is Record<string, unknown> =>
-				Boolean(item && typeof item === 'object' && !Array.isArray(item))
-			)
-			.map((item) => (typeof item.rationale === 'string' ? item.rationale.trim() : ''))
-			.filter(Boolean);
+		return (basis as Array<{ rationale: string }>).map((item) => item.rationale);
 	}
 
 	function draftList(draft: Record<string, unknown>, key: string) {
 		const value = draft[key];
-		return Array.isArray(value) ? value.map(String).filter(Boolean).join(', ') : '';
+		return Array.isArray(value) ? value.join(', ') : '';
 	}
 </script>
 

@@ -61,10 +61,21 @@ class _Jobs:
         self.job = job
         self.finished: tuple[str, str | None] | None = None
 
+    async def recover_expired_jobs(self, *, now):
+        return 0
+
+    async def read_job(self, job_id):
+        return self.job if self.job.job_id == job_id else None
+
+    async def renew_lease(self, **kwargs):
+        assert kwargs["worker_id"] == self.job.worker_id
+        assert kwargs["lease_version"] == self.job.lease_version
+        return self.job
+
     async def claim_next_feedback_analysis_job(self, now: str):
         if self.job.status != "pending":
             return None
-        self.job = replace(self.job, status="running", started_at=now, updated_at=now)
+        self.job = replace(self.job, status="running", started_at=now, updated_at=now, worker_id="worker-1", lease_version=1)
         return self.job
 
     async def mark_succeeded(self, job_id: str, result_id: str, finished_at: str, **_lease):

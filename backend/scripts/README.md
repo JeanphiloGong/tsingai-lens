@@ -16,6 +16,10 @@ cd backend
 ./.venv/bin/python scripts/feedback_analysis_worker.py --once
 ```
 
+The feedback, correction-signal, and tool-failure polling loops build one
+application runtime per process and close it once when the loop exits or raises.
+`--once` retains its own single-job runtime lifecycle.
+
 The worker does not retry failed jobs automatically. An operator can explicitly
 return one failed, result-less `feedback_analysis` job to `pending`:
 

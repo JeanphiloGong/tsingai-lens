@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -85,7 +84,7 @@ class RuleBasedFeedbackAnalysisEngine:
             problem_type=problem_type,
             confidence=confidence,
             suggested_evidence=tuple(
-                str(item.get("source_ref"))
+                item["source_ref"]
                 for item in coverage.inspected_sources
                 if item.get("source_ref")
             ),
@@ -108,8 +107,8 @@ class FeedbackAnalysisHandler:
     async def handle(self, job: Any) -> tuple[AnalysisResult, dict[str, Any], tuple[str, ...]]:
         if job.job_type != "feedback_analysis" or job.payload_version != 1:
             raise AnalysisInputError("unsupported_feedback_analysis_job")
-        feedback_id = str(job.payload.get("feedback_id") or "")
-        if not feedback_id:
+        feedback_id = job.payload.get("feedback_id")
+        if not isinstance(feedback_id, str) or not feedback_id:
             raise AnalysisInputError("feedback_id_missing")
         feedback = await self.chat_repository.read_feedback_by_id(feedback_id)
         if feedback is None:
@@ -166,7 +165,7 @@ class FeedbackAnalysisHandler:
                     {
                         "tool_call_id": call.tool_call_id,
                         "name": call.name,
-                        "arguments": deepcopy(dict(call.arguments)),
+                        "arguments": call.arguments,
                         "position": call.position,
                     }
                     for call in answer.tool_calls
@@ -175,7 +174,7 @@ class FeedbackAnalysisHandler:
                     {
                         "tool_call_id": answer.tool_result.tool_call_id,
                         "status": answer.tool_result.status.value,
-                        "data": deepcopy(dict(answer.tool_result.data)),
+                        "data": answer.tool_result.data,
                         "resource_refs": [
                             {
                                 "resource_type": item.resource_type,
@@ -289,35 +288,21 @@ async def read_chat_coverage_audit(
     a request signal and leaves inspection status unknown/partial.
     """
 
-    model_reader = getattr(repository, "read_model_calls", None)
-    model_calls: tuple[Any, ...] | None
-    if not callable(model_reader):
+    try:
+        collected: list[Any] = []
+        offset = 0
+        while offset < 10_000:
+            batch = await repository.read_model_calls(session_id, limit=200, offset=offset)
+            collected.extend(batch)
+            if len(batch) < 200:
+                break
+            offset += len(batch)
+        model_calls: tuple[Any, ...] | None = tuple(collected)
+    except TypeError:
+        raise
+    except Exception:  # noqa: BLE001
+        # An unavailable audit cannot establish that a Source was inspected.
         model_calls = None
-    else:
-        try:
-            collected: list[Any] = []
-            offset = 0
-            while True:
-                try:
-                    batch = await model_reader(session_id, limit=200, offset=offset)
-                except TypeError:
-                    batch = await model_reader(session_id)
-                values = tuple(batch or ())
-                collected.extend(values)
-                if len(values) < 200:
-                    break
-                offset += len(values)
-                if offset >= 10_000:
-                    break
-            model_calls = tuple(collected)
-        except Exception:  # noqa: BLE001
-            # Coverage must never turn a readable feedback record into a
-            # fabricated successful audit because the optional audit read failed.
-            model_calls = None
-
-    tool_reader = getattr(repository, "read_tool_call", None)
-    if not callable(tool_reader):
-        return ChatCoverageAudit(model_calls=model_calls, tool_calls=None)
 
     tool_ids = {
         request.tool_call_id
@@ -328,7 +313,7 @@ async def read_chat_coverage_audit(
     tool_audit_error = False
     for tool_call_id in tool_ids:
         try:
-            record = await tool_reader(tool_call_id)
+            record = await repository.read_tool_call(tool_call_id)
         except Exception:  # noqa: BLE001
             tool_audit_error = True
             continue

@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import logging
 from typing import Any
 
+from repositories.analysis_job_repository import AnalysisJobRepository
+
 from application.feedback.analysis_handler import AnalysisInputError
 from application.feedback.correction_signal_handler import CorrectionSignalAnalysisHandler
 from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
@@ -25,7 +27,7 @@ class CorrectionSignalAnalysisWorker:
     def __init__(
         self,
         *,
-        job_repository: Any,
+        job_repository: AnalysisJobRepository,
         case_repository: Any,
         handler: CorrectionSignalAnalysisHandler,
     ) -> None:
@@ -35,9 +37,7 @@ class CorrectionSignalAnalysisWorker:
 
     async def run_once(self) -> Any | None:
         now = datetime.now(timezone.utc).isoformat()
-        recover = getattr(self.job_repository, "recover_expired_jobs", None)
-        if callable(recover):
-            await recover(now=now)
+        await self.job_repository.recover_expired_jobs(now=now)
         job = await self.job_repository.claim_next_correction_signal_analysis_job(now=now)
         if job is None:
             return None
@@ -48,8 +48,7 @@ class CorrectionSignalAnalysisWorker:
                 lambda: self.handler.handle(job),
             )
         except LeaseLostError:
-            read_job = getattr(self.job_repository, "read_job", None)
-            return await read_job(job.job_id) if callable(read_job) else job
+            return await self.job_repository.read_job(job.job_id)
         except AnalysisInputError as exc:
             code = str(exc)
             if code in {

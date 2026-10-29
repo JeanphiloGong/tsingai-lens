@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import logging
 import re
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ from application.core.objectives.analysis.source_screening import (
 from domain.core import (
     ResearchObjective,
 )
-from domain.source import SourceDocumentTree
+from domain.source import SourceBlock, SourceDocumentNode, SourceDocumentTree, SourceTable
 
 logger = logging.getLogger(__name__)
 
@@ -87,23 +86,14 @@ class SourceSelectionHint:
     matched_variables: tuple[str, ...]
     reason: str | None
 
-    def __post_init__(self) -> None:
-        if not self.table_id:
-            raise ValueError("source selection hint requires table_id")
-        if self.role not in {"result_table", "condition_context"}:
-            raise ValueError(f"unsupported source selection hint role: {self.role}")
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
-def _optional_text(value: Any) -> str | None:
-    return _text(value) or None
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
+
+
 
 
 def _notify_progress(
@@ -870,7 +860,7 @@ def _append_ranked_text_hint_routes(
 
 
 def _text_hint_route_priority(candidate: dict[str, Any]) -> int:
-    section_key = _objective_column_key(str(candidate.get("section_label") or ""))
+    section_key = _objective_column_key((candidate.get("section_label") or ""))
     priority = 0
     if "conclusion" in section_key:
         priority += 8
@@ -880,7 +870,7 @@ def _text_hint_route_priority(candidate: dict[str, Any]) -> int:
         priority += 2
     if "abstract" in section_key:
         priority -= 3
-    text = str(candidate.get("text") or "").casefold()
+    text = (candidate.get("text") or "").casefold()
     if any(
         phrase in text
         for phrase in (
@@ -934,7 +924,7 @@ def _text_hint_route_role(
     if evidence_role == "mediator_context":
         return "characterization"
     text = " ".join(
-        str(value or "")
+        (value or "")
         for value in (
             candidate.get("section_label"),
             candidate.get("text"),
@@ -1205,8 +1195,8 @@ def _build_route_source_candidates(
     *,
     frame: PaperAnalysisFrame,
     objective_context: ResearchObjective,
-    blocks: list[Any],
-    tables: list[Any],
+    blocks: list[SourceBlock],
+    tables: list[SourceTable],
     document_tree: SourceDocumentTree | None = None,
     lineage_source_refs: Iterable[tuple[str, str]] = (),
 ) -> list[dict[str, Any]]:
@@ -1217,9 +1207,9 @@ def _build_route_source_candidates(
         if str(source_kind or "").strip() and str(source_ref or "").strip()
     )
     table_by_id = {
-        str(getattr(table, "table_id", "") or ""): table
+        str(table.table_id or ""): table
         for table in tables
-        if str(getattr(table, "table_id", "") or "")
+        if str(table.table_id or "")
     }
     table_ids = list((*frame.relevant_tables, *frame.excluded_tables))
     # A primary experimental paper is a recall-first inspection scope. The
@@ -1228,9 +1218,9 @@ def _build_route_source_candidates(
     # binding even when the model only assigned medium relevance.
     if frame.paper_role == "primary_experiment":
         table_ids.extend(
-            str(getattr(table, "table_id", "") or "")
+            str(table.table_id or "")
             for table in tables
-            if str(getattr(table, "table_id", "") or "")
+            if str(table.table_id or "")
         )
     for table_id in dict.fromkeys(table_ids):
         table = table_by_id.get(table_id)
@@ -1247,8 +1237,8 @@ def _build_route_source_candidates(
                     "excluded" if table_id in frame.excluded_tables else "relevant"
                 )
             ),
-            "caption_text": getattr(table, "caption_text", None),
-            "heading_path": getattr(table, "heading_path", None),
+            "caption_text": table.caption_text,
+            "heading_path": table.heading_path,
             "table_schema": table_schema,
             "sample_rows": table_schema["sample_rows"],
             # Candidate recall uses the complete logical table a researcher
@@ -1296,14 +1286,14 @@ def _build_route_source_candidates(
             (
                 item
                 for item in blocks
-                if str(getattr(item, "block_id", "") or "") == source_ref
+                if item.block_id == source_ref
             ),
             None,
         )
         if block is None:
             continue
-        block_type = str(getattr(block, "block_type", "") or "")
-        text = str(getattr(block, "text", "") or "").strip()
+        block_type = str(block.block_type or "")
+        text = str(block.text or "").strip()
         if not text or block_type not in {"paragraph", "list_item", "figure_caption"}:
             continue
         text_candidates.append(
@@ -1391,6 +1381,7 @@ def _build_route_source_candidates(
         )
         in selected_keys
     ]
+
 
 
 def _route_candidate_is_direct_result_candidate(
@@ -1521,21 +1512,22 @@ def _route_tree_position(candidate: dict[str, Any]) -> dict[str, Any]:
 def _tree_position_payload(
     *,
     document_tree: SourceDocumentTree,
-    node: Any,
+    node: SourceDocumentNode,
 ) -> dict[str, Any]:
     return {
-        "node_id": getattr(node, "node_id", None),
-        "node_type": str(getattr(node, "node_type", "") or "") or None,
+        "node_id": node.node_id,
+        "node_type": str(node.node_type or "") or None,
         "section_path": _tree_node_section_path(
             document_tree=document_tree,
             node=node,
         ),
-        "source_ref_kind": getattr(node, "source_ref_kind", None),
-        "source_ref_id": getattr(node, "source_ref_id", None),
-        "order": getattr(node, "order", None),
-        "page_start": getattr(node, "page_start", None),
-        "page_end": getattr(node, "page_end", None),
+        "source_ref_kind": node.source_ref_kind,
+        "source_ref_id": node.source_ref_id,
+        "order": node.order,
+        "page_start": node.page_start,
+        "page_end": node.page_end,
     }
+
 
 
 def _tree_node_section_path(

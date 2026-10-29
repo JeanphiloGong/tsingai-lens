@@ -99,22 +99,8 @@ class FeedbackCaseService:
         if any(message.session_id != case.session_id for message in messages):
             raise FileNotFoundError(f"feedback case not found: {case_id}")
         results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
-        signal_reader = getattr(
-            self.case_repository, "read_correction_signal_analysis_results", None
-        )
-        signal_results = (
-            await signal_reader(case.signal_analysis_result_ids)
-            if signal_reader is not None
-            else ()
-        )
-        tool_failure_reader = getattr(
-            self.case_repository, "read_tool_failure_analysis_results", None
-        )
-        tool_failure_results = (
-            await tool_failure_reader(case.tool_failure_analysis_result_ids)
-            if tool_failure_reader is not None
-            else ()
-        )
+        signal_results = await self.case_repository.read_correction_signal_analysis_results(case.signal_analysis_result_ids)
+        tool_failure_results = await self.case_repository.read_tool_failure_analysis_results(case.tool_failure_analysis_result_ids)
         feedback_items: list[Any] = []
         for signal_id in case.source_signal_ids:
             item = await self.chat_repository.read_feedback_by_id(signal_id)
@@ -130,14 +116,8 @@ class FeedbackCaseService:
             messages=messages,
             session_id=case.session_id,
         )
-        annotation_reader = getattr(self.case_repository, "read_annotation", None)
-        annotation = (
-            await annotation_reader(case.case_id)
-            if annotation_reader is not None
-            else None
-        )
-        review_reader = getattr(self.case_repository, "read_review_decisions", None)
-        decisions = await review_reader(case.case_id) if review_reader is not None else ()
+        annotation = await self.case_repository.read_annotation(case.case_id)
+        decisions = await self.case_repository.read_review_decisions(case.case_id)
         return _detail(
             case,
             messages,
@@ -178,10 +158,10 @@ class FeedbackCaseService:
         }:
             raise ValueError("feedback_case_not_annotatable")
         allowed_source_refs = _case_source_refs(case, results)
-        requested_refs = tuple(dict.fromkeys(str(item).strip() for item in support_source_refs if str(item).strip()))
+        requested_refs = support_source_refs
         if any(ref not in allowed_source_refs for ref in requested_refs):
             raise ValueError("annotation_source_not_in_case")
-        current = await self._read_annotation(case.case_id)
+        current = await self.case_repository.read_annotation(case.case_id)
         timestamp = now or datetime.now(timezone.utc).isoformat()
         version = current.version + 1 if current is not None else 1
         annotation = FeedbackAnnotation.build(
@@ -192,15 +172,12 @@ class FeedbackCaseService:
             severity=severity,  # type: ignore[arg-type]
             target=target,
             support_source_refs=requested_refs,
-            dataset_uses=tuple(dataset_uses),  # type: ignore[arg-type]
+            dataset_uses=dataset_uses,  # type: ignore[arg-type]
             reason=reason,
             created_by=user_id,
             created_at=timestamp,
         )
-        saver = getattr(self.case_repository, "save_annotation", None)
-        if saver is None:
-            raise RuntimeError("feedback annotation persistence is not configured")
-        return await saver(annotation, expected_digest=expected_digest, now=timestamp)
+        return await self.case_repository.save_annotation(annotation, expected_digest=expected_digest, now=timestamp)
 
     async def _authorized_case(
         self, case_id: str, user_id: str
@@ -217,27 +194,9 @@ class FeedbackCaseService:
         ):
             raise FileNotFoundError(f"feedback case not found: {case_id}")
         results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
-        signal_reader = getattr(
-            self.case_repository, "read_correction_signal_analysis_results", None
-        )
-        signal_results = (
-            await signal_reader(case.signal_analysis_result_ids)
-            if signal_reader is not None
-            else ()
-        )
-        tool_failure_reader = getattr(
-            self.case_repository, "read_tool_failure_analysis_results", None
-        )
-        tool_failure_results = (
-            await tool_failure_reader(case.tool_failure_analysis_result_ids)
-            if tool_failure_reader is not None
-            else ()
-        )
+        signal_results = await self.case_repository.read_correction_signal_analysis_results(case.signal_analysis_result_ids)
+        tool_failure_results = await self.case_repository.read_tool_failure_analysis_results(case.tool_failure_analysis_result_ids)
         return case, (*results, *signal_results, *tool_failure_results)
-
-    async def _read_annotation(self, case_id: str) -> FeedbackAnnotation | None:
-        reader = getattr(self.case_repository, "read_annotation", None)
-        return await reader(case_id) if reader is not None else None
 
     async def submit_review_for_user(
         self,
@@ -251,15 +210,14 @@ class FeedbackCaseService:
         now: str | None = None,
     ) -> ReviewDecision:
         case, _ = await self._authorized_case(case_id, user_id)
-        annotation = await self._read_annotation(case.case_id)
+        annotation = await self.case_repository.read_annotation(case.case_id)
         if annotation is None:
             raise ValueError("feedback_case_annotation_required")
         if annotation.annotation_digest != expected_annotation_digest:
             raise ValueError("feedback_case_stale")
         if decision == "accept":
             await self._validate_review_acceptance(case, annotation)
-        reader = getattr(self.case_repository, "read_review_decisions", None)
-        previous = await reader(case.case_id) if reader is not None else ()
+        previous = await self.case_repository.read_review_decisions(case.case_id)
         timestamp = now or datetime.now(timezone.utc).isoformat()
         review = ReviewDecision(
             decision_id=_review_decision_id(
@@ -275,10 +233,7 @@ class FeedbackCaseService:
             seq=len(previous) + 1,
             created_at=timestamp,
         )
-        appender = getattr(self.case_repository, "append_review_decision", None)
-        if appender is None:
-            raise RuntimeError("feedback review persistence is not configured")
-        return await appender(
+        return await self.case_repository.append_review_decision(
             review,
             expected_annotation_digest=expected_annotation_digest,
             now=timestamp,
@@ -317,10 +272,7 @@ class FeedbackCaseService:
         self, *, case_id: str, user_id: str
     ) -> tuple[ReviewDecision, ...]:
         case, _ = await self._authorized_case(case_id, user_id)
-        reader = getattr(self.case_repository, "read_review_decisions", None)
-        if reader is None:
-            return ()
-        return await reader(case.case_id)
+        return await self.case_repository.read_review_decisions(case.case_id)
 
     async def _authorized_collection_ids(
         self, user_id: str, collection_id: str | None
@@ -349,22 +301,8 @@ class FeedbackCaseService:
         if any(message.session_id != case.session_id for message in messages):
             return None
         results = await self.case_repository.read_analysis_results(case.analysis_result_ids)
-        signal_reader = getattr(
-            self.case_repository, "read_correction_signal_analysis_results", None
-        )
-        signal_results = (
-            await signal_reader(case.signal_analysis_result_ids)
-            if signal_reader is not None
-            else ()
-        )
-        tool_failure_reader = getattr(
-            self.case_repository, "read_tool_failure_analysis_results", None
-        )
-        tool_failure_results = (
-            await tool_failure_reader(case.tool_failure_analysis_result_ids)
-            if tool_failure_reader is not None
-            else ()
-        )
+        signal_results = await self.case_repository.read_correction_signal_analysis_results(case.signal_analysis_result_ids)
+        tool_failure_results = await self.case_repository.read_tool_failure_analysis_results(case.tool_failure_analysis_result_ids)
         result = _latest_result((*results, *signal_results, *tool_failure_results))
         needs_review = case.status in {
             "detected",

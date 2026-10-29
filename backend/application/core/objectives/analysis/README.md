@@ -44,10 +44,20 @@ Only a ready, source-grounded selection can enter Finding synthesis.
 | Synthesize | `ExperimentFindingSynthesisService` | Ready selections -> optional groups and Findings | Optional assertion annotation | Groups/Findings |
 | Project | `ExperimentCompatibilityProjection` | Fixed experiment graph -> existing Objective/Evidence/Finding response shapes | None | None |
 
-`source_extraction.py` remains the Source-local fact reader used by the
-screening/routing path. It does not allocate experiment identities. The old
-`paper_experiment.py` assembly and revision-converter path is retired; do not
-add new callers or documentation links to it.
+`source_extraction.py` supplies Source payload and context helpers used by
+screening, routing, and experiment bundle construction. Its legacy
+`extract_and_validate_source_facts` orchestrator has no production caller; the
+active service uses `build_bundle_from_routes` and `PaperExperimentExtractor`.
+The dormant orchestrator is retained pending a separate deletion task; do not
+add new callers. None of these payload helpers allocates experiment identities.
+The old `paper_experiment.py` assembly and revision-converter path is retired.
+
+Raw response parsing owns field formats. Preparation and binding consume those
+parsed values directly; repository reads reconstruct the stored facts without
+cleaning identifiers, dropping records, or changing numeric values. Domain
+objects retain scientific relationships and version rules. Source-local
+response validation uses those same domain rules inside the existing model
+repair loop, so an invalid attribution is rejected before persistence.
 
 ## Candidate Contract and Scientific Gates
 

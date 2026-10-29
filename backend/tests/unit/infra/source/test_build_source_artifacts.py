@@ -93,3 +93,19 @@ async def test_parse_research_text_preserves_traceback_and_current_failures(tmp_
     stats = json.loads((output_dir / "stats.json").read_text())
     assert stats["num_documents"] == 1
     assert stats["total_runtime"] >= stats["input_load_time"] >= 0
+
+
+@pytest.mark.anyio
+async def test_scratch_table_serializes_numpy_scalars_and_arrays(tmp_path):
+    import numpy as np
+    from infra.source.storage.table_io import write_table_to_storage
+    from infra.source.storage.file_storage import FileStorage
+
+    table = pd.DataFrame([{
+        "matrix": np.array([[1, 2], [3, 4]]),
+        "scalar_array": np.array(5), "count": np.int64(7),
+        "nested": {"value": np.float32(2.5)}, "missing": float("nan"),
+    }])
+    await write_table_to_storage(table, "tables", FileStorage(str(tmp_path)))
+    record = json.loads((tmp_path / "tables.json").read_text())["records"][0]
+    assert record == {"matrix": [[1, 2], [3, 4]], "scalar_array": 5, "count": 7, "nested": {"value": 2.5}, "missing": None}

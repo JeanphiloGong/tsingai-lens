@@ -61,7 +61,7 @@ from domain.core import (
     ResearchObjective,
     SourceObservation,
 )
-from domain.core.research_objective import normalize_objective_terms
+from domain.core.research_objective import ObjectiveEvidence, normalize_objective_terms
 from domain.core.research_process import build_source_observation_id
 from domain.core.scientific_fact import (
     ScientificAttribute,
@@ -70,12 +70,16 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-from domain.source import SourceDocumentTree, render_markdown_table
+from domain.source import (
+    SourceBlock, SourceDocumentNode, SourceDocumentTree, SourceFigure,
+    SourceTable, SourceTableCell, render_markdown_table,
+)
 from openai import APIConnectionError, APIStatusError
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     model_validator,
 )
 
@@ -547,10 +551,13 @@ class EvidenceComparisonModelOutput(_SourceExtractionContractBase):
 
     @model_validator(mode="after")
     def _validate_comparability(self) -> "EvidenceComparisonModelOutput":
-        if not self.comparable and not self.incomparability_reasons:
-            raise ValueError("incomparable evidence requires reasons")
-        if self.comparable and self.incomparability_reasons:
-            raise ValueError("comparable evidence cannot have incomparability reasons")
+        ScientificComparison(
+            baseline_label=self.baseline_label,
+            target_label=self.target_label,
+            axis_names=tuple(self.axis_names),
+            comparable=self.comparable,
+            incomparability_reasons=tuple(self.incomparability_reasons),
+        )
         return self
 
 
@@ -637,49 +644,28 @@ class EvidenceExtractionModelOutput(_SourceExtractionContractBase):
 
     @model_validator(mode="after")
     def _validate_scientific_contract(self) -> "EvidenceExtractionModelOutput":
-        result_role = self.evidence_role in {"direct_result", "contradictory_result"}
-        if result_role and self.reported_result is None:
-            raise ValueError("result evidence requires one reported result")
-        if not result_role and self.reported_result is not None:
-            raise ValueError("context evidence cannot report an experimental result")
-        if not result_role and self.attribution_scope in {
-            "isolated_effect",
-            "joint_effect",
-        }:
-            raise ValueError("context evidence cannot claim experimental attribution")
-        if self.comparison is not None and not self.comparison.comparable:
-            if self.attribution_scope != "not_attributable":
-                raise ValueError("incomparable evidence cannot be attributed")
-        variable_names = [item.name.casefold() for item in self.changed_variables]
-        if len(variable_names) != len(set(variable_names)):
-            raise ValueError("changed variable names must be unique per extraction")
         if any(
             item.baseline_value is not None
             and item.target_value is not None
             and item.baseline_value == item.target_value
             for item in self.changed_variables
         ):
-            raise ValueError(
-                "changed variables require distinct baseline and target values"
-            )
-        if self.attribution_scope in {"isolated_effect", "joint_effect"}:
-            if self.comparison is None or not self.comparison.comparable:
-                raise ValueError("experimental attribution requires comparison")
-            variables = set(variable_names)
-            axes = {item.casefold() for item in self.comparison.axis_names}
-            if variables != axes:
-                raise ValueError("comparison axes must match changed variables")
-            if any(
-                item.baseline_value is None or item.target_value is None
-                for item in self.changed_variables
-            ):
-                raise ValueError(
-                    "experimental attribution requires baseline and target values"
+            raise ValueError("changed variables require distinct baseline and target values")
+        ObjectiveEvidence._validate_attribution(
+            evidence_role=self.evidence_role,
+            selection_status="extracted",
+            attribution_scope=self.attribution_scope,
+            has_reported_result=self.reported_result is not None,
+            comparison_comparable=(self.comparison.comparable if self.comparison else None),
+            comparison_axes=self.comparison.axis_names if self.comparison else (),
+            changed_variables=tuple(
+                ScientificVariable(
+                    name=item.name, baseline_value=item.baseline_value,
+                    target_value=item.target_value, unit=item.unit,
                 )
-            if self.attribution_scope == "isolated_effect" and len(variables) != 1:
-                raise ValueError("isolated effect requires one changed variable")
-            if self.attribution_scope == "joint_effect" and len(variables) < 2:
-                raise ValueError("joint effect requires multiple changed variables")
+                for item in self.changed_variables
+            ),
+        )
         return self
 
 
@@ -710,7 +696,7 @@ class DirectEvidenceExtractionModelOutput(EvidenceExtractionModelOutput):
     reported_result: DirectEvidenceResultModelOutput
 
 
-class DirectEvidenceExtractionsModelOutput(_SourceExtractionContractBase):
+class DirectEvidenceExtractionsModelOutput(EvidenceExtractionsModelOutput):
     extractions: list[DirectEvidenceExtractionModelOutput] = Field(
         default_factory=list,
         max_length=_SOURCE_EXTRACTION_MAX_ITEMS,
@@ -981,274 +967,8 @@ def build_objective_evidence_prompt(
     return _SOURCE_EXTRACTION_SYSTEM_PROMPT, user_prompt
 
 
-def _normalize_objective_evidence_payload(payload: Any) -> Any:
-    def identical_nonempty_scalar(left: Any, right: Any) -> bool:
-        if isinstance(left, bool) or isinstance(right, bool):
-            return type(left) is type(right) and left == right
-        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-            return left == right
-        if isinstance(left, str) and isinstance(right, str):
-            return bool(left.strip()) and left == right
-        return False
-
-    def complete_changed_variable_names(
-        variables: list[Any],
-    ) -> tuple[str, ...]:
-        def is_complete_scalar(value: Any) -> bool:
-            if isinstance(value, str):
-                return bool(value.strip())
-            return isinstance(value, (int, float, bool))
-
-        names: list[str] = []
-        seen: set[str] = set()
-        for variable in variables:
-            if not isinstance(variable, Mapping):
-                return ()
-            name = variable.get("name")
-            baseline = variable.get("baseline_value")
-            target = variable.get("target_value")
-            if (
-                not isinstance(name, str)
-                or not name.strip()
-                or not is_complete_scalar(baseline)
-                or not is_complete_scalar(target)
-                or identical_nonempty_scalar(baseline, target)
-            ):
-                return ()
-            name = name.strip()
-            canonical_name = name.casefold()
-            if canonical_name in seen:
-                return ()
-            seen.add(canonical_name)
-            names.append(name)
-        return tuple(names)
-
-    if not isinstance(payload, Mapping):
-        return payload
-    extractions = payload.get("extractions")
-    if not isinstance(extractions, list):
-        return payload
-
-    changed = False
-    normalized_extractions: list[Any] = []
-    for extraction in extractions:
-        if not isinstance(extraction, Mapping):
-            normalized_extractions.append(extraction)
-            continue
-        normalized_extraction = dict(extraction)
-        variables = normalized_extraction.get("changed_variables", [])
-        comparison = normalized_extraction.get("comparison")
-        # Removing a fixed factor or an empty comparison must not also remove
-        # malformed fields or violations that the output model would reject.
-        if (
-            not isinstance(normalized_extraction.get("evidence_role", "irrelevant"), str)
-            or not isinstance(variables, list)
-            or len(variables) > 12
-            or any(
-                not isinstance(variable, Mapping)
-                or set(variable) - {"name", "baseline_value", "target_value", "unit"}
-                or not isinstance(variable.get("name"), str)
-                or any(
-                    variable.get(field) is not None
-                    and not isinstance(variable[field], (str, int, float, bool))
-                    for field in ("baseline_value", "target_value")
-                )
-                or (variable.get("unit") is not None and not isinstance(variable["unit"], str))
-                for variable in variables
-            )
-            or (
-                comparison is not None
-                and (
-                    not isinstance(comparison, Mapping)
-                    or set(comparison) - {
-                        "baseline_label", "target_label", "axis_names",
-                        "comparable", "incomparability_reasons",
-                    }
-                    or not isinstance(comparison.get("baseline_label"), str)
-                    or not isinstance(comparison.get("target_label"), str)
-                    or not isinstance(comparison.get("axis_names"), list)
-                    or any(not isinstance(axis, str) for axis in comparison["axis_names"])
-                    or not isinstance(comparison.get("comparable"), bool)
-                    or ("incomparability_reasons" in comparison and (
-                        not isinstance(comparison["incomparability_reasons"], list)
-                        or any(not isinstance(reason, str) for reason in comparison["incomparability_reasons"])
-                    ))
-                    or (
-                        not comparison["comparable"]
-                        and not comparison.get("incomparability_reasons")
-                    )
-                    or (
-                        comparison["comparable"]
-                        and comparison.get("incomparability_reasons")
-                    )
-                )
-            )
-            or normalized_extraction.get("attribution_scope", "not_attributable") not in (
-                "isolated_effect", "joint_effect", "association_only", "descriptive_only", "not_attributable"
-            )
-            or normalized_extraction.get("resolution_status", "partial") not in (
-                "resolved", "partial", "unresolved", "skipped", "unknown"
-            )
-        ):
-            normalized_extractions.append(normalized_extraction)
-            continue
-        variable_names = [variable["name"].casefold() for variable in variables]
-        if len(variable_names) != len(set(variable_names)):
-            normalized_extractions.append(normalized_extraction)
-            continue
-        scientific_context = normalized_extraction.get("scientific_context")
-        has_context_fact = isinstance(scientific_context, Mapping) and any(
-            isinstance(scientific_context.get(family), list)
-            and bool(scientific_context.get(family))
-            for family in _OBJECTIVE_CONTEXT_FIELD_NAMES
-        )
-        if (
-            normalized_extraction.get("evidence_role") in _OBJECTIVE_CONTEXT_ROLES
-            and normalized_extraction.get("reported_result") is not None
-        ):
-            # The role is model-authored metadata, while the reported result
-            # must still pass deterministic grounding against the primary
-            # Source. Preserve the candidate fact for that validation instead
-            # of turning a role-label mismatch into a technical extraction
-            # failure. This does not infer contradiction or attribution.
-            normalized_extraction["evidence_role"] = "direct_result"
-            changed = True
-        if (
-            normalized_extraction.get("evidence_role")
-            in {"direct_result", "contradictory_result"}
-            and normalized_extraction.get("reported_result") is None
-            and not variables
-            and normalized_extraction.get("comparison") is None
-            and has_context_fact
-        ):
-            # Role selection is model metadata, while the context values still
-            # pass deterministic Source grounding below. Preserve an otherwise
-            # valid Methods/sample transcription as context instead of losing
-            # the complete Source to schema failure. This never upgrades the
-            # route to result Evidence: the selected result remains unresolved
-            # until a Source-backed reported_result is extracted.
-            normalized_extraction.update(
-                {
-                    "evidence_role": "condition_context",
-                    "changed_variables": [],
-                    "comparison": None,
-                    "reported_result": None,
-                    "attribution_scope": "not_attributable",
-                }
-            )
-            variables = normalized_extraction["changed_variables"]
-            changed = True
-        fixed_names: set[str] = set()
-        changed_variables: list[Any] = []
-        for variable in variables:
-            baseline = variable.get("baseline_value")
-            target = variable.get("target_value")
-            variable_name = variable["name"].strip().casefold()
-            if not variable_name or not identical_nonempty_scalar(
-                baseline,
-                target,
-            ):
-                changed_variables.append(variable)
-                continue
-            fixed_names.add(variable_name)
-            changed = True
-
-        if fixed_names:
-            normalized_extraction["changed_variables"] = changed_variables
-        remaining_variable_names = {
-            variable["name"].strip().casefold()
-            for variable in changed_variables
-            if variable["name"].strip()
-        }
-        comparison = extraction.get("comparison")
-        if isinstance(comparison, Mapping) and isinstance(
-            comparison.get("axis_names"), list
-        ):
-            normalized_comparison = dict(comparison)
-            normalized_comparison["axis_names"] = [
-                axis
-                for axis in comparison["axis_names"]
-                if axis.strip().casefold() not in fixed_names
-                or axis.strip().casefold() in remaining_variable_names
-            ]
-            normalized_extraction["comparison"] = normalized_comparison
-        comparison = normalized_extraction.get("comparison")
-        if isinstance(comparison, Mapping):
-            axis_names = comparison.get("axis_names")
-            missing_axis_names = not any(axis.strip() for axis in axis_names)
-            recovered_axis_names = (
-                complete_changed_variable_names(changed_variables)
-                if missing_axis_names
-                else ()
-            )
-            if recovered_axis_names:
-                normalized_comparison = dict(comparison)
-                normalized_comparison["axis_names"] = list(recovered_axis_names)
-                normalized_extraction["comparison"] = normalized_comparison
-                changed = True
-        comparison = normalized_extraction.get("comparison")
-        complete_variable_names = complete_changed_variable_names(changed_variables)
-        if (
-            extraction.get("reported_result") is not None
-            and extraction.get("attribution_scope")
-            in {"isolated_effect", "joint_effect"}
-            and not complete_variable_names
-        ):
-            normalized_extraction["attribution_scope"] = (
-                "association_only"
-                if isinstance(comparison, Mapping)
-                and comparison.get("comparable") is True
-                else (
-                    "not_attributable"
-                    if isinstance(comparison, Mapping)
-                    else "descriptive_only"
-                )
-            )
-            normalized_extraction["resolution_status"] = "partial"
-            changed = True
-        comparison_has_no_axes = (
-            isinstance(comparison, Mapping)
-            and isinstance(comparison.get("axis_names"), list)
-            and not any(axis.strip() for axis in comparison["axis_names"])
-        )
-        if not changed_variables and (fixed_names or comparison_has_no_axes):
-            normalized_extraction["comparison"] = None
-            if extraction.get("attribution_scope") in {
-                "isolated_effect",
-                "joint_effect",
-                "association_only",
-            }:
-                normalized_extraction["attribution_scope"] = (
-                    "descriptive_only"
-                    if extraction.get("reported_result") is not None
-                    else "not_attributable"
-                )
-            changed = True
-        if (
-            extraction.get("attribution_scope") == "joint_effect"
-            and len(changed_variables) == 1
-            and len(remaining_variable_names) == 1
-        ):
-            normalized_extraction["attribution_scope"] = "isolated_effect"
-        normalized_extractions.append(normalized_extraction)
-
-    if not changed:
-        return payload
-    normalized_payload = dict(payload)
-    normalized_payload["extractions"] = normalized_extractions
-    return normalized_payload
 
 
-def _first_objective_evidence_extraction(
-    payload: Any,
-) -> dict[str, Any] | None:
-    if not isinstance(payload, Mapping):
-        return None
-    extractions = payload.get("extractions")
-    if not isinstance(extractions, list) or not extractions:
-        return None
-    item = extractions[0]
-    return dict(item) if isinstance(item, Mapping) else None
 
 
 def _objective_evidence_repair_instruction(
@@ -1373,8 +1093,6 @@ class ObjectiveSourceExtractor:
                 response,
                 context_field=narrow_context_field,
             )
-        if isinstance(response, DirectEvidenceExtractionsModelOutput):
-            return EvidenceExtractionsModelOutput.model_validate(response.model_dump())
         if not isinstance(response, EvidenceExtractionsModelOutput):
             raise TypeError("unexpected objective evidence extraction response type")
         return response
@@ -1386,29 +1104,22 @@ class ObjectiveSourceExtractor:
         response_model: type[BaseModel],
         max_completion_tokens: int | None,
     ) -> tuple[BaseModel, str | None]:
-        last_invalid_extraction: dict[str, Any] | None = None
+        invalid_extraction: dict[str, Any] | None = None
+        echoed_prompt = False
 
-        def normalize_payload(payload: Any) -> Any:
-            nonlocal last_invalid_extraction
-            normalized = _normalize_objective_evidence_payload(payload)
-            last_invalid_extraction = _first_objective_evidence_extraction(
-                normalized
-            )
-            if not isinstance(normalized, dict):
-                return normalized
-            if (
-                "extractions" not in normalized
-                and normalized
-                and set(normalized) <= _SOURCE_EXTRACTION_ECHOED_PROMPT_KEYS
-            ):
-                raise ValueError(
-                    "objective evidence response echoed input fields instead of "
-                    "returning extractions"
-                )
-            return normalized
+        def record_invalid_response(error: Exception) -> None:
+            nonlocal invalid_extraction, echoed_prompt
+            invalid_extraction = None
+            echoed_prompt = False
+            if isinstance(error, ValidationError):
+                for detail in error.errors():
+                    if detail["loc"][:1] == ("extractions",) and len(detail["loc"]) == 2:
+                        invalid_extraction = detail["input"]
+                    if detail["loc"] and detail["loc"][0] in _SOURCE_EXTRACTION_ECHOED_PROMPT_KEYS:
+                        echoed_prompt = True
 
         def build_retry_prompt(repair_detail: str) -> str:
-            if "echoed input fields" in repair_detail:
+            if echoed_prompt:
                 return (
                     "Your previous response only echoed the input fields and did "
                     "not perform evidence extraction. Do not repeat OBJECTIVE, "
@@ -1420,7 +1131,7 @@ class ObjectiveSourceExtractor:
                 )
             return _objective_evidence_repair_instruction(
                 repair_detail=repair_detail,
-                invalid_extraction=last_invalid_extraction,
+                invalid_extraction=invalid_extraction,
             )
 
         return self.response_client.complete_json(
@@ -1428,7 +1139,7 @@ class ObjectiveSourceExtractor:
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
             build_retry_prompt=build_retry_prompt,
-            normalize_response_payload=normalize_payload,
+            on_validation_error=record_invalid_response,
             max_attempts=3,
             json_schema_name="structured_evidence_extractions",
         )
@@ -1454,8 +1165,7 @@ class ObjectiveSourceExtractor:
         )
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
+
 
 
 _EXTRACTION_ROUTE_ROLE_PRIORITY = {
@@ -1951,8 +1661,8 @@ def _extract_source_round(
                     llm_route_records_list: list[dict[str, Any]] = []
                     existing_grounding_keys = {
                         (
-                            _text(ref.get("source_kind")),
-                            _text(ref.get("source_ref")),
+                            (ref.get("source_kind") or ""),
+                            (ref.get("source_ref") or ""),
                         )
                         for _context_source, ref in grounding_source_pairs
                     }
@@ -2872,9 +2582,9 @@ def _collect_context_source_candidates(
     specific_terms: tuple[str, ...],
     specific_term_fields: Mapping[str, frozenset[str]],
     objective_paper_frames: tuple[PaperAnalysisFrame, ...],
-    blocks_by_document_id: dict[str, list[Any]],
-    tables_by_document_id: dict[str, list[Any]],
-    figures_by_document_id: dict[str, list[Any]],
+    blocks_by_document_id: dict[str, list[SourceBlock]],
+    tables_by_document_id: dict[str, list[SourceTable]],
+    figures_by_document_id: dict[str, list[SourceFigure]],
     document_tree: SourceDocumentTree | None,
     fully_inspected_source_keys: set[tuple[str, str, str, str]],
     inspected_context_fields_by_source: Mapping[
@@ -2950,11 +2660,7 @@ def _collect_context_source_candidates(
                             )
                             or ""
                         ).strip()
-                        for child_id in getattr(
-                            section_node,
-                            "child_ids",
-                            (),
-                        )
+                        for child_id in section_node.child_ids
                         if document_tree.nodes.get(child_id) is not None
                         and document_tree.nodes[child_id].node_type
                         in {"paragraph", "list_item", "caption"}
@@ -3075,8 +2781,8 @@ def _collect_context_source_candidates(
                 (objective_id, document_id, *source_key)
             )
     for position, block in enumerate(blocks_by_document_id.get(document_id, ())):
-        source_ref = _text(getattr(block, "block_id", ""))
-        text = _text(getattr(block, "text", ""))
+        source_ref = (block.block_id or "")
+        text = (block.text or "")
         heading = _adaptive_context_heading(
             block,
             document_tree=document_tree,
@@ -3116,22 +2822,22 @@ def _collect_context_source_candidates(
         indexed_source_keys.add(source_key)
 
     for position, table in enumerate(tables_by_document_id.get(document_id, ())):
-        source_ref = _text(getattr(table, "table_id", ""))
+        source_ref = (table.table_id or "")
         if not source_ref:
             continue
         heading = " ".join(
             part
             for part in (
                 _adaptive_context_source_heading(
-                    heading_path=getattr(table, "heading_path", ""),
+                    heading_path=table.heading_path,
                     document_tree=document_tree,
                     source_ref_kind="table",
                     source_ref=source_ref,
                 ),
-                _text(getattr(table, "caption_text", "")),
+                (table.caption_text or ""),
                 " ".join(
-                    _text(value)
-                    for value in (getattr(table, "column_headers", ()) or ())
+                    (value or "")
+                    for value in (table.column_headers or ())
                 ),
             )
             if part
@@ -3145,8 +2851,8 @@ def _collect_context_source_candidates(
             for part in (
                 heading,
                 " ".join(
-                    _text(row)
-                    for row in (getattr(table, "table_matrix", ()) or ())
+                    " ".join(row)
+                    for row in (table.table_matrix or ())
                 ),
             )
             if part
@@ -3178,15 +2884,15 @@ def _collect_context_source_candidates(
         indexed_source_keys.add(source_key)
 
     for position, figure in enumerate(figures_by_document_id.get(document_id, ())):
-        source_ref = _text(getattr(figure, "figure_id", ""))
-        caption = _text(getattr(figure, "caption_text", ""))
+        source_ref = (figure.figure_id or "")
+        caption = (figure.caption_text or "")
         if not source_ref or not caption:
             continue
         heading = " ".join(
             part
             for part in (
                 _adaptive_context_source_heading(
-                    heading_path=getattr(figure, "heading_path", ""),
+                    heading_path=figure.heading_path,
                     document_tree=document_tree,
                     source_ref_kind="figure",
                     source_ref=source_ref,
@@ -3298,8 +3004,8 @@ def _match_context_candidates_to_result(
             for position, block in enumerate(
                 blocks_by_document_id.get(document_id, ())
             )
-            if _text(getattr(block, "block_id", ""))
-            == _text(anchor.source_ref)
+            if (getattr(block, "block_id", "") or "")
+            == (anchor.source_ref or "")
         ),
         None,
     )
@@ -3307,12 +3013,12 @@ def _match_context_candidates_to_result(
         for position, block in enumerate(
             blocks_by_document_id.get(document_id, ())
         ):
-            source_ref = _text(getattr(block, "block_id", ""))
-            text = _text(getattr(block, "text", ""))
+            source_ref = (getattr(block, "block_id", "") or "")
+            text = (getattr(block, "text", "") or "")
             if (
                 not source_ref
                 or not text
-                or source_ref == _text(anchor.source_ref)
+                or source_ref == (anchor.source_ref or "")
                 or abs(position - anchor_block_position)
                 > _ADAPTIVE_CONTEXT_NEIGHBOR_RADIUS
             ):
@@ -4440,9 +4146,9 @@ def _adaptive_context_source_heading(
 ) -> str:
     heading = heading_path
     if isinstance(heading, (list, tuple)):
-        direct = " ".join(_text(part) for part in heading if _text(part))
+        direct = " ".join((part or "") for part in heading if (part or ""))
     else:
-        direct = _text(heading)
+        direct = (heading or "")
     if direct.strip():
         return direct.casefold()
     if document_tree is None or not source_ref:
@@ -4455,9 +4161,9 @@ def _adaptive_context_source_heading(
     if node is None:
         return ""
     return " ".join(
-        _text(part)
+        (part or "")
         for part in _tree_node_section_path(document_tree=document_tree, node=node)
-        if _text(part)
+        if (part or "")
     ).casefold()
 
 
@@ -4472,7 +4178,7 @@ def _adaptive_context_heading(
         heading_path=getattr(block, "heading_path", ""),
         document_tree=document_tree,
         source_ref_kind=source_ref_kind,
-        source_ref=source_ref or _text(getattr(block, "block_id", "")),
+        source_ref=source_ref or (getattr(block, "block_id", "") or ""),
     )
 
 
@@ -4515,42 +4221,33 @@ def _objective_merge_table_repair_records(
 def build_route_source_payload(
     *,
     route: EvidenceCandidate,
-    blocks: list[Any],
-    tables: list[Any],
-    figures: list[Any] | None = None,
+    blocks: list[SourceBlock],
+    tables: list[SourceTable],
+    figures: list[SourceFigure] | None = None,
     document_tree: SourceDocumentTree | None = None,
-    table_cells: list[Any] | None = None,
+    table_cells: list[SourceTableCell] | None = None,
 ) -> dict[str, Any]:
     if route.source_kind == "table":
         table = next(
             (
                 candidate
                 for candidate in tables
-                if str(getattr(candidate, "table_id", "") or "") == route.source_ref
+                if candidate.table_id == route.source_ref
             ),
             None,
         )
         if table is None:
             return {}
-        header_row_count = int(getattr(table, "header_row_count", 1) or 0)
-        table_matrix = [
-            [str(cell) for cell in row]
-            for row in getattr(table, "table_matrix", ()) or ()
-            if isinstance(row, (list, tuple))
-        ]
+        header_row_count = int(table.header_row_count or 0)
+        table_matrix = [list(row) for row in table.table_matrix]
         column_headers = [
-            str(value) for value in getattr(table, "column_headers", ()) or ()
+            str(value) for value in table.column_headers or ()
         ]
-        table_metadata = getattr(table, "metadata", {}) or {}
-        table_visual_text = (
-            str(table_metadata.get("visual_text") or "").strip()
-            if isinstance(table_metadata, Mapping)
-            else ""
-        )
+        table_visual_text = str(table.metadata.get("visual_text") or "").strip()
         cells = tuple(
             cell
             for cell in table_cells or []
-            if str(getattr(cell, "table_id", "") or "") == route.source_ref
+            if str(cell.table_id or "") == route.source_ref
         )
         caption_text = _objective_table_caption_text(table=table, blocks=blocks)
         continuation = find_table_label_continuation(
@@ -4563,9 +4260,9 @@ def build_route_source_payload(
             "source_kind": "table",
             "source_ref": route.source_ref,
             "document_id": route.document_id,
-            "page": getattr(table, "page", None),
+            "page": table.page,
             "caption_text": caption_text,
-            "heading_path": getattr(table, "heading_path", None),
+            "heading_path": table.heading_path,
             "column_headers": column_headers,
             "header_row_count": header_row_count,
             "table_matrix": table_matrix,
@@ -4580,16 +4277,16 @@ def build_route_source_payload(
             **({"table_reading_context_omissions": context_omissions} if context_omissions else {}),
             "table_cells": [
                 {
-                    "row_index": getattr(cell, "row_index", None),
-                    "col_index": getattr(cell, "col_index", None),
-                    "header_path": getattr(cell, "header_path", None),
-                    "cell_text": str(getattr(cell, "cell_text", "") or ""),
+                    "row_index": cell.row_index,
+                    "col_index": cell.col_index,
+                    "header_path": cell.header_path,
+                    "cell_text": str(cell.cell_text or ""),
                 }
                 for cell in sorted(
                     cells,
                     key=lambda item: (
-                        getattr(item, "row_index", 0),
-                        getattr(item, "col_index", 0),
+                        item.row_index,
+                        item.col_index,
                     ),
                 )
             ],
@@ -4603,7 +4300,7 @@ def build_route_source_payload(
             (
                 candidate
                 for candidate in blocks
-                if str(getattr(candidate, "block_id", "") or "") == source_block_id
+                if candidate.block_id == source_block_id
             ),
             None,
         )
@@ -4612,14 +4309,14 @@ def build_route_source_payload(
                 route=route,
                 document_tree=document_tree,
             )
-        text = str(getattr(block, "text", "") or "").strip()
+        text = str(block.text or "").strip()
         return {
             "source_kind": "text_window",
             "source_ref": route.source_ref,
             "document_id": route.document_id,
-            "page": getattr(block, "page", None),
-            "block_type": getattr(block, "block_type", None),
-            "heading_path": getattr(block, "heading_path", None),
+            "page": block.page,
+            "block_type": block.block_type,
+            "heading_path": block.heading_path,
             "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
         }
     if route.source_kind == "figure":
@@ -4627,20 +4324,20 @@ def build_route_source_payload(
             (
                 candidate
                 for candidate in figures or []
-                if str(getattr(candidate, "figure_id", "") or "") == route.source_ref
+                if candidate.figure_id == route.source_ref
             ),
             None,
         )
         if figure is None:
             return {}
-        caption = str(getattr(figure, "caption_text", "") or "").strip()
+        caption = str(figure.caption_text or "").strip()
         return {
             "source_kind": "figure",
             "source_ref": route.source_ref,
             "document_id": route.document_id,
-            "page": getattr(figure, "page", None),
+            "page": figure.page,
             "caption_text": caption[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
-            "heading_path": getattr(figure, "heading_path", None),
+            "heading_path": figure.heading_path,
             "text": caption[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
         }
     return {}
@@ -6389,20 +6086,20 @@ def _route_tree_position(candidate: dict[str, Any]) -> dict[str, Any]:
 def _tree_position_payload(
     *,
     document_tree: SourceDocumentTree,
-    node: Any,
+    node: SourceDocumentNode,
 ) -> dict[str, Any]:
     return {
-        "node_id": getattr(node, "node_id", None),
-        "node_type": str(getattr(node, "node_type", "") or "") or None,
+        "node_id": node.node_id,
+        "node_type": str(node.node_type or "") or None,
         "section_path": _tree_node_section_path(
             document_tree=document_tree,
             node=node,
         ),
-        "source_ref_kind": getattr(node, "source_ref_kind", None),
-        "source_ref_id": getattr(node, "source_ref_id", None),
-        "order": getattr(node, "order", None),
-        "page_start": getattr(node, "page_start", None),
-        "page_end": getattr(node, "page_end", None),
+        "source_ref_kind": node.source_ref_kind,
+        "source_ref_id": node.source_ref_id,
+        "order": node.order,
+        "page_start": node.page_start,
+        "page_end": node.page_end,
     }
 
 
@@ -6569,8 +6266,8 @@ def _objective_seed_context_routes(
             if unit.comparison is not None:
                 context_fields.append("comparison")
         for source_ref_record in unit.source_refs:
-            source_kind = _text(source_ref_record.get("source_kind")).casefold()
-            source_ref = _text(source_ref_record.get("source_ref"))
+            source_kind = (source_ref_record.get("source_kind") or "").casefold()
+            source_ref = (source_ref_record.get("source_ref") or "")
             if source_kind in {"block", "section", "text"}:
                 source_kind = "text_window"
             if source_kind not in {"text_window", "table", "figure"} or not source_ref:
@@ -6584,7 +6281,7 @@ def _objective_seed_context_routes(
                 seed_context_fields = tuple(context_fields)
             else:
                 seed_role = (
-                    _text(source_ref_record.get("role")) or "background_context"
+                    (source_ref_record.get("role") or "") or "background_context"
                 )
                 seed_context_fields = tuple(
                     source_ref_record.get("context_fields", ())
@@ -6828,8 +6525,8 @@ def _objective_bundle_grounding_sources(
 
     pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for item in bundle:
-        source_kind = _text(item.get("source_kind"))
-        source_ref = _text(item.get("source_ref"))
+        source_kind = (item.get("source_kind") or "")
+        source_ref = (item.get("source_ref") or "")
         if not source_kind or not source_ref:
             continue
         source = dict(item)
@@ -6876,7 +6573,7 @@ def _objective_bundle_source_refs_for_record(
     for variable in record.get("changed_variables") or ():
         if not isinstance(variable, Mapping):
             continue
-        name = _text(variable.get("name")) or None
+        name = (variable.get("name") or "") or None
         for field in ("baseline_value", "target_value"):
             value = variable.get(field)
             if value not in (None, ""):
@@ -6895,7 +6592,7 @@ def _objective_bundle_source_refs_for_record(
             for attribute in context.get(group) or ():
                 if not isinstance(attribute, Mapping):
                     continue
-                name = _text(attribute.get("name")) or group
+                name = (attribute.get("name") or "") or group
                 value = attribute.get("value")
                 if value not in (None, ""):
                     signals.append((name, value))
@@ -6905,8 +6602,8 @@ def _objective_bundle_source_refs_for_record(
 
     selected: list[dict[str, Any]] = []
     for source, ref in bundle_pairs:
-        source_kind = _text(ref.get("source_kind"))
-        source_ref = _text(ref.get("source_ref"))
+        source_kind = (ref.get("source_kind") or "")
+        source_ref = (ref.get("source_ref") or "")
         if not source_kind or not source_ref:
             continue
         if (source_kind, source_ref) in existing_grounding_keys:
@@ -6941,13 +6638,13 @@ def _merge_objective_grounding_source_pairs(
     merged: list[tuple[dict[str, Any], dict[str, Any]]] = list(existing)
     seen = {
         (
-            _text(ref.get("source_kind")),
-            _text(ref.get("source_ref")),
+            (ref.get("source_kind") or ""),
+            (ref.get("source_ref") or ""),
         )
         for _source, ref in existing
     }
     for source, ref in additional:
-        key = (_text(ref.get("source_kind")), _text(ref.get("source_ref")))
+        key = ((ref.get("source_kind") or ""), (ref.get("source_ref") or ""))
         if not all(key) or key in seen:
             continue
         merged.append((source, ref))

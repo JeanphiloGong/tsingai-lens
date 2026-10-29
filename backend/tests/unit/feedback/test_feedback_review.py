@@ -51,6 +51,12 @@ class _Cases:
     async def read_analysis_results(self, result_ids):
         return (self.result,) if self.result.result_id in result_ids else ()
 
+    async def read_correction_signal_analysis_results(self, result_ids):
+        return ()
+
+    async def read_tool_failure_analysis_results(self, result_ids):
+        return ()
+
     async def read_annotation(self, case_id: str):
         return self.annotation if case_id == self.case.case_id else None
 
@@ -263,9 +269,9 @@ async def test_idempotency_key_replays_one_review_and_rejects_payload_reuse() ->
 
 
 def test_review_digest_must_be_hex_sha256() -> None:
-    with pytest.raises(ValueError, match="review annotation digest must be sha256"):
-        ReviewDecision(
-            decision_id="review-1", case_id="case-1", annotation_digest="z" * 64,
-            decision="accept", reason="checked", created_by="user-1", seq=1,
-            created_at="2026-09-24T00:00:00+00:00",
+    from controllers.feedback_cases import FeedbackReviewRequest
+
+    with pytest.raises(ValueError):
+        FeedbackReviewRequest(
+            expected_annotation_digest="z" * 64, decision="accept", reason="checked",
         )

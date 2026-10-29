@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import json
 import logging
 import os
@@ -12,8 +11,9 @@ from typing import Annotated, Any, Callable, Iterable, Literal, Mapping
 
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.structured_extraction.json_support import StructuredOutputError
 from domain.core import PaperResearchMap, ResearchObjective
-from domain.source import SourceDocumentTree
+from domain.source import SourceDocumentTree, SourceTable
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -101,17 +101,6 @@ class PaperFrameBatchResult(_SourceScreeningContractBase):
         max_length=8,
     )
 
-    @model_validator(mode="after")
-    def _validate_source_partition(self) -> "PaperFrameBatchResult":
-        relevant = self.relevant_source_unit_ids
-        excluded = self.excluded_source_unit_ids
-        if len(relevant) != len(set(relevant)) or len(excluded) != len(set(excluded)):
-            raise ValueError("paper frame source-unit ids must be unique")
-        if set(relevant) & set(excluded):
-            raise ValueError(
-                "paper frame source-unit ids cannot be both relevant and excluded"
-            )
-        return self
 
     @property
     def source_accounting_origin(self) -> Literal["model", "repair"]:
@@ -378,7 +367,7 @@ class ObjectiveSourceScreener:
                 label for label in returned_labels if label not in source_labels
             ]
             if missing_labels or unknown_labels:
-                raise ValueError(
+                raise StructuredOutputError(
                     "objective paper frame must account for every Source label "
                     "exactly once; "
                     f"expected_source_labels={list(source_labels)}; "
@@ -427,7 +416,7 @@ class ObjectiveSourceScreener:
             ) from exc
         if not isinstance(response, PaperFrameBatchModelOutput):
             raise TypeError("unexpected objective paper frame response type")
-        screening_note = _optional_text(response.screening_note)
+        screening_note = response.screening_note
         if screening_note and len(screening_note) > _FRAME_SCREENING_NOTE_CHARS:
             logger.warning(
                 "Objective paper framing screening note truncated model=%s "
@@ -479,17 +468,6 @@ class PaperFrameSourceDisposition:
     def __post_init__(self) -> None:
         if not self.source_unit_id or not self.source_kind or not self.source_ref:
             raise ValueError("paper frame Source disposition requires complete lineage")
-        if self.disposition not in {
-            "model_relevant",
-            "model_excluded",
-            "repaired_relevant",
-            "repaired_excluded",
-            "fallback_relevant",
-        }:
-            raise ValueError(
-                f"unsupported paper frame Source disposition: {self.disposition}"
-            )
-        object.__setattr__(self, "accounting_errors", tuple(self.accounting_errors))
         if self.disposition.startswith(("repaired_", "fallback_")) and not (
             self.accounting_errors
         ):
@@ -540,12 +518,10 @@ class _PreparedPaperFrame:
     completed_frame: PaperAnalysisFrame | None = None
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
-def _optional_text(value: Any) -> str | None:
-    return _text(value) or None
+
+
 
 
 def _notify_progress(
@@ -1526,21 +1502,21 @@ def _split_frame_section_text(text: str) -> tuple[str, ...]:
 
 
 def _build_frame_table_source_units(
-    tables: list[Any],
+    tables: list[SourceTable],
 ) -> list[dict[str, Any]]:
     units: list[dict[str, Any]] = []
     for table in sorted(
         tables,
-        key=lambda item: int(getattr(item, "table_order", 0) or 0),
+        key=lambda item: int(item.table_order or 0),
     ):
-        table_id = str(getattr(table, "table_id", "") or "").strip()
+        table_id = str(table.table_id or "").strip()
         if not table_id:
             continue
-        matrix = tuple(getattr(table, "table_matrix", ()) or ())
+        matrix = tuple(table.table_matrix or ())
         serialized_rows = [
             [
                 str(cell)[:_FRAME_TABLE_VALUE_CHARS]
-                for cell in (row if isinstance(row, (list, tuple)) else (row,))
+                for cell in row
             ]
             for row in matrix
         ]
@@ -1559,24 +1535,25 @@ def _build_frame_table_source_units(
                     ),
                     "source_kind": "table",
                     "source_ref": table_id,
-                    "caption_text": str(getattr(table, "caption_text", None) or "")[
+                    "caption_text": str(table.caption_text or "")[
                         :_FRAME_TABLE_TEXT_CHARS
                     ],
-                    "heading_path": str(getattr(table, "heading_path", None) or "")[
+                    "heading_path": str(table.heading_path or "")[
                         :_FRAME_TABLE_TEXT_CHARS
                     ],
                     "column_headers": [
                         str(value)[:_FRAME_TABLE_VALUE_CHARS]
-                        for value in getattr(table, "column_headers", ()) or ()
+                        for value in table.column_headers or ()
                     ],
-                    "row_count": int(getattr(table, "row_count", 0) or 0),
-                    "col_count": int(getattr(table, "col_count", 0) or 0),
+                    "row_count": int(table.row_count or 0),
+                    "col_count": int(table.col_count or 0),
                     "row_start": row_start,
                     "row_end": row_start + len(rows),
                     "sample_rows": rows,
                 }
             )
     return units
+
 
 
 def _section_text_from_tree_node(

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole
+
 from copy import deepcopy
 
 import json
@@ -55,10 +57,21 @@ class _Jobs:
         self.job = job
         self.finished = None
 
+    async def recover_expired_jobs(self, *, now):
+        return 0
+
+    async def read_job(self, job_id):
+        return self.job if self.job.job_id == job_id else None
+
+    async def renew_lease(self, **kwargs):
+        assert kwargs["worker_id"] == self.job.worker_id
+        assert kwargs["lease_version"] == self.job.lease_version
+        return self.job
+
     async def claim_next_tool_failure_analysis_job(self, now: str):
         if self.job.status != "pending":
             return None
-        self.job = replace(self.job, status="running", started_at=now, updated_at=now)
+        self.job = replace(self.job, status="running", started_at=now, updated_at=now, worker_id="worker-1", lease_version=1)
         return self.job
 
     async def mark_succeeded(self, job_id: str, result_id: str, finished_at: str, **_lease):
@@ -125,7 +138,7 @@ def _fixture():
     result_message = ChatMessage(
         message_id="tool-result-1",
         session_id=session.session_id,
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(result),
             ensure_ascii=True,
@@ -193,13 +206,13 @@ async def test_handler_builds_independent_tool_failure_result():
 
 async def test_worker_cancels_when_result_is_no_longer_a_failure():
     session, messages, call, job = _fixture()
-    successful = ChatToolResult(tool_call_id=call.tool_call_id, status="succeeded", data={"ok": True})
+    successful = ChatToolResult(tool_call_id=call.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={"ok": True})
     changed_messages = (
         messages[0],
         ChatMessage(
             message_id=messages[1].message_id,
             session_id=session.session_id,
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(successful),
                 ensure_ascii=True,

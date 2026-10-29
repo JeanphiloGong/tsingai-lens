@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback.sample_builder_support import EvaluationSampleModelOutput, PreferenceSampleModelOutput, SftSampleModelOutput
+
 from domain.feedback.sample_revision import PreferenceRevisionContent
 
 
@@ -35,10 +37,21 @@ class _Jobs:
     def __init__(self, job: AnalysisJob) -> None:
         self.job = job
 
+    async def recover_expired_jobs(self, *, now):
+        return 0
+
+    async def read_job(self, job_id):
+        return self.job if self.job.job_id == job_id else None
+
+    async def renew_lease(self, **kwargs):
+        assert kwargs["worker_id"] == self.job.worker_id
+        assert kwargs["lease_version"] == self.job.lease_version
+        return self.job
+
     async def claim_next_dataset_sample_build_job(self, *, now: str):
         if self.job.status != "pending":
             return None
-        self.job = replace(self.job, status="running", started_at=now, updated_at=now)
+        self.job = replace(self.job, status="running", started_at=now, updated_at=now, worker_id="worker-1", lease_version=1)
         return self.job
 
 class _Datasets:
@@ -58,7 +71,8 @@ class _Cases:
 
 
 class _Samples:
-    def __init__(self, sample: DatasetSample):
+    def __init__(self, sample: DatasetSample, jobs: _Jobs):
+        self.jobs = jobs
         self.sample = sample
         self.revision = None
         self.completed = None
@@ -86,6 +100,14 @@ class _Samples:
                 status="needs_input" if kwargs["outcome"] == "needs_input" else "build_failed",
                 active_job_id=None,
             )
+        self.jobs.job = replace(
+            self.jobs.job,
+            status="failed" if kwargs["outcome"] == "failed" else "succeeded",
+            result_id=(revision.revision_id if revision else self.sample.sample_id)
+                if kwargs["outcome"] != "failed" else None,
+            error_code=kwargs.get("error_code"),
+            finished_at=kwargs["finished_at"], updated_at=kwargs["finished_at"],
+        )
         return self.sample
 
 
@@ -113,7 +135,7 @@ def _case() -> FeedbackCase:
         source_signal_ids=(),
         analysis_result_ids=(),
         context_snapshot={
-            "question": "比较 A、B。",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。",
             "answer": "原回答",
             "candidate_target": "基于证据的回答",
             "inspected_sources": [
@@ -154,8 +176,8 @@ def _job() -> AnalysisJob:
 
 
 async def test_worker_publishes_candidate_as_needs_confirmation() -> None:
-    samples = _Samples(_sample())
     jobs = _Jobs(_job())
+    samples = _Samples(_sample(), jobs)
     result = await DatasetSampleBuildWorker(
         job_repository=jobs,
         dataset_repository=_Datasets(),
@@ -179,7 +201,8 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
         key: value for key, value in _case().context_snapshot.items() if key != "candidate_target"
     })
     sample = replace(_sample(), source_digest=source_digest_for_case(case))
-    samples = _Samples(sample)
+    jobs = _Jobs(_job_for_case(case))
+    samples = _Samples(sample, jobs)
     if task_type == "preference":
         previous = SampleRevision.build_worker(
             revision_id="previous-revision",
@@ -216,21 +239,22 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
             assert kwargs["context"][0]["text"] == "证据原文"
             assert kwargs["review_note"] == "核对比较条件"
             if task_type == "sft":
-                return {"target": "基于原文生成的回答", "missing_reasons": []}
+                return SftSampleModelOutput.model_validate({"target": "基于原文生成的回答", "missing_reasons": []})
             if task_type == "preference":
                 assert kwargs["snapshot"]["response_a"] == "当前回答 A"
                 assert kwargs["snapshot"]["response_b"] == "当前回答 B"
-                return {"response_a": "当前回答 A", "response_b": "修正后的回答 B",
-                    "suggested_preference": "b", "rationale": "按意见核对了条件。", "missing_reasons": []}
-            return {"reference": "基于原文生成的回答", "criteria": ["必须说明比较条件"], "missing_reasons": []}
+                return PreferenceSampleModelOutput.model_validate({"response_a": "当前回答 A", "response_b": "修正后的回答 B",
+                    "suggested_preference": "b", "rationale": "按意见核对了条件。", "missing_reasons": []})
+            return EvaluationSampleModelOutput.model_validate({"reference": "基于原文生成的回答", "criteria": ["必须说明比较条件"], "missing_reasons": []})
 
     job = _job_for_case(case)
     job = replace(job, payload={**job.payload, "review_note": "核对比较条件"})
+    jobs.job = job
     generator = Generator()
     builder = {"sft": SftSampleBuilder, "preference": PreferenceSampleBuilder,
         "evaluation": EvaluationSampleBuilder}[task_type](generator=generator)
     result = await DatasetSampleBuildWorker(
-        job_repository=_Jobs(job),
+        job_repository=jobs,
         dataset_repository=_Datasets(replace(_dataset(), task_type=task_type)),
         sample_repository=samples,
         case_repository=Cases(),
@@ -250,9 +274,9 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
 
 
 async def test_worker_leaves_missing_material_as_needs_input() -> None:
-    samples = _Samples(replace(_sample(), source_digest="b" * 64))
     job = replace(_job(), payload={**_job().payload, "source_digest": "b" * 64})
     jobs = _Jobs(job)
+    samples = _Samples(replace(_sample(), source_digest="b" * 64), jobs)
     cases = _Cases()
     cases.read_case = lambda case_id: _missing_case(case_id)
     result = await DatasetSampleBuildWorker(
@@ -269,8 +293,8 @@ async def test_worker_leaves_missing_material_as_needs_input() -> None:
 
 
 async def test_worker_rejects_source_changed_after_collect() -> None:
-    samples = _Samples(_sample())
     jobs = _Jobs(_job())
+    samples = _Samples(_sample(), jobs)
     cases = _Cases()
     cases.read_case = lambda case_id: _missing_case(case_id)
 
@@ -295,8 +319,8 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
     case = replace(
         _case(),
         context_snapshot={
-            "question": "比较 A、B。",
-            "original_answer": "回答 A",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。",
+            "answer": "回答 A",
             "candidate_target": "回答 B",
             "inspected_sources": [{"document_title": "文献 B", "quote": "图注原文"}],
         },
@@ -310,7 +334,7 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
         now="2026-09-29T00:00:00+00:00",
     )
     jobs = _Jobs(_job_for_case(case))
-    samples = _Samples(sample)
+    samples = _Samples(sample, jobs)
 
     class Cases(_Cases):
         async def read_case(self, case_id: str):
@@ -321,7 +345,7 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
 
         async def generate(self, **inputs):
             assert inputs["review_note"] is None
-            return {"suggested_preference": "b", "rationale": "回答 B 保留图注的条件。"}
+            return PreferenceSampleModelOutput.model_validate({"suggested_preference": "b", "rationale": "回答 B 保留图注的条件。"})
 
     worker = DatasetSampleBuildWorker(
         job_repository=jobs,
@@ -368,7 +392,7 @@ def _job_for_case(case: FeedbackCase) -> AnalysisJob:
 async def _missing_case(case_id: str):
     return replace(
         _case(),
-        context_snapshot={"question": "缺少证据", "answer": "原回答", "inspected_sources": []},
+        context_snapshot={"messages": [{"role": "user", "content": "缺少证据"}], "question": "缺少证据", "answer": "原回答", "inspected_sources": []},
     )
 
 
@@ -384,9 +408,10 @@ async def test_worker_reports_persisted_state_when_completion_loses_its_lease():
             assert inputs["outcome"] == "candidate"
             return None
 
-    samples = LostLeaseSamples(replace(_sample(), status="building"))
+    jobs = ReclaimedJobs(_job())
+    samples = LostLeaseSamples(replace(_sample(), status="building"), jobs)
     result = await DatasetSampleBuildWorker(
-        job_repository=ReclaimedJobs(_job()), dataset_repository=_Datasets(),
+        job_repository=jobs, dataset_repository=_Datasets(),
         sample_repository=samples, case_repository=_Cases(), builder=SftSampleBuilder(),
     ).run_once()
     assert result == replacement
@@ -399,9 +424,10 @@ async def test_worker_times_out_a_build_before_its_lease_expires():
         async def build(self, **kwargs):
             await asyncio.Event().wait()
 
-    samples = _Samples(_sample())
+    jobs = _Jobs(_job())
+    samples = _Samples(_sample(), jobs)
     worker = DatasetSampleBuildWorker(
-        job_repository=_Jobs(_job()), dataset_repository=_Datasets(),
+        job_repository=jobs, dataset_repository=_Datasets(),
         sample_repository=samples, case_repository=_Cases(),
         builders={"sft": HangingBuilder()}, build_timeout_seconds=0.01,
     )
@@ -420,10 +446,33 @@ async def test_withdrawn_case_never_invokes_a_builder():
         async def read_case(self, case_id):
             return replace(_case(), status="withdrawn")
 
-    samples = _Samples(_sample())
+    jobs = _Jobs(_job())
+    samples = _Samples(_sample(), jobs)
     result = await DatasetSampleBuildWorker(
-        job_repository=_Jobs(_job()), dataset_repository=_Datasets(), sample_repository=samples,
+        job_repository=jobs, dataset_repository=_Datasets(), sample_repository=samples,
         case_repository=WithdrawnCases(), builders={"sft": UnusedBuilder()},
     ).run_once()
     assert result.status == "succeeded"
     assert samples.sample.status == "needs_input"
+
+
+async def test_disappeared_job_cannot_be_reported_as_success():
+    class MissingJobs(_Jobs):
+        async def read_job(self, job_id):
+            return None
+
+    class DeletedJobSamples(_Samples):
+        async def complete_build(self, **kwargs):
+            # The transaction found no matching persisted job, so nothing was published.
+            return None
+
+    jobs = MissingJobs(_job())
+    samples = DeletedJobSamples(_sample(), jobs)
+    worker = DatasetSampleBuildWorker(
+        job_repository=jobs, dataset_repository=_Datasets(), sample_repository=samples,
+        case_repository=_Cases(), builder=SftSampleBuilder(),
+    )
+    with pytest.raises(RuntimeError, match="sample build job disappeared: job-1"):
+        await worker.run_once()
+    assert samples.revision is None
+    assert samples.sample.current_revision_id is None

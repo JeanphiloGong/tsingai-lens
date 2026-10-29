@@ -7,6 +7,7 @@ import json
 import math
 from typing import Any, Mapping
 
+import numpy as np
 import pandas as pd
 
 from infra.source.storage.file_storage import FileStorage
@@ -34,16 +35,10 @@ def _jsonable(value: Any) -> Any:
         return None
     if isinstance(value, float) and math.isnan(value):
         return None
-    if hasattr(value, "item") and not isinstance(value, (str, bytes, bytearray)):
-        try:
-            return _jsonable(value.item())
-        except Exception:
-            pass
-    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray, Mapping)):
-        try:
-            return _jsonable(value.tolist())
-        except Exception:
-            pass
+    if isinstance(value, np.ndarray):
+        return _jsonable(value.tolist())
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):

@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.structured_extraction.json_support import StructuredOutputError
 
 RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v7"
 
@@ -192,7 +193,7 @@ def _validate_axis_candidate_accounting(
     ]
     decision_ids = [decision.pair_id for decision in response.decisions]
     if decision_ids != expected_ids:
-        raise ValueError(
+        raise StructuredOutputError(
             "axis pair decisions must account for every input pair_id exactly once "
             "and in input order"
         )

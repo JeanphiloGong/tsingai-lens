@@ -130,6 +130,11 @@ def run(probe, scenario, payload, *, finish_reason="stop"):
     client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     )
+    def with_options(**options):
+        assert options["max_retries"] == 0
+        assert 0 < options["timeout"] <= 30
+        return client
+    client.with_options = with_options
     runtime = SimpleNamespace(
         model="test-model",
         max_completion_tokens=8192,

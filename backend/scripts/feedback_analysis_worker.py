@@ -20,16 +20,10 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
-async def _build_runtime():
-    # Import the application graph only when a command is actually executed;
-    # this keeps the operational module importable for lightweight checks.
+async def run_once() -> str:
     from main import ApplicationOverrides, build_application_runtime
 
-    return await build_application_runtime(ApplicationOverrides())
-
-
-async def run_once() -> str:
-    runtime = await _build_runtime()
+    runtime = await build_application_runtime(ApplicationOverrides())
     try:
         if runtime.feedback_analysis_worker is None:
             raise RuntimeError("feedback analysis worker is not configured")
@@ -41,7 +35,9 @@ async def run_once() -> str:
 
 async def requeue_failed_job(job_id: str) -> str:
     """Explicitly requeue one failed feedback-analysis job for inspection."""
-    runtime = await _build_runtime()
+    from main import ApplicationOverrides, build_application_runtime
+
+    runtime = await build_application_runtime(ApplicationOverrides())
     try:
         repository = runtime.analysis_job_repository
         if repository is None:
@@ -56,10 +52,19 @@ async def requeue_failed_job(job_id: str) -> str:
 
 
 async def run_loop(interval_seconds: float) -> None:
-    while True:
-        status = await run_once()
-        print(status, flush=True)
-        await asyncio.sleep(interval_seconds)
+    from main import ApplicationOverrides, build_application_runtime
+
+    runtime = await build_application_runtime(ApplicationOverrides())
+    try:
+        worker = runtime.feedback_analysis_worker
+        if worker is None:
+            raise RuntimeError("feedback analysis worker is not configured")
+        while True:
+            job = await worker.run_once()
+            print("idle" if job is None else job.status, flush=True)
+            await asyncio.sleep(interval_seconds)
+    finally:
+        await runtime.close()
 
 
 def main() -> None:

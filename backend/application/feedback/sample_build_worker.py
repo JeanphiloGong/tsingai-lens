@@ -5,20 +5,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import uuid4
 
-from application.feedback.evaluation_sample_builder import EvaluationSampleBuilder
-from application.feedback.preference_sample_builder import PreferenceSampleBuilder
+from application.feedback.evaluation_sample_builder import EvaluationBuildNeedsInput, EvaluationSampleBuilder
+from application.feedback.preference_sample_builder import PreferenceBuildNeedsInput, PreferenceSampleBuilder
 from application.feedback.sft_sample_builder import (
+    SftBuildNeedsInput,
     SftSampleBuilderProtocol,
 )
 from application.feedback.worker_lease import LeaseLostError, run_with_lease_heartbeat
 from domain.feedback import SampleRevision
 from domain.feedback.sample_revision import content_digest_for
 from repositories.analysis_job_repository import (
+    AnalysisJobRepository,
     DATASET_SAMPLE_BUILD_JOB_TYPE,
     DATASET_SAMPLE_BUILD_PAYLOAD_VERSION,
 )
@@ -38,7 +39,7 @@ class DatasetSampleBuildWorker:
     def __init__(
         self,
         *,
-        job_repository: Any,
+        job_repository: AnalysisJobRepository,
         dataset_repository: FeedbackDatasetRepository,
         sample_repository: FeedbackDatasetSampleRepository,
         case_repository: FeedbackCaseRepository,
@@ -62,9 +63,7 @@ class DatasetSampleBuildWorker:
 
     async def run_once(self) -> Any | None:
         now = datetime.now(timezone.utc).isoformat()
-        recover = getattr(self.job_repository, "recover_expired_jobs", None)
-        if callable(recover):
-            await recover(now=now)
+        await self.job_repository.recover_expired_jobs(now=now)
         job = await self.job_repository.claim_next_dataset_sample_build_job(now=now)
         if job is None:
             return None
@@ -75,7 +74,7 @@ class DatasetSampleBuildWorker:
             remaining = (datetime.fromisoformat(job.lease_expires_at) - datetime.now(timezone.utc)).total_seconds()
             timeout = min(timeout, remaining - 5)
         if timeout <= 0:
-            return await self._read_finished(job, status="running")
+            return await self._read_finished(job)
         try:
             async with asyncio.timeout(timeout):
                 return await run_with_lease_heartbeat(
@@ -84,19 +83,19 @@ class DatasetSampleBuildWorker:
                     lambda: self._build(job),
                 )
         except LeaseLostError:
-            return await self._read_finished(job, status="running")
+            return await self._read_finished(job)
         except TimeoutError:
             payload = job.payload
             await self.sample_repository.complete_build(
-                job=job, sample_id=str(payload.get("sample_id") or ""),
-                generation=int(payload.get("generation") or 0), revision=None,
+                job=job, sample_id=payload["sample_id"],
+                generation=payload["generation"], revision=None,
                 outcome="failed", error_code="dataset_sample_build_timeout",
                 finished_at=datetime.now(timezone.utc).isoformat(),
             )
-            return await self._read_finished(job, status="failed", error_code="dataset_sample_build_timeout")
+            return await self._read_finished(job)
 
     async def _build(self, job: Any) -> Any:
-        payload = dict(job.payload or {})
+        payload = job.payload
         try:
             dataset_id = _required_payload(payload, "dataset_id")
             sample_id = _required_payload(payload, "sample_id")
@@ -134,7 +133,7 @@ class DatasetSampleBuildWorker:
                     missing_reasons=("source_changed_since_collection",),
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
-                return await self._read_finished(job, status="succeeded", result_id=sample_id)
+                return await self._read_finished(job)
             annotation = await self.case_repository.read_annotation(case.case_id)
             task_builder = self.builders.get(dataset.task_type)
             if task_builder is None:
@@ -151,27 +150,26 @@ class DatasetSampleBuildWorker:
                 review_note=payload.get("review_note"),
                 **({"previous_revision": previous} if dataset.task_type == "preference" else {}),
             )
-            missing_reasons = getattr(built, "missing_reasons", None)
-            if missing_reasons is not None and not hasattr(built, "content"):
+            if isinstance(built, (SftBuildNeedsInput, PreferenceBuildNeedsInput, EvaluationBuildNeedsInput)):
                 await self.sample_repository.complete_build(
                     job=job,
                     sample_id=sample_id,
                     generation=generation,
                     revision=None,
                     outcome="needs_input",
-                    missing_reasons=tuple(missing_reasons),
+                    missing_reasons=built.missing_reasons,
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
-                return await self._read_finished(job, status="succeeded", result_id=sample_id)
+                return await self._read_finished(job)
 
-            content = getattr(built, "content", None)
-            provenance = getattr(built, "provenance", None)
+            content = built.content
+            provenance = built.provenance
             expected_schema = {
                 "sft": "literature-sft.v1",
                 "preference": "literature-preference.v1",
                 "evaluation": "literature-evaluation.v1",
             }.get(dataset.task_type)
-            if content is None or not isinstance(provenance, dict) or content.schema_version != expected_schema:
+            if content.schema_version != expected_schema:
                 raise ValueError("dataset_sample_build_content_task_mismatch")
 
             if (
@@ -188,7 +186,7 @@ class DatasetSampleBuildWorker:
                     missing_reasons=("candidate_unchanged_after_rebuild",),
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
-                return await self._read_finished(job, status="succeeded", result_id=sample_id)
+                return await self._read_finished(job)
 
             revision_no = 1
             if previous is not None:
@@ -215,14 +213,14 @@ class DatasetSampleBuildWorker:
                 outcome="candidate",
                 finished_at=datetime.now(timezone.utc).isoformat(),
             )
-            return await self._read_finished(job, status="succeeded", result_id=revision.revision_id)
+            return await self._read_finished(job)
         except Exception as exc:  # noqa: BLE001
             logger.exception("dataset sample build failed job_id=%s", job.job_id)
             try:
                 await self.sample_repository.complete_build(
                     job=job,
-                    sample_id=str(payload.get("sample_id") or ""),
-                    generation=int(payload.get("generation") or 0),
+                    sample_id=payload.get("sample_id"),
+                    generation=payload.get("generation"),
                     revision=None,
                     outcome="failed",
                     error_code=_error_code(exc),
@@ -230,11 +228,7 @@ class DatasetSampleBuildWorker:
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("dataset sample build failure persistence failed job_id=%s", job.job_id)
-            return await self._read_finished(
-                job,
-                status="failed",
-                error_code=_error_code(exc),
-            )
+            return await self._read_finished(job)
 
     async def _complete_stale(self, job: Any, sample_id: str, generation: int) -> Any:
         await self.sample_repository.complete_build(
@@ -246,34 +240,18 @@ class DatasetSampleBuildWorker:
             error_code="sample_build_superseded",
             finished_at=datetime.now(timezone.utc).isoformat(),
         )
-        return await self._read_finished(job, status="cancelled", error_code="sample_build_superseded")
+        return await self._read_finished(job)
 
-    async def _read_finished(
-        self,
-        job: Any,
-        *,
-        status: str,
-        result_id: str | None = None,
-        error_code: str | None = None,
-    ) -> Any:
-        reader = getattr(self.job_repository, "read_job", None)
-        if callable(reader):
-            finished = await reader(job.job_id)
-            if finished is not None:
-                return finished
-        return replace(
-            job,
-            status=status,
-            result_id=result_id,
-            error_code=error_code,
-            finished_at=datetime.now(timezone.utc).isoformat(),
-            updated_at=datetime.now(timezone.utc).isoformat(),
-        )
+    async def _read_finished(self, job: Any) -> Any:
+        finished = await self.job_repository.read_job(job.job_id)
+        if finished is None:
+            raise RuntimeError(f"sample build job disappeared: {job.job_id}")
+        return finished
 
 
 def _required_payload(payload: dict[str, Any], name: str) -> str:
-    value = str(payload.get(name) or "").strip()
-    if not value:
+    value = payload.get(name)
+    if not isinstance(value, str) or not value:
         raise ValueError(f"dataset_sample_build_{name}_missing")
     return value
 

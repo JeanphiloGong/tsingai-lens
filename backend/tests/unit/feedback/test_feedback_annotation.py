@@ -54,6 +54,12 @@ class _Cases:
     async def read_analysis_results(self, result_ids):
         return (self.result,) if self.result.result_id in result_ids else ()
 
+    async def read_correction_signal_analysis_results(self, result_ids):
+        return ()
+
+    async def read_tool_failure_analysis_results(self, result_ids):
+        return ()
+
     async def read_annotation(self, case_id: str):
         return self.annotation if case_id == self.case.case_id else None
 
@@ -212,7 +218,7 @@ async def test_concurrent_first_annotations_allow_one_digest_winner() -> None:
 
 
 def test_annotation_digest_must_be_hex_sha256() -> None:
-    with pytest.raises(ValueError, match="annotation digest must be sha256"):
+    with pytest.raises(ValueError, match="annotation digest does not match content"):
         FeedbackAnnotation(
             annotation_id="annotation-1", case_id="case-1", version=1,
             problem_type="source_missing", severity="high", target=None,

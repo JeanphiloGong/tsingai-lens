@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import logging
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Awaitable, Callable, TypeVar
+
+from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepository
 
 logger = logging.getLogger(__name__)
 
@@ -17,23 +19,18 @@ class LeaseLostError(RuntimeError):
 
 
 async def run_with_lease_heartbeat(
-    job_repository: Any,
-    job: Any,
+    job_repository: AnalysisJobRepository,
+    job: AnalysisJob,
     operation: Callable[[], Awaitable[T]],
     *,
     interval_seconds: float = 60.0,
 ) -> T:
     """Run an operation while extending its active job lease.
 
-    Repositories that predate the lease contract are allowed to omit the
-    method in unit-test doubles; production repositories must implement it.
     A failed renewal is treated as lease loss, so callers cannot announce a
     successful result after ownership has become uncertain.
     """
 
-    renew = getattr(job_repository, "renew_lease", None)
-    if not callable(renew) or not getattr(job, "worker_id", None):
-        return await operation()
     if interval_seconds <= 0:
         raise ValueError("lease heartbeat interval must be positive")
 
@@ -47,7 +44,7 @@ async def run_with_lease_heartbeat(
             except asyncio.TimeoutError:
                 pass
             try:
-                renewed = await renew(
+                renewed = await job_repository.renew_lease(
                     job_id=job.job_id,
                     worker_id=job.worker_id,
                     lease_version=job.lease_version,

@@ -42,6 +42,7 @@ def add_runtime_arguments(
     include_max_completion_tokens: bool = True,
     default_max_completion_tokens: int | None = None,
 ) -> None:
+    parser.set_defaults(temperature=0.0, max_completion_tokens=None, reasoning_effort=None)
     parser.add_argument(
         "--backend-root",
         type=Path,
@@ -97,21 +98,21 @@ def resolve_runtime(
     allow_placeholder_api_key: bool = True,
     default_model: str = DEFAULT_MODEL,
 ) -> ResolvedRuntime:
-    backend_root = _resolve_backend_root(getattr(args, "backend_root", None))
+    backend_root = _resolve_backend_root(args.backend_root)
     env_file = _resolve_env_file(
         backend_root=backend_root,
-        env_file=getattr(args, "env_file", None),
+        env_file=args.env_file,
     )
     env_values = _read_env_file(env_file)
 
     model = _pick_first_non_empty(
-        getattr(args, "model", None),
+        args.model,
         os.getenv("LLM_MODEL"),
         env_values.get("LLM_MODEL"),
         default_model,
     )
     base_url = _pick_first_non_empty(
-        getattr(args, "base_url", None),
+        args.base_url,
         os.getenv("LLM_BASE_URL"),
         env_values.get("LLM_BASE_URL"),
         None,
@@ -120,7 +121,7 @@ def resolve_runtime(
         base_url = base_url.rstrip("/")
 
     api_key = _pick_first_non_empty(
-        getattr(args, "api_key", None),
+        args.api_key,
         os.getenv("LLM_API_KEY"),
         env_values.get("LLM_API_KEY"),
         None,
@@ -133,15 +134,15 @@ def resolve_runtime(
             "--env-file. A placeholder key is applied only when --base-url/LLM_BASE_URL is set."
         )
 
-    temperature = float(getattr(args, "temperature", 0.0))
-    max_completion_tokens = getattr(args, "max_completion_tokens", None)
+    temperature = float(args.temperature)
+    max_completion_tokens = args.max_completion_tokens
     if max_completion_tokens is not None and int(max_completion_tokens) <= 0:
         raise SystemExit("--max-completion-tokens must be greater than 0")
-    timeout_s = float(getattr(args, "timeout_s", DEFAULT_TIMEOUT_S))
+    timeout_s = float(args.timeout_s)
     if timeout_s <= 0:
         raise SystemExit("--timeout-s must be greater than 0")
     reasoning_effort = _pick_first_non_empty(
-        getattr(args, "reasoning_effort", None),
+        args.reasoning_effort,
         os.getenv("LLM_REASONING_EFFORT"),
         env_values.get("LLM_REASONING_EFFORT"),
         None,

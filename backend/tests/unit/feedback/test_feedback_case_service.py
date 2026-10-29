@@ -74,6 +74,15 @@ class _Cases:
             return (self.signal_result,)
         return ()
 
+    async def read_tool_failure_analysis_results(self, result_ids):
+        return ()
+
+    async def read_annotation(self, case_id):
+        return None
+
+    async def read_review_decisions(self, case_id):
+        return ()
+
 
 def _fixture():
     session = ChatSession.create(

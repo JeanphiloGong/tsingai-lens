@@ -29,10 +29,19 @@ async def run_once() -> str:
 
 
 async def run_loop(interval_seconds: float) -> None:
-    while True:
-        status = await run_once()
-        print(status, flush=True)
-        await asyncio.sleep(interval_seconds)
+    from main import ApplicationOverrides, build_application_runtime
+
+    runtime = await build_application_runtime(ApplicationOverrides())
+    try:
+        worker = runtime.correction_signal_analysis_worker
+        if worker is None:
+            raise RuntimeError("correction signal analysis worker is not configured")
+        while True:
+            job = await worker.run_once()
+            print("idle" if job is None else job.status, flush=True)
+            await asyncio.sleep(interval_seconds)
+    finally:
+        await runtime.close()
 
 
 def main() -> None:

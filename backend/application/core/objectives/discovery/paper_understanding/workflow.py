@@ -13,6 +13,7 @@ from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
     StructuredResponseClient,
 )
+from application.core.structured_extraction.json_support import StructuredOutputError
 from .common import (
     PAPER_RESEARCH_MAP_RELATIONSHIP_LIMIT,
     PAPER_RESEARCH_MAP_UNRESOLVED_SIGNAL_LIMIT,
@@ -163,7 +164,7 @@ def _source_unit_ids_from_labels(
 ) -> list[str]:
     unknown_labels = sorted(set(source_labels) - source_units_by_label.keys())
     if unknown_labels:
-        raise ValueError(
+        raise StructuredOutputError(
             "paper research map references unknown Source labels: "
             f"{unknown_labels}"
         )
@@ -624,7 +625,7 @@ class PaperResearchMapExtractor:
                 study.identity_key(source_keys) for study in paper_map.studies
             ]
             if len(study_identities) != len(set(study_identities)):
-                raise ValueError("studies contain duplicate study identities")
+                raise StructuredOutputError("studies contain duplicate study identities")
             return paper_map
 
         def complete_json_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:

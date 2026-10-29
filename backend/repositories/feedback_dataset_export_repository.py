@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -17,6 +16,7 @@ from infra.persistence.database import AsyncSessionLocal
 
 from domain.feedback.dataset_export import (
     EXPORT_SCHEMA_VERSION,
+    EXPORT_SCHEMA_VERSIONS,
     DatasetExport,
     ExportIssue,
     ExportMember,
@@ -125,7 +125,7 @@ class FeedbackDatasetExportRepository:
                         "content": content_payload,
                         "content_digest": member.content_digest,
                         "input_digest": member.input_digest,
-                        "provenance": deepcopy(member.provenance),
+                        "provenance": member.provenance,
                         "row_key": member.row_key,
                     }
                 )
@@ -203,7 +203,7 @@ class FeedbackDatasetExportRepository:
                         content=content,
                         content_digest=item["content_digest"],
                         input_digest=item["input_digest"],
-                        provenance=deepcopy(item["provenance"]),
+                        provenance=item["provenance"],
                     )
                 )
             return ExportPreview(
@@ -332,7 +332,7 @@ class FeedbackDatasetExportRepository:
                         content=content,
                         content_digest=record["content_digest"],
                         input_digest=record["input_digest"],
-                        provenance=deepcopy(record["provenance"]),
+                        provenance=record["provenance"],
                     )
                 )
             preview_members = tuple(member_values)
@@ -356,7 +356,7 @@ class FeedbackDatasetExportRepository:
             export_no = int(max_no or 0) + 1
             export_id = draft.manifest.get("export_id") or draft.preview_id
             manifest = {
-                **deepcopy(draft.manifest),
+                **draft.manifest,
                 "export_id": export_id,
                 "export_no": export_no,
                 "created_at": draft.created_at,
@@ -368,8 +368,8 @@ class FeedbackDatasetExportRepository:
                 dataset_id=draft.dataset_id,
                 export_no=export_no,
                 schema_version=str(draft.manifest.get("schema_version") or EXPORT_SCHEMA_VERSION),
-                rows=deepcopy(list(draft.rows)),
-                provenance=deepcopy(list(draft.provenance)),
+                rows=list(draft.rows),
+                provenance=list(draft.provenance),
                 manifest=manifest,
                 preview_id=draft.preview_id,
                 preview_digest=draft.preview_digest,
@@ -484,7 +484,7 @@ async def _read_current_members(
                 content=content,
                 content_digest=revision.content_digest,
                 input_digest=revision.input_digest,
-                provenance=deepcopy(revision.provenance or {}),
+                provenance=revision.provenance or {},
             )
         )
     return tuple(member_values)
@@ -493,6 +493,8 @@ async def _read_current_members(
 async def _read_export_locked(
     db: AsyncSession, row: FeedbackDatasetExportRow
 ) -> DatasetExport:
+    if row.schema_version not in EXPORT_SCHEMA_VERSIONS:
+        raise ValueError("unsupported export schema")
     member_rows = list(await db.scalars(
         select(FeedbackDatasetExportMemberRow)
         .where(FeedbackDatasetExportMemberRow.export_id == row.export_id)
@@ -558,7 +560,7 @@ async def _read_export_locked(
                     content=content,
                     content_digest=member.content_digest,
                     input_digest=member.input_digest,
-                    provenance=deepcopy(revisions[member.revision_id].provenance or {}),
+                    provenance=revisions[member.revision_id].provenance or {},
                 )
             )
         members = tuple(member_values)
@@ -569,8 +571,8 @@ async def _read_export_locked(
         dataset_id=row.dataset_id,
         export_no=row.export_no,
         schema_version=row.schema_version,
-        rows=tuple(deepcopy(row.rows or ())),
-        provenance=tuple(deepcopy(row.provenance or ())),
+        rows=tuple(row.rows),
+        provenance=tuple(row.provenance),
         members=members,
         preview_id=row.preview_id,
         preview_digest=row.preview_digest,
@@ -578,7 +580,7 @@ async def _read_export_locked(
         content_digest=row.content_digest,
         provenance_digest=row.provenance_digest,
         manifest_digest=row.manifest_digest,
-        manifest=deepcopy(row.manifest or {}),
+        manifest=row.manifest,
         created_by=row.created_by,
         idempotency_key=row.idempotency_key,
         created_at=_iso(row.created_at),

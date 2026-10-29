@@ -113,8 +113,6 @@ class FeedbackDatasetService:
             raise FeedbackDatasetError("dataset_name_required")
         if len(cleaned_name) > 120:
             raise FeedbackDatasetError("dataset_name_too_long")
-        if not user_id or not collection_id:
-            raise FeedbackDatasetError("dataset_identity_required")
         _validate_public_spec(construction_spec)
         dataset = Dataset(
             dataset_id=f"fdset_{uuid4().hex[:32]}",

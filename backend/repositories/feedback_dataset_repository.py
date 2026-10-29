@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -48,7 +47,7 @@ class FeedbackDatasetRepository:
                 collection_id=dataset.collection_id,
                 name=dataset.name,
                 task_type=dataset.task_type,
-                construction_spec=deepcopy(dataset.construction_spec),
+                construction_spec=dataset.construction_spec,
                 spec_version=dataset.spec_version,
                 created_by=dataset.created_by,
                 created_at=now,
@@ -68,7 +67,7 @@ class FeedbackDatasetRepository:
                 collection_id=row.collection_id,
                 name=row.name,
                 task_type=row.task_type,
-                construction_spec=deepcopy(row.construction_spec or {}),
+                construction_spec=row.construction_spec,
                 spec_version=row.spec_version,
                 created_by=row.created_by,
             )
@@ -84,7 +83,7 @@ class FeedbackDatasetRepository:
                     collection_id=row.collection_id,
                     name=row.name,
                     task_type=row.task_type,
-                    construction_spec=deepcopy(row.construction_spec or {}),
+                    construction_spec=row.construction_spec,
                     spec_version=row.spec_version,
                     created_by=row.created_by,
                 ),
@@ -116,7 +115,7 @@ class FeedbackDatasetRepository:
                         collection_id=row.collection_id,
                         name=row.name,
                         task_type=row.task_type,
-                        construction_spec=deepcopy(row.construction_spec or {}),
+                        construction_spec=row.construction_spec,
                         spec_version=row.spec_version,
                         created_by=row.created_by,
                     ),
@@ -152,7 +151,7 @@ async def ensure_system_datasets(
                         collection_id=dataset.collection_id,
                         name=dataset.name,
                         task_type=dataset.task_type,
-                        construction_spec=deepcopy(dataset.construction_spec),
+                        construction_spec=dataset.construction_spec,
                         spec_version=dataset.spec_version,
                         created_by=dataset.created_by,
                         created_at=now,
@@ -171,7 +170,7 @@ async def ensure_system_datasets(
             collection_id=row.collection_id,
             name=row.name,
             task_type=row.task_type,
-            construction_spec=deepcopy(row.construction_spec or {}),
+            construction_spec=row.construction_spec,
             spec_version=row.spec_version,
             created_by=row.created_by,
         ))

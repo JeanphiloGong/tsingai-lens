@@ -54,16 +54,6 @@ class DatasetSample:
     def __post_init__(self) -> None:
         if not self.sample_id or not self.dataset_id or not self.source_case_id:
             raise ValueError("dataset sample identity is required")
-        if self.status not in {
-            "pending",
-            "building",
-            "needs_confirmation",
-            "needs_input",
-            "confirmed",
-            "discarded",
-            "build_failed",
-        }:
-            raise ValueError("invalid dataset sample status")
         if self.generation < 1:
             raise ValueError("sample generation must be positive")
         if not _is_sha256(self.source_digest):
@@ -78,8 +68,6 @@ class DatasetSample:
             raise ValueError("confirmed sample requires a confirmed revision")
         if self.status != "confirmed" and (self.confirmed_by or self.confirmed_at):
             raise ValueError("unconfirmed sample cannot have confirmation audit")
-        reasons = tuple(dict.fromkeys(str(item).strip() for item in self.missing_reasons if str(item).strip()))
-        object.__setattr__(self, "missing_reasons", reasons)
 
     @classmethod
     def pending(

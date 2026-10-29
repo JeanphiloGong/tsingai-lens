@@ -312,7 +312,7 @@ class FeedbackDatasetSampleRepository:
                 content_digest=row.content_digest,
                 input_digest=row.input_digest,
                 construction_spec_version=row.construction_spec_version,
-                provenance=dict(row.provenance or {}),
+                provenance=row.provenance,
                 created_at=_iso(row.created_at),
                 created_by=row.created_by,
                 job_id=row.job_id,
@@ -431,7 +431,7 @@ class FeedbackDatasetSampleRepository:
                             content_digest=revision.content_digest,
                             input_digest=revision.input_digest,
                             construction_spec_version=revision.construction_spec_version,
-                            provenance=dict(revision.provenance or {}),
+                            provenance=revision.provenance,
                             created_at=_iso(revision.created_at),
                             created_by=revision.created_by,
                             job_id=revision.job_id,
@@ -508,7 +508,7 @@ class FeedbackDatasetSampleRepository:
                     content_digest=revision.content_digest,
                     input_digest=revision.input_digest,
                     construction_spec_version=revision.construction_spec_version,
-                    provenance=dict(revision.provenance),
+                    provenance=revision.provenance,
                     created_by=revision.created_by,
                     job_id=revision.job_id,
                     created_at=_datetime(revision.created_at),
@@ -646,7 +646,10 @@ class FeedbackDatasetSampleRepository:
                     or previous_action.actor_id != actor_id
                 ):
                     raise DatasetSampleActionConflict("sample_action_identity_conflict")
-                return DatasetSample(**previous_action.result_sample)
+                result_sample = previous_action.result_sample
+                return DatasetSample(
+                    **{**result_sample, "missing_reasons": tuple(result_sample["missing_reasons"])}
+                )
             if row.generation != expected_generation or row.current_revision_id != expected_revision_id:
                 raise DatasetSampleActionConflict("sample_revision_stale")
             ensure_action_allowed(row.status, action)
@@ -928,7 +931,7 @@ class FeedbackDatasetSampleRepository:
                         content_digest=revision.content_digest,
                         input_digest=revision.input_digest,
                         construction_spec_version=revision.construction_spec_version,
-                        provenance=dict(revision.provenance),
+                        provenance=revision.provenance,
                         created_by=revision.created_by,
                         job_id=revision.job_id,
                         created_at=_datetime(revision.created_at),

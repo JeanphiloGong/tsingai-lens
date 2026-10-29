@@ -48,15 +48,8 @@ class ExportMember:
             raise ValueError("export member identity is required")
         if self.revision_no < 1:
             raise ValueError("export member revision number must be positive")
-        if not isinstance(
-            self.content,
-            (SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent),
-        ):
-            raise ValueError("unsupported export member content")
         if not _is_sha256(self.content_digest) or not _is_sha256(self.input_digest):
             raise ValueError("export member digests must be sha256")
-        if not isinstance(self.provenance, dict):
-            raise ValueError("export member provenance must be an object")
         if self.content_digest != content_digest_for(self.content):
             raise ValueError("export member content digest does not match content")
         object.__setattr__(self, "provenance", _copy(self.provenance))
@@ -208,8 +201,6 @@ class DatasetExport:
             raise ValueError("export identity is required")
         if self.export_no < 1:
             raise ValueError("export number must be positive")
-        if self.schema_version not in EXPORT_SCHEMA_VERSIONS:
-            raise ValueError("unsupported export schema version")
         for digest in (
             self.preview_digest,
             self.member_digest,

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from infra.persistence import database
-
 import asyncio
 from hashlib import sha256
 
@@ -50,7 +48,6 @@ class _ImmediateDocumentPreparationService:
         )
         if not created:
             return run
-        session_factory = database.AsyncSessionLocal
         await SourceArtifactRepository().replace_document(
             collection_id,
             SourceDocument(

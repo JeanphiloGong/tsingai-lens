@@ -31,7 +31,7 @@ def _request(goal_service, user_id: str = "local-user"):
 
 @pytest.fixture()
 def goal_services(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     goal_service = GoalService(collection_service)
 
     return collection_service, goal_service

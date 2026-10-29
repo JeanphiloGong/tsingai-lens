@@ -253,7 +253,6 @@ async def test_failed_cross_paper_finding_rolls_back_the_entire_analysis_graph(
         analysis_version=analysis.analysis_version,
         with_group=False,
     )
-    session_factory = database.AsyncSessionLocal
     repository = ExperimentAnalysisRepository()
 
     with pytest.raises(ValueError, match="requires a comparison group"):
@@ -320,7 +319,6 @@ async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
         ),
         created_by="test-agent",
     )
-    session_factory = database.AsyncSessionLocal
     repository = ExperimentAnalysisRepository()
 
     with pytest.raises(RuntimeError, match="objective publication failed"):

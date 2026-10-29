@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from infra.persistence import database
-
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
@@ -121,7 +119,6 @@ def build_research_objective_service(
     collection_service,
     **kwargs,
 ) -> ObjectiveExperimentAnalysisService:
-    session_factory = database.AsyncSessionLocal
     objective_judgments = kwargs.pop("response_client", None)
     if objective_judgments is not None:
         kwargs.setdefault("objective_source_screener", objective_judgments)

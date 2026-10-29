@@ -79,7 +79,7 @@ async def _store_source_documents(repository, collection_id, documents) -> None:
 
 @pytest.fixture()
 def document_services(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     source_repository = SourceArtifactRepository()
     document_profile_service = DocumentProfileService(
         collection_service,

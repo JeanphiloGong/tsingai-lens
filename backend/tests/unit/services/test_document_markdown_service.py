@@ -31,7 +31,7 @@ def anyio_backend() -> str:
 
 
 def _build_markdown_service(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     source_repository = SourceArtifactRepository()
     return collection_service, DocumentMarkdownService(
         collection_service,

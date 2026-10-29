@@ -39,7 +39,7 @@ async def _store_source_documents(repository, collection_id, documents) -> None:
 
 @pytest.fixture()
 def source_reference_services(monkeypatch, tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     repository = SourceArtifactRepository()
     workflow_service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,

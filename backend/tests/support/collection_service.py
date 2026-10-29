@@ -6,7 +6,7 @@ from infra.persistence.file import FileCollectionWorkspace
 from repositories.collection_repository import CollectionRepository
 
 
-def build_test_collection_service(root_dir: Path, *, session_factory) -> CollectionService:
+def build_test_collection_service(root_dir: Path) -> CollectionService:
     return CollectionService(
         repository=CollectionRepository(),
         workspace=FileCollectionWorkspace(root_dir),

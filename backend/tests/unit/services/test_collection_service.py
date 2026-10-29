@@ -56,7 +56,7 @@ def test_source_archive_operations_have_a_direct_owner() -> None:
 
 
 async def test_collection_contains_its_uploaded_documents(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Current papers")
     first = await _import_service(service).add_document(
         collection["collection_id"],
@@ -93,7 +93,7 @@ def _import_service(collection_service: CollectionService) -> SourceImportServic
 
 
 async def test_upload_retry_reuses_content_identity_and_preserves_preparation(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection_id = (await service.create_collection("LPBF papers"))["collection_id"]
     importer = _import_service(service)
     content = _valid_pdf_bytes("LPBF heat treatment")
@@ -124,7 +124,7 @@ async def test_upload_retry_reuses_content_identity_and_preserves_preparation(tm
 
 
 async def test_collection_update_preserves_documents(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Before")
     document = await _import_service(service).add_document(
         collection["collection_id"],
@@ -143,7 +143,7 @@ async def test_collection_update_preserves_documents(tmp_path, *, postgres_sessi
 
 
 async def test_collection_agent_default_permission_is_owner_scoped(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     from repositories.auth_repository import AuthRepository, AuthUserRecord
     await AuthRepository().add_user(AuthUserRecord("user-1", "owner@example.com", None, "!", datetime.now(timezone.utc).isoformat()))
     collection = await service.create_collection("Permission defaults", owner_user_id="user-1")
@@ -172,7 +172,7 @@ async def test_collection_agent_default_permission_is_owner_scoped(tmp_path, *, 
 
 
 async def test_missing_collection_is_not_inferred_from_workspace(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     service.workspace.create_collection_dirs("col_orphaned_workspace")
 
     with pytest.raises(FileNotFoundError, match="collection not found"):
@@ -180,7 +180,7 @@ async def test_missing_collection_is_not_inferred_from_workspace(tmp_path, *, po
 
 
 async def test_upload_registers_document_and_preserves_original_bytes(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Uploaded Collection")
     content = b"  Experimental Section\r\nMix and anneal.\r\n"
     document = await _import_service(service).add_document(
@@ -219,7 +219,7 @@ async def test_upload_registers_document_and_preserves_original_bytes(tmp_path, 
 
 
 async def test_failed_document_registration_removes_unregistered_bytes(monkeypatch, tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Failed upload")
     written_keys: list[str] = []
     write = service.object_store.write
@@ -246,7 +246,7 @@ async def test_failed_document_registration_removes_unregistered_bytes(monkeypat
 
 
 async def test_registration_error_preserves_bytes_already_registered(monkeypatch, tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection_id = (await service.create_collection("Committed upload"))["collection_id"]
     add_documents = service.repository.add_documents
     content = b"Experimental Section\nMix and anneal."
@@ -269,7 +269,7 @@ async def test_registration_error_preserves_bytes_already_registered(monkeypatch
 
 
 async def test_source_archive_uses_document_ids(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Reproduction sources")
     first_payload = _valid_pdf_bytes("First")
     second_payload = _valid_pdf_bytes("Second")
@@ -298,7 +298,7 @@ async def test_source_archive_uses_document_ids(tmp_path, *, postgres_session_fa
 
 
 async def test_source_archive_rejects_unknown_document(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Reproduction sources")
 
     with pytest.raises(CollectionSourceArchiveError) as exc_info:
@@ -311,7 +311,7 @@ async def test_source_archive_rejects_unknown_document(tmp_path, *, postgres_ses
 
 
 async def test_source_resolution_reads_only_current_collection_documents(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     first_collection = await service.create_collection("First")
     second_collection = await service.create_collection("Second")
     first = await _import_service(service).add_document(
@@ -338,7 +338,7 @@ async def test_source_resolution_reads_only_current_collection_documents(tmp_pat
 
 
 async def test_source_resolution_rejects_invalid_storage_key(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Unsafe")
     document = StoredDocument(
         document=Document(
@@ -367,7 +367,7 @@ async def test_source_resolution_rejects_invalid_storage_key(tmp_path, *, postgr
 
 
 async def test_delete_collection_removes_documents_and_bytes(tmp_path, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Delete")
     uploaded = await _import_service(service).add_document(
         collection["collection_id"], "paper.txt", b"Methods", "text/plain"
@@ -391,7 +391,7 @@ async def test_delete_collection_removes_documents_and_bytes(tmp_path, *, postgr
     ],
 )
 async def test_invalid_upload_leaves_no_document_or_bytes(tmp_path, filename, content, media_type, message, *, postgres_session_factory) -> None:
-    service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    service = build_test_collection_service(tmp_path / 'collections')
     collection = await service.create_collection("Upload")
     collection_id = collection["collection_id"]
 

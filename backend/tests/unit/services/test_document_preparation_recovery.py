@@ -29,7 +29,7 @@ def anyio_backend():
 
 @pytest.fixture
 async def preparation(tmp_path, *, postgres_session_factory):
-    collections = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collections = build_test_collection_service(tmp_path / 'collections')
     collection = await collections.create_collection("LPBF porosity research")
     collection_id = collection["collection_id"]
     document = StoredDocument(

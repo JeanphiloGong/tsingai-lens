@@ -35,7 +35,7 @@ def anyio_backend() -> str:
 
 
 def _build_profile_service(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     return collection_service, DocumentProfileService(
         collection_service,
         source_artifact_repository=SourceArtifactRepository(),
@@ -275,7 +275,7 @@ async def test_document_profile_service_short_circuits_insufficient_content(tmp_
         def extract_document_profile(self, payload):  # noqa: ANN001
             raise AssertionError("extract_document_profile should not be called")
 
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=SourceArtifactRepository(),
@@ -345,7 +345,7 @@ async def test_document_profile_service_continues_after_one_model_format_failure
             self.last_trace = None
             return trace
 
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=SourceArtifactRepository(),

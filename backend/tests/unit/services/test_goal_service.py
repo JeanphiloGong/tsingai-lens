@@ -14,7 +14,7 @@ def anyio_backend() -> str:
 
 
 async def test_goal_service_creates_seed_collection_and_contract(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     service = GoalService(collection_service)
 
     payload = await service.intake_goal(
@@ -48,7 +48,7 @@ async def test_goal_service_creates_seed_collection_and_contract(tmp_path, *, po
 
 
 async def test_goal_service_rejects_empty_goal_signal(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / 'collections', session_factory=postgres_session_factory)
+    collection_service = build_test_collection_service(tmp_path / 'collections')
     service = GoalService(collection_service)
 
     with pytest.raises(ValueError) as exc_info:

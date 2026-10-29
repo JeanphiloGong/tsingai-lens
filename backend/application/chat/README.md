@@ -57,7 +57,7 @@ that arithmetic remains possible and mechanisms use only the allowed premises.
 ## Start Here
 
 - HTTP entry: `controllers/chat/sessions.py`
-- Turn orchestration: `ChatSessionService.post_message_for_user()`
+- Turn orchestration: `ChatSessionService.send_message()`
 - Agent loop: `ResearchAgentRunner.run_turn()`
 - Tool lookup: `CapabilityRegistry`
 - Approval continuation: `ChatSessionService.decide_tool_call_for_user()`

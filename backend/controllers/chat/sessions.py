@@ -38,7 +38,7 @@ from controllers.chat.schemas import (
     ChatToolDecisionRequest,
     ChatTreeNodeResponse,
     ChatTreeResponse,
-    ChatTurnRequest,
+    SendChatMessageRequest,
     ChatTurnResponse,
 )
 from controllers.dependencies.auth import current_user_id
@@ -422,9 +422,9 @@ async def set_chat_message_feedback(
     response_model=ChatTurnResponse,
     summary="Run one Research Agent turn",
 )
-async def post_chat_message(
+async def send_chat_message(
     session_id: str,
-    payload: ChatTurnRequest,
+    payload: SendChatMessageRequest,
     request: Request,
 ) -> ChatTurnResponse | StreamingResponse:
     try:
@@ -435,11 +435,11 @@ async def post_chat_message(
                 if payload.permission_mode is not ToolPermissionMode.CONFIRM
                 else {}
             )
-            events = await request.app.state.chat_session_service.stream_message_for_user(
+            events = await request.app.state.chat_session_service.send_message_stream(
                 session_id,
                 user_id,
                 message=payload.message,
-                source_contexts=_source_contexts(payload),
+                source_contexts=_map_source_contexts(payload),
                 **permission_kwargs,
                 **({"branch_revision": True} if payload.branch_revision else {}),
             )
@@ -456,11 +456,11 @@ async def post_chat_message(
             if payload.permission_mode is not ToolPermissionMode.CONFIRM
             else {}
         )
-        turn = await request.app.state.chat_session_service.post_message_for_user(
+        turn = await request.app.state.chat_session_service.send_message(
             session_id,
             user_id,
             message=payload.message,
-            source_contexts=_source_contexts(payload),
+            source_contexts=_map_source_contexts(payload),
             **permission_kwargs,
             **({"branch_revision": True} if payload.branch_revision else {}),
         )
@@ -490,7 +490,7 @@ async def post_chat_message(
     return _turn_response(turn)
 
 
-def _source_contexts(payload: ChatTurnRequest) -> tuple[ChatSourceContext, ...]:
+def _map_source_contexts(payload: SendChatMessageRequest) -> tuple[ChatSourceContext, ...]:
     try:
         return tuple(
             ChatSourceContext(

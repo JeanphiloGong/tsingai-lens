@@ -30,7 +30,7 @@ async def test_heartbeat_preserves_research_phase_and_completed_counts(monkeypat
                               completion_reason=AgentCompletionReason.MODEL_ANSWER)
 
     monkeypatch.setattr(service.runner, "run_turn", slow_turn)
-    events = await service.stream_message_for_user(session.session_id, "user-1", message="Review the evidence")
+    events = await service.send_message_stream(session.session_id, "user-1", message="Review the evidence")
 
     async def finish_turn():
         return [event async for event in events]

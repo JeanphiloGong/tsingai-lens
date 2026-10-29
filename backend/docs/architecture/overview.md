@@ -17,7 +17,7 @@ Read this page first, then follow the first entry point that matches the task:
 | Form candidate questions | `controllers/core/research_objectives.py:discover_collection_objectives` | selected ready Documents and Paper Maps | Yes | candidate Objectives |
 | Create or confirm a question | `application/core/objectives/objective_authoring_service.py:create_chat_assisted_candidate` or `confirm_objective` | exact candidate or approved arguments | No | Objective |
 | Analyze one confirmed question | `controllers/core/research_objectives.py:start_collection_objective_analysis` | frozen Objective and ready Documents | Yes | analysis version, Evidence, Findings |
-| Chat or Agent request | `application/chat/session_service.py:post_message_for_user` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
+| Chat or Agent request | `application/chat/session_service.py:send_message` | Chat trajectory and canonical resources | Yes, when needed | messages, tool calls, approvals |
 
 The normal reading path is:
 

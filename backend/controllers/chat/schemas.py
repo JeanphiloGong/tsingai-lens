@@ -194,7 +194,7 @@ class ChatToolCallResponse(BaseModel):
     authorization_revision: int | None = None
 
 
-class ChatTurnRequest(BaseModel):
+class SendChatMessageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     message: str = Field(min_length=1, max_length=12000)

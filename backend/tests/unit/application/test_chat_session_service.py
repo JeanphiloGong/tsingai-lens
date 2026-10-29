@@ -154,7 +154,7 @@ async def test_chat_session_service_persists_ordinary_conversation(*, postgres_s
     service = _service(_Model(ModelTurn(content="你好，我可以帮助你。")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    result = await service.post_message_for_user(
+    result = await service.send_message(
         session.session_id,
         "user-1",
         message="你好",
@@ -251,7 +251,7 @@ async def test_chat_session_service_persists_selected_source_with_user_message(*
         heading_path="Client supplied heading",
     )
 
-    await service.post_message_for_user(
+    await service.send_message(
         session.session_id,
         "user-1",
         message="解释这段结果。",
@@ -303,10 +303,10 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(forged_s
     )
     if forged_second_block:
         with pytest.raises(ChatSourceContextError):
-            await service.post_message_for_user(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
+            await service.send_message(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
         assert not await repository.read_messages(session.session_id)
         return
-    await service.post_message_for_user(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
+    await service.send_message(session.session_id, "user-1", message="Compare these blocks", source_contexts=contexts)
     stored = await repository.read_messages(session.session_id)
     assert [item.source_ref for item in stored[0].source_contexts] == ["results", "methods"]
     assert [item.page for item in stored[0].source_contexts] == [3, 2]
@@ -335,7 +335,7 @@ async def test_chat_session_service_rejects_source_from_another_collection(*, po
     )
 
     with pytest.raises(ChatSourceContextError, match="does not belong"):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -369,7 +369,7 @@ async def test_chat_session_service_rejects_unknown_document_source(*, postgres_
     )
 
     with pytest.raises(ChatSourceContextError, match="document does not belong"):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -426,7 +426,7 @@ async def test_chat_session_service_rejects_forged_source_context(source_kind: s
     )
 
     with pytest.raises(ChatSourceContextError, match=error):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -456,7 +456,7 @@ async def test_chat_session_service_accepts_a_bounded_canonical_quote(*, postgre
         quote="Conductivity improved to 12 mS/cm",
     )
 
-    await service.post_message_for_user(
+    await service.send_message(
         session.session_id,
         "user-1",
         message="Explain this excerpt.",
@@ -491,7 +491,7 @@ async def test_chat_session_service_rejects_a_stale_source_digest(*, postgres_se
     )
 
     with pytest.raises(ChatSourceContextError, match="digest does not match"):
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="Explain this.",
@@ -506,7 +506,7 @@ async def test_chat_session_service_streams_text_before_the_persisted_turn(*, po
     service = _service(_Model(ModelTurn(content="逐段回复")), repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    stream = await service.stream_message_for_user(
+    stream = await service.send_message_stream(
         session.session_id,
         "user-1",
         message="你好",
@@ -555,7 +555,7 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
     service = _service(model, repository)
     reader = _service(model, repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    original = await service.stream_message_for_user(
+    original = await service.send_message_stream(
         session.session_id, "user-1", message="Explain matched LPBF tensile conditions without tools.",
     )
     try:
@@ -604,7 +604,7 @@ async def test_interrupted_response_keeps_partial_text_without_claiming_it_compl
     model = _PausedResponseModel()
     service = _service(model, repository)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    original = await service.stream_message_for_user(session.session_id, "user-1", message="Explain matching conditions without tools.")
+    original = await service.send_message_stream(session.session_id, "user-1", message="Explain matching conditions without tools.")
     async for event in original:
         if event["type"] == "text_delta":
             break
@@ -656,7 +656,7 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(*, po
     )
     service = _service(model, repository, capability)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    stream = await service.stream_message_for_user(
+    stream = await service.send_message_stream(
         session.session_id,
         "user-1",
         message="Inspect the prepared paper sources.",
@@ -691,7 +691,7 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(*, po
 
     model.turns.clear()
     model.turns.append(ModelTurn(content="The interrupted source inspection can be resumed."))
-    resumed = await service.post_message_for_user(
+    resumed = await service.send_message(
         session.session_id,
         "user-1",
         message="Continue from the interrupted inspection.",
@@ -816,7 +816,7 @@ async def test_new_request_recovers_a_running_call_left_by_a_dead_worker(*, post
         ),
     )
 
-    result = await service.post_message_for_user(
+    result = await service.send_message(
         session.session_id,
         "user-1",
         message="Continue after the interruption.",
@@ -864,7 +864,7 @@ async def test_approved_continuation_captures_text_without_repeating_the_write(*
         name="create_objective_candidate", arguments={"question": "Compare matched LPBF tensile conditions"},
     ),))), repository, capability)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    initial = await service.post_message_for_user(session.session_id, "user-1", message="Create an objective candidate for these test conditions.")
+    initial = await service.send_message(session.session_id, "user-1", message="Create an objective candidate for these test conditions.")
     call = initial["pending_approval"]
     assert call is not None
     original_snapshot = await repository.read_response_snapshot(session.session_id)
@@ -909,7 +909,7 @@ async def test_approved_write_response_failure_preserves_saved_result_but_fails_
         capability,
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    proposed = await service.post_message_for_user(
+    proposed = await service.send_message(
         session.session_id,
         "user-1",
         message="保存已重建的拉伸实验。",
@@ -973,7 +973,7 @@ async def test_chat_session_service_checkpoints_every_agent_step(*, postgres_ses
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    result = await service.post_message_for_user(
+    result = await service.send_message(
         session.session_id,
         "user-1",
         message="What is in this collection?",
@@ -1038,7 +1038,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
     service = ChatSessionService(repository=repository, collection_service=collection,
                                  source_artifact_repository=sources, runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    stream = await service.stream_message_for_user(
+    stream = await service.send_message_stream(
         session.session_id, "user-1",
         message="Read the exact Source in paper A, then paper B, to compare their EIS conductivity measurements.",
     )
@@ -1067,7 +1067,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(ending
 
     model.turns.clear()
     model.turns.append(ModelTurn(content="Paper B has not yet been inspected. Its Source must be read next."))
-    resumed = await service.post_message_for_user(
+    resumed = await service.send_message(
         session.session_id, "user-1", message="Without tools, summarize what is still unread.",
     )
     assert resumed["status"] == "completed"
@@ -1093,7 +1093,7 @@ async def test_chat_session_service_approves_exact_write_and_resumes(*, postgres
         capability,
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    pending_turn = await service.post_message_for_user(
+    pending_turn = await service.send_message(
         session.session_id,
         "user-1",
         message="保存这个目标",
@@ -1107,7 +1107,7 @@ async def test_chat_session_service_approves_exact_write_and_resumes(*, postgres
     )
     assert capability.executed == []
     with pytest.raises(ChatApprovalPendingError) as blocked:
-        await service.post_message_for_user(
+        await service.send_message(
             session.session_id,
             "user-1",
             message="start another branch",
@@ -1171,7 +1171,7 @@ async def test_chat_session_service_rejection_never_executes_write(*, postgres_s
         capability,
     )
     session = await service.create_session(collection_id="col-1", user_id="user-1")
-    pending = (await service.post_message_for_user(
+    pending = (await service.send_message(
         session.session_id,
         "user-1",
         message="保存这个目标",
@@ -1211,7 +1211,7 @@ async def test_rename_survives_continuation_and_rejects_non_owner(*, postgres_se
     for invalid in (" ", "x" * 161, "line\nbreak", "nul\x00title"):
         with pytest.raises(ValueError):
             await service.set_session_title_for_user(session.session_id, "user-1", title=invalid)
-    await service.post_message_for_user(session.session_id, "user-1", message="Compare the evidence")
+    await service.send_message(session.session_id, "user-1", message="Compare the evidence")
     assert (await service.get_session_for_user(session.session_id, "user-1")).title == "IN718 comparison"
     assert (await service.list_sessions_for_user(collection_id="col-1", user_id="user-1"))[0].title == "IN718 comparison"
     assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
@@ -1264,7 +1264,7 @@ async def test_approval_continuation_recovers_context_without_repeating_write(de
         chat_session=session, messages=history, tool_calls=calls,
         tool_results=tuple(message.tool_result for message in history if message.tool_result),
     )
-    proposed = await service.post_message_for_user(session.session_id, "user-1", message="Save the reviewed objective.")
+    proposed = await service.send_message(session.session_id, "user-1", message="Save the reviewed objective.")
     pending = proposed["pending_approval"]
     model.continuing = True
     response = await service.decide_tool_call_for_user(

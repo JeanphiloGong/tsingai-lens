@@ -662,7 +662,7 @@ class ChatSessionService:
                 raise ChatFeedbackAnalysisEnqueueError(saved.feedback_id) from exc
         return saved
 
-    async def post_message_for_user(
+    async def send_message(
         self,
         session_id: str,
         user_id: str,
@@ -721,7 +721,7 @@ class ChatSessionService:
             "execution_plan": result.execution_plan,
         }
 
-    async def stream_message_for_user(
+    async def send_message_stream(
         self,
         session_id: str,
         user_id: str,

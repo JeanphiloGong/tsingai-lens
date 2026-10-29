@@ -22,7 +22,7 @@ from controllers.chat.schemas import (
     ChatSessionCreateRequest,
     ChatSessionListResponse,
     ChatToolDecisionRequest,
-    ChatTurnRequest,
+    SendChatMessageRequest,
 )
 from domain.chat import (
     ChatMessage,
@@ -116,7 +116,7 @@ class _Service:
         await self.get_session_for_user(session_id, user_id)
         return self.pending
 
-    async def post_message_for_user(
+    async def send_message(
         self,
         session_id: str,
         user_id: str,
@@ -154,7 +154,7 @@ class _Service:
             "error_code": None,
         }
 
-    async def stream_message_for_user(
+    async def send_message_stream(
         self,
         session_id: str,
         user_id: str,
@@ -163,7 +163,7 @@ class _Service:
         source_contexts: tuple[ChatSourceContext, ...] = (),
         permission_mode: ToolPermissionMode = ToolPermissionMode.CONFIRM,
     ):
-        turn = await self.post_message_for_user(
+        turn = await self.send_message(
             session_id,
             user_id,
             message=message,
@@ -219,9 +219,9 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
     )
     read = asyncio.run(sessions_controller.get_chat_session("chat-1", request))
     turn = asyncio.run(
-        sessions_controller.post_chat_message(
+        sessions_controller.send_chat_message(
             "chat-1",
-            ChatTurnRequest(message="你好"),
+            SendChatMessageRequest(message="你好"),
             request,
         )
     )
@@ -281,9 +281,9 @@ def test_chat_sessions_api_forwards_explicit_permission_mode() -> None:
     service = _Service()
 
     asyncio.run(
-        sessions_controller.post_chat_message(
+        sessions_controller.send_chat_message(
             "chat-1",
-            ChatTurnRequest(message="你好", permission_mode="none"),
+            SendChatMessageRequest(message="你好", permission_mode="none"),
             _request(service),
         )
     )
@@ -314,9 +314,9 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
     }
 
     turn = asyncio.run(
-        sessions_controller.post_chat_message(
+        sessions_controller.send_chat_message(
             "chat-1",
-            ChatTurnRequest(message="你好", source_contexts=[source_context] + [
+            SendChatMessageRequest(message="你好", source_contexts=[source_context] + [
                 {**source_context, "source_ref": f"methods-{index}", "resource_ref": {
                     **source_context["resource_ref"], "resource_id": f"doc-1:methods-{index}"
                 }} for index in range(1, count)
@@ -328,7 +328,7 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
     assert len(turn.messages[0].source_contexts) == count
     if count == 12:
         with pytest.raises(ValueError):
-            ChatTurnRequest(message="Explain these blocks", source_contexts=[source_context] * 13)
+            SendChatMessageRequest(message="Explain these blocks", source_contexts=[source_context] * 13)
     assert turn.messages[0].source_contexts[0].document_id == "doc-1"
     assert turn.messages[0].source_contexts[0].resource_ref.model_dump() == (
         {
@@ -345,9 +345,9 @@ def test_chat_sessions_api_accepts_traceable_source_contexts(count: int) -> None
 def test_chat_sessions_api_maps_a_forged_source_context_to_422() -> None:
     with pytest.raises(HTTPException) as invalid:
         asyncio.run(
-            sessions_controller.post_chat_message(
+            sessions_controller.send_chat_message(
                 "chat-1",
-                ChatTurnRequest(message="forged source"),
+                SendChatMessageRequest(message="forged source"),
                 _request(_Service()),
             )
         )
@@ -394,9 +394,9 @@ def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending() 
 
     with pytest.raises(HTTPException) as conflict:
         asyncio.run(
-            sessions_controller.post_chat_message(
+            sessions_controller.send_chat_message(
                 "chat-1",
-                ChatTurnRequest(message="blocked"),
+                SendChatMessageRequest(message="blocked"),
                 _request(service),
             )
         )

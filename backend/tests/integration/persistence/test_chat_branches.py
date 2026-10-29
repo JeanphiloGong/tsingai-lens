@@ -516,7 +516,7 @@ async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
 
     app.service.runner.model = PausedModel(ModelTurn(content=ANSWER))
     branch = await _branch(app)
-    events = await app.service.stream_message_for_user(
+    events = await app.service.send_message_stream(
         branch["session_id"], app.owner, message=REVISION, branch_revision=True,
     )
     try:

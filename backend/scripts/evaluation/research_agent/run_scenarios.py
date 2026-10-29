@@ -139,7 +139,7 @@ async def replay_case(service, case, mode):
                 for message in previous["messages"]
                 for request in message.tool_calls
             }
-            turn = await service.post_message_for_user(session.session_id, case["user_id"], message=instruction["message"])
+            turn = await service.send_message(session.session_id, case["user_id"], message=instruction["message"])
             record = {"session_id": session.session_id, "message": instruction["message"], "response": turn,
                       "automatic_authorization_active": automatic_authorization_active, "decisions": []}
             result["turns"].append(record)

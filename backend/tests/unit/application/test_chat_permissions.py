@@ -45,7 +45,7 @@ async def test_session_permission_controls_actual_write(mode, expected, *, postg
         actions=[write.spec.name] if mode == "auto" else [],
         expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat() if mode == "auto" else None,
         expected_revision=0)
-    result = await service.post_message_for_user(session.session_id, "user-1", message="Save feedback on this published Finding.")
+    result = await service.send_message(session.session_id, "user-1", message="Save feedback on this published Finding.")
     assert result["status"] == expected, [(c.name, c.error_code) for c in (await read_tool_calls(repository, session.session_id))]
     calls = [call for call in (await read_tool_calls(repository, session.session_id)) if call.name == write.spec.name]
     if mode == "read_only":
@@ -77,7 +77,7 @@ async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(*, postgre
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     await repository.set_permission(session.session_id, "user-1", mode="auto", actions=[write.spec.name],
         expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
-    result = await service.post_message_for_user(session.session_id, "user-1", message="Inspect this feedback, do not save anything.")
+    result = await service.send_message(session.session_id, "user-1", message="Inspect this feedback, do not save anything.")
     assert result["status"] == "completed"
     assert write.executed
 
@@ -130,7 +130,7 @@ async def test_each_automatic_write_rechecks_current_permission(revoke, *, postg
         finding_write.spec.name, plan_write.spec.name,
     ],
         expires_at=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), expected_revision=0)
-    stream = await service.stream_message_for_user(session.session_id, "user-1", message="Apply the two corrections.")
+    stream = await service.send_message_stream(session.session_id, "user-1", message="Apply the two corrections.")
     events = [event async for event in stream]
     result = next(event["turn"] for event in events if event["type"] == "turn")
     assert result["status"] == ("failed" if revoke else "completed")

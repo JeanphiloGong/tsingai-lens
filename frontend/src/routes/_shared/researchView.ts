@@ -468,258 +468,26 @@ export type ObjectiveEvidenceMap = {
 	coverage: ObjectiveEvidenceMapCoverage;
 };
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-	return value && typeof value === 'object' && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function asArray(value: unknown): unknown[] {
-	return Array.isArray(value) ? value : [];
-}
-
-function nonEmptyText(value: unknown): string | null {
-	if (typeof value !== 'string') return null;
-	const text = value.trim();
-	return text ? text : null;
-}
-
-function toText(value: unknown, fallback = ''): string {
-	if (typeof value === 'string') return value.trim() || fallback;
-	if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-	return fallback;
-}
-
 export function formatShortIdentifier(value: string | null | undefined): string {
-	const text = String(value ?? '').trim();
+	const text = value?.trim() ?? '';
 	if (!text) return '--';
 	if (text.length <= 24) return text;
 	return `${text.slice(0, 10)}...${text.slice(-6)}`;
 }
 
-function toNumber(value: unknown, fallback = 0): number {
-	if (typeof value === 'number' && Number.isFinite(value)) return value;
-	if (typeof value === 'string' && value.trim() !== '') {
-		const parsed = Number(value);
-		return Number.isFinite(parsed) ? parsed : fallback;
-	}
-	return fallback;
-}
-
-function toOptionalNumber(value: unknown): number | null {
-	if (typeof value === 'number' && Number.isFinite(value)) return value;
-	if (typeof value === 'string' && value.trim() !== '') {
-		const parsed = Number(value);
-		return Number.isFinite(parsed) ? parsed : null;
-	}
-	return null;
-}
-
-function toStringList(value: unknown): string[] {
-	if (Array.isArray(value)) {
-		return value
-			.map((item) => {
-				if (typeof item === 'string' || typeof item === 'number') return String(item).trim();
-				const record = asRecord(item);
-				return toText(record?.label ?? record?.name ?? record?.id ?? record?.message);
-			})
-			.filter((item) => item !== '');
-	}
-	if (typeof value === 'string' && value.trim()) return [value.trim()];
-	return [];
-}
-
-function normalizeUnknownRecord(value: unknown): Record<string, unknown> {
-	const record = asRecord(value);
-	return record ? { ...record } : {};
-}
-
-function normalizeObjectiveSummary(value: unknown): ObjectiveSummary | null {
-	const record = asRecord(value);
-	if (!record || !toText(record.objective_id) || !toText(record.question)) return null;
-	const confirmationStatus = toText(record.confirmation_status);
-	return {
-		collection_id: toText(record.collection_id),
-		objective_id: toText(record.objective_id),
-		question: toText(record.question),
-		material_scope: toStringList(record.material_scope),
-		variables: toStringList(record.variables),
-		outcomes: toStringList(record.outcomes),
-		mechanisms: toStringList(record.mechanisms),
-		constraints: toStringList(record.constraints),
-		requested_comparator: nonEmptyText(record.requested_comparator),
-		seed_document_ids: toStringList(record.seed_document_ids),
-		excluded_document_ids: toStringList(record.excluded_document_ids),
-		confidence: toNumber(record.confidence),
-		reason: nonEmptyText(record.reason),
-		confirmation_status: confirmationStatus === 'confirmed' ? 'confirmed' : 'candidate',
-		active_analysis_version: toOptionalNumber(record.active_analysis_version),
-		published_analysis_version: toOptionalNumber(record.published_analysis_version),
-		created_at: nonEmptyText(record.created_at),
-		updated_at: nonEmptyText(record.updated_at)
-	};
-}
-
-function normalizeObjectiveAnalysisState(value: unknown): ObjectiveAnalysisState | null {
-	const record = asRecord(value);
-	if (!record || !toNumber(record.analysis_version)) return null;
-	const status = toText(record.status) as ObjectiveAnalysisStatus;
-	const origin = toText(record.origin) as FindingOrigin;
-	const abstentionReason = nonEmptyText(record.abstention_reason) as FindingAbstentionReason | null;
-	return {
-		collection_id: toText(record.collection_id),
-		objective_id: toText(record.objective_id),
-		analysis_version: toNumber(record.analysis_version),
-		document_inputs: asArray(record.document_inputs)
-			.map((item) => {
-				const input = asRecord(item);
-				const documentId = toText(input?.document_id);
-				const fingerprint = toText(input?.preparation_fingerprint);
-				return documentId && fingerprint
-					? { document_id: documentId, preparation_fingerprint: fingerprint }
-					: null;
-			})
-			.filter((item): item is PreparedDocumentInput => item !== null),
-		pipeline_version: toText(record.pipeline_version),
-		model_name: nonEmptyText(record.model_name),
-		prompt_versions: Object.fromEntries(
-			Object.entries(normalizeUnknownRecord(record.prompt_versions)).map(([key, item]) => [
-				key,
-				toText(item)
-			])
-		),
-		status: ['queued', 'running', 'succeeded', 'failed'].includes(status) ? status : 'failed',
-		phase: toText(record.phase),
-		processed_document_count: toNumber(record.processed_document_count),
-		total_document_count: toNumber(record.total_document_count),
-		current_document_id: nonEmptyText(record.current_document_id),
-		progress_message: nonEmptyText(record.progress_message),
-		error_code: nonEmptyText(record.error_code),
-		error_message: nonEmptyText(record.error_message),
-		created_at: nonEmptyText(record.created_at),
-		started_at: nonEmptyText(record.started_at),
-		completed_at: nonEmptyText(record.completed_at),
-		origin: ['human_authored', 'agent_authored', 'hybrid'].includes(origin)
-			? origin
-			: 'system_generated',
-		source_analysis_version: toOptionalNumber(record.source_analysis_version),
-		created_by_user_id: nonEmptyText(record.created_by_user_id),
-		created_by_tool_call_id: nonEmptyText(record.created_by_tool_call_id),
-		abstention_reason: abstentionReason,
-		abstention_note: nonEmptyText(record.abstention_note)
-	};
-}
-
-function normalizeObjectiveEvidenceReview(value: unknown): ObjectiveEvidenceReview {
-	const record = asRecord(value);
-	const statusCounts = asRecord(record?.status_counts);
-	const statuses: ObjectiveEvidenceStatus[] = [
-		'comparable',
-		'association_only',
-		'descriptive',
-		'needs_context',
-		'non_comparable',
-		'extraction_failed'
-	];
-	const normalizedStatusCounts = Object.fromEntries(
-		statuses
-			.map((status): [ObjectiveEvidenceStatus, number] => [
-				status,
-				Math.max(0, toNumber(statusCounts?.[status]))
-			])
-			.filter(([, count]) => count > 0)
-	) as Partial<Record<ObjectiveEvidenceStatus, number>>;
-	const gaps = asArray(record?.gaps)
-		.map((item) => {
-			const gap = asRecord(item);
-			const status = toText(gap?.evidence_status) as ObjectiveEvidenceStatus;
-			if (!toText(gap?.evidence_id) || !statuses.includes(status)) return null;
-			return {
-				evidence_id: toText(gap?.evidence_id),
-				document_id: toText(gap?.document_id),
-				source_kind: toText(gap?.source_kind),
-				source_ref: toText(gap?.source_ref),
-				page_numbers: asArray(gap?.page_numbers)
-					.map((page) => toNumber(page))
-					.filter((page) => page > 0),
-				evidence_status: status,
-				reason: toText(gap?.reason, '该证据暂不能用于直接比较。'),
-				outcome: nonEmptyText(gap?.outcome),
-				source_excerpt: toText(gap?.source_excerpt)
-			};
-		})
-		.filter((item): item is ObjectiveEvidenceGap => item !== null);
-	return {
-		total_evidence_count: Math.max(0, toNumber(record?.total_evidence_count)),
-		result_count: Math.max(0, toNumber(record?.result_count)),
-		comparable_evidence_count: Math.max(0, toNumber(record?.comparable_evidence_count)),
-		gap_count: Math.max(0, toNumber(record?.gap_count)),
-		omitted_gap_count: Math.max(0, toNumber(record?.omitted_gap_count)),
-		status_counts: normalizedStatusCounts,
-		gaps
-	};
-}
-
-export function normalizeObjectiveList(value: unknown, collectionId: string): ObjectiveList {
-	const record = asRecord(value);
-	return {
-		collection_id: toText(record?.collection_id, collectionId),
-		objectives: asArray(record?.objectives)
-			.map((item) => normalizeObjectiveSummary(item))
-			.filter((item): item is ObjectiveSummary => item !== null)
-	};
-}
-
-export function normalizeObjectiveScope(
-	value: unknown,
-	collectionId: string,
-	objectiveId: string
-): ObjectiveScope {
-	const record = asRecord(value);
-	const counts = asRecord(record?.counts);
-	const classifications: ObjectiveScopeClassification[] = [
-		'likely_relevant',
-		'needs_inspection',
-		'confidently_out_of_scope'
-	];
-	const decisions = asArray(record?.decisions)
-		.map((item) => {
-			const decision = asRecord(item);
-			const documentId = toText(decision?.document_id);
-			const classification = toText(decision?.classification) as ObjectiveScopeClassification;
-			if (!documentId || !classifications.includes(classification)) return null;
-			return {
-				document_id: documentId,
-				classification,
-				reason: toText(decision?.reason),
-				doc_role: toText(decision?.doc_role, 'uncertain'),
-				map_status: toText(decision?.map_status, 'unknown'),
-				map_limitations: toStringList(decision?.map_limitations),
-				support_basis: toStringList(decision?.support_basis),
-				is_seed: decision?.is_seed === true
-			} satisfies ObjectiveScopeDecision;
-		})
-		.filter((item): item is ObjectiveScopeDecision => item !== null);
-	return {
-		collection_id: toText(record?.collection_id, collectionId),
-		objective_id: toText(record?.objective_id, objectiveId),
-		counts: {
-			likely_relevant: Math.max(0, toNumber(counts?.likely_relevant)),
-			needs_inspection: Math.max(0, toNumber(counts?.needs_inspection)),
-			confidently_out_of_scope: Math.max(0, toNumber(counts?.confidently_out_of_scope))
-		},
-		recommended_document_ids: toStringList(record?.recommended_document_ids),
-		review_document_ids: toStringList(record?.review_document_ids),
-		excluded_document_ids: toStringList(record?.excluded_document_ids),
-		decisions,
-		support_is_evidence: record?.support_is_evidence === true
-	};
-}
-
 export async function fetchCollectionObjectives(collectionId: string): Promise<ObjectiveList> {
-	const encoded = encodeURIComponent(collectionId);
-	const data = await requestJson(`/collections/${encoded}/objectives`);
-	return normalizeObjectiveList(data, collectionId);
+	const data = (await requestJson(
+		`/collections/${encodeURIComponent(collectionId)}/objectives`
+	)) as ObjectiveList;
+	if (
+		!data || data.collection_id !== collectionId || !Array.isArray(data.objectives) ||
+		data.objectives.some((item) => !item || typeof item.objective_id !== 'string' ||
+			!item.objective_id || typeof item.question !== 'string' || !item.question ||
+			!['candidate', 'confirmed'].includes(item.confirmation_status))
+	) {
+		throw new Error('Objective list response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchObjectiveScope(
@@ -727,42 +495,19 @@ export async function fetchObjectiveScope(
 	objectiveId: string
 ): Promise<ObjectiveScope> {
 	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/scope`;
-	const data = await requestJson(path);
-	return normalizeObjectiveScope(data, collectionId, objectiveId);
-}
-
-function normalizeObjectiveAnalysis(value: unknown, collectionId: string): ObjectiveAnalysis {
-	const record = asRecord(value) ?? {};
-	const objective = normalizeObjectiveSummary(record.objective);
-	return {
-		collection_id: toText(record.collection_id, collectionId),
-		objective:
-			objective ??
-			({
-				objective_id: '',
-				question: '',
-				material_scope: [],
-				variables: [],
-				outcomes: [],
-				mechanisms: [],
-				constraints: [],
-				requested_comparator: null,
-				seed_document_ids: [],
-				excluded_document_ids: [],
-				confidence: 0,
-				reason: null,
-				confirmation_status: 'candidate',
-				active_analysis_version: null,
-				published_analysis_version: null,
-				collection_id: collectionId,
-				created_at: null,
-				updated_at: null
-			} satisfies ObjectiveSummary),
-		active_analysis: normalizeObjectiveAnalysisState(record.active_analysis),
-		published_analysis: normalizeObjectiveAnalysisState(record.published_analysis),
-		evidence_review: normalizeObjectiveEvidenceReview(record.evidence_review),
-		warnings: toStringList(record.warnings)
-	};
+	const data = (await requestJson(path)) as ObjectiveScope;
+	if (
+		!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		!data.counts || !Array.isArray(data.recommended_document_ids) ||
+		!Array.isArray(data.review_document_ids) || !Array.isArray(data.excluded_document_ids) ||
+		!Array.isArray(data.decisions) || typeof data.support_is_evidence !== 'boolean' ||
+		data.decisions.some((item) => !item || typeof item.document_id !== 'string' ||
+			!item.document_id || !['likely_relevant', 'needs_inspection', 'confidently_out_of_scope']
+				.includes(item.classification))
+	) {
+		throw new Error('Objective scope response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchObjectiveFindings(
@@ -778,7 +523,13 @@ export async function fetchObjectiveFindings(
 		offset: String(offset),
 		limit: String(limit)
 	});
-	return requestJson(`${path}?${params.toString()}`) as Promise<ObjectiveFindingPage>;
+	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveFindingPage;
+	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion || !Array.isArray(data.items) ||
+		data.items.some((item) => !item || typeof item.finding_id !== 'string' || !item.finding_id)) {
+		throw new Error('Objective Findings response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchObjectiveFinding(
@@ -789,7 +540,12 @@ export async function fetchObjectiveFinding(
 ): Promise<ObjectiveFindingDetail> {
 	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}`;
 	const params = new URLSearchParams({ analysis_version: String(analysisVersion) });
-	return requestJson(`${path}?${params.toString()}`) as Promise<ObjectiveFindingDetail>;
+	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveFindingDetail;
+	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion || data.finding?.finding_id !== findingId) {
+		throw new Error('Objective Finding response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchObjectiveEvidence(
@@ -805,7 +561,14 @@ export async function fetchObjectiveEvidence(
 	if (findingId) params.set('finding_id', findingId);
 	params.set('offset', String(offset));
 	params.set('limit', String(limit));
-	return requestJson(`${path}?${params.toString()}`) as Promise<ObjectiveEvidencePage>;
+	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveEvidencePage;
+	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion || !Array.isArray(data.items) ||
+		data.items.some((item) => !item || typeof item.evidence_id !== 'string' || !item.evidence_id ||
+			typeof item.document_id !== 'string' || !item.document_id)) {
+		throw new Error('Objective Evidence response is invalid.');
+	}
+	return data;
 }
 
 export async function createFindingVersion(
@@ -822,6 +585,9 @@ export async function createFindingVersion(
 }
 
 export type ExperimentAnalysisProjection = {
+	collection_id: string;
+	objective_id: string;
+	analysis_version: number;
 	selections: Array<{
 		selection_id: string;
 		experiment_id: string;
@@ -915,7 +681,16 @@ export async function fetchExperimentAnalysis(
 	analysisVersion: number
 ): Promise<ExperimentAnalysisProjection> {
 	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/experiment-analysis`;
-	return requestJson(`${path}?analysis_version=${encodeURIComponent(String(analysisVersion))}`) as Promise<ExperimentAnalysisProjection>;
+	const data = (await requestJson(
+		`${path}?analysis_version=${encodeURIComponent(String(analysisVersion))}`
+	)) as ExperimentAnalysisProjection;
+	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion ||
+		!Array.isArray(data.selections) || !Array.isArray(data.comparison_groups) ||
+		!Array.isArray(data.experiments) || !Array.isArray(data.findings)) {
+		throw new Error('Experiment analysis response is invalid.');
+	}
+	return data;
 }
 
 export type FindingEvidenceSummary = {
@@ -968,26 +743,47 @@ export async function runObjectiveAnalysis(
 	collectionId: string,
 	objectiveId: string,
 	documentIds: string[]
-) {
+): Promise<ObjectiveAnalysis> {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const encodedObjective = encodeURIComponent(objectiveId);
-	const data = await requestJson(
+	const data = (await requestJson(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`,
 		{
 			method: 'POST',
 			body: JSON.stringify({ document_ids: documentIds })
 		}
-	);
-	return normalizeObjectiveAnalysis(data, collectionId);
+	)) as ObjectiveAnalysis;
+	if (
+		!data || data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId ||
+		!Array.isArray(data.warnings) || !Array.isArray(data.evidence_review?.gaps) ||
+		[data.active_analysis, data.published_analysis].some((state) => state !== null &&
+			(!state || state.objective_id !== objectiveId || !Number.isInteger(state.analysis_version) ||
+				state.analysis_version < 1 || !['queued', 'running', 'succeeded', 'failed'].includes(state.status)))
+	) {
+		throw new Error('Objective analysis response is invalid.');
+	}
+	return data;
 }
 
-export async function fetchObjectiveAnalysis(collectionId: string, objectiveId: string) {
+export async function fetchObjectiveAnalysis(
+	collectionId: string,
+	objectiveId: string
+): Promise<ObjectiveAnalysis> {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const encodedObjective = encodeURIComponent(objectiveId);
-	const data = await requestJson(
+	const data = (await requestJson(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`
-	);
-	return normalizeObjectiveAnalysis(data, collectionId);
+	)) as ObjectiveAnalysis;
+	if (
+		!data || data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId ||
+		!Array.isArray(data.warnings) || !Array.isArray(data.evidence_review?.gaps) ||
+		[data.active_analysis, data.published_analysis].some((state) => state !== null &&
+			(!state || state.objective_id !== objectiveId || !Number.isInteger(state.analysis_version) ||
+				state.analysis_version < 1 || !['queued', 'running', 'succeeded', 'failed'].includes(state.status)))
+	) {
+		throw new Error('Objective analysis response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchObjectiveAnalysisStatus(

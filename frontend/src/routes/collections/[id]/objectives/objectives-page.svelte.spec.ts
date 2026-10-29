@@ -247,6 +247,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
 					active_analysis: analysisState('queued'),
 					published_analysis: null,
+					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
 					warnings: []
 				});
 			}
@@ -320,6 +321,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
 					active_analysis: analysisState('queued'),
 					published_analysis: null,
+					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
 					warnings: []
 				});
 			}
@@ -375,6 +377,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 						]
 					},
 					published_analysis: null,
+					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
 					warnings: []
 				});
 			}
@@ -384,6 +387,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 2 }),
 					active_analysis: { ...analysisState('queued'), analysis_version: 2 },
 					published_analysis: null,
+					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
 					warnings: []
 				});
 			}
@@ -458,6 +462,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					}),
 					active_analysis: analysisState('running'),
 					published_analysis: null,
+					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
 					warnings: []
 				});
 			}
@@ -509,6 +514,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 					}),
 					active_analysis: analysisState(completed ? 'succeeded' : 'running'),
 					published_analysis: completed ? analysisState('succeeded') : null,
+					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
 					warnings: []
 				});
 			}
@@ -558,6 +564,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 				objective: objective({ confirmation_status: 'confirmed', active_analysis_version: 1 }),
 				active_analysis: analysisState('running'),
 				published_analysis: null,
+					evidence_review: { total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0, gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: [] },
 				warnings: []
 			})
 		);

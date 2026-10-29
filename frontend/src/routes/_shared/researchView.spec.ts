@@ -5,6 +5,7 @@ import {
 	createFindingCuration,
 	createFindingFeedback,
 	fetchCollectionObjectives,
+	fetchExperimentAnalysis,
 	fetchFindingCurations,
 	fetchFindingFeedback,
 	fetchObjectiveAnalysis,
@@ -16,7 +17,6 @@ import {
 	collectionFindingDatasetUrl,
 	findingGoldDraftUrl,
 	objectiveFindingDatasetUrl,
-	normalizeObjectiveScope,
 	runObjectiveAnalysis
 } from './researchView';
 
@@ -127,6 +127,10 @@ describe('objective Finding API', () => {
 			objective,
 			active_analysis: analysis,
 			published_analysis: analysis,
+			evidence_review: {
+				total_evidence_count: 0, result_count: 0, comparable_evidence_count: 0,
+				gap_count: 0, omitted_gap_count: 0, status_counts: {}, gaps: []
+			},
 			warnings: []
 		});
 
@@ -163,7 +167,7 @@ describe('objective Finding API', () => {
 		expect(findingGoldDraftUrl('col/1')).toBe('/api/v1/collections/col%2F1/finding-gold-draft');
 	});
 
-	it('normalizes and fetches the complete Objective scope preview', async () => {
+	it('preserves the complete Objective scope preview', async () => {
 		const payload = {
 			collection_id: 'col_123',
 			objective_id: 'obj_1',
@@ -185,9 +189,7 @@ describe('objective Finding API', () => {
 					map_limitations: [],
 					support_basis: ['relationship-1'],
 					is_seed: true
-				},
-				{ document_id: '', classification: 'likely_relevant' },
-				{ document_id: 'paper-invalid', classification: 'maybe' }
+				}
 			],
 			support_is_evidence: false
 		};
@@ -205,13 +207,33 @@ describe('objective Finding API', () => {
 			is_seed: true
 		});
 		expect(result.support_is_evidence).toBe(false);
-		expect(normalizeObjectiveScope(null, 'col_fallback', 'obj_fallback')).toMatchObject({
-			collection_id: 'col_fallback',
-			objective_id: 'obj_fallback',
-			recommended_document_ids: [],
-			decisions: [],
+		expect(result).toBe(payload);
+	});
+
+	it.each([null, {}, { collection_id: 'col_123', objectives: [null] }])(
+		'rejects an invalid Objective list instead of returning an empty success: %j',
+		async (payload) => {
+			request.mockResolvedValue(payload);
+			await expect(fetchCollectionObjectives('col_123')).rejects.toThrow('Objective list response');
+		}
+	);
+
+	it('rejects a bad scope decision instead of silently dropping it', async () => {
+		request.mockResolvedValue({
+			collection_id: 'col_123', objective_id: 'obj_1', counts: {},
+			recommended_document_ids: [], review_document_ids: [], excluded_document_ids: [],
+			decisions: [{ document_id: 'paper-1', classification: 'maybe' }],
 			support_is_evidence: false
 		});
+		await expect(fetchObjectiveScope('col_123', 'obj_1')).rejects.toThrow('Objective scope response');
+	});
+
+	it('rejects missing analysis data for both queue and read instead of inventing an Objective', async () => {
+		request.mockResolvedValue({ collection_id: 'col_123' });
+		await expect(runObjectiveAnalysis('col_123', 'obj_1', ['paper-1']))
+			.rejects.toThrow('Objective analysis response');
+		await expect(fetchObjectiveAnalysis('col_123', 'obj_1'))
+			.rejects.toThrow('Objective analysis response');
 	});
 
 	it('requests versioned Finding and exact Evidence pages', async () => {
@@ -283,6 +305,29 @@ describe('objective Finding API', () => {
 
 		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1/evidence-map');
 		expect(result.projection_version).toBe('objective-evidence-map.v1');
+	});
+
+	it('rejects a stale Finding version and missing experiment containers', async () => {
+		request.mockResolvedValueOnce({
+			collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 2,
+			items: [finding]
+		});
+		await expect(fetchObjectiveFindings('col_123', 'obj_1', 1)).rejects.toThrow(
+			'Objective Findings response is invalid.'
+		);
+		request.mockResolvedValueOnce({ selections: [], findings: [] });
+		await expect(fetchExperimentAnalysis('col_123', 'obj_1', 1)).rejects.toThrow(
+			'Experiment analysis response is invalid.'
+		);
+	});
+
+	it('returns an experiment projection without rewriting its values', async () => {
+		const payload = {
+			collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1,
+			selections: [], comparison_groups: [], experiments: [], findings: [finding]
+		};
+		request.mockResolvedValueOnce(payload);
+		expect(await fetchExperimentAnalysis('col_123', 'obj_1', 1)).toBe(payload);
 	});
 
 	it('builds the LlamaFactory Alpaca dataset export URL', () => {

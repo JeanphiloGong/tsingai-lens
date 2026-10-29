@@ -753,8 +753,8 @@ def _is_sha256(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
 
 
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
+def _text(value: str | None) -> str:
+    return value.strip() if value is not None else ""
 
 
 def _git_revision() -> str:

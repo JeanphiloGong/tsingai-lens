@@ -732,7 +732,7 @@ def _make_item(
     import_key = f"{MIGRATION_VERSION}:{dataset_id}:{source_case_id}:{task_type}"
     sample_id = stable_id("sample_mig", import_key)
     revision_id = stable_id("revision_mig", import_key) if content is not None else None
-    reasons = tuple(dict.fromkeys(str(item).strip() for item in missing_reasons if str(item).strip()))
+    reasons = tuple(dict.fromkeys(missing_reasons))
     return DatasetMigrationItem(
         import_key=import_key,
         dataset_id=dataset_id,

@@ -64,7 +64,7 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
         raise ValueError("acceptance manifest must be a JSON object")
     if payload.get("schema_version") != "objective_finding_material_acceptance.v1":
         raise ValueError("unsupported acceptance manifest schema_version")
-    documents = _mapping_list(payload.get("documents"))
+    documents = (payload.get("documents") or [])
     document_hashes = {_text(item.get("sha256")) for item in documents}
     paper_ids = {_text(item.get("paper_id")) for item in documents}
     if (
@@ -76,7 +76,7 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
         raise ValueError(
             "acceptance manifest requires exactly six papers with unique documents"
         )
-    objectives = _mapping_list(payload.get("objectives"))
+    objectives = (payload.get("objectives") or [])
     objective_keys = {_text(item.get("key")) for item in objectives}
     if (
         len(objectives) < 3
@@ -97,7 +97,7 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
             "forbidden_direct_sources",
             "required_finding_claims",
         ):
-            for requirement in _mapping_list(objective.get(field)):
+            for requirement in (objective.get(field) or []):
                 if (
                     _text(requirement.get("paper_id")) not in paper_ids
                     or not _text(requirement.get("label"))
@@ -118,7 +118,7 @@ def load_acceptance_manifest(path: Path) -> dict[str, Any]:
                         "acceptance Source requirements need a source kind and "
                         "Source term groups"
                     )
-    statuses = set(_text_list(payload.get("required_review_statuses")))
+    statuses = set((payload.get("required_review_statuses") or []))
     if statuses != {"correct", "partial", "incorrect"}:
         raise ValueError("acceptance manifest requires correct, partial, and incorrect")
     return payload
@@ -190,10 +190,10 @@ async def check_objective_findings_projection(
     manifest_objectives: list[dict[str, Any]] = []
     expected_document_ids: set[str] | None = None
     required_review_statuses: set[str] = set()
-    manifest_objectives = _mapping_list(acceptance_manifest["objectives"])
+    manifest_objectives = (acceptance_manifest["objectives"] or [])
     document_ids_by_paper = await _resolve_manifest_document_ids(
         collection_id,
-        _mapping_list(acceptance_manifest["documents"]),
+        (acceptance_manifest["documents"] or []),
     )
     expected_document_ids = set(document_ids_by_paper.values())
     required_review_statuses = set(acceptance_manifest["required_review_statuses"])
@@ -214,7 +214,7 @@ async def check_objective_findings_projection(
             payload = await _local_objective_bundle(collection_id, objective_id)
         expectation = (
             _manifest_objective_for_question(
-                _text(_mapping(payload.get("objective")).get("question")),
+                _text((payload.get("objective") or {}).get("question")),
                 manifest_objectives,
             )
             if manifest_objectives
@@ -239,9 +239,7 @@ async def check_objective_findings_projection(
                         _text(requirement.get("paper_id"))
                     ],
                 }
-                for requirement in _mapping_list(
-                    expectation.get("required_source_evidence")
-                )
+                for requirement in (expectation.get("required_source_evidence") or [])
             ],
             expected_finding_requirements=[
                 {
@@ -250,9 +248,7 @@ async def check_objective_findings_projection(
                         _text(requirement.get("paper_id"))
                     ],
                 }
-                for requirement in _mapping_list(
-                    expectation.get("required_finding_claims")
-                )
+                for requirement in (expectation.get("required_finding_claims") or [])
             ],
             forbidden_direct_source_requirements=[
                 {
@@ -261,9 +257,7 @@ async def check_objective_findings_projection(
                         _text(requirement.get("paper_id"))
                     ],
                 }
-                for requirement in _mapping_list(
-                    expectation.get("forbidden_direct_sources")
-                )
+                for requirement in (expectation.get("forbidden_direct_sources") or [])
             ],
         )
         objectives.append(result)
@@ -298,27 +292,27 @@ def evaluate_objective_bundle(
     expected_finding_requirements: list[dict[str, Any]] | None = None,
     forbidden_direct_source_requirements: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    objective = _mapping(payload.get("objective"))
-    analysis = _mapping(payload.get("published_analysis"))
-    paper_contributions = _mapping_list(payload.get("paper_contributions"))
-    findings = _mapping_list(payload.get("findings"))
+    objective = (payload.get("objective") or {})
+    analysis = (payload.get("published_analysis") or {})
+    paper_contributions = (payload.get("paper_contributions") or [])
+    findings = (payload.get("findings") or [])
     evidence_by_finding = {
-        str(finding_id): _mapping_list(records)
-        for finding_id, records in _mapping(payload.get("evidence_by_finding")).items()
+        str(finding_id): (records or [])
+        for finding_id, records in (payload.get("evidence_by_finding") or {}).items()
     }
     feedback_by_finding = {
-        str(finding_id): _mapping_list(records)
-        for finding_id, records in _mapping(payload.get("feedback_by_finding")).items()
+        str(finding_id): (records or [])
+        for finding_id, records in (payload.get("feedback_by_finding") or {}).items()
     }
     curations_by_finding = {
-        str(finding_id): _mapping_list(records)
-        for finding_id, records in _mapping(payload.get("curations_by_finding")).items()
+        str(finding_id): (records or [])
+        for finding_id, records in (payload.get("curations_by_finding") or {}).items()
     }
     dataset_by_finding = {
         _text(item.get("finding_id")): item
-        for item in _mapping_list(payload.get("dataset_items"))
+        for item in (payload.get("dataset_items") or [])
     }
-    training_rows = _mapping_list(payload.get("training_jsonl_rows"))
+    training_rows = (payload.get("training_jsonl_rows") or [])
     collection_id = _text(objective.get("collection_id"))
     objective_id = _text(objective.get("objective_id"))
     analysis_version = _int(analysis.get("analysis_version"))
@@ -406,7 +400,7 @@ def evaluate_objective_bundle(
         finding_id = _text(finding.get("finding_id"))
         evidence = evidence_by_finding.get(finding_id, [])
         all_evidence.extend(evidence)
-        contributions = _mapping_list(finding.get("paper_contributions"))
+        contributions = (finding.get("paper_contributions") or [])
         referenced_ids = {
             evidence_id
             for contribution in contributions
@@ -416,13 +410,13 @@ def evaluate_objective_bundle(
                 "context_evidence_ids",
                 "condition_boundary_evidence_ids",
             )
-            for evidence_id in _text_list(contribution.get(field))
+            for evidence_id in (contribution.get(field) or [])
         }
         direct_ids = {
             evidence_id
             for contribution in contributions
             for field in ("supporting_evidence_ids", "contradicting_evidence_ids")
-            for evidence_id in _text_list(contribution.get(field))
+            for evidence_id in (contribution.get(field) or [])
         }
         direct_records = [
             item
@@ -436,21 +430,19 @@ def evaluate_objective_bundle(
             for item in direct_records
         }
         factor_keys = {
-            _table_header_key(item) for item in _text_list(finding.get("factors"))
+            _table_header_key(item) for item in (finding.get("factors") or [])
         }
         direct_factor_sets = [
             {
                 _table_header_key(variable.get("name"))
-                for variable in _mapping_list(item.get("changed_variables"))
+                for variable in (item.get("changed_variables") or [])
             }
             for item in direct_records
         ]
         supporting_ids = {
             evidence_id
             for contribution in contributions
-            for evidence_id in _text_list(
-                contribution.get("supporting_evidence_ids")
-            )
+            for evidence_id in (contribution.get("supporting_evidence_ids") or [])
         }
         contradicting_ids = direct_ids - supporting_ids
         supporting_scopes = {
@@ -463,7 +455,7 @@ def evaluate_objective_bundle(
             evidence_scopes=supporting_scopes,
         )
         has_coupled_variables = any(
-            len(_mapping_list(item.get("changed_variables"))) > 1
+            len((item.get("changed_variables") or [])) > 1
             for item in direct_records
         )
         direct_result_issues = _direct_result_issues(
@@ -484,8 +476,8 @@ def evaluate_objective_bundle(
             if any(
                 evidence_id in direct_ids
                 for evidence_id in (
-                    _text_list(contribution.get("supporting_evidence_ids"))
-                    + _text_list(contribution.get("contradicting_evidence_ids"))
+                    (contribution.get("supporting_evidence_ids") or [])
+                    + (contribution.get("contradicting_evidence_ids") or [])
                 )
             )
         }
@@ -494,7 +486,7 @@ def evaluate_objective_bundle(
             == _text(contribution.get("document_id"))
             for contribution in contributions
             for field in ("supporting_evidence_ids", "contradicting_evidence_ids")
-            for evidence_id in _text_list(contribution.get(field))
+            for evidence_id in (contribution.get(field) or [])
         )
         synthesis_status = _text(finding.get("synthesis_status"))
         synthesis_issues = _synthesis_status_issues(
@@ -540,7 +532,7 @@ def evaluate_objective_bundle(
                 _check(
                     objective_id,
                     f"Finding {finding_id} has factors and one outcome",
-                    bool(_text_list(finding.get("factors")))
+                    bool((finding.get("factors") or []))
                     and bool(_text(finding.get("outcome"))),
                     blocker=True,
                 ),
@@ -658,7 +650,7 @@ def evaluate_objective_bundle(
 
     if "training_jsonl_rows" in payload:
         training_issues = _training_export_issues(
-            dataset_items=_mapping_list(payload.get("dataset_items")),
+            dataset_items=(payload.get("dataset_items") or []),
             training_rows=training_rows,
             collection_id=collection_id,
             objective_id=objective_id,
@@ -675,7 +667,7 @@ def evaluate_objective_bundle(
             )
         )
 
-    published_evidence = _mapping_list(payload.get("evidence"))
+    published_evidence = (payload.get("evidence") or [])
     if not published_evidence:
         published_evidence = list(
             {
@@ -738,7 +730,7 @@ def evaluate_objective_bundle(
     for requirement in expected_source_requirements or []:
         label = _text(requirement.get("label")) or "required decision Source"
         source_keys = _matching_source_keys(requirement, source_index)
-        allowed_roles = set(_text_list(requirement.get("allowed_evidence_roles")))
+        allowed_roles = set((requirement.get("allowed_evidence_roles") or []))
         lineage_matches = [
             _text(evidence.get("evidence_id"))
             for evidence in published_evidence
@@ -765,17 +757,17 @@ def evaluate_objective_bundle(
         label = _text(requirement.get("label")) or "required decision Finding"
         document_id = _text(requirement.get("document_id"))
         term_groups = [
-            _text_list(group)
+            (group or [])
             for group in requirement.get("statement_term_groups") or []
         ]
         allowed_strengths = set(
-            _text_list(requirement.get("allowed_assertion_strengths"))
+            (requirement.get("allowed_assertion_strengths") or [])
         )
         allowed_scopes = set(
-            _text_list(requirement.get("allowed_attribution_scopes"))
+            (requirement.get("allowed_attribution_scopes") or [])
         )
         allowed_statuses = set(
-            _text_list(requirement.get("allowed_synthesis_statuses"))
+            (requirement.get("allowed_synthesis_statuses") or [])
         )
         matching_finding_ids = []
         for finding in findings:
@@ -799,10 +791,8 @@ def evaluate_objective_bundle(
                 continue
             if not any(
                 _text(contribution.get("document_id")) == document_id
-                and bool(_text_list(contribution.get("supporting_evidence_ids")))
-                for contribution in _mapping_list(
-                    finding.get("paper_contributions")
-                )
+                and bool((contribution.get("supporting_evidence_ids") or []))
+                for contribution in (finding.get("paper_contributions") or [])
             ):
                 continue
             matching_finding_ids.append(_text(finding.get("finding_id")))
@@ -849,7 +839,7 @@ def evaluate_objective_bundle(
                 " ".join(
                     [
                         _text(item.get("statement")),
-                        *_text_list(item.get("factors")),
+                        *(item.get("factors") or []),
                         _text(item.get("outcome")),
                     ]
                 )
@@ -1711,7 +1701,7 @@ def _api_objective_bundle(
         f"/api/v1/collections/{collection_id}/objectives/{objective_id}/analysis",
         cookie=cookie,
     )
-    analysis = _mapping(state.get("published_analysis"))
+    analysis = (state.get("published_analysis") or {})
     version = _int(analysis.get("analysis_version"))
     if version < 1:
         raise RuntimeError(f"Objective has no published analysis: {objective_id}")
@@ -1721,7 +1711,7 @@ def _api_objective_bundle(
         f"/api/v1/collections/{collection_id}/objectives/{objective_id}/findings?{query}",
         cookie=cookie,
     )
-    findings = _mapping_list(finding_page.get("items"))
+    findings = (finding_page.get("items") or [])
     evidence_query = urlencode(
         {"analysis_version": version, "offset": 0, "limit": 500}
     )
@@ -1734,7 +1724,7 @@ def _api_objective_bundle(
         cookie=cookie,
     )
     paper_contributions = (
-        _mapping_list(findings[0].get("paper_contributions")) if findings else []
+        (findings[0].get("paper_contributions") or []) if findings else []
     )
     evidence_by_finding = {}
     feedback_by_finding = {}
@@ -1754,7 +1744,7 @@ def _api_objective_bundle(
             f"/api/v1/collections/{collection_id}/objectives/{objective_id}/evidence?{evidence_query}",
             cookie=cookie,
         )
-        evidence_by_finding[finding_id] = _mapping_list(page.get("items"))
+        evidence_by_finding[finding_id] = (page.get("items") or [])
         review_query = urlencode({"analysis_version": version})
         feedback_page = _api_json_request(
             base,
@@ -1764,7 +1754,7 @@ def _api_objective_bundle(
             ),
             cookie=cookie,
         )
-        feedback_by_finding[finding_id] = _mapping_list(feedback_page.get("items"))
+        feedback_by_finding[finding_id] = (feedback_page.get("items") or [])
         curation_page = _api_json_request(
             base,
             (
@@ -1773,7 +1763,7 @@ def _api_objective_bundle(
             ),
             cookie=cookie,
         )
-        curations_by_finding[finding_id] = _mapping_list(curation_page.get("items"))
+        curations_by_finding[finding_id] = (curation_page.get("items") or [])
     dataset = _api_json_request(
         base,
         f"/api/v1/collections/{collection_id}/objectives/{objective_id}/finding-dataset",
@@ -1792,11 +1782,11 @@ def _api_objective_bundle(
         "published_analysis": analysis,
         "paper_contributions": paper_contributions,
         "findings": findings,
-        "evidence": _mapping_list(evidence_page.get("items")),
+        "evidence": (evidence_page.get("items") or []),
         "evidence_by_finding": evidence_by_finding,
         "feedback_by_finding": feedback_by_finding,
         "curations_by_finding": curations_by_finding,
-        "dataset_items": _mapping_list(dataset.get("items")),
+        "dataset_items": (dataset.get("items") or []),
         "training_jsonl_rows": training_rows,
     }
 
@@ -1830,7 +1820,7 @@ async def _load_source_index(
         from infra.source.artifact_bundle import source_table_payload
 
         record = source_table_payload(table)
-        metadata = _mapping(record.get("metadata"))
+        metadata = (record.get("metadata") or {})
         index[(table.document_id, "table", table.table_id)] = {
             "text": _text(
                 record.get("table_markdown")
@@ -1916,7 +1906,7 @@ def _matching_source_keys(
     document_id = _text(requirement.get("document_id"))
     source_kind = _text(requirement.get("source_kind"))
     term_groups = [
-        _text_list(group) for group in requirement.get("source_term_groups") or []
+        (group or []) for group in requirement.get("source_term_groups") or []
     ]
     matches: list[tuple[str, str, str]] = []
     for key, source in source_index.items():
@@ -1953,7 +1943,7 @@ def _evidence_lineage_keys(
             _text(reference.get("source_kind")),
             _text(reference.get("source_ref")),
         )
-        for reference in _mapping_list(evidence.get("related_source_refs"))
+        for reference in (evidence.get("related_source_refs") or [])
     )
     return keys
 
@@ -2006,7 +1996,7 @@ def _audit_source_record(
     related_sources: dict[str, dict[str, Any]] = {}
     related_locators_match = True
     related_pages_match = True
-    for ref in _mapping_list(evidence.get("related_source_refs")):
+    for ref in (evidence.get("related_source_refs") or []):
         source_ref = _text(ref.get("source_ref"))
         source_kind = _text(ref.get("source_kind"))
         if not source_ref or not source_kind:
@@ -2029,7 +2019,7 @@ def _audit_source_record(
             _text(ref.get("source_ref")): related_sources[
                 _text(ref.get("source_ref"))
             ]
-            for ref in _mapping_list(evidence.get("related_source_refs"))
+            for ref in (evidence.get("related_source_refs") or [])
             if _text(ref.get("source_kind")) == "table"
             and _text(ref.get("source_ref")) in related_sources
         }
@@ -2041,7 +2031,7 @@ def _audit_source_record(
     if key[1] == "table" and source is not None:
         primary_table_refs = [
             ref
-            for ref in _mapping_list(evidence.get("related_source_refs"))
+            for ref in (evidence.get("related_source_refs") or [])
             if _text(ref.get("source_kind")) == "table"
             and _text(ref.get("source_ref")) == key[2]
         ]
@@ -2069,7 +2059,7 @@ def _audit_source_record(
             source,
             row_indexes=primary_row_indexes,
             repair_attestations=[
-                _mapping(ref.get("table_matrix_repair_attestation"))
+                (ref.get("table_matrix_repair_attestation") or {})
                 for ref in primary_table_refs
                 if isinstance(ref.get("table_matrix_repair_attestation"), dict)
             ],
@@ -2083,7 +2073,7 @@ def _audit_source_record(
         evidence.get("source_kind") == "table"
         and evidence.get("evidence_role")
         in {"direct_result", "contradictory_result"}
-        and bool(_mapping(evidence.get("reported_result")))
+        and bool((evidence.get("reported_result") or {}))
     ):
         table_binding_matches = (
             _composite_table_evidence_binding_matches(evidence, table_sources)
@@ -2229,7 +2219,7 @@ def _table_audit_rows(source: dict[str, Any]) -> list[list[str]]:
         for row in source.get("rows") or []
         if isinstance(row, list)
     ]
-    flattened_headers = _text_list(source.get("column_headers"))
+    flattened_headers = (source.get("column_headers") or [])
     if not flattened_headers:
         return raw_rows
     try:
@@ -2248,7 +2238,7 @@ def _composite_table_evidence_binding_matches(
     sources: dict[str, dict[str, Any]],
 ) -> bool:
     row_indexes_by_source: dict[str, list[int]] = {}
-    for ref in _mapping_list(evidence.get("related_source_refs")):
+    for ref in (evidence.get("related_source_refs") or []):
         source_ref = _text(ref.get("source_ref"))
         row_index = _int(ref.get("row_index"))
         if source_ref not in sources or row_index <= 0:
@@ -2268,7 +2258,7 @@ def _composite_table_evidence_binding_matches(
     if not endpoint_rows:
         return False
 
-    comparison = _mapping(evidence.get("comparison"))
+    comparison = (evidence.get("comparison") or {})
     if not any(
         _row_contains_value(baseline_row, comparison.get("baseline_label"))
         and _row_contains_value(target_row, comparison.get("target_label"))
@@ -2276,7 +2266,7 @@ def _composite_table_evidence_binding_matches(
     ):
         return False
 
-    for variable in _mapping_list(evidence.get("changed_variables")):
+    for variable in (evidence.get("changed_variables") or []):
         if not any(
             _table_variable_values_bind(
                 variable,
@@ -2288,7 +2278,7 @@ def _composite_table_evidence_binding_matches(
         ):
             return False
 
-    reported_result = _mapping(evidence.get("reported_result"))
+    reported_result = (evidence.get("reported_result") or {})
     return any(
         any(
             index < len(target_row)
@@ -2331,7 +2321,7 @@ def _table_evidence_binding_matches(
     if source is None:
         return False
     rows = _table_audit_rows(source)
-    comparison = _mapping(evidence.get("comparison"))
+    comparison = (evidence.get("comparison") or {})
     if not rows:
         return False
     if not comparison:
@@ -2359,16 +2349,16 @@ def _table_scalar_result_binding_matches(
     source: dict[str, Any],
     rows: list[list[str]],
 ) -> bool:
-    if _mapping_list(evidence.get("changed_variables")):
+    if (evidence.get("changed_variables") or []):
         return False
-    result = _mapping(evidence.get("reported_result"))
+    result = (evidence.get("reported_result") or {})
     outcome = result.get("outcome")
     value = result.get("value")
     if not _text(outcome) or value is None:
         return False
     table_refs = [
         ref
-        for ref in _mapping_list(evidence.get("related_source_refs"))
+        for ref in (evidence.get("related_source_refs") or [])
         if _text(ref.get("source_kind")) == "table"
         and _text(ref.get("source_ref")) == _text(evidence.get("source_ref"))
     ]
@@ -2385,7 +2375,7 @@ def _table_scalar_result_binding_matches(
             and _value_matches_cell(value, rows[row_index][col_index])
         ):
             return True
-        attestation = _mapping(ref.get("table_matrix_repair_attestation"))
+        attestation = (ref.get("table_matrix_repair_attestation") or {})
         if (
             attestation
             and _table_header_is_result(
@@ -2409,7 +2399,7 @@ def _table_comparison_rows(
 ) -> tuple[list[str], list[str], set[int]] | None:
     row_indexes: list[int] = []
     result_columns: set[int] = set()
-    for ref in _mapping_list(evidence.get("related_source_refs")):
+    for ref in (evidence.get("related_source_refs") or []):
         row_index = _int(ref.get("row_index"))
         col_index = _int(ref.get("col_index"))
         if 0 < row_index < len(rows) and row_index not in row_indexes:
@@ -2428,7 +2418,7 @@ def _table_row_values_bind(
     baseline_row: list[str],
     target_row: list[str],
 ) -> bool:
-    for variable in _mapping_list(evidence.get("changed_variables")):
+    for variable in (evidence.get("changed_variables") or []):
         variable_columns = [
             index
             for index, header in enumerate(headers)
@@ -2450,7 +2440,7 @@ def _table_row_values_bind(
             for index in variable_columns
         ):
             return False
-    reported_result = _mapping(evidence.get("reported_result"))
+    reported_result = (evidence.get("reported_result") or {})
     result_columns = [
         index
         for index, header in enumerate(headers)
@@ -2471,7 +2461,7 @@ def _table_named_comparison_rows_bind(
     if len(rows) < 2:
         return False
     headers = rows[0]
-    comparison = _mapping(evidence.get("comparison"))
+    comparison = (evidence.get("comparison") or {})
     baseline_rows = [
         row
         for row in rows[1:]
@@ -2502,10 +2492,10 @@ def _table_row_delta_is_explained(
     target_row: list[str],
     result_columns: set[int],
 ) -> bool:
-    variables = _mapping_list(evidence.get("changed_variables"))
-    outcome = _mapping(evidence.get("reported_result")).get("outcome")
+    variables = (evidence.get("changed_variables") or [])
+    outcome = (evidence.get("reported_result") or {}).get("outcome")
     reasons = " ".join(
-        _text_list(_mapping(evidence.get("comparison")).get("incomparability_reasons"))
+        ((evidence.get("comparison") or {}).get("incomparability_reasons") or [])
     )
     for index, header in enumerate(headers):
         if index >= len(baseline_row) or index >= len(target_row):
@@ -2669,7 +2659,7 @@ def _api_jsonl_request(
         raise RuntimeError(f"Lens API returned HTTP {exc.code}: {detail}") from exc
     except URLError as exc:
         raise RuntimeError(f"Lens API request failed: {exc}") from exc
-    return _mapping_list(json.loads(line) for line in lines if line.strip())
+    return ((json.loads(line) for line in lines if line.strip()) or [])
 
 
 def _check(
@@ -2764,9 +2754,7 @@ def _synthesis_status_issues(
     boundary_ids = {
         evidence_id
         for contribution in contributions
-        for evidence_id in _text_list(
-            contribution.get("condition_boundary_evidence_ids")
-        )
+        for evidence_id in (contribution.get("condition_boundary_evidence_ids") or [])
     }
     evidence_by_id = {_text(item.get("evidence_id")): item for item in evidence}
     valid_boundary_ids = {
@@ -2848,9 +2836,9 @@ def _direct_results_have_disjoint_context_boundary(
     def values(records: list[dict[str, Any]]) -> dict[tuple[str, str, str], set[str]]:
         result: dict[tuple[str, str, str], set[str]] = {}
         for record in records:
-            context = _mapping(record.get("scientific_context"))
+            context = (record.get("scientific_context") or {})
             for section in ("material", "sample", "process", "test"):
-                for attribute in _mapping_list(context.get(section)):
+                for attribute in (context.get(section) or []):
                     key = (
                         section,
                         _normalized_term(attribute.get("name")),
@@ -2908,7 +2896,7 @@ def _training_export_issues(
     }
     actual: dict[str, dict[str, Any]] = {}
     for row in training_rows:
-        metadata = _mapping(row.get("metadata"))
+        metadata = (row.get("metadata") or {})
         finding_id = _text(metadata.get("finding_id"))
         if not finding_id or finding_id in actual:
             issues.append("training_jsonl has a missing or duplicate finding_id")
@@ -2920,7 +2908,7 @@ def _training_export_issues(
             or _int(metadata.get("analysis_version")) != analysis_version
         ):
             issues.append(f"{finding_id}: training metadata identity differs")
-        messages = _mapping_list(row.get("messages"))
+        messages = (row.get("messages") or [])
         if len(messages) != 2 or any(not _text(item.get("content")) for item in messages):
             issues.append(f"{finding_id}: training messages are incomplete")
             continue
@@ -2943,16 +2931,14 @@ def _training_export_issues(
         )
     for finding_id in set(actual) & set(expected):
         item = expected[finding_id]
-        expected_messages = _mapping_list(item.get("training_messages"))
+        expected_messages = (item.get("training_messages") or [])
         if not expected_messages:
             issues.append(f"{finding_id}: training-ready dataset item has no messages")
-        if _mapping_list(actual[finding_id].get("messages")) != expected_messages:
+        if (actual[finding_id].get("messages") or []) != expected_messages:
             issues.append(f"{finding_id}: JSONL messages differ from the JSON dataset")
-        if _mapping(actual[finding_id].get("metadata")) != _mapping(
-            item.get("metadata")
-        ):
+        if (actual[finding_id].get("metadata") or {}) != (item.get("metadata") or {}):
             issues.append(f"{finding_id}: JSONL metadata differs from the JSON dataset")
-        messages = _mapping_list(actual[finding_id].get("messages"))
+        messages = (actual[finding_id].get("messages") or [])
         if len(messages) != 2:
             continue
         try:
@@ -2982,7 +2968,7 @@ def _direct_result_issues(
     )
     for evidence in evidence_records:
         evidence_id = _text(evidence.get("evidence_id"))
-        result = _mapping(evidence.get("reported_result"))
+        result = (evidence.get("reported_result") or {})
         result_direction = _text(result.get("direction"))
         if _normalized_term(result.get("outcome")) != outcome:
             issues.append(f"{evidence_id}: outcome differs from Finding")
@@ -3013,7 +2999,7 @@ def _experiment_binding_issues(
     for evidence in evidence_records:
         evidence_id = _text(evidence.get("evidence_id"))
         source_text = _evidence_lineage_source_text(evidence, source_index)
-        for variable in _mapping_list(evidence.get("changed_variables")):
+        for variable in (evidence.get("changed_variables") or []):
             for field in ("baseline_value", "target_value"):
                 value = variable.get(field)
                 if _numbers(value) and not _numbers_grounded(value, source_text):
@@ -3021,7 +3007,7 @@ def _experiment_binding_issues(
                         f"{evidence_id}: {variable.get('name')} {field}={value!r} "
                         "is absent from Evidence lineage Sources"
                     )
-        result_value = _mapping(evidence.get("reported_result")).get("value")
+        result_value = (evidence.get("reported_result") or {}).get("value")
         if _numbers(result_value) and not _numbers_grounded(result_value, source_text):
             issues.append(
                 f"{evidence_id}: result value={result_value!r} is absent from "
@@ -3045,7 +3031,7 @@ def _sample_state_confounding_issues(
             continue
         factors = {
             _normalized_term(item.get("name"))
-            for item in _mapping_list(evidence.get("changed_variables"))
+            for item in (evidence.get("changed_variables") or [])
         }
         if not any(
             term in factor
@@ -3067,7 +3053,7 @@ def _numbers_grounded(value: Any, source: str) -> bool:
 
 def _numbers(value: Any) -> tuple[Decimal, ...]:
     result: list[Decimal] = []
-    source = _text(value).replace("−", "-")
+    source = (str(value) if value is not None else "").replace("−", "-")
     for match in _MULTIPLICATION_SCIENTIFIC_RE.finditer(source):
         try:
             coefficient = _decimal_number(match.group(1))
@@ -3160,7 +3146,7 @@ def _event_time(value: Any) -> datetime:
 
 
 def _normalized_text(value: Any) -> str:
-    return _SPACE_RE.sub(" ", _text(value)).casefold()
+    return _SPACE_RE.sub(" ", str(value) if value is not None else "").casefold()
 
 
 def _normalized_lines(value: Any) -> tuple[str, ...]:
@@ -3175,21 +3161,14 @@ def _normalized_term(value: Any) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", _text(value).casefold()))
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, dict) else {}
 
 
-def _mapping_list(value: Any) -> list[dict[str, Any]]:
-    return [dict(item) for item in value or [] if isinstance(item, dict)]
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
+def _text(value: str | None) -> str:
+    return (value or "").strip()
 
 
-def _text_list(value: Any) -> list[str]:
-    values = value if isinstance(value, (list, tuple, set)) else [value]
-    return [text for item in values if (text := _text(item))]
 
 
 def _int(value: Any) -> int:

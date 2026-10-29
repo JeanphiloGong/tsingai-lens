@@ -39,6 +39,11 @@ includes exact Source excerpts and locators. The generic `samples`,
 of those same Evidence records for recall evaluation; they are not a second
 extraction path.
 
+Export reads controlled published records directly and preserves their identities.
+The evaluator rejects malformed record lists at the JSON file entrance before
+writing a report. Scientific label, metric, and unit equivalence still belongs
+to scoring; it does not repair missing record identities.
+
 Evaluate prediction against gold:
 
 ```bash

@@ -13,7 +13,6 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from application.evaluation.finding_feedback_service import parse_curated_finding
-from domain.core import Finding  # noqa: E402
 
 
 AGENT_RECOMMENDATIONS = ("accept", "reject", "correct", "unclear", "skip")
@@ -144,31 +143,31 @@ def render_text_summary(summary: dict[str, Any]) -> str:
         f"Rows: {summary['total_rows']}",
         f"Reviewed by agent: {summary['agent_reviewed_count']}",
     ]
-    counts = _mapping(summary.get("counts"))
+    counts = (summary.get("counts") or {})
     if counts:
         lines.append(
             "Recommendations: "
             + ", ".join(f"{key}={value}" for key, value in sorted(counts.items()))
         )
-    errors = _mapping_list(summary.get("errors"))
+    errors = (summary.get("errors") or [])
     if errors:
         lines.append("")
         lines.append("Errors:")
         lines.extend(
             f"- line {item['line']}: {item['message']}" for item in errors
         )
-    warnings = _mapping_list(summary.get("warnings"))
+    warnings = (summary.get("warnings") or [])
     if warnings:
         lines.append("")
         lines.append("Warnings:")
         lines.extend(
             f"- line {item['line']}: {item['message']}" for item in warnings
         )
-    handoff = _mapping(summary.get("human_handoff"))
+    handoff = (summary.get("human_handoff") or {})
     if handoff:
         lines.append("")
         lines.append(str(handoff.get("required_action") or ""))
-    goals = _mapping_list(summary.get("goals"))
+    goals = (summary.get("goals") or [])
     if goals:
         lines.append("")
         lines.append("Goal handoff:")
@@ -208,7 +207,17 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
                 "agent drafts must keep action=skip; human review sets import actions",
             )
         )
-    agent_review = _mapping(row.get("agent_review"))
+    agent_review = row.get("agent_review")
+    if agent_review is not None and not isinstance(agent_review, dict):
+        errors.append(_issue(line_number, finding_id, "agent_review must be an object"))
+        return {
+            "collection_id": row.get("collection_id"),
+            "objective_id": row.get("objective_id"),
+            "finding_id": finding_id,
+            "recommendation": "missing",
+            "errors": errors,
+            "warnings": warnings,
+        }
     if not agent_review:
         warnings.append(_issue(line_number, finding_id, "missing agent_review"))
         return {
@@ -256,7 +265,7 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
                 )
             )
     elif recommendation == "correct":
-        target = _mapping(agent_review.get("curated_finding"))
+        target = (agent_review.get("curated_finding") or {})
         if not target:
             errors.append(
                 _issue(
@@ -288,7 +297,10 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
                 "agent reviewed row should include agent_review.note",
             )
         )
-    if not _mapping_list(row.get("evidence")):
+    evidence = row.get("evidence", [])
+    if not isinstance(evidence, list) or any(not isinstance(item, dict) for item in evidence):
+        errors.append(_issue(line_number, finding_id, "evidence must be a list of objects"))
+    elif not evidence:
         warnings.append(_issue(line_number, finding_id, "row has no evidence summary"))
     return {
         "collection_id": _text(row.get("collection_id")),
@@ -381,7 +393,7 @@ def _check_accept_recommendation(
     errors: list[dict[str, Any]],
     warnings: list[dict[str, Any]],
 ) -> None:
-    gate = _mapping(row.get("acceptance_gate"))
+    gate = (row.get("acceptance_gate") or {})
     if not gate:
         errors.append(
             _issue(
@@ -399,7 +411,7 @@ def _check_accept_recommendation(
                 "agent accept recommendation is blocked by acceptance_gate",
             )
         )
-    blocking_missing = _strings(gate.get("blocking_missing"))
+    blocking_missing = (gate.get("blocking_missing") or [])
     if blocking_missing:
         errors.append(
             _issue(
@@ -409,7 +421,7 @@ def _check_accept_recommendation(
                 + ", ".join(blocking_missing),
             )
         )
-    review_checks = _strings(gate.get("review_checks"))
+    review_checks = (gate.get("review_checks") or [])
     if review_checks:
         warnings.append(
             _issue(
@@ -441,20 +453,14 @@ def _issue(line_number: int, finding_id: str, message: str) -> dict[str, Any]:
     }
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
-def _mapping_list(value: Any) -> list[dict[str, Any]]:
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _strings(value: Any) -> list[str]:
-    return [_text(item) for item in value if _text(item)] if isinstance(value, list) else []
 
 
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
+def _text(value: str | None) -> str:
+    return value.strip() if value is not None else ""
 
 
 if __name__ == "__main__":

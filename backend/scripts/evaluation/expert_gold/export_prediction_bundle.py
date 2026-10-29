@@ -532,7 +532,7 @@ async def _load_artifacts(
                 "title": item.title,
                 "doc_type": item.doc_type,
                 "profile_warnings": list(item.profile_warnings),
-                "confidence": round(float(item.confidence), 2),
+                "confidence": round(item.confidence, 2),
                 "profile_status": item.profile_status,
                 "source_fingerprint": item.source_fingerprint,
                 "profile_version": item.profile_version,
@@ -552,19 +552,17 @@ def _convert_papers(
     profiles: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     profiles_by_document_id = {
-        str(item.get("document_id") or ""): item for item in profiles
+        item["document_id"]: item for item in profiles
     }
     papers: list[dict[str, Any]] = []
     for row_number, document in enumerate(documents, start=1):
-        document_id = str(
-            document.get("document_id") or document.get("id") or ""
-        ).strip()
+        document_id = document["id"]
         profile = profiles_by_document_id.get(document_id, {})
-        metadata = document.get("metadata") or {}
+        metadata = document["metadata"]
         papers.append(
             {
                 "paper_id": document_id,
-                "title": profile.get("title") or document.get("title") or "",
+                "title": profile.get("title") or document["title"],
                 "doi": metadata.get("doi"),
                 "source_filename": metadata.get("source_filename"),
                 "document_type": profile.get("doc_type"),
@@ -579,7 +577,7 @@ def _raw_records(
     artifact: str,
 ) -> list[dict[str, Any]]:
     return [
-        {**dict(record), "source": {"artifact": artifact, "row": row_number}}
+        {**record, "source": {"artifact": artifact, "row": row_number}}
         for row_number, record in enumerate(records, start=1)
     ]
 
@@ -603,18 +601,16 @@ def _project_objective_evidence(
     observations: dict[tuple[str, str, str], dict[str, Any]] = {}
 
     for evidence in evidence_records:
-        paper_id = _text(evidence.get("document_id"))
-        if not paper_id:
-            continue
-        evidence_id = _text(evidence.get("evidence_id"))
-        source = evidence.get("source") if isinstance(evidence.get("source"), dict) else {}
-        evidence_ids = [value for value in (evidence_id, *_strings(evidence.get("evidence_anchor_ids"))) if value]
-        context = evidence.get("scientific_context") if isinstance(evidence.get("scientific_context"), dict) else {}
+        paper_id = evidence["document_id"]
+        evidence_id = evidence["evidence_id"]
+        source = evidence["source"]
+        evidence_ids = [evidence_id, *evidence.get("evidence_anchor_ids", [])]
+        context = evidence.get("scientific_context") or {}
         material_values = _context_values(context, "material")
         sample_labels = _sample_labels(context)
-        comparison = evidence.get("comparison") if isinstance(evidence.get("comparison"), dict) else {}
-        baseline_label = _text(comparison.get("baseline_label"))
-        target_label = _text(comparison.get("target_label"))
+        comparison = evidence.get("comparison") or {}
+        baseline_label = comparison.get("baseline_label") or ""
+        target_label = comparison.get("target_label") or ""
         if baseline_label and target_label:
             sample_labels = list(dict.fromkeys((*sample_labels, baseline_label, target_label)))
 
@@ -641,16 +637,16 @@ def _project_objective_evidence(
                     "source": source,
                 },
             )
-            row["evidence_ids"] = _merge_strings(row.get("evidence_ids"), evidence_ids)
+            row["evidence_ids"] = _merge_strings(row["evidence_ids"], evidence_ids)
             if not row.get("sample_description"):
                 row["sample_description"] = _context_description(context)
             if not row.get("material_system") and material_values:
                 row["material_system"] = material_values[0]
 
         for attribute in _context_attributes(context, "process"):
-            name = _text(attribute.get("name"))
+            name = attribute["name"]
             value = attribute.get("value")
-            unit = _text(attribute.get("unit"))
+            unit = attribute.get("unit") or ""
             if not name or value in (None, ""):
                 continue
             targets = sample_ids or [""]
@@ -675,7 +671,7 @@ def _project_objective_evidence(
                         "source": source,
                     },
                 )
-                row["evidence_ids"] = _merge_strings(row.get("evidence_ids"), evidence_ids)
+                row["evidence_ids"] = _merge_strings(row["evidence_ids"], evidence_ids)
 
         test_attributes = _context_attributes(context, "test")
         if test_attributes:
@@ -705,7 +701,7 @@ def _project_objective_evidence(
                 },
             )
             for attribute in test_attributes:
-                name = _text(attribute.get("name"))
+                name = attribute["name"]
                 if not name:
                     continue
                 row["condition_payload"][name] = attribute.get("value")
@@ -720,12 +716,12 @@ def _project_objective_evidence(
                     row["other_conditions"] = (
                         f"{row['other_conditions']}; " if row["other_conditions"] else ""
                     ) + f"{name}={attribute.get('value')}"
-            row["evidence_ids"] = _merge_strings(row.get("evidence_ids"), evidence_ids)
+            row["evidence_ids"] = _merge_strings(row["evidence_ids"], evidence_ids)
 
-        result = evidence.get("reported_result") if isinstance(evidence.get("reported_result"), dict) else {}
-        outcome = _text(result.get("outcome"))
+        result = evidence.get("reported_result") or {}
+        outcome = result.get("outcome")
         if outcome:
-            unit = _text(result.get("unit"))
+            unit = result.get("unit") or ""
             target_value = result.get("target_value")
             if target_value in (None, ""):
                 target_value = result.get("value")
@@ -770,11 +766,11 @@ def _project_objective_evidence(
                         "direction_text": result.get("direction") or "unknown",
                         "evidence_reference": _evidence_reference(evidence),
                         "evidence_ids": [],
-                        "notes": _text(evidence.get("attribution_scope")),
+                        "notes": evidence.get("attribution_scope", ""),
                         "source": source,
                     },
                 )
-                row["evidence_ids"] = _merge_strings(row.get("evidence_ids"), evidence_ids)
+                row["evidence_ids"] = _merge_strings(row["evidence_ids"], evidence_ids)
             elif sample_ids:
                 _merge_measurement(
                     measurements,
@@ -788,7 +784,7 @@ def _project_objective_evidence(
                     source=source,
                 )
             else:
-                observation_key = (paper_id, metric_key, _text(result.get("result_text")))
+                observation_key = (paper_id, metric_key, result.get("result_text") or "")
                 row = observations.setdefault(
                     observation_key,
                     {
@@ -808,7 +804,7 @@ def _project_objective_evidence(
                         "source": source,
                     },
                 )
-                row["evidence_ids"] = _merge_strings(row.get("evidence_ids"), evidence_ids)
+                row["evidence_ids"] = _merge_strings(row["evidence_ids"], evidence_ids)
 
     return {
         "samples": list(samples.values()),
@@ -854,12 +850,11 @@ def _merge_measurement(
             "source": source,
         },
     )
-    row["evidence_ids"] = _merge_strings(row.get("evidence_ids"), evidence_ids)
+    row["evidence_ids"] = _merge_strings(row["evidence_ids"], evidence_ids)
 
 
 def _context_attributes(context: dict[str, Any], section: str) -> list[dict[str, Any]]:
-    value = context.get(section)
-    return [dict(item) for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+    return context.get(section, [])
 
 
 def _context_values(context: dict[str, Any], section: str) -> list[str]:
@@ -870,7 +865,7 @@ def _sample_labels(context: dict[str, Any]) -> list[str]:
     labels: list[str] = []
     identity_names = {"sample", "sample id", "sample_id", "id", "group", "condition", "sample condition", "label", "specimen"}
     for item in _context_attributes(context, "sample"):
-        name = _normalized_label(item.get("name"))
+        name = _normalized_label(item["name"])
         value = _text(item.get("value"))
         if value and (name in identity_names or not labels):
             labels.append(value)
@@ -882,7 +877,7 @@ def _context_description(context: dict[str, Any], *, section: str | None = None)
     parts = []
     for name in sections:
         for item in _context_attributes(context, name):
-            label = _text(item.get("name"))
+            label = item["name"]
             value = _text(item.get("value"))
             if label and value:
                 parts.append(f"{label}={value}")
@@ -891,36 +886,29 @@ def _context_description(context: dict[str, Any], *, section: str | None = None)
 
 def _evidence_reference(evidence: dict[str, Any]) -> str:
     refs = evidence.get("source_refs")
-    if isinstance(refs, list):
-        values = [_text(item.get("source_ref")) for item in refs if isinstance(item, dict)]
-        return "; ".join(value for value in values if value)
-    return _text(evidence.get("source_ref"))
+    if refs is not None:
+        return "; ".join(item["source_ref"] for item in refs)
+    return evidence["source_ref"]
 
 
-def _projection_id(kind: str, *values: Any) -> str:
-    payload = "|".join(_text(value) for value in values)
+def _projection_id(kind: str, *values: str) -> str:
+    payload = "|".join(value.strip() for value in values)
     return f"{kind}_{sha1(payload.encode('utf-8')).hexdigest()[:20]}"
 
 
-def _normalized_label(value: Any) -> str:
-    return " ".join(_text(value).casefold().split())
+def _normalized_label(value: str) -> str:
+    return " ".join(value.casefold().split())
 
 
 def _scalar_key(value: Any, unit: Any = "") -> str:
     return f"{_text(value)}|{_text(unit)}"
 
 
-def _strings(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [_text(item) for item in value if _text(item)]
+def _merge_strings(existing: list[str], values: list[str]) -> list[str]:
+    return list(dict.fromkeys((*existing, *values)))
 
 
-def _merge_strings(existing: Any, values: list[str]) -> list[str]:
-    return list(dict.fromkeys((*_strings(existing), *values)))
-
-
-def _text(value: Any) -> str:
+def _text(value: str | int | float | bool | None) -> str:
     return str(value).strip() if value not in (None, "") else ""
 
 

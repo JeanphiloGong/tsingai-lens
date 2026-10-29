@@ -31,6 +31,7 @@ from pydantic import ValidationError
 ensure_backend_root_on_path(Path(__file__).resolve().parents[2])
 
 from domain.core.research_objective import (
+    PaperSourceUnitCoverageStatus,
     PaperResearchMap,
     PaperResearchSourceRef,
     ReviewKnowledgeItem,
@@ -324,7 +325,7 @@ def load_scenarios(
                         window_id=item["window_id"],
                         source_kind=item["source_kind"],
                         source_ref=item["source_ref"],
-                        status=item["status"],
+                        status=PaperSourceUnitCoverageStatus(item["status"]),
                         reason=item.get("reason"),
                     )
                     for item in payload.get("source_unit_coverage", ())

@@ -267,8 +267,8 @@ def _jsonl(rows: list[dict[str, Any]]) -> str:
     return "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
 
 
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
+def _text(value: str | None) -> str:
+    return value.strip() if value is not None else ""
 
 
 if __name__ == "__main__":

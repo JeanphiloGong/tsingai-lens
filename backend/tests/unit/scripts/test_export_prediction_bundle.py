@@ -192,6 +192,8 @@ def test_prediction_bundle_preserves_exact_evidence_and_uncertainty(tmp_path):
     records["objective_evidence"] = [
         {
             "evidence_id": "ev-1",
+            "document_id": "paper-1",
+            "source_ref": "block-1",
             "source_excerpt": "Preheating increased ductility by 14%.",
         }
     ]
@@ -366,3 +368,14 @@ async def test_export_prediction_bundle_allows_missing_current_artifacts(tmp_pat
     assert set(bundle["metadata"]["missing_artifacts"]) == set(
         exporter.ARTIFACT_NAMES
     )
+
+
+def test_prediction_bundle_rejects_missing_evidence_identity(tmp_path):
+    exporter = _load_exporter_module()
+    records = {name: [] for name in exporter.ARTIFACT_NAMES}
+    records["objective_evidence"] = [{"evidence_id": "ev-1"}]
+    with pytest.raises(KeyError, match="document_id"):
+        exporter.build_prediction_bundle(
+            collection_id="col-test", source_output_dir=tmp_path,
+            records_by_artifact=records, missing_artifacts=[],
+        )

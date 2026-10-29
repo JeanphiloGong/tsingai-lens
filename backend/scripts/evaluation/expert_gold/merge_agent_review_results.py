@@ -13,7 +13,6 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from application.evaluation.finding_feedback_service import parse_curated_finding
-from domain.core import Finding  # noqa: E402
 
 
 RECOMMENDATIONS = {"accept", "reject", "correct", "unclear", "skip"}
@@ -104,7 +103,9 @@ def _validated_agent_review(
     *,
     line_number: int,
 ) -> dict[str, Any]:
-    review = _mapping(row.get("agent_review")) or _mapping(row)
+    review = row.get("agent_review", row)
+    if not isinstance(review, dict):
+        raise ValueError(f"line {line_number}: agent_review must be an object")
     reviewer = _text(review.get("reviewer"))
     if not _is_agent_reviewer(reviewer):
         raise ValueError(
@@ -122,7 +123,7 @@ def _validated_agent_review(
         "note": _text(review.get("note")),
         "human_confirmed": False,
     }
-    curated_finding = _mapping(review.get("curated_finding"))
+    curated_finding = (review.get("curated_finding") or {})
     if curated_finding:
         parse_curated_finding(curated_finding)
         output["curated_finding"] = curated_finding
@@ -156,12 +157,10 @@ def _jsonl(rows: list[dict[str, Any]]) -> str:
     return "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
+def _text(value: str | None) -> str:
+    return value.strip() if value is not None else ""
 
 
 if __name__ == "__main__":

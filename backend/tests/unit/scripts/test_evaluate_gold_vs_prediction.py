@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+
+import pytest
 from pathlib import Path
 
 
@@ -505,3 +507,20 @@ def _prediction_bundle() -> dict:
         "observations": [],
         "evidence": [{"paper_id": paper_id, "evidence_id": "anchor-yield"}],
     }
+
+
+@pytest.mark.parametrize("replacement", [{}, ["invalid record"]])
+def test_evaluation_rejects_malformed_prediction_sections(tmp_path, replacement):
+    evaluator = _load_evaluator_module()
+    gold_path = tmp_path / "gold.json"
+    prediction_path = tmp_path / "prediction.json"
+    report_path = tmp_path / "report.json"
+    gold_path.write_text(json.dumps(_gold_bundle()), encoding="utf-8")
+    prediction = _prediction_bundle()
+    prediction["measurement_results"] = replacement
+    prediction_path.write_text(json.dumps(prediction), encoding="utf-8")
+    with pytest.raises(ValueError, match="measurement_results must be a list of records"):
+        evaluator.evaluate_gold_vs_prediction(
+            gold_path=gold_path, prediction_path=prediction_path, output_path=report_path,
+        )
+    assert not report_path.exists()

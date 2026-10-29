@@ -130,6 +130,37 @@ describe('current collection document workflow', () => {
 		});
 	});
 
+	it('shows an Objective load failure without claiming the collection has no objectives', async () => {
+		const normal = fetchMock.getMockImplementation()!;
+		fetchMock.mockImplementation(async (...args) => {
+			if (String(args[0]).endsWith('/objectives')) return new Response('', { status: 503 });
+			return normal(...args);
+		});
+		render(Page);
+		await expect.element(browserPage.getByRole('alert')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('button', { name: 'Form research questions from 1' })).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Parsing paper.')).toBeInTheDocument();
+	});
+
+	it('retains existing objectives when refreshing them fails', async () => {
+		const normal = fetchMock.getMockImplementation()!;
+		let failObjectives = false;
+		fetchMock.mockImplementation(async (...args) => {
+			if (String(args[0]).endsWith('/objectives')) {
+				return failObjectives ? new Response('', { status: 503 }) : jsonResponse({
+					collection_id: 'col_123', objectives: [{ objective_id: 'obj_1', question: 'Compare porosity', confirmation_status: 'confirmed' }]
+				});
+			}
+			return normal(...args);
+		});
+		render(Page);
+		await expect.element(browserPage.getByRole('link', { name: 'Enter research objectives' })).toBeInTheDocument();
+		failObjectives = true;
+		await browserPage.getByRole('button', { name: 'Refresh status' }).click();
+		await expect.element(browserPage.getByRole('alert')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('link', { name: 'Enter research objectives' })).toBeInTheDocument();
+	});
+
 	it('downloads a selected source archive without changing the research flow', async () => {
 		render(Page);
 
@@ -264,7 +295,7 @@ describe('current collection document workflow', () => {
 					collection_id: 'col_123',
 					objectives:
 							runReads > 0
-							? [{ objective_id: 'obj-1', question: 'How does heat affect strength?' }]
+							? [{ objective_id: 'obj-1', question: 'How does heat affect strength?', confirmation_status: 'candidate' }]
 							: []
 				});
 			}
@@ -295,7 +326,7 @@ describe('current collection document workflow', () => {
 			if (url.pathname.endsWith('/objectives')) {
 				return jsonResponse({
 					collection_id: 'col_123',
-					objectives: [{ objective_id: 'obj-1', question: 'How does heat affect strength?' }]
+					objectives: [{ objective_id: 'obj-1', question: 'How does heat affect strength?', confirmation_status: 'candidate' }]
 				});
 			}
 			throw new Error(`unexpected request: ${url.pathname}`);

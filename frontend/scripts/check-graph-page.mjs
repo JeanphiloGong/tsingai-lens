@@ -26,17 +26,33 @@ const pageErrors = [];
 async function capture(page, name, viewport, options = {}) {
 	await page.setViewportSize(viewport);
 	await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
-	await page.waitForLoadState('networkidle').catch(() => undefined);
-	await page
-		.waitForSelector('.graph-page-shell, .graph-empty-state', { timeout: 20_000 })
-		.catch(() => undefined);
-	await page.waitForTimeout(1_500);
+	// Polling can keep networkidle pending; readiness belongs to the rendered state.
+	await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch((error) => {
+		if (error.name !== 'TimeoutError') throw error;
+	});
+	let readinessTimeout = false;
+	try {
+		await page.waitForFunction(() =>
+			window.location.pathname === '/login' ||
+			Boolean(document.querySelector('.evidence-map-page .state--error')) ||
+			(!document.querySelector('.evidence-map-page [aria-busy="true"]') &&
+				Boolean(document.querySelector('.evidence-map-page .map, .evidence-map-page .state--empty'))),
+			undefined, { timeout: 20_000 }
+		);
+	} catch (error) {
+		if (error.name !== 'TimeoutError') throw error;
+		readinessTimeout = true;
+	}
 
-	if (options.selectOverviewNode) {
-		const overviewButtons = page.locator('.graph-overview-lists button');
-		if ((await overviewButtons.count()) > 0) {
-			await overviewButtons.first().click();
-			await page.waitForTimeout(700);
+	let selectionExpected = false;
+	if (options.selectOverviewNode && !readinessTimeout) {
+		const findingButtons = page.locator('.evidence-map-page .node--finding .finding-select');
+		if ((await findingButtons.count()) > 0) {
+			selectionExpected = true;
+			await findingButtons.first().click();
+			await page.waitForFunction(() =>
+				!document.querySelector('.evidence-map-page [aria-busy="true"]')
+			);
 		}
 	}
 
@@ -47,28 +63,28 @@ async function capture(page, name, viewport, options = {}) {
 		const bodyText = document.body.innerText || '';
 		const documentElement = document.documentElement;
 		const horizontalOverflow = documentElement.scrollWidth > window.innerWidth + 1;
-		const hasLoading = bodyText.includes('Loading graph...');
-		const hasLoaded = bodyText.includes('Graph loaded');
-		const hasNaN = /\bNaN\b/.test(bodyText);
-		const canvasTop =
-			document.querySelector('.graph-canvas-panel')?.getBoundingClientRect().top ?? null;
-		const controlsTop =
-			document.querySelector('.graph-controls-panel')?.getBoundingClientRect().top ?? null;
+		const root = document.querySelector('.evidence-map-page');
+		const loading = Boolean(root?.querySelector('[aria-busy="true"]'));
+		const failed = Boolean(root?.querySelector('.state--error'));
+		const hasMap = Boolean(root?.querySelector('.map'));
+		const hasEmpty = Boolean(root?.querySelector('.state--empty'));
+		const columns = root?.querySelectorAll('.flow > .column');
+		const first = columns?.[0]?.getBoundingClientRect();
+		const second = columns?.[1]?.getBoundingClientRect();
 		return {
-			hasNaN,
-			loadingLoadedConflict: hasLoading && hasLoaded,
+			ready: !loading && !failed && (hasMap || hasEmpty),
+			state: loading ? 'loading' : failed ? 'error' : hasMap ? 'graph' : hasEmpty ? 'empty' : 'unrecognized',
+			hasNaN: /\bNaN\b/.test(bodyText),
 			horizontalOverflow,
-			canvasAfterControls:
-				canvasTop !== null && controlsTop !== null ? canvasTop > controlsTop : false,
+			mobileFlowNotStacked: window.innerWidth < 640 && Boolean(first && second && second.top <= first.top),
 			scrollWidth: documentElement.scrollWidth,
 			viewportWidth: window.innerWidth,
-			hasGraphCanvas: Boolean(document.querySelector('.graph-canvas-shell')),
-			hasDetailPanel: Boolean(document.querySelector('.graph-detail-card')),
-			hasLinkedPanel: Boolean(document.querySelector('.graph-linked-records'))
+			hasGraph: hasMap,
+			selectedFinding: Boolean(root?.querySelector('.node--finding [aria-pressed="true"]'))
 		};
 	});
 
-	return { name, viewport, screenshotPath, metrics };
+	return { name, viewport, screenshotPath, readinessTimeout, selectionExpected, metrics };
 }
 
 async function main() {
@@ -96,13 +112,12 @@ async function main() {
 
 	const checks = {
 		hasNaN: captures.some((entry) => entry.metrics.hasNaN),
-		loadingLoadedConflict: captures.some((entry) => entry.metrics.loadingLoadedConflict),
+		selectionFailed: captures.some((entry) => entry.selectionExpected && !entry.metrics.selectedFinding),
+		notReady: captures.some((entry) => entry.readinessTimeout || !entry.metrics.ready),
 		mobileHorizontalOverflow: captures.some(
 			(entry) => entry.name === 'mobile' && entry.metrics.horizontalOverflow
 		),
-		mobileCanvasAfterControls: captures.some(
-			(entry) => entry.name === 'mobile' && entry.metrics.canvasAfterControls
-		),
+		mobileFlowNotStacked: captures.some((entry) => entry.metrics.mobileFlowNotStacked),
 		consoleWarnings: consoleMessages.length,
 		pageErrors: pageErrors.length
 	};

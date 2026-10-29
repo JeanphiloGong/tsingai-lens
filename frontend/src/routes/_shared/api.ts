@@ -76,27 +76,11 @@ export function errorMessage(error: unknown) {
 }
 
 export function isHttpStatusError(error: unknown, status: number) {
-	if (error instanceof ApiError) {
-		return error.status === status;
-	}
-	const message = error instanceof Error ? error.message : String(error ?? '');
-	return message.startsWith(`${status} `);
+	return error instanceof ApiError && error.status === status;
 }
 
 export function getApiErrorDetail(error: unknown) {
-	if (error instanceof ApiError) {
-		return normalizeDetail(error.detail);
-	}
-
-	if (error instanceof Error) {
-		const marker = ' - ';
-		const index = error.message.indexOf(marker);
-		if (index >= 0) {
-			return normalizeDetail(parseMaybeJson(error.message.slice(index + marker.length)));
-		}
-	}
-
-	return null;
+	return error instanceof ApiError ? normalizeDetail(error.detail) : null;
 }
 
 export function getApiErrorCode(error: unknown) {
@@ -116,20 +100,12 @@ function parseMaybeJson(value: string) {
 	}
 }
 
-function normalizePath(path: string) {
-	return path.startsWith('/') ? path : `/${path}`;
-}
-
-function buildUrl(path: string) {
-	const normalized = normalizePath(path);
+export function buildApiUrl(path: string) {
+	const normalized = path.startsWith('/') ? path : `/${path}`;
 	if (normalized.startsWith('/api/')) {
 		return normalized;
 	}
 	return `${API_PREFIX}${normalized}`;
-}
-
-export function buildApiUrl(path: string) {
-	return buildUrl(path);
 }
 
 function buildApiError(response: Response, detail: unknown) {
@@ -156,7 +132,7 @@ export async function throwApiError(response: Response): Promise<never> {
 }
 
 export async function requestJson(path: string, init: RequestInit = {}) {
-	const url = buildUrl(path);
+	const url = buildApiUrl(path);
 	const headers = new Headers(init.headers ?? {});
 	if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');
@@ -173,7 +149,7 @@ export async function requestJson(path: string, init: RequestInit = {}) {
 }
 
 export async function requestText(path: string, init: RequestInit = {}) {
-	const url = buildUrl(path);
+	const url = buildApiUrl(path);
 	const response = await fetch(url, { ...init, credentials: 'same-origin' });
 	const text = await response.text();
 
@@ -185,7 +161,7 @@ export async function requestText(path: string, init: RequestInit = {}) {
 }
 
 export async function requestBlob(path: string, init: RequestInit = {}) {
-	const url = buildUrl(path);
+	const url = buildApiUrl(path);
 	const headers = new Headers(init.headers ?? {});
 	if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
 		headers.set('Content-Type', 'application/json');

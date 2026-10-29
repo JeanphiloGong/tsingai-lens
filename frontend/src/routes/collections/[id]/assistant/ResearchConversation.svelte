@@ -196,7 +196,7 @@
 		refreshPendingSources();
 	}
 	$: collectionName = userId
-		? ($collections.find((item) => item.id === collectionId)?.name?.trim() ?? '')
+		? ($collections.find((item) => item.collection_id === collectionId)?.name?.trim() ?? '')
 		: '';
 	$: conversationTitle =
 		session?.title?.trim() ??
@@ -616,7 +616,6 @@
 				nextSession = await createChatSession(activeCollectionId, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;
 				createdSession = true;
-				messages = [];
 			} else {
 				const trajectory = await fetchChatTrajectory(nextSession.session_id, controller.signal);
 				if (!isCurrentSession(generation, activeCollectionId)) return;

@@ -8,20 +8,25 @@ This node owns browser-side helpers shared across frontend routes.
 - centralize authentication expiry and API error handling;
 - expose typed clients for Collection, Document preparation, Source,
   Objective/Finding, and Assistant resources;
-- keep formatting, translations, and Pipeline Run state shaping out
+- keep formatting, translations, and Pipeline Run state presentation out
   of route components.
 
 ## Important Files
 
 - `api.ts`
   Base request helpers, shared HTTP error behavior, and same-origin blob
-  downloads used by source archives and Finding dataset exports.
+  downloads used by source archives and Finding dataset exports. HTTP status
+  and detail come only from `ApiError`; ordinary network errors are not parsed
+  as HTTP responses. `buildApiUrl` owns URL construction for requests, streams,
+  and downloads.
 - `collections.ts`, `collectionDocuments.ts`, `pipelineRuns.ts`
   Collection upload, current Document, independent preparation, and Pipeline
   Run progress contracts. Collection history uses compact run summaries; one
   run read retains complete diagnostic state. `pipelineRuns.ts` also queues
-  collection-level research-question formation and normalizes its persisted
-  `objective_discovery` Pipeline Run.
+  collection-level research-question formation and reads its persisted
+  `objective_discovery` Pipeline Run directly. Clients reject invalid response
+  identities and required containers at the request boundary; they do not
+  fabricate missing states or rebuild valid server responses.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads
   summary/analysis state, paginated Findings, one Finding detail, and paginated

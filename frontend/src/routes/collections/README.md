@@ -21,7 +21,12 @@ The visual rules are documented in [DESIGN.md](../../../docs/DESIGN.md).
   collection-scoped Pipeline Run; queued/running progress survives navigation or refresh,
   disables duplicate submission, and refreshes Objectives at completion. A
   failed run exposes its error and restores the retry action. This phase does
-  not claim that Objective Evidence analysis has started.
+  not claim that Objective Evidence analysis has started. Objective query failures
+  remain visible through the page error state: an initial failure means unknown
+  availability, while a failed refresh preserves the previously loaded results.
+  Only a successful empty response establishes that there are no Objectives.
+  Collection changes clear prior results and ignore late responses from the old
+  collection; document preparation remains available during an Objective failure.
   The overview keeps a persistent four-stage research strip and, while paper
   preparation runs are queued or running, adds an aggregate progress bar with
   ready/total papers, active run count, and weighted run completion. It does

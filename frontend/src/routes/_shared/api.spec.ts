@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, errorMessage, requestBlob, requestJson } from './api';
+import { ApiError, errorMessage, requestBlob, requestJson, isHttpStatusError, getApiErrorDetail } from './api';
 import { language } from './i18n';
 
 describe('api shared error handling', () => {
 	afterEach(() => {
 		language.set('en');
 		vi.unstubAllGlobals();
+	});
+
+	it('uses the HTTP error contract and leaves network messages uninterpreted', () => {
+		const network = new Error('404 Not Found - {"detail":"missing"}');
+		expect(isHttpStatusError(network, 404)).toBe(false);
+		expect(getApiErrorDetail(network)).toBeNull();
+		expect(errorMessage(network)).toBe(network.message);
+		const http = new ApiError(404, 'Not Found', { detail: 'missing' });
+		expect(isHttpStatusError(http, 404)).toBe(true);
+		expect(getApiErrorDetail(http)).toBe('missing');
 	});
 
 	it.each([

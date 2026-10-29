@@ -99,6 +99,11 @@
 		if (!nextCollectionId || nextCollectionId === loadedCollectionId) return;
 		collectionId = nextCollectionId;
 		loadedCollectionId = nextCollectionId;
+		clearPoll();
+		documents = [];
+		runs = [];
+		objectiveList = null;
+		selectedArchiveDocumentIds = [];
 		void refreshAll();
 	});
 
@@ -119,16 +124,19 @@
 	}
 
 	async function pollRuns() {
+		const requestedCollectionId = collectionId;
 		const active = runs.filter(isPipelineRunActive);
 		if (!active.length) return;
 		try {
 			const refreshed = await Promise.all(active.map((run) => getPipelineRun(run.run_id)));
+			if (requestedCollectionId !== collectionId) return;
 			const refreshedById = new Map(refreshed.map((run) => [run.run_id, run]));
 			runs = runs.map((run) => refreshedById.get(run.run_id) ?? run);
 			const finishedDiscovery = refreshed.find(
 				(run) => run.pipeline_name === 'objective_discovery' && !isPipelineRunActive(run)
 			);
 			await Promise.all([loadDocuments(), loadObjectives()]);
+			if (requestedCollectionId !== collectionId) return;
 			if (
 				finishedDiscovery?.status === 'completed' ||
 				finishedDiscovery?.status === 'partial_success'
@@ -140,30 +148,35 @@
 				error = $t('overview.currentModel.discoveryFailed');
 			}
 		} catch (err) {
-			error = errorMessage(err);
+			if (requestedCollectionId === collectionId) error = errorMessage(err);
 		}
 		schedulePoll();
 	}
 
 	async function refreshAll() {
+		const requestedCollectionId = collectionId;
 		loading = true;
 		error = '';
 		try {
 			await Promise.all([loadDocuments(), loadRuns(), loadObjectives()]);
+			if (requestedCollectionId !== collectionId) return;
 			const latestDiscovery = runs.find((run) => run.pipeline_name === 'objective_discovery');
 			if (latestDiscovery?.status === 'failed') {
 				error = $t('overview.currentModel.discoveryFailed');
 			}
 		} catch (err) {
-			error = errorMessage(err);
+			if (requestedCollectionId === collectionId) error = errorMessage(err);
 		} finally {
+			if (requestedCollectionId !== collectionId) return;
 			loading = false;
 			schedulePoll();
 		}
 	}
 
 	async function loadDocuments() {
-		const items = (await listCollectionDocuments(collectionId)).items;
+		const requestedCollectionId = collectionId;
+		const items = (await listCollectionDocuments(requestedCollectionId)).items;
+		if (requestedCollectionId !== collectionId) return;
 		documents = items;
 		const availableIds = new Set(items.map((document) => document.document_id));
 		selectedArchiveDocumentIds = selectedArchiveDocumentIds.filter((documentId) =>
@@ -172,15 +185,15 @@
 	}
 
 	async function loadRuns() {
-		runs = (await listCollectionPipelineRuns(collectionId, { limit: 100 })).items;
+		const requestedCollectionId = collectionId;
+		const result = await listCollectionPipelineRuns(requestedCollectionId, { limit: 100 });
+		if (requestedCollectionId === collectionId) runs = result.items;
 	}
 
 	async function loadObjectives() {
-		try {
-			objectiveList = await fetchCollectionObjectives(collectionId);
-		} catch {
-			objectiveList = null;
-		}
+		const requestedCollectionId = collectionId;
+		const result = await fetchCollectionObjectives(requestedCollectionId);
+		if (requestedCollectionId === collectionId) objectiveList = result;
 	}
 
 	function runFor(documentId: string) {
@@ -347,14 +360,13 @@
 			active
 				.filter((run) => run.scope_type === 'document')
 				.map((run) => run.scope_id)
-				.filter((documentId): documentId is string => Boolean(documentId))
 		);
 		const ready = items.filter(
 			(document) => document.status === 'ready' && !activeDocumentIds.has(document.document_id)
 		).length;
 		const total = Math.max(items.length, ready + active.length);
 		const activeProgress = active.reduce(
-			(sum, run) => sum + Math.max(0, Math.min(100, Number(run.progress_percent) || 0)) / 100,
+			(sum, run) => sum + run.progress_percent / 100,
 			0
 		);
 		const percent = Math.round(((ready + activeProgress) / total) * 100);
@@ -365,7 +377,7 @@
 			ready,
 			total,
 			active: active.length,
-			percent: Math.max(0, Math.min(100, percent)),
+			percent,
 			message
 		};
 	}
@@ -420,15 +432,17 @@
 
 	<section class={`research-state research-state--${collectionStage}`} aria-live="polite">
 		<div class="research-state__copy">
-			<h3>{$t(`overview.currentModel.state.${collectionStage}.title`)}</h3>
-			<p>
-				{$t(`overview.currentModel.state.${collectionStage}.body`, {
-					papers: documents.length,
-					ready: readyDocuments.length,
-					processing: processingDocuments.length,
-					objectives: objectiveCount
-				})}
-			</p>
+			{#if objectiveList !== null}
+				<h3>{$t(`overview.currentModel.state.${collectionStage}.title`)}</h3>
+				<p>
+					{$t(`overview.currentModel.state.${collectionStage}.body`, {
+						papers: documents.length,
+						ready: readyDocuments.length,
+						processing: processingDocuments.length,
+						objectives: objectiveCount
+					})}
+				</p>
+			{/if}
 			{#if preparationProgress}
 				<div
 					class="active-progress"
@@ -511,7 +525,7 @@
 				>
 					{$t('overview.currentModel.preparePending', { count: attentionDocuments.length })}
 				</button>
-			{:else if readyDocuments.length}
+			{:else if readyDocuments.length && objectiveList !== null}
 				<button
 					class="btn btn--primary"
 					type="button"
@@ -528,7 +542,7 @@
 				</button>
 			{/if}
 
-			{#if !objectiveCount && readyDocuments.length && attentionDocuments.length}
+			{#if objectiveList !== null && !objectiveCount && readyDocuments.length && attentionDocuments.length}
 				<button
 					class="btn btn--ghost"
 					type="button"
@@ -564,7 +578,7 @@
 			<span>3</span>
 			<div>
 				<strong>{$t('overview.currentModel.progress.objectives')}</strong><small
-					>{objectiveCount}</small
+					>{objectiveList === null ? '--' : objectiveCount}</small
 				>
 			</div>
 		</div>

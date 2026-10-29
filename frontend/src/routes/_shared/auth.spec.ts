@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
+import { ApiError } from './api';
 
 const { requestJson } = vi.hoisted(() => ({
 	requestJson: vi.fn()
@@ -48,7 +49,7 @@ describe('auth shared helper', () => {
 	});
 
 	it('sets anonymous state on a missing session', async () => {
-		requestJson.mockRejectedValue(new Error('401 Unauthorized'));
+		requestJson.mockRejectedValue(new ApiError(401, 'Unauthorized', null));
 
 		const user = await fetchCurrentSession();
 

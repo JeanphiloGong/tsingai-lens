@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -17,17 +16,3 @@ class EvidenceCoverage:
     claim_support: tuple[dict[str, Any], ...] = ()
     gaps: tuple[str, ...] = ()
     coverage_status: CoverageStatus = "unknown"
-
-    def __post_init__(self) -> None:
-        if self.coverage_status not in {"complete", "partial", "failed", "unknown"}:
-            raise ValueError("invalid evidence coverage status")
-        for name in (
-            "requested_scope",
-            "inspected_sources",
-            "omitted_candidates",
-            "claim_support",
-        ):
-            object.__setattr__(
-                self, name, deepcopy(tuple(dict(item) for item in getattr(self, name)))
-            )
-        object.__setattr__(self, "gaps", tuple(str(item) for item in self.gaps))

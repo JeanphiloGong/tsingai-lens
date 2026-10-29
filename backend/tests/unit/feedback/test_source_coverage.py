@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
+from domain.chat import ChatMessageRole
+
 from dataclasses import asdict
 
 import json
@@ -12,8 +16,10 @@ from domain.chat import (
     ChatMessage,
     ChatResourceRef,
     ChatSourceContext,
+    ChatToolCall,
     ChatToolRequest,
     ChatToolResult,
+    ToolRisk,
 )
 from repositories.chat_repository import ChatModelCall
 
@@ -62,7 +68,7 @@ def _trajectory(
     }
     result = ChatToolResult(
         tool_call_id="tool-1",
-        status=result_status,
+        status=ToolResultStatus(result_status),
         data=data,
         error_code=result_error,
         error_message="The Source read failed." if result_error else None,
@@ -70,7 +76,7 @@ def _trajectory(
     result_message = ChatMessage(
         message_id="tool-result-1",
         session_id="session-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(result),
             ensure_ascii=True,
@@ -252,12 +258,20 @@ def test_selected_context_stays_requested_when_model_audit_is_missing() -> None:
 def test_durable_source_request_without_result_remains_unverified() -> None:
     messages, answer, model_call = _trajectory()
     request = messages[1].tool_calls[0]
+    durable_call = ChatToolCall.requested(
+        tool_call_id=request.tool_call_id,
+        session_id=answer.session_id,
+        assistant_message_id=messages[1].message_id,
+        name=request.name,
+        arguments=request.arguments,
+        risk=ToolRisk.READ,
+    )
     messages = (messages[0], messages[1], answer)
 
     coverage = build_evidence_coverage(
         messages,
         answer,
-        audit=ChatCoverageAudit(model_calls=(model_call,), tool_calls={request.tool_call_id: object()}),
+        audit=ChatCoverageAudit(model_calls=(model_call,), tool_calls={request.tool_call_id: durable_call}),
     )
 
     assert coverage.coverage_status == "unknown"

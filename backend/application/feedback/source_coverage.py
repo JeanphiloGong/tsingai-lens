@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from application.chat.capability_policy import complete_source_reads
-from domain.chat import ChatMessage, ChatMessageRole
+from domain.chat import ChatMessage, ChatMessageRole, ChatToolCall
+from repositories.chat_repository import ChatModelCall
 from domain.feedback import EvidenceCoverage
 
 
@@ -35,8 +36,8 @@ class ChatCoverageAudit:
     read.
     """
 
-    model_calls: Sequence[Any] | None = None
-    tool_calls: Mapping[str, Any] | None = None
+    model_calls: Sequence[ChatModelCall] | None = None
+    tool_calls: Mapping[str, ChatToolCall] | None = None
     tool_audit_error: bool = False
 
 
@@ -148,13 +149,10 @@ def build_evidence_coverage(
             continue
         request = request_by_id.get(result.tool_call_id)
         durable_call = durable_tool_calls.get(result.tool_call_id)
-        name = str(
-            getattr(durable_call, "name", None)
-            or (request.name if request is not None else "")
-        )
-        arguments = _mapping(
-            getattr(durable_call, "arguments", None)
-            or (request.arguments if request is not None else {})
+        name = durable_call.name if durable_call is not None else request.name if request is not None else ""
+        arguments = (
+            durable_call.arguments if durable_call is not None
+            else request.arguments if request is not None else {}
         )
         if name in _SOURCE_TOOL_NAMES:
             source_attempts.append({
@@ -165,8 +163,8 @@ def build_evidence_coverage(
         elif name in _NAVIGATION_TOOL_NAMES:
             _add_navigation_scope(add_requested, name=name, arguments=arguments, data=result.data)
 
-        result_status = _enum_value(result.status)
-        durable_status = _enum_value(getattr(durable_call, "status", None))
+        result_status = result.status
+        durable_status = durable_call.status if durable_call is not None else None
         failed = result_status == "failed" or durable_status in {"failed", "rejected"}
         if name in _SOURCE_TOOL_NAMES and failed:
             attempt = _failed_source_record(
@@ -174,14 +172,14 @@ def build_evidence_coverage(
                 arguments=arguments,
                 data=result.data,
                 tool_call_id=result.tool_call_id,
-                error_code=result.error_code or getattr(durable_call, "error_code", None),
+                error_code=result.error_code or (durable_call.error_code if durable_call is not None else None),
             )
             if attempt:
                 failed_attempts.append(attempt)
             continue
         if name not in _SOURCE_TOOL_NAMES or result_status != "succeeded":
             continue
-        data = _mapping(result.data)
+        data = result.data
         successful_results.setdefault(name, []).append(data)
         for record in _source_records(name, data):
             observations.append(
@@ -205,27 +203,23 @@ def build_evidence_coverage(
     observed_tool_ids = {item["tool_call_id"] for item in source_attempts}
     for tool_call_id, request in request_by_id.items():
         durable_call = durable_tool_calls.get(tool_call_id)
-        name = str(
-            getattr(durable_call, "name", None) or getattr(request, "name", "")
-        )
+        name = durable_call.name if durable_call is not None else request.name
         if name not in _SOURCE_TOOL_NAMES or tool_call_id in observed_tool_ids:
             continue
-        arguments = _mapping(
-            getattr(durable_call, "arguments", None) or request.arguments
-        )
+        arguments = durable_call.arguments if durable_call is not None else request.arguments
         source_attempts.append({
             "tool_call_id": tool_call_id,
             "tool_name": name,
             "arguments": dict(arguments),
         })
-        status = _enum_value(getattr(durable_call, "status", None))
+        status = durable_call.status if durable_call is not None else None
         if status in {"failed", "rejected"}:
             attempt = _failed_source_record(
                 name=name,
                 arguments=arguments,
                 data={},
                 tool_call_id=tool_call_id,
-                error_code=getattr(durable_call, "error_code", None),
+                error_code=(durable_call.error_code if durable_call is not None else None),
             )
             if attempt:
                 failed_attempts.append(attempt)
@@ -286,7 +280,7 @@ def build_evidence_coverage(
     for item in requested:
         if _requested_item_has_complete_read(item, inspected):
             continue
-        origin = str(item.get("origin") or "")
+        origin = item.get("origin") or ""
         if origin == "user_selected_context":
             add_omitted(item, reason="selected_context_not_verified")
         elif origin == "search_result":
@@ -334,22 +328,22 @@ def build_evidence_coverage(
 
 
 def _matching_model_calls(
-    model_calls: Sequence[Any] | None,
+    model_calls: Sequence[ChatModelCall] | None,
     answer: ChatMessage,
     active_user: ChatMessage | None,
-) -> tuple[Any, ...]:
+) -> tuple[ChatModelCall, ...]:
     if model_calls is None:
         return ()
     trigger_id = active_user.message_id if active_user is not None else None
-    matched: list[Any] = []
+    matched: list[ChatModelCall] = []
     for call in model_calls:
-        if str(getattr(call, "session_id", "")) != answer.session_id:
+        if call.session_id != answer.session_id:
             continue
-        purpose = _enum_value(getattr(call, "purpose", None))
+        purpose = call.purpose
         if purpose == "compaction":
             continue
-        response_id = getattr(call, "response_message_id", None)
-        call_trigger = getattr(call, "trigger_message_id", None)
+        response_id = call.response_message_id
+        call_trigger = call.trigger_message_id
         if response_id != answer.message_id and call_trigger != trigger_id:
             continue
         matched.append(call)
@@ -359,7 +353,7 @@ def _matching_model_calls(
 def _coverage_gaps(
     *,
     audit: ChatCoverageAudit,
-    model_calls: Sequence[Any],
+    model_calls: Sequence[ChatModelCall],
     source_attempts: Sequence[Mapping[str, Any]],
     failed_attempts: Sequence[Mapping[str, Any]],
     inspected: Sequence[Mapping[str, Any]],
@@ -375,15 +369,15 @@ def _coverage_gaps(
     else:
         non_success = sorted(
             {
-                _enum_value(getattr(call, "status", None)) or "unknown"
+                call.status or "unknown"
                 for call in model_calls
-                if _enum_value(getattr(call, "status", None)) != "provider_succeeded"
+                if call.status != "provider_succeeded"
             }
         )
         if non_success:
             gaps.append("model call audit contains non-success status: " + ", ".join(non_success))
     if failed_attempts:
-        codes = sorted({str(item.get("error_code") or "unknown") for item in failed_attempts})
+        codes = sorted({item.get("error_code") or "unknown" for item in failed_attempts})
         gaps.append("source tool failed: " + ", ".join(codes))
     if source_attempts and not inspected:
         gaps.append("no successful exact Source read was recorded")
@@ -399,7 +393,7 @@ def _coverage_gaps(
 def _coverage_status(
     *,
     audit: ChatCoverageAudit,
-    model_calls: Sequence[Any],
+    model_calls: Sequence[ChatModelCall],
     requested: Sequence[Mapping[str, Any]],
     inspected: Sequence[Mapping[str, Any]],
     omitted: Sequence[Mapping[str, Any]],
@@ -409,7 +403,7 @@ def _coverage_status(
 ) -> str:
     if inspected:
         model_ok = bool(model_calls) and all(
-            _enum_value(getattr(call, "status", None)) == "provider_succeeded"
+            call.status == "provider_succeeded"
             for call in model_calls
         )
         exact_requested = [
@@ -466,7 +460,7 @@ def _inspected_records(
         previous["tool_call_ids"] = list(dict.fromkeys([
             *previous.get("tool_call_ids", []), observation.tool_call_id
         ]))
-        if len(str(record.get("quote") or "")) > len(str(previous.get("quote") or "")):
+        if len(record.get("quote") or "") > len(previous.get("quote") or ""):
             previous["quote"] = record.get("quote")
             previous["quote_truncated"] = record.get("quote_truncated", True)
     return list(grouped.values())
@@ -481,13 +475,11 @@ def _source_records(name: str, data: Mapping[str, Any]) -> tuple[dict[str, Any],
             if "content" not in record and record.get("table_markdown") is not None:
                 record["content"] = record.get("table_markdown")
         return (record,)
-    document = _mapping(data.get("document"))
-    document_id = str(document.get("document_id") or "")
-    document_title = str(document.get("title") or "")
+    document = data["document"]
+    document_id = document.get("document_id") or ""
+    document_title = document.get("title") or ""
     values: list[dict[str, Any]] = []
     for item in data.get("sources") or ():
-        if not isinstance(item, Mapping):
-            continue
         record = dict(item)
         if document_id:
             record.setdefault("document_id", document_id)
@@ -526,8 +518,8 @@ def _add_document_scope(
     arguments: Mapping[str, Any],
     data: Mapping[str, Any],
 ) -> None:
-    document = _mapping(data.get("document"))
-    document_id = str(arguments.get("document_id") or document.get("document_id") or "")
+    document = data["document"]
+    document_id = arguments.get("document_id") or document.get("document_id") or ""
     if not document_id:
         return
     # A filtered inspect with an exact Source reference is represented by its
@@ -622,10 +614,10 @@ def _candidate_record(record: Mapping[str, Any]) -> dict[str, Any]:
 
 def _coverage_key(record: Mapping[str, Any], *, include_digest: bool = False) -> tuple[str, str, str, str]:
     return (
-        str(record.get("document_id") or ""),
-        str(record.get("source_kind") or ""),
-        str(record.get("source_ref") or record.get("table_ref") or ""),
-        str(record.get("source_digest") or "") if include_digest else "",
+        record.get("document_id") or "",
+        record.get("source_kind") or "",
+        record.get("source_ref") or record.get("table_ref") or "",
+        record.get("source_digest") or "" if include_digest else "",
     )
 
 
@@ -643,29 +635,19 @@ def _same_source_identity(left: Mapping[str, Any], right: Mapping[str, Any]) -> 
 def _requested_item_has_complete_read(
     requested: Mapping[str, Any], inspected: Sequence[Mapping[str, Any]]
 ) -> bool:
-    document_id = str(requested.get("document_id") or "")
-    source_kind = str(requested.get("source_kind") or "")
-    source_ref = str(requested.get("source_ref") or requested.get("table_ref") or "")
+    document_id = requested.get("document_id") or ""
+    source_kind = requested.get("source_kind") or ""
+    source_ref = requested.get("source_ref") or requested.get("table_ref") or ""
     if not document_id or not source_kind or not source_ref:
         return False
-    digest = str(requested.get("source_digest") or "")
+    digest = requested.get("source_digest") or ""
     return any(
-        str(item.get("document_id") or "") == document_id
-        and str(item.get("source_kind") or "") == source_kind
-        and str(item.get("source_ref") or item.get("table_ref") or "") == source_ref
-        and (not digest or str(item.get("source_digest") or "") == digest)
+        item.get("document_id") or "" == document_id
+        and item.get("source_kind") or "" == source_kind
+        and item.get("source_ref") or item.get("table_ref") or "" == source_ref
+        and (not digest or item.get("source_digest") or "" == digest)
         for item in inspected
     )
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _enum_value(value: Any) -> str | None:
-    if value is None:
-        return None
-    return str(getattr(value, "value", value))
 
 
 __all__ = ["ChatCoverageAudit", "build_evidence_coverage"]

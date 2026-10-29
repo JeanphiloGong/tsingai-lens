@@ -54,34 +54,28 @@ class SourceObservation:
     derived_from_observation_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        for name in (
-            "observation_id",
-            "collection_id",
-            "objective_id",
-            "document_id",
-            "source_kind",
-            "source_ref",
-            "observation_role",
+        for name, value in (
+            ("observation_id", self.observation_id),
+            ("collection_id", self.collection_id),
+            ("objective_id", self.objective_id),
+            ("document_id", self.document_id),
+            ("source_kind", self.source_kind),
+            ("source_ref", self.source_ref),
+            ("observation_role", self.observation_role),
         ):
-            if not str(getattr(self, name) or "").strip():
+            if not value.strip():
                 raise ValueError(f"source observation requires {name}")
-        if self.source_kind not in _SOURCE_KINDS:
-            raise ValueError(f"unsupported source observation kind: {self.source_kind}")
-        if self.status not in SOURCE_OBSERVATION_STATUSES:
-            raise ValueError(f"unsupported source observation status: {self.status}")
         if not 0 <= self.confidence <= 1:
             raise ValueError("source observation confidence must be between 0 and 1")
-        object.__setattr__(self, "changed_variables", tuple(self.changed_variables))
-        parents = tuple(self.derived_from_observation_ids)
+        parents = self.derived_from_observation_ids
         if (
-            any(not str(item).strip() for item in parents)
+            any(not item.strip() for item in parents)
             or self.observation_id in parents
             or len(parents) != len(set(parents))
         ):
             raise ValueError(
                 "observation derivation requires distinct parent observations"
             )
-        object.__setattr__(self, "derived_from_observation_ids", parents)
 
     @property
     def evidence_id(self) -> str:

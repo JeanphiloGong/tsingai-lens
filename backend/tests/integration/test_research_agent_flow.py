@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
@@ -61,7 +63,7 @@ class _CandidateCapability:
         self.executed.append(arguments.model_dump())
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": "obj-agent-1",
                 "confirmation_status": "candidate",

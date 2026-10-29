@@ -58,7 +58,7 @@
 
 	$: locale = $language === 'zh' ? 'zh-CN' : 'en-US';
 	$: sortedCollections = [...$collections].sort(compareCollectionsByUpdated);
-	$: latestCollectionId = sortedCollections[0]?.id ?? '';
+	$: latestCollectionId = sortedCollections[0]?.collection_id ?? '';
 	$: visibleCollections = sortedCollections.filter((collection) => {
 		const query = searchTerm.trim().toLowerCase();
 		const matchesQuery =
@@ -189,7 +189,7 @@
 			});
 			closeCreate();
 			await loadCollections();
-			await goto(resolve('/collections/[id]', { id: result.id }));
+			await goto(resolve('/collections/[id]', { id: result.collection_id }));
 		} catch (err) {
 			createError = errorMessage(err);
 		} finally {
@@ -311,24 +311,24 @@
 		openRowMenuId = '';
 		const pendingDocuments = collection.documents.filter((document) => document.status !== 'ready');
 		if (!collection.documents.length) {
-			setRowMessage(collection.id, $t('home.indexNoFiles'), 'error');
+			setRowMessage(collection.collection_id, $t('home.indexNoFiles'), 'error');
 			return;
 		}
 		if (!pendingDocuments.length) {
-			setRowMessage(collection.id, $t('home.indexStarted'));
+			setRowMessage(collection.collection_id, $t('home.indexStarted'));
 			return;
 		}
 
 		try {
-			setRowMessage(collection.id, $t('home.indexing'));
+			setRowMessage(collection.collection_id, $t('home.indexing'));
 			const runs = await Promise.all(
 				pendingDocuments.map((document) =>
-					prepareCollectionDocument(collection.id, document.document_id)
+					prepareCollectionDocument(collection.collection_id, document.document_id)
 				)
 			);
 			collections.update((items) =>
 				items.map((item) =>
-					item.id === collection.id
+					item.collection_id === collection.collection_id
 						? {
 								...item,
 								status: 'running',
@@ -338,9 +338,9 @@
 				)
 			);
 			scheduleCollectionPoll();
-			setRowMessage(collection.id, $t('home.indexStarted'));
+			setRowMessage(collection.collection_id, $t('home.indexStarted'));
 		} catch (err) {
-			setRowMessage(collection.id, errorMessage(err), 'error');
+			setRowMessage(collection.collection_id, errorMessage(err), 'error');
 		}
 	}
 
@@ -353,14 +353,14 @@
 			return;
 		}
 
-		deletingCollectionId = collection.id;
-		setRowMessage(collection.id, $t('home.deleting'));
+		deletingCollectionId = collection.collection_id;
+		setRowMessage(collection.collection_id, $t('home.deleting'));
 
 		try {
-			await deleteCollection(collection.id);
+			await deleteCollection(collection.collection_id);
 			setNotice($t('home.deleted', { name }));
 		} catch (err) {
-			setRowMessage(collection.id, errorMessage(err), 'error');
+			setRowMessage(collection.collection_id, errorMessage(err), 'error');
 		} finally {
 			deletingCollectionId = '';
 		}
@@ -463,7 +463,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each visibleCollections as collection (collection.id)}
+					{#each visibleCollections as collection (collection.collection_id)}
 						{@const step = nextStep(collection)}
 						{@const statusGroup = getCollectionStatusGroup(collection)}
 						<tr>
@@ -495,7 +495,7 @@
 										statusGroup === 'complete'
 											? '/collections/[id]/objectives'
 											: '/collections/[id]',
-										{ id: collection.id }
+										{ id: collection.collection_id }
 									)}
 								>
 									{step}
@@ -504,7 +504,7 @@
 							</td>
 							<td>
 								<div class="row-actions">
-									<a class="enter-link" href={resolve('/collections/[id]', { id: collection.id })}
+									<a class="enter-link" href={resolve('/collections/[id]', { id: collection.collection_id })}
 										>{$t('home.actionEnter')}</a
 									>
 									<div class="row-menu">
@@ -514,12 +514,12 @@
 											aria-label={$t('home.moreActions', {
 												name: collection.name || $t('collection.unknownName')
 											})}
-											aria-expanded={openRowMenuId === collection.id}
-											on:click={(event) => toggleRowMenu(collection.id, event)}
+											aria-expanded={openRowMenuId === collection.collection_id}
+											on:click={(event) => toggleRowMenu(collection.collection_id, event)}
 										>
 											<Ellipsis size={16} aria-hidden="true" />
 										</button>
-										{#if openRowMenuId === collection.id}
+										{#if openRowMenuId === collection.collection_id}
 											<div class="row-menu__panel" style={rowMenuPanelStyle}>
 												<button
 													type="button"
@@ -532,10 +532,10 @@
 												<button
 													type="button"
 													class="danger-menu-item"
-													disabled={deletingCollectionId === collection.id}
+													disabled={deletingCollectionId === collection.collection_id}
 													on:click={() => removeCollection(collection)}
 												>
-													{deletingCollectionId === collection.id
+													{deletingCollectionId === collection.collection_id
 														? $t('home.deleting')
 														: $t('home.actionDelete')}
 												</button>
@@ -543,13 +543,13 @@
 										{/if}
 									</div>
 								</div>
-								{#if rowMessages[collection.id]}
+								{#if rowMessages[collection.collection_id]}
 									<div
-										class={`row-message ${rowMessages[collection.id].type === 'error' ? 'row-message--error' : ''}`}
+										class={`row-message ${rowMessages[collection.collection_id].type === 'error' ? 'row-message--error' : ''}`}
 										role="status"
 										aria-live="polite"
 									>
-										{rowMessages[collection.id].message}
+										{rowMessages[collection.collection_id].message}
 									</div>
 								{/if}
 							</td>
@@ -560,7 +560,7 @@
 		</div>
 
 		<div class="collection-list">
-			{#each visibleCollections as collection (collection.id)}
+			{#each visibleCollections as collection (collection.collection_id)}
 				{@const step = nextStep(collection)}
 				{@const statusGroup = getCollectionStatusGroup(collection)}
 				<article class="collection-list-card">
@@ -594,23 +594,23 @@
 							class="next-link"
 							href={resolve(
 								statusGroup === 'complete' ? '/collections/[id]/objectives' : '/collections/[id]',
-								{ id: collection.id }
+								{ id: collection.collection_id }
 							)}
 						>
 							{step}
 							<ArrowRight size={16} aria-hidden="true" />
 						</a>
-						<a class="enter-link" href={resolve('/collections/[id]', { id: collection.id })}
+						<a class="enter-link" href={resolve('/collections/[id]', { id: collection.collection_id })}
 							>{$t('home.actionEnter')}</a
 						>
 					</div>
-					{#if rowMessages[collection.id]}
+					{#if rowMessages[collection.collection_id]}
 						<div
-							class={`row-message ${rowMessages[collection.id].type === 'error' ? 'row-message--error' : ''}`}
+							class={`row-message ${rowMessages[collection.collection_id].type === 'error' ? 'row-message--error' : ''}`}
 							role="status"
 							aria-live="polite"
 						>
-							{rowMessages[collection.id].message}
+							{rowMessages[collection.collection_id].message}
 						</div>
 					{/if}
 				</article>

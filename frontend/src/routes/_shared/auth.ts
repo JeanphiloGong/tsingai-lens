@@ -8,7 +8,7 @@ export type AuthUser = {
 };
 
 type AuthSessionPayload = {
-	user?: Partial<AuthUser> | null;
+	user: AuthUser;
 };
 
 type AuthState = {
@@ -38,23 +38,10 @@ export function startAuthSynchronization() {
 	return () => window.removeEventListener('storage', handleStorage);
 }
 
-function normalizeUser(value: unknown): AuthUser | null {
-	if (!value || typeof value !== 'object') return null;
-	const record = value as Partial<AuthUser>;
-	const userId = String(record.user_id ?? '').trim();
-	const email = String(record.email ?? '').trim();
-	if (!userId || !email) return null;
-	return {
-		user_id: userId,
-		email,
-		display_name: typeof record.display_name === 'string' ? record.display_name : null
-	};
-}
-
 function setAuthenticated(payload: unknown) {
-	const record = payload && typeof payload === 'object' ? (payload as AuthSessionPayload) : {};
-	const user = normalizeUser(record.user);
-	if (!user) {
+	const record = payload as AuthSessionPayload;
+	const user = record?.user;
+	if (!user || typeof user.user_id !== 'string' || !user.user_id || typeof user.email !== 'string' || !user.email) {
 		throw new Error('Auth response is missing user.');
 	}
 	clearOtherUsersChatStorage(user.user_id);

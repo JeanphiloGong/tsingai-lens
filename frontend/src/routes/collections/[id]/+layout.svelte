@@ -16,7 +16,7 @@
 	let deleteError = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: collection = $collections.find((item) => item.id === collectionId);
+	$: collection = $collections.find((item) => item.collection_id === collectionId);
 	$: collectionName = collection?.name;
 	$: documentCount = collection?.documents.length ?? collection?.paper_count ?? 0;
 	$: readyDocumentCount =

@@ -55,7 +55,7 @@
 	$: collectionId = $page.params.id ?? '';
 	$: documentId = $page.params.document_id ?? '';
 	$: collectionName =
-		$collections.find((item) => item.id === collectionId)?.name || $t('collection.unknownName');
+		$collections.find((item) => item.collection_id === collectionId)?.name || $t('collection.unknownName');
 	$: userId = $authState.status === 'authenticated' ? ($authState.user?.user_id ?? '') : '';
 	$: currentOwner = `${userId}:${collectionId}`;
 	$: if (currentOwner !== owner) {

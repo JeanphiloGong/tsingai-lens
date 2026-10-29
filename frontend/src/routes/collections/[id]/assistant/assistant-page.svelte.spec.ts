@@ -201,7 +201,7 @@ function installApi({
 					objectives: [
 						{
 							objective_id: 'obj_energy_1',
-							question: 'How does laser energy affect Ti-6Al-4V strength?'
+							question: 'How does laser energy affect Ti-6Al-4V strength?', confirmation_status: 'candidate'
 						}
 					]
 				})
@@ -325,14 +325,14 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toHaveAttribute('href', '/collections/col_123');
 		expect(document.querySelector('.conversation-header')).toBeNull();
 		collections.set([
-			{ id: 'col_other', collection_id: 'col_other', name: 'Other research', documents: [] },
-			{ id: 'col_123', collection_id: 'col_123', name: '316L LPBF comparison', documents: [] }
+			{ collection_id: 'col_other', name: 'Other research', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] },
+			{ collection_id: 'col_123', name: '316L LPBF comparison', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] }
 		]);
 		await expect
 			.element(browserPage.getByRole('link', { name: '316L LPBF comparison', exact: true }))
 			.toHaveAttribute('href', '/collections/col_123');
 		collections.update((items) =>
-			items.map((item) => (item.id === 'col_123' ? { ...item, name: 'Renamed study' } : item))
+			items.map((item) => (item.collection_id === 'col_123' ? { ...item, name: 'Renamed study' } : item))
 		);
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Renamed study', exact: true }))
@@ -378,7 +378,7 @@ describe('collections/[id]/assistant Research Agent', () => {
 		).toBe(false);
 		await composer.fill('Please only check the test conditions first.');
 		collections.set([
-			{ id: 'col_123', collection_id: 'col_123', name: 'Updated title', documents: [] }
+			{ collection_id: 'col_123', name: 'Updated title', description: null, status: 'uploaded', paper_count: 0, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', documents: [] }
 		]);
 		await expect.element(composer).toHaveValue('Please only check the test conditions first.');
 	});

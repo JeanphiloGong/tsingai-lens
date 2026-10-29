@@ -134,7 +134,7 @@
   $: headerCollectionId = collectionRouteMatch?.[1]
     ? decodeRoutePart(collectionRouteMatch[1])
     : '';
-  $: headerCollection = $collections.find((item) => item.id === headerCollectionId);
+  $: headerCollection = $collections.find((item) => item.collection_id === headerCollectionId);
   $: headerCollectionName = headerCollection?.name || headerCollectionId;
 </script>
 

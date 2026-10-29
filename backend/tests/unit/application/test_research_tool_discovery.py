@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 import json
@@ -173,7 +175,7 @@ def test_experiment_draft_reuses_prior_turn_complete_source_reads():
     request = ChatToolRequest(tool_call_id="read-1", name="read_source", arguments={}, position=0)
     tool_result = ChatToolResult(
         tool_call_id="read-1",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "document_id": "paper-1",
             "source_kind": "text_window",
@@ -200,7 +202,7 @@ def test_experiment_draft_reuses_prior_turn_complete_source_reads():
         ChatMessage(
             message_id="t1",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(tool_result),
                 ensure_ascii=True,
@@ -337,7 +339,7 @@ def test_read_only_filters_previously_loaded_writes_without_mutating_loaded_name
     )
     first_tool_result = ChatToolResult(
         tool_call_id="discover-1",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={"loaded_tool_names": [read.spec.name, write.spec.name]},
     )
     messages = [
@@ -357,7 +359,7 @@ def test_read_only_filters_previously_loaded_writes_without_mutating_loaded_name
         ChatMessage(
             message_id="tool-1",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(first_tool_result),
                 ensure_ascii=True,
@@ -668,7 +670,7 @@ def test_loaded_write_is_not_filtered_by_natural_language_request_scope():
     writer = _Capability("create_finding_version", ToolRisk.WRITE)
     second_tool_result = ChatToolResult(
         tool_call_id="discovery",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={"loaded_tool_names": ["create_finding_version"]},
     )
     messages = [
@@ -695,7 +697,7 @@ def test_loaded_write_is_not_filtered_by_natural_language_request_scope():
         ChatMessage(
             message_id="result",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(second_tool_result),
                 ensure_ascii=True,
@@ -780,7 +782,7 @@ def test_completed_write_does_not_hide_same_capability_for_another_resource():
     )
     third_tool_result = ChatToolResult(
         tool_call_id="discover-1",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={"loaded_tool_names": ["create_objective_candidate"]},
     )
     messages = [
@@ -795,7 +797,7 @@ def test_completed_write_does_not_hide_same_capability_for_another_resource():
         ChatMessage(
             message_id="tool-1",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(third_tool_result),
                 ensure_ascii=True,

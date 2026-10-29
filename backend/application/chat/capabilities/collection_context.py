@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 import logging
 import re
 from typing import Any
@@ -63,18 +65,18 @@ class GetCollectionContextCapability:
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "collection": {
-                    "collection_id": str(collection["collection_id"]),
-                    "name": str(collection.get("name") or "")[:240],
+                    "collection_id": collection["collection_id"],
+                    "name": collection["name"][:240],
                     "description": (
-                        str(collection["description"])[:1_000]
+                        collection["description"][:1_000]
                         if collection.get("description")
                         else None
                     ),
-                    "status": str(collection.get("status") or "unknown"),
-                    "paper_count": int(collection.get("paper_count") or 0),
+                    "status": collection["status"],
+                    "paper_count": collection["paper_count"],
                 },
                 "objective_count": len(objectives),
                 "objectives": objective_records,
@@ -272,7 +274,7 @@ class BrowseCollectionPapersCapability:
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
                 "paper_total": len(candidates),

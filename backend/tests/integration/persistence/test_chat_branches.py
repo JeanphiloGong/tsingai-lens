@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 import json
 
 from domain.chat import ChatToolRequest
@@ -120,7 +122,7 @@ async def branch_app(postgres_session_factory, tmp_path):
         name="create_objective_candidate", arguments={"question": "Compare matched LPBF tensile conditions"}, risk=ToolRisk.WRITE,
     ).require_approval()
     call = call.approve(user_id=chat.user_id, arguments_digest=call.arguments_digest, decided_at=NOW).start(NOW).succeed(NOW)
-    result = ChatToolResult(tool_call_id=call.tool_call_id, status="succeeded", data={"objective_id": "existing-objective"})
+    result = ChatToolResult(tool_call_id=call.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={"objective_id": "existing-objective"})
     source = ChatSourceContext(
         resource_ref=ChatResourceRef(resource_type="source", resource_id="paper:methods"),
         collection_id="collection", document_id="paper", document_title="LPBF tensile test conditions",
@@ -156,7 +158,7 @@ async def branch_app(postgres_session_factory, tmp_path):
         ChatMessage(
             message_id="result",
             session_id=chat.session_id,
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(result),
                 ensure_ascii=True,

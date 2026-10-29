@@ -91,9 +91,6 @@ class ChatModelContext:
             )})
         return messages
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "messages", tuple(self.messages))
-        object.__setattr__(self, "rollover_summary", self.rollover_summary.strip())
 
 
 _LINEAGE_FIELDS = {

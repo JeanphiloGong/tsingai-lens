@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 import json
@@ -125,7 +127,7 @@ def test_progress_trace_exposes_versioned_execution_plan() -> None:
         }, position=0,
     )
     tool_result = ChatToolResult(
-        tool_call_id="plan-1", status="succeeded", data=plan_call.arguments
+        tool_call_id="plan-1", status=ToolResultStatus.SUCCEEDED, data=plan_call.arguments
     )
     messages = [
         request,
@@ -139,7 +141,7 @@ def test_progress_trace_exposes_versioned_execution_plan() -> None:
         ChatMessage(
             message_id="tool-1",
             session_id=context.session_id,
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(tool_result),
                 ensure_ascii=True,
@@ -176,7 +178,7 @@ def test_progress_log_keeps_model_plan_request_out_of_info_logs(caplog) -> None:
         }, position=0,
     )
     first_tool_result = ChatToolResult(
-        tool_call_id="plan-1", status="succeeded", data=call.arguments
+        tool_call_id="plan-1", status=ToolResultStatus.SUCCEEDED, data=call.arguments
     )
     messages = [
         request,
@@ -190,7 +192,7 @@ def test_progress_log_keeps_model_plan_request_out_of_info_logs(caplog) -> None:
         ChatMessage(
             message_id="tool-1",
             session_id=context.session_id,
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(first_tool_result),
                 ensure_ascii=True,
@@ -224,7 +226,7 @@ def test_execution_plan_keeps_scientific_and_technical_end_states_distinct() -> 
             }, position=0,
         )
         second_tool_result = ChatToolResult(
-            tool_call_id="plan-1", status="succeeded", data=call.arguments
+            tool_call_id="plan-1", status=ToolResultStatus.SUCCEEDED, data=call.arguments
         )
         return (
             request,
@@ -238,7 +240,7 @@ def test_execution_plan_keeps_scientific_and_technical_end_states_distinct() -> 
             ChatMessage(
                 message_id="tool-1",
                 session_id="chat-1",
-                role="tool",
+                role=ChatMessageRole.TOOL,
                 content=json.dumps(
                     asdict(second_tool_result),
                     ensure_ascii=True,
@@ -279,7 +281,7 @@ def test_execution_plan_keeps_permission_denial_and_stall_distinct() -> None:
             }, position=0,
         )
         third_tool_result = ChatToolResult(
-            tool_call_id="plan-1", status="succeeded", data=call.arguments
+            tool_call_id="plan-1", status=ToolResultStatus.SUCCEEDED, data=call.arguments
         )
         return (
             request,
@@ -293,7 +295,7 @@ def test_execution_plan_keeps_permission_denial_and_stall_distinct() -> None:
             ChatMessage(
                 message_id="tool-1",
                 session_id="chat-1",
-                role="tool",
+                role=ChatMessageRole.TOOL,
                 content=json.dumps(
                     asdict(third_tool_result),
                     ensure_ascii=True,

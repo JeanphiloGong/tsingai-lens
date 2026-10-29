@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
+from domain.chat import ToolResultStatus
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
@@ -78,7 +82,7 @@ class DiscoverResearchToolsCapability:
         names = list(dict.fromkeys(arguments.tool_names))
         if any(name not in self.tools for name in (*names, *arguments.deferred_tool_names)):
             return ChatToolResult(
-                tool_call_id=context.tool_call_id, status="failed",
+                tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
                 error_code="tool_not_discoverable",
                 error_message=(
                     "Select only registered research tools named in the catalog. "
@@ -86,7 +90,7 @@ class DiscoverResearchToolsCapability:
                 ),
             )
         return ChatToolResult(
-            tool_call_id=context.tool_call_id, status="succeeded",
+            tool_call_id=context.tool_call_id, status=ToolResultStatus.SUCCEEDED,
             data={
                 "loaded_tool_names": names,
                 "source_inspection_required": arguments.source_inspection_required,

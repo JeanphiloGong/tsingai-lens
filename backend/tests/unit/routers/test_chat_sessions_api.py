@@ -100,7 +100,7 @@ class _Service:
         assert user_id == "user-1"
         return (ChatSessionSummary(
             session=self.session,
-            title=self.messages[0].content if self.messages else None,
+            title=self.messages[0].content.strip().split("\n", 1)[0].strip()[:160] or None if self.messages else None,
         ),)
 
     async def list_messages_for_user(self, session_id: str, user_id: str):

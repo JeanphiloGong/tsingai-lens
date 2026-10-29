@@ -4,26 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 
 ChatSessionStatus = Literal["idle", "running", "approval"]
-
-
-def _required_text(value: Any, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError(f"{field_name} cannot be empty")
-    return text
-
-
-def _timestamp(value: Any, field_name: str) -> str:
-    text = _required_text(value, field_name)
-    try:
-        datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must be an ISO-8601 timestamp") from exc
-    return text
 
 
 @dataclass(frozen=True)
@@ -48,31 +32,21 @@ class ChatSession:
         if any(value is not None for value in lineage):
             if any(value is None for value in lineage):
                 raise ValueError("a conversation branch requires complete lineage")
-            if (not isinstance(self.fork_position, int) or isinstance(self.fork_position, bool)
-                    or self.fork_position < 0 or not self.fork_content.strip()
-                    or len(self.fork_content) > 12000 or "\x00" in self.fork_content):
+            if (
+                self.fork_position < 0
+                or not self.fork_content.strip()
+                or len(self.fork_content) > 12000
+                or "\x00" in self.fork_content
+            ):
                 raise ValueError("a conversation branch requires a question and position")
-            for name in ("root_session_id", "parent_session_id", "fork_message_id"):
-                _required_text(getattr(self, name), name)
+            if not self.root_session_id or not self.parent_session_id or not self.fork_message_id:
+                raise ValueError("a conversation branch requires complete lineage")
             if self.parent_session_id == self.session_id:
                 raise ValueError("a conversation cannot branch from itself")
-        for field_name in ("session_id", "user_id", "collection_id"):
-            object.__setattr__(
-                self, field_name, _required_text(getattr(self, field_name), field_name)
-            )
-        if self.title is not None:
-            title = self.title.strip()
-            if not title or len(title) > 160 or any(c in title for c in "\x00\r\n"):
-                raise ValueError("title must be between 1 and 160 characters")
-            object.__setattr__(self, "title", title)
-        created_at = _timestamp(self.created_at, "created_at")
-        updated_at = _timestamp(self.updated_at, "updated_at")
-        if datetime.fromisoformat(updated_at.replace("Z", "+00:00")) < datetime.fromisoformat(
-            created_at.replace("Z", "+00:00")
-        ):
+        created_at = datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
+        updated_at = datetime.fromisoformat(self.updated_at.replace("Z", "+00:00"))
+        if updated_at < created_at:
             raise ValueError("updated_at cannot be before created_at")
-        object.__setattr__(self, "created_at", created_at)
-        object.__setattr__(self, "updated_at", updated_at)
 
     @classmethod
     def create(

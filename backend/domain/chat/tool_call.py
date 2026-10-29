@@ -36,25 +36,13 @@ class ToolResultStatus(StrEnum):
     FAILED = "failed"
 
 
-def _required_text(value: Any, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        raise ValueError(f"{field_name} cannot be empty")
-    return text
 
 
-def _arguments(value: Mapping[str, Any]) -> dict[str, Any]:
-    copied = deepcopy(dict(value))
-    try:
-        json.dumps(copied, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("tool arguments must be JSON serializable") from exc
-    return copied
 
 
 def tool_arguments_digest(arguments: Mapping[str, Any]) -> str:
     canonical = json.dumps(
-        _arguments(arguments),
+        arguments,
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
@@ -62,19 +50,12 @@ def tool_arguments_digest(arguments: Mapping[str, Any]) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _timestamp(value: Any, field_name: str) -> str:
-    text = _required_text(value, field_name)
-    try:
-        datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must be an ISO-8601 timestamp") from exc
-    return text
 
 
 @dataclass(frozen=True)
 class ChatToolResult:
     tool_call_id: str
-    status: ToolResultStatus | str
+    status: ToolResultStatus
     data: Mapping[str, Any] = field(default_factory=dict)
     resource_refs: tuple[ChatResourceRef, ...] = ()
     warnings: tuple[str, ...] = ()
@@ -82,21 +63,10 @@ class ChatToolResult:
     error_message: str | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "tool_call_id", _required_text(self.tool_call_id, "tool_call_id")
-        )
-        object.__setattr__(self, "status", ToolResultStatus(self.status))
-        object.__setattr__(self, "data", deepcopy(dict(self.data)))
-        object.__setattr__(self, "resource_refs", tuple(self.resource_refs))
-        object.__setattr__(
-            self,
-            "warnings",
-            tuple(str(item).strip() for item in self.warnings if str(item).strip()),
-        )
         if self.status is ToolResultStatus.FAILED:
-            if not str(self.error_code or "").strip():
+            if not self.error_code:
                 raise ValueError("failed tool result requires error_code")
-            if not str(self.error_message or "").strip():
+            if not self.error_message:
                 raise ValueError("failed tool result requires error_message")
         elif self.error_code is not None or self.error_message is not None:
             raise ValueError("successful tool result cannot contain an error")
@@ -114,9 +84,9 @@ class ChatToolCall:
     name: str
     arguments: Mapping[str, Any]
     arguments_digest: str
-    risk: ToolRisk | str
+    risk: ToolRisk
     position: int = 0
-    status: ToolCallStatus | str = ToolCallStatus.REQUESTED
+    status: ToolCallStatus = ToolCallStatus.REQUESTED
     started_at: str | None = None
     finished_at: str | None = None
     error_code: str | None = None
@@ -136,21 +106,8 @@ class ChatToolCall:
             or not self.decision_user_id
         ):
             raise ValueError("scope grant requires its revision and authorizing user")
-        for field_name in (
-            "tool_call_id",
-            "session_id",
-            "assistant_message_id",
-            "name",
-        ):
-            object.__setattr__(
-                self, field_name, _required_text(getattr(self, field_name), field_name)
-            )
-        copied_arguments = _arguments(self.arguments)
-        object.__setattr__(self, "arguments", copied_arguments)
-        if self.arguments_digest != tool_arguments_digest(copied_arguments):
+        if self.arguments_digest != tool_arguments_digest(self.arguments):
             raise ValueError("tool call arguments digest does not match arguments")
-        object.__setattr__(self, "risk", ToolRisk(self.risk))
-        object.__setattr__(self, "status", ToolCallStatus(self.status))
         if (
             self.status is ToolCallStatus.APPROVAL_REQUIRED
             and self.risk is not ToolRisk.WRITE
@@ -200,7 +157,7 @@ class ChatToolCall:
         risk: ToolRisk,
         position: int = 0,
     ) -> "ChatToolCall":
-        copied_arguments = _arguments(arguments)
+        copied_arguments = deepcopy(arguments)
         return cls(
             tool_call_id=tool_call_id,
             session_id=session_id,
@@ -232,9 +189,9 @@ class ChatToolCall:
         return replace(
             self,
             status=ToolCallStatus.APPROVED,
-            decision_user_id=_required_text(user_id, "user_id"),
+            decision_user_id=user_id,
             decision_arguments_digest=arguments_digest,
-            decided_at=_timestamp(decided_at, "decided_at"),
+            decided_at=decided_at,
         )
 
     def reject(
@@ -248,11 +205,11 @@ class ChatToolCall:
             raise ValueError(f"cannot reject tool call in status {self.status.value}")
         if arguments_digest != self.arguments_digest:
             raise ValueError("rejection arguments digest does not match stored arguments")
-        decision_time = _timestamp(decided_at, "decided_at")
+        decision_time = decided_at
         return replace(
             self,
             status=ToolCallStatus.REJECTED,
-            decision_user_id=_required_text(user_id, "user_id"),
+            decision_user_id=user_id,
             decision_arguments_digest=arguments_digest,
             decided_at=decision_time,
             finished_at=decision_time,
@@ -270,7 +227,7 @@ class ChatToolCall:
         return replace(
             self,
             status=ToolCallStatus.RUNNING,
-            started_at=_required_text(started_at, "started_at"),
+            started_at=started_at,
         )
 
     def succeed(self, finished_at: str) -> "ChatToolCall":
@@ -279,7 +236,7 @@ class ChatToolCall:
         return replace(
             self,
             status=ToolCallStatus.SUCCEEDED,
-            finished_at=_required_text(finished_at, "finished_at"),
+            finished_at=finished_at,
         )
 
     def fail(self, error_code: str, finished_at: str) -> "ChatToolCall":
@@ -292,8 +249,8 @@ class ChatToolCall:
         return replace(
             self,
             status=ToolCallStatus.FAILED,
-            error_code=_required_text(error_code, "error_code"),
-            finished_at=_required_text(finished_at, "finished_at"),
+            error_code=error_code,
+            finished_at=finished_at,
         )
 
 __all__ = [

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 import json
@@ -75,7 +77,7 @@ async def feedback_app(postgres_session_factory, tmp_path):
     await repository.add_session(chat)
     await repository.add_session(ChatSession.create(session_id="chat-2", user_id=users[0]["user_id"], collection_id="collection", created_at=NOW))
     call = ChatToolCall.requested(tool_call_id="call", session_id="chat-1", assistant_message_id="request", name="list_findings", arguments={}, risk=ToolRisk.READ)
-    result = ChatToolResult(tool_call_id="call", status="succeeded", data={"findings": []})
+    result = ChatToolResult(tool_call_id="call", status=ToolResultStatus.SUCCEEDED, data={"findings": []})
     messages = (
         ChatMessage.user(
             message_id="question",
@@ -105,7 +107,7 @@ async def feedback_app(postgres_session_factory, tmp_path):
         ChatMessage(
             message_id="tool-result",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(result),
                 ensure_ascii=True,

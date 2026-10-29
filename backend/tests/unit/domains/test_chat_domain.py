@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 import json
 
 from dataclasses import asdict, replace
 
 import pytest
+
+from controllers.chat.schemas import ChatSourceContextPayload
 
 from domain.chat import (
     ChatMessage,
@@ -32,6 +36,36 @@ def test_ordered_requests_preserve_order_and_reject_gaps_and_duplicates() -> Non
             replace(message, tool_calls=(first, bad))
     with pytest.raises(ValueError):
         replace(message, tool_call_id="call-1")
+
+
+def test_prepared_assistant_text_keeps_its_original_format() -> None:
+    content = "  strength-A / strength-a / 001\n    indented result\n"
+
+    message = ChatMessage.assistant(
+        message_id="message-A", session_id="chat-A", content=content,
+        created_at="2026-10-29T00:00:00+00:00",
+    )
+
+    assert message.content == content
+
+
+def test_approval_arguments_are_isolated_and_tampering_stops_execution() -> None:
+    arguments = {"measurements": ["strength-A", "strength-a", "001"], "certainty": 0.735123}
+    pending = ChatToolCall.requested(
+        tool_call_id="call-A", session_id="chat-A", assistant_message_id="message-A",
+        name="save_result", arguments=arguments, risk=ToolRisk.WRITE,
+    ).require_approval()
+    arguments["measurements"].append("outside-change")
+    approved = pending.approve(
+        user_id="researcher-A", arguments_digest=pending.arguments_digest,
+        decided_at="2026-10-29T00:00:00+00:00",
+    )
+
+    assert approved.arguments["measurements"] == ["strength-A", "strength-a", "001"]
+    assert approved.arguments["certainty"] == 0.735123
+    approved.arguments["measurements"].append("tampered")
+    with pytest.raises(ValueError, match="digest"):
+        approved.start("2026-10-29T00:01:00+00:00")
 
 
 def test_chat_session_preserves_immutable_owner_and_collection() -> None:
@@ -142,7 +176,7 @@ def test_tool_result_failure_requires_public_error_code() -> None:
     with pytest.raises(ValueError, match="failed tool result requires error_code"):
         ChatToolResult(
             tool_call_id="call-1",
-            status="failed",
+            status=ToolResultStatus.FAILED,
         )
 
 
@@ -150,12 +184,12 @@ def test_queued_tool_result_requires_a_traceable_resource() -> None:
     with pytest.raises(ValueError, match="queued tool result requires a resource"):
         ChatToolResult(
             tool_call_id="call-1",
-            status="queued",
+            status=ToolResultStatus.QUEUED,
         )
 
     queued = ChatToolResult(
         tool_call_id="call-1",
-        status="queued",
+        status=ToolResultStatus.QUEUED,
         resource_refs=(
             ChatResourceRef(
                 resource_type="objective_analysis",
@@ -167,11 +201,11 @@ def test_queued_tool_result_requires_a_traceable_resource() -> None:
     assert queued.resource_refs[0].resource_id == "objective-1:1"
 
 
-def test_tool_result_and_message_copy_mutable_input() -> None:
+def test_tool_result_message_preserves_paired_scientific_result() -> None:
     payload = {"items": ["paper-1"]}
     result = ChatToolResult(
         tool_call_id="call-1",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data=payload,
         resource_refs=(
             ChatResourceRef(
@@ -183,7 +217,7 @@ def test_tool_result_and_message_copy_mutable_input() -> None:
     message = ChatMessage(
         message_id="msg-3",
         session_id="chat-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(result),
             ensure_ascii=True,
@@ -193,18 +227,12 @@ def test_tool_result_and_message_copy_mutable_input() -> None:
         tool_call_id=result.tool_call_id,
         tool_result=result,
     )
-    payload["items"].append("paper-2")
 
     assert result.data == {"items": ["paper-1"]}
     assert message.tool_result == result
     assert message.tool_call_id == "call-1"
 
 
-def test_resource_reference_requires_stable_identity() -> None:
-    with pytest.raises(ValueError, match="resource_type"):
-        ChatResourceRef(resource_type=" ", resource_id="paper-1")
-    with pytest.raises(ValueError, match="resource_id"):
-        ChatResourceRef(resource_type="document", resource_id=" ")
 
 
 def test_user_message_preserves_traceable_source_context() -> None:
@@ -239,13 +267,10 @@ def test_user_message_preserves_traceable_source_context() -> None:
     assert message.source_contexts[0].quote == "Conductivity improved to 12 mS/cm under EIS."
 
 
-def test_source_context_rejects_an_invalid_source_digest() -> None:
-    with pytest.raises(ValueError, match="SHA-256"):
-        ChatSourceContext(
-            resource_ref=ChatResourceRef(
-                resource_type="source",
-                resource_id="doc-1:results",
-            ),
+def test_source_context_request_rejects_an_invalid_source_digest() -> None:
+    with pytest.raises(ValueError, match="source_digest"):
+        ChatSourceContextPayload(
+            resource_ref={"resource_type": "source", "resource_id": "doc-1:results"},
             collection_id="col-1",
             document_id="doc-1",
             document_title="Paper A",

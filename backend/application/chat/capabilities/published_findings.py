@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+from domain.chat import ToolResultStatus
 
 import json
 from dataclasses import replace
@@ -126,13 +126,11 @@ class QueryPublishedFindingsCapability:
             )
             finding_items = [
                 self._finding_summary(item)
-                for item in findings.get("items", ())
-                if isinstance(item, Mapping)
+                for item in findings["items"]
             ]
             evidence_items = [
                 self._evidence_summary(item)
-                for item in evidence.get("items", ())
-                if isinstance(item, Mapping)
+                for item in evidence["items"]
             ]
             finding_count += len(finding_items)
             evidence_count += len(evidence_items)
@@ -141,8 +139,8 @@ class QueryPublishedFindingsCapability:
                     "objective_id": objective.objective_id,
                     "question": objective.question[:500],
                     "analysis_version": version,
-                    "finding_total": int(findings.get("total") or 0),
-                    "evidence_total": int(evidence.get("total") or 0),
+                    "finding_total": findings["total"],
+                    "evidence_total": evidence["total"],
                     "findings": finding_items,
                     "evidence_reviews": findings.get("evidence_reviews", {}),
                     "evidence": evidence_items,
@@ -182,7 +180,7 @@ class QueryPublishedFindingsCapability:
         scientific_absence = finding_count == 0 and evidence_count == 0
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "selected_objective_count": len(selected),
                 "published_objective_count": len(records),
@@ -197,44 +195,38 @@ class QueryPublishedFindingsCapability:
 
     @staticmethod
     def _finding_summary(item: Mapping[str, Any]) -> dict[str, Any]:
-        contributions = item.get("paper_contributions") or ()
         return {
-            "finding_id": str(item.get("finding_id") or ""),
-            "parent_finding_id": item.get("parent_finding_id"),
-            "statement": str(item.get("statement") or "")[:1_000],
-            "factors": [str(value)[:160] for value in item.get("factors") or ()][:6],
-            "outcome": str(item.get("outcome") or "")[:160],
-            "direction": str(item.get("direction") or "unknown")[:80],
-            "assertion_strength": str(
-                item.get("assertion_strength") or "uncertain"
-            )[:80],
-            "synthesis_status": str(item.get("synthesis_status") or "unknown")[:80],
-            "certainty": item.get("certainty"),
+            "finding_id": item["finding_id"],
+            "parent_finding_id": item["parent_finding_id"],
+            "statement": item["statement"][:1_000],
+            "factors": [value[:160] for value in item["factors"][:6]],
+            "outcome": item["outcome"][:160],
+            "direction": item["direction"][:80],
+            "assertion_strength": item["assertion_strength"][:80],
+            "synthesis_status": item["synthesis_status"][:80],
+            "certainty": item["certainty"],
             "document_ids": [
-                str(value.get("document_id"))
-                for value in contributions
-                if isinstance(value, Mapping) and value.get("document_id")
-            ][:12],
+                value["document_id"] for value in item["paper_contributions"][:12]
+            ],
         }
 
     @staticmethod
     def _evidence_summary(item: Mapping[str, Any]) -> dict[str, Any]:
-        result = item.get("reported_result")
         return {
-            "evidence_id": str(item.get("evidence_id") or ""),
-            "document_id": str(item.get("document_id") or ""),
-            "source_kind": str(item.get("source_kind") or ""),
-            "source_ref": str(item.get("source_ref") or "")[:500],
-            "source_excerpt": str(item.get("source_excerpt") or "")[:800],
-            "evidence_role": item.get("evidence_role"),
-            "reported_result": dict(result) if isinstance(result, Mapping) else None,
-            "attribution_scope": item.get("attribution_scope"),
-            "resolution_status": item.get("resolution_status"),
-            "confidence": item.get("confidence"),
-            "supports_finding": item.get("supports_finding") is True,
-            "eligible_for_finding_authoring": item.get("eligible_for_finding_authoring") is True,
-            "supersedes_evidence_id": item.get("supersedes_evidence_id"),
-            "superseded_by_evidence_id": item.get("superseded_by_evidence_id"),
+            "evidence_id": item["evidence_id"],
+            "document_id": item["document_id"],
+            "source_kind": item["source_kind"],
+            "source_ref": item["source_ref"][:500],
+            "source_excerpt": item["source_excerpt"][:800],
+            "evidence_role": item["evidence_role"],
+            "reported_result": item["reported_result"],
+            "attribution_scope": item["attribution_scope"],
+            "resolution_status": item["resolution_status"],
+            "confidence": item["confidence"],
+            "supports_finding": item["supports_finding"],
+            "eligible_for_finding_authoring": item["eligible_for_finding_authoring"],
+            "supersedes_evidence_id": item["supersedes_evidence_id"],
+            "superseded_by_evidence_id": item["superseded_by_evidence_id"],
         }
 
     @staticmethod
@@ -318,7 +310,7 @@ class InspectPublishedFindingCapability:
             arguments.finding_id,
             analysis_version=arguments.analysis_version,
         )
-        version = int(detail["analysis_version"])
+        version = detail["analysis_version"]
         review_key = dict(collection_id=context.collection_id, objective_id=arguments.objective_id,
                           analysis_version=version, finding_id=arguments.finding_id)
         feedback = await self.finding_feedback_service.list_feedback(**review_key)
@@ -331,12 +323,8 @@ class InspectPublishedFindingCapability:
             offset=arguments.evidence_offset,
             limit=arguments.evidence_limit,
         )
-        evidence_items = [
-            dict(item)
-            for item in evidence.get("items", ())
-            if isinstance(item, Mapping)
-        ]
-        evidence_total = int(evidence.get("total") or 0)
+        evidence_items = evidence["items"]
+        evidence_total = evidence["total"]
         review = detail.get("evidence_review", {})
         replacements = review.get("evidence_replacements", {})
         pending_ids = {
@@ -353,7 +341,7 @@ class InspectPublishedFindingCapability:
             items = candidates.get("items", ())
             for item in items:
                 if item["evidence_id"] in pending_ids:
-                    replacement_evidence.append(dict(item))
+                    replacement_evidence.append(item)
                     pending_ids.remove(item["evidence_id"])
             offset += len(items)
             if not items or offset >= candidates["total"]:
@@ -375,11 +363,11 @@ class InspectPublishedFindingCapability:
         )
         result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "objective_id": arguments.objective_id,
                 "analysis_version": version,
-                "finding": dict(detail["finding"]),
+                "finding": detail["finding"],
                 "feedback_records": [{
                     'feedback_id': item.feedback_id,
                     'collection_id': item.collection_id,
@@ -523,7 +511,7 @@ class InspectPublishedFindingCapability:
             "content": json.dumps({
                 "tool_call_id": result.tool_call_id,
                 "status": result.status.value,
-                "data": deepcopy(dict(result.data)),
+                "data": result.data,
                 "resource_refs": [
                     {
                         "resource_type": item.resource_type,
@@ -540,7 +528,7 @@ class InspectPublishedFindingCapability:
             if not evidence_items:
                 return ChatToolResult(
                     tool_call_id=context.tool_call_id,
-                    status="failed",
+                    status=ToolResultStatus.FAILED,
                     error_code="finding_read_exceeds_budget",
                     error_message=(
                         "The complete Finding or one Evidence record exceeds the read budget. "

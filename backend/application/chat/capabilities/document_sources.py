@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
+from domain.chat import ToolResultStatus
 
 import hashlib
 import json
@@ -18,7 +18,7 @@ from application.chat.capabilities.contracts import (
 )
 from application.chat.context_builder import ChatContextBuilder
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from domain.source import render_markdown_table
+from domain.source import SourceBlock, SourceDocument, SourceFigure, SourceTable, render_markdown_table
 from infra.source.artifact_bundle import source_table_payload
 
 _SOURCE_CONTENT_LIMIT = 2_500
@@ -39,7 +39,7 @@ async def _unavailable_document_sources(
         except FileNotFoundError:
             missing.append(document_id)
     return ChatToolResult(
-        tool_call_id=context.tool_call_id, status="failed",
+        tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
         error_code="document_not_found" if missing else "document_sources_not_ready",
         error_message=(
             "These document identifiers are not in this collection. Use browse_collection_papers "
@@ -173,7 +173,7 @@ class ReadSourceCapability:
         if source is None:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="source_not_found",
                 error_message="The requested canonical Source was not found in this paper.",
             )
@@ -192,7 +192,7 @@ class ReadSourceCapability:
         if arguments.offset > 0 and arguments.offset >= canonical_length:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     **source,
                     "document_id": document.document_id,
@@ -223,11 +223,11 @@ class ReadSourceCapability:
             )
         result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 **source,
                 "document_id": document.document_id,
-                "document_title": str(document.title or "")[:500],
+                "document_title": document.title[:500],
                 "content": content,
                 "content_offset": start,
                 "canonical_length": canonical_length,
@@ -253,7 +253,7 @@ class ReadSourceCapability:
                 else:
                     high = candidate_end - 1
             if low == start:
-                return ChatToolResult(tool_call_id=context.tool_call_id, status="failed",
+                return ChatToolResult(tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
                                       error_code="source_batch_too_large",
                                       error_message="Read this Source individually to leave room for its content and locator.")
             result = replace(result, data={**result.data, "content": canonical_content[start:low],
@@ -262,7 +262,7 @@ class ReadSourceCapability:
         return result
 
     @staticmethod
-    def _source_record(document: Any, arguments: ReadSourceToolRequest) -> dict[str, Any] | None:
+    def _source_record(document: SourceDocument, arguments: ReadSourceToolRequest) -> dict[str, Any] | None:
         if arguments.source_kind == "text_window":
             item = next(
                 (block for block in document.blocks if block.block_id == arguments.source_ref),
@@ -276,8 +276,8 @@ class ReadSourceCapability:
                 "source_ref": item.block_id,
                 "page": item.page,
                 "heading_path": item.heading_path,
-                "block_type": str(item.block_type or "paragraph"),
-                "_canonical_content": str(item.text or ""),
+                "block_type": item.block_type,
+                "_canonical_content": item.text,
             }
         if arguments.source_kind == "table":
             item = next(
@@ -296,7 +296,7 @@ class ReadSourceCapability:
                 "caption": item.caption_text,
                 "row_count": item.row_count,
                 "column_count": item.col_count,
-                "_canonical_content": str(record.get("table_markdown") or "").strip(),
+                "_canonical_content": (record["table_markdown"] or "").strip(),
             }
         item = next(
             (figure for figure in document.figures if figure.figure_id == arguments.source_ref),
@@ -311,7 +311,7 @@ class ReadSourceCapability:
             "page": item.page,
             "heading_path": item.heading_path,
             "figure_label": item.figure_label,
-            "_canonical_content": str(item.caption_text or ""),
+            "_canonical_content": (item.caption_text or ""),
         }
 
 
@@ -365,14 +365,12 @@ class SearchSourcesCapability:
                     for block in sorted(
                         document.blocks, key=lambda item: item.block_order
                     )
-                    if str(block.text or "").strip()
+                    if block.text.strip()
                 ),
                 *(
                     (
                         InspectDocumentSourcesCapability._table_source(table),
-                        str(
-                            source_table_payload(table)["table_markdown"] or ""
-                        ).strip(),
+                        (source_table_payload(table)["table_markdown"] or "").strip(),
                     )
                     for table in sorted(
                         document.tables, key=lambda item: item.table_order
@@ -381,12 +379,12 @@ class SearchSourcesCapability:
                 *(
                     (
                         InspectDocumentSourcesCapability._figure_source(figure),
-                        str(figure.caption_text or ""),
+                        (figure.caption_text or ""),
                     )
                     for figure in sorted(
                         document.figures, key=lambda item: item.figure_order
                     )
-                    if str(figure.caption_text or "").strip()
+                    if (figure.caption_text or "").strip()
                 ),
             )
             for item, canonical_content in candidates:
@@ -407,7 +405,7 @@ class SearchSourcesCapability:
                     {
                         **item,
                         "document_id": document.document_id,
-                        "document_title": str(document.title or "")[:500],
+                        "document_title": document.title[:500],
                         "content": content,
                         "content_truncated": truncated,
                     }
@@ -430,7 +428,7 @@ class SearchSourcesCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "query": arguments.query,
                 "document_ids": list(arguments.document_ids),
@@ -494,19 +492,19 @@ class InspectTableCapability:
         if table is None:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="table_source_not_found",
                 error_message="The requested table Source was not found in this paper.",
             )
 
         record = source_table_payload(table)
-        canonical_markdown = str(record["table_markdown"] or "").strip()
+        canonical_markdown = (record["table_markdown"] or "").strip()
         digest = hashlib.sha256(canonical_markdown.encode("utf-8")).hexdigest()
         data_rows = table.table_matrix[table.header_row_count :]
         if arguments.row_offset > 0 and arguments.row_offset >= len(data_rows):
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 data={
                     "document_id": document.document_id,
                     "table_ref": table.table_id,
@@ -596,7 +594,7 @@ class InspectTableCapability:
 
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "document_id": document.document_id,
                 "document_title": document.title,
@@ -638,11 +636,11 @@ class InspectTableCapability:
 
     @staticmethod
     def _bounded_utf8(
-        value: Any,
+        value: str,
         *,
         limit: int,
     ) -> tuple[str, bool]:
-        text = str(value or "")
+        text = value
         encoded = text.encode("utf-8")
         if len(encoded) <= limit:
             return text, False
@@ -690,7 +688,7 @@ class InspectDocumentSourcesCapability:
             *(
                 self._text_source(block)
                 for block in sorted(document.blocks, key=lambda item: item.block_order)
-                if str(block.text or "").strip()
+                if block.text.strip()
             ),
             *(
                 self._table_source(table)
@@ -699,7 +697,7 @@ class InspectDocumentSourcesCapability:
             *(
                 self._figure_source(figure)
                 for figure in sorted(document.figures, key=lambda item: item.figure_order)
-                if str(figure.caption_text or "").strip()
+                if (figure.caption_text or "").strip()
             ),
         ]
         for source in sources:
@@ -710,7 +708,7 @@ class InspectDocumentSourcesCapability:
             source["source_label"] = f"S{index:03d}"
         sections: dict[str, dict[str, Any]] = {}
         for source in sources:
-            heading = " ".join(str(source.get("heading_path") or "").split())
+            heading = " ".join((source["heading_path"] or "").split())
             section = sections.setdefault(heading, {
                 "heading_path": heading, "pages": [], "source_count": 0,
                 "source_types": [], "first_source_ref": source["source_ref"],
@@ -730,7 +728,7 @@ class InspectDocumentSourcesCapability:
             if (not selected_types or item["source_type"] in selected_types)
             and (arguments.page is None or item["page"] == arguments.page)
             and (arguments.heading_path is None
-                 or " ".join(str(item.get("heading_path") or "").split()) == arguments.heading_path)
+                 or " ".join((item["heading_path"] or "").split()) == arguments.heading_path)
             and (
                 arguments.source_ref is None
                 or item["source_ref"] == arguments.source_ref
@@ -784,11 +782,11 @@ class InspectDocumentSourcesCapability:
             )
         result = ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "document": {
                     "document_id": document.document_id,
-                    "title": str(document.title or "")[:500],
+                    "title": document.title[:500],
                 },
                 "query": arguments.query,
                 "source_ref": arguments.source_ref,
@@ -838,7 +836,7 @@ class InspectDocumentSourcesCapability:
                 visible[0] = {**visible[0], "content": "", "content_truncated": True,
                               "reading_note": "Read this oversized Source with read_source or inspect_table."}
             else:
-                return ChatToolResult(tool_call_id=context.tool_call_id, status="failed",
+                return ChatToolResult(tool_call_id=context.tool_call_id, status=ToolResultStatus.FAILED,
                                       error_code="source_batch_too_large",
                                       error_message="Request this paper individually with an exact Source or narrower section.")
             next_offset = arguments.offset + len(visible)
@@ -866,7 +864,7 @@ class InspectDocumentSourcesCapability:
             "content": json.dumps({
                 "tool_call_id": result.tool_call_id,
                 "status": result.status.value,
-                "data": deepcopy(dict(result.data)),
+                "data": result.data,
                 "resource_refs": [
                     {
                         "resource_type": item.resource_type,
@@ -882,17 +880,17 @@ class InspectDocumentSourcesCapability:
         })
 
     @staticmethod
-    def _source_label_for_document(document: Any, source_ref: str) -> str:
+    def _source_label_for_document(document: SourceDocument, source_ref: str) -> str:
         refs = [
             block.block_id
             for block in sorted(document.blocks, key=lambda item: item.block_order)
-            if str(block.text or "").strip()
+            if block.text.strip()
         ]
         refs.extend(table.table_id for table in sorted(document.tables, key=lambda item: item.table_order))
         refs.extend(
             figure.figure_id
             for figure in sorted(document.figures, key=lambda item: item.figure_order)
-            if str(figure.caption_text or "").strip()
+            if (figure.caption_text or "").strip()
         )
         try:
             return f"S{refs.index(source_ref) + 1:03d}"
@@ -900,30 +898,30 @@ class InspectDocumentSourcesCapability:
             return ""
 
     @staticmethod
-    def _text_source(block: Any) -> dict[str, Any]:
+    def _text_source(block: SourceBlock) -> dict[str, Any]:
         content, truncated = InspectDocumentSourcesCapability._bounded(block.text)
         return {
             "source_type": "text",
             # `source_kind` is the stable Evidence locator kind. Keep the
             # parser-specific block type as separate display metadata.
             "source_kind": "text_window",
-            "block_type": str(block.block_type or "paragraph"),
+            "block_type": block.block_type,
             "source_ref": block.block_id,
             "page": block.page,
             "heading_path": block.heading_path,
             "content": content,
-            "_canonical_content": str(block.text or ""),
+            "_canonical_content": block.text,
             "content_truncated": truncated,
-            "source_digest": hashlib.sha256(str(block.text or "").encode("utf-8")).hexdigest(),
+            "source_digest": hashlib.sha256(block.text.encode("utf-8")).hexdigest(),
         }
 
     @staticmethod
-    def _table_source(table: Any) -> dict[str, Any]:
+    def _table_source(table: SourceTable) -> dict[str, Any]:
         record = source_table_payload(table)
         # Empty parser tables are still valid navigation records. Keep their
         # canonical content representation stable instead of letting the
         # digest path call ``encode`` on ``None``.
-        canonical_markdown = str(record.get("table_markdown") or "").strip()
+        canonical_markdown = (record["table_markdown"] or "").strip()
         content, truncated = InspectDocumentSourcesCapability._bounded(
             canonical_markdown
         )
@@ -945,7 +943,7 @@ class InspectDocumentSourcesCapability:
         }
 
     @staticmethod
-    def _figure_source(figure: Any) -> dict[str, Any]:
+    def _figure_source(figure: SourceFigure) -> dict[str, Any]:
         content, truncated = InspectDocumentSourcesCapability._bounded(
             figure.caption_text
         )
@@ -957,18 +955,18 @@ class InspectDocumentSourcesCapability:
             "heading_path": figure.heading_path,
             "figure_label": figure.figure_label,
             "content": content,
-            "_canonical_content": str(figure.caption_text or ""),
+            "_canonical_content": (figure.caption_text or ""),
             "content_truncated": truncated,
-            "source_digest": hashlib.sha256(str(figure.caption_text or "").encode("utf-8")).hexdigest(),
+            "source_digest": hashlib.sha256((figure.caption_text or "").encode("utf-8")).hexdigest(),
         }
 
     @staticmethod
     def _bounded(
-        value: Any,
+        value: str | None,
         *,
         limit: int = _SOURCE_CONTENT_LIMIT,
     ) -> tuple[str, bool]:
-        text = str(value or "").strip()
+        text = (value or "").strip()
         return text[:limit], len(text) > limit
 
     @staticmethod
@@ -976,7 +974,7 @@ class InspectDocumentSourcesCapability:
         if not query:
             return True
         searchable = " ".join(
-            str(item.get(key) or "")
+            (item.get(key) or "")
             for key in ("heading_path", "caption", "figure_label", "content")
         ).casefold()
         normalized = query.casefold()

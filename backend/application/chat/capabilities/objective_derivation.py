@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from collections.abc import Mapping
 from hashlib import sha256
 import json
@@ -97,7 +99,7 @@ class DeriveObjectiveCapability:
         if published is None:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="succeeded",
+                status=ToolResultStatus.SUCCEEDED,
                 data=_abstained_result(
                     arguments.objective_id,
                     reason="parent_analysis_not_published",
@@ -113,7 +115,7 @@ class DeriveObjectiveCapability:
         findings = {
             finding_id: item
             for item in state.get("findings") or ()
-            if (finding_id := _text(_field(item, "finding_id")))
+            if (finding_id := (_field(item, "finding_id") or ""))
         }
         omitted_finding_count = int(state.get("omitted_finding_count") or 0)
         evidence_review = state.get("evidence_review")
@@ -124,12 +126,12 @@ class DeriveObjectiveCapability:
             evidence_id: dict(item)
             for item in evidence_review.get("gaps") or ()
             if isinstance(item, Mapping)
-            and (evidence_id := _text(item.get("evidence_id")))
+            and (evidence_id := (item.get("evidence_id") or ""))
         }
         contributions = {
             document_id: item
             for item in state.get("paper_contributions") or ()
-            if (document_id := _text(_field(item, "document_id")))
+            if (document_id := (_field(item, "document_id") or ""))
         }
 
         accepted: list[dict[str, Any]] = []
@@ -213,7 +215,7 @@ class DeriveObjectiveCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "parent_objective_id": arguments.objective_id,
                 "published_analysis_version": int(version),
@@ -262,7 +264,7 @@ class DeriveObjectiveCapability:
                 {
                     **common,
                     "snapshot": {
-                        "statement": _text(_field(finding, "statement"))[:1_000],
+                        "statement": (_field(finding, "statement") or "")[:1_000],
                     },
                 },
                 ChatResourceRef(
@@ -279,21 +281,21 @@ class DeriveObjectiveCapability:
             gap = gaps.get(reference_id)
             if gap is None:
                 return {}, None, f"unknown_evidence_gap:{reference_id}"
-            status = _text(gap.get("evidence_status")) or "unknown"
+            status = (gap.get("evidence_status") or "") or "unknown"
             if status == "extraction_failed":
                 return (
                     {},
                     None,
                     f"technical_failure_is_not_scientific_basis:{reference_id}",
                 )
-            document_id = _text(gap.get("document_id"))
-            source_ref = _text(gap.get("source_ref"))
+            document_id = (gap.get("document_id") or "")
+            source_ref = (gap.get("source_ref") or "")
             resource_ref = None
             if document_id and source_ref:
                 resource_ref = ChatResourceRef(
                     resource_type="source",
                     resource_id=(
-                        f"{document_id}:{_text(gap.get('source_kind'))}:{source_ref}"
+                        f"{document_id}:{(gap.get('source_kind') or '')}:{source_ref}"
                     ),
                     href=(
                         f"/collections/{context.collection_id}/documents/{document_id}?"
@@ -307,9 +309,9 @@ class DeriveObjectiveCapability:
                     **common,
                     "snapshot": {
                         "evidence_status": status,
-                        "reason": _text(gap.get("reason"))[:1_000],
+                        "reason": (gap.get("reason") or "")[:1_000],
                         "document_id": document_id,
-                        "source_kind": _text(gap.get("source_kind")),
+                        "source_kind": (gap.get("source_kind") or ""),
                         "source_ref": source_ref,
                     },
                 },
@@ -320,7 +322,7 @@ class DeriveObjectiveCapability:
         contribution = contributions.get(reference_id)
         if contribution is None:
             return {}, None, f"unknown_paper_contribution:{reference_id}"
-        disposition = _text(_field(contribution, "evidence_disposition"))
+        disposition = (_field(contribution, "evidence_disposition") or "")
         if disposition in {"extraction_failed", "excluded"}:
             return (
                 {},
@@ -333,9 +335,7 @@ class DeriveObjectiveCapability:
                 "snapshot": {
                     "document_id": reference_id,
                     "evidence_disposition": disposition,
-                    "reason": _text(
-                        _field(contribution, "evidence_disposition_reason")
-                    )[:1_000],
+                    "reason": (_field(contribution, "evidence_disposition_reason") or "")[:1_000],
                 },
             },
             ChatResourceRef(
@@ -391,8 +391,7 @@ def _field(value: Any, name: str, default: Any = None) -> Any:
     return getattr(value, name, default)
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
+
 
 
 def _deduplicate_refs(refs: list[ChatResourceRef]) -> tuple[ChatResourceRef, ...]:

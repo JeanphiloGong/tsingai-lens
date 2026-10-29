@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from typing import Any
 
 from application.chat.capabilities.contracts import (
@@ -58,7 +60,7 @@ class PreviewResearchScopeCapability:
         if not paper_maps:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="paper_map_not_ready",
                 error_message=(
                     "The collection Paper Map is not ready. Prepare the literature "
@@ -152,7 +154,7 @@ class PreviewResearchScopeCapability:
             )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "question": arguments.question,
                 "likely_relevant": likely_relevant,

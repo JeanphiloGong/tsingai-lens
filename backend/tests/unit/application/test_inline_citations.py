@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 import json
@@ -29,7 +31,7 @@ def _read_result(
 ) -> ChatToolResult:
     return ChatToolResult(
         tool_call_id=call_id,
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "document_id": "doc-1",
             "document_title": "P006.pdf",
@@ -99,7 +101,7 @@ def test_ambiguous_short_marker_requires_a_document_qualified_reference() -> Non
     second = _read_result(call_id="call-2", source_ref="shared-table")
     second = ChatToolResult(
         tool_call_id="call-2",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={**second.data, "document_id": "doc-2", "document_title": "P007.pdf"},
         resource_refs=(
             ChatResourceRef(
@@ -129,7 +131,7 @@ def test_ambiguous_short_marker_requires_a_document_qualified_reference() -> Non
 def test_search_match_is_readable_but_never_a_supporting_link() -> None:
     result = ChatToolResult(
         tool_call_id="call-search",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "matches": [
                 {
@@ -166,7 +168,7 @@ def test_search_match_is_readable_but_never_a_supporting_link() -> None:
 def test_table_ref_is_bound_when_the_capability_uses_its_canonical_field_name() -> None:
     result = ChatToolResult(
         tool_call_id="call-table",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={
             "document_id": "doc-1",
             "document_title": "P006.pdf",
@@ -224,7 +226,7 @@ def test_historical_assistant_message_is_projected_with_its_source_context() -> 
     tool = ChatMessage(
         message_id="tool-1",
         session_id="session-1",
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(source),
             ensure_ascii=True,

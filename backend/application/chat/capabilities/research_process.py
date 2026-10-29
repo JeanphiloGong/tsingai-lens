@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from collections import Counter
 from collections.abc import Mapping
 from typing import Any
@@ -87,7 +89,7 @@ class InspectResearchProcessCapability:
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "collection_id": context.collection_id,
                 "process": {

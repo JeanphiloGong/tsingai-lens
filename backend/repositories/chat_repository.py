@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus, ToolRisk
+
 import json
+from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -127,9 +130,6 @@ class ChatSessionSummary:
     session: ChatSession
     title: str | None = None
 
-    def __post_init__(self) -> None:
-        first_line = (self.title or "").strip().split("\n", 1)[0].strip()
-        object.__setattr__(self, "title", first_line[:160] or None)
 
 
 class ChatRepository:
@@ -180,8 +180,8 @@ class ChatRepository:
                 name=row.name,
                 arguments=dict(row.arguments),
                 arguments_digest=row.arguments_digest,
-                risk=row.risk,
-                status=row.status,
+                risk=ToolRisk(row.risk),
+                status=ToolCallStatus(row.status),
                 started_at=_optional_iso(row.started_at),
                 finished_at=_optional_iso(row.finished_at),
                 error_code=row.error_code,
@@ -539,7 +539,7 @@ class ChatRepository:
                         fork_content=row.fork_content,
                         title=row.title,
                     ),
-                    title=row.title or title,
+                    title=(row.title or title or "").strip().split("\n", 1)[0].strip()[:160] or None,
                 )
                 for row, title in rows.all()
             )
@@ -563,7 +563,7 @@ class ChatRepository:
                     ChatToolRequest(
                         tool_call_id=call_row.tool_call_id,
                         name=call_row.name,
-                        arguments=dict(call_row.arguments),
+                        arguments=call_row.arguments,
                         position=call_row.position,
                         decision_user_id=call_row.decision_user_id,
                         decision_arguments_digest=call_row.decision_arguments_digest,
@@ -579,8 +579,8 @@ class ChatRepository:
                 if result_row is not None:
                     tool_result = ChatToolResult(
                         tool_call_id=result_row.tool_call_id,
-                        status=result_row.result_status,
-                        data=dict(result_row.result_data or {}),
+                        status=ToolResultStatus(result_row.result_status),
+                        data=result_row.result_data,
                         resource_refs=tuple(
                             ChatResourceRef(
                                 resource_type=item["resource_type"],
@@ -589,7 +589,7 @@ class ChatRepository:
                             )
                             for item in result_row.result_resource_refs or ()
                         ),
-                        warnings=tuple(str(item) for item in result_row.result_warnings or ()),
+                        warnings=tuple(result_row.result_warnings),
                         error_code=result_row.result_error_code,
                         error_message=result_row.result_error_message,
                     )
@@ -616,7 +616,7 @@ class ChatRepository:
                 messages.append(ChatMessage(
                     message_id=row.message_id,
                     session_id=row.session_id,
-                    role=row.role,
+                    role=ChatMessageRole(row.role),
                     content=row.content,
                     created_at=_iso(row.created_at),
                     tool_call_id=row.tool_call_id,
@@ -635,7 +635,7 @@ class ChatRepository:
                 ChatToolRequest(
                     tool_call_id=call.tool_call_id,
                     name=call.name,
-                    arguments=dict(call.arguments),
+                    arguments=call.arguments,
                     position=call.position,
                     decision_user_id=call.decision_user_id,
                     decision_arguments_digest=call.decision_arguments_digest,
@@ -654,8 +654,8 @@ class ChatRepository:
             if result_row is not None:
                 tool_result = ChatToolResult(
                     tool_call_id=result_row.tool_call_id,
-                    status=result_row.result_status,
-                    data=dict(result_row.result_data or {}),
+                    status=ToolResultStatus(result_row.result_status),
+                    data=result_row.result_data,
                     resource_refs=tuple(
                         ChatResourceRef(
                             resource_type=item["resource_type"],
@@ -664,7 +664,7 @@ class ChatRepository:
                         )
                         for item in result_row.result_resource_refs or ()
                     ),
-                    warnings=tuple(str(item) for item in result_row.result_warnings or ()),
+                    warnings=tuple(result_row.result_warnings),
                     error_code=result_row.result_error_code,
                     error_message=result_row.result_error_message,
                 )
@@ -691,7 +691,7 @@ class ChatRepository:
             return ChatMessage(
                 message_id=row.message_id,
                 session_id=row.session_id,
-                role=row.role,
+                role=ChatMessageRole(row.role),
                 content=row.content,
                 created_at=_iso(row.created_at),
                 tool_call_id=row.tool_call_id,
@@ -987,8 +987,8 @@ class ChatRepository:
                 name=row.name,
                 arguments=dict(row.arguments),
                 arguments_digest=row.arguments_digest,
-                risk=row.risk,
-                status=row.status,
+                risk=ToolRisk(row.risk),
+                status=ToolCallStatus(row.status),
                 started_at=_optional_iso(row.started_at),
                 finished_at=_optional_iso(row.finished_at),
                 error_code=row.error_code,
@@ -1021,8 +1021,8 @@ class ChatRepository:
                     name=row.name,
                     arguments=dict(row.arguments),
                     arguments_digest=row.arguments_digest,
-                    risk=row.risk,
-                    status=row.status,
+                    risk=ToolRisk(row.risk),
+                    status=ToolCallStatus(row.status),
                     started_at=_optional_iso(row.started_at),
                     finished_at=_optional_iso(row.finished_at),
                     error_code=row.error_code,
@@ -1142,7 +1142,7 @@ class ChatRepository:
                         assistant_message_id=call.assistant_message_id,
                         name=call.name,
                         position=call.position,
-                        arguments=dict(call.arguments),
+                        arguments=call.arguments,
                         arguments_digest=call.arguments_digest,
                         risk=call.risk.value,
                         status=call.status.value,
@@ -1184,7 +1184,7 @@ class ChatRepository:
                             or ChatToolRequest(
                                 tool_call_id=call_row.tool_call_id,
                                 name=call_row.name,
-                                arguments=dict(call_row.arguments),
+                                arguments=call_row.arguments,
                                 position=call_row.position,
                                 decision_user_id=call_row.decision_user_id,
                                 decision_arguments_digest=call_row.decision_arguments_digest,
@@ -1201,7 +1201,7 @@ class ChatRepository:
                 if call_row is None or call_row.session_id != chat_session.session_id:
                     raise ValueError("tool result belongs to an unknown call")
                 call_row.result_status = result.status.value
-                call_row.result_data = dict(result.data)
+                call_row.result_data = deepcopy(result.data)
                 call_row.result_resource_refs = [
                     asdict(item) for item in result.resource_refs
                 ]
@@ -1248,8 +1248,8 @@ class ChatRepository:
                 name=row.name,
                 arguments=dict(row.arguments),
                 arguments_digest=row.arguments_digest,
-                risk=row.risk,
-                status=row.status,
+                risk=ToolRisk(row.risk),
+                status=ToolCallStatus(row.status),
                 started_at=_optional_iso(row.started_at),
                 finished_at=_optional_iso(row.finished_at),
                 error_code=row.error_code,
@@ -1334,8 +1334,8 @@ class ChatRepository:
                 name=row.name,
                 arguments=dict(row.arguments),
                 arguments_digest=row.arguments_digest,
-                risk=row.risk,
-                status=row.status,
+                risk=ToolRisk(row.risk),
+                status=ToolCallStatus(row.status),
                 started_at=_optional_iso(row.started_at),
                 finished_at=_optional_iso(row.finished_at),
                 error_code=row.error_code,

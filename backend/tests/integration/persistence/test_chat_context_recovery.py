@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 from domain.chat import ChatToolRequest
@@ -38,7 +40,7 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
             risk=ToolRisk.READ,
         ).start(NOW).succeed(NOW)
         content = "Synthetic prior paper result; material state and tensile orientation constrain comparison. " * 900
-        result = ChatToolResult(tool_call_id=call.tool_call_id, status="succeeded", data={
+        result = ChatToolResult(tool_call_id=call.tool_call_id, status=ToolResultStatus.SUCCEEDED, data={
             **call.arguments, "content": content, "source_digest": sha256(content.encode()).hexdigest(),
             "content_truncated": False,
         })
@@ -66,7 +68,7 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
                 ChatMessage(
                     message_id=f"prior-result-{index}",
                     session_id=session.session_id,
-                    role="tool",
+                    role=ChatMessageRole.TOOL,
                     content=json.dumps(
                         asdict(result),
                         ensure_ascii=True,

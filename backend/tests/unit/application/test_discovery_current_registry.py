@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 import json
@@ -22,7 +24,7 @@ def anyio_backend():
 def discovered_messages():
     tool_result = ChatToolResult(
         tool_call_id="discovery",
-        status="succeeded",
+        status=ToolResultStatus.SUCCEEDED,
         data={"loaded_tool_names": ["read_source"]},
     )
     return [
@@ -52,7 +54,7 @@ def discovered_messages():
         ChatMessage(
             message_id="result",
             session_id="chat-1",
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(tool_result),
                 ensure_ascii=True,

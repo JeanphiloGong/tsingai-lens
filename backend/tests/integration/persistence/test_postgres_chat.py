@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole, ToolResultStatus
+
 from dataclasses import asdict
 
 import json
@@ -72,7 +74,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     user_message = ChatMessage.user(
         message_id="msg-1",
         session_id=chat.session_id,
-        content="读取 collection",
+        content="  读取 collection\n保持实验状态独立。",
         created_at="2026-08-19T00:00:01+00:00",
         source_contexts=(
             ChatSourceContext(
@@ -116,10 +118,15 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     ).start("2026-08-19T00:00:03+00:00").succeed(
         "2026-08-19T00:00:04+00:00"
     )
+    result_payload = {
+        "document_count": 10,
+        "measurement_keys": ["strength-A", "strength-a", "001"],
+        "certainty": 0.735123,
+    }
     read_result = ChatToolResult(
         tool_call_id=read_call.tool_call_id,
-        status="succeeded",
-        data={"document_count": 10},
+        status=ToolResultStatus.SUCCEEDED,
+        data=result_payload,
         resource_refs=(ChatResourceRef(
             resource_type="document",
             resource_id="doc-source",
@@ -130,7 +137,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     tool_message = ChatMessage(
         message_id="msg-3",
         session_id=chat.session_id,
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(read_result),
             ensure_ascii=True,
@@ -157,6 +164,14 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         tool_results=(read_result,),
     )
 
+    result_payload["measurement_keys"].append("outside-change")
+    stored_tool_message = await repository.read_message(tool_message.message_id)
+    assert stored_tool_message.tool_result.data["measurement_keys"] == [
+        "strength-A", "strength-a", "001",
+    ]
+    assert stored_tool_message.tool_result.data["certainty"] == 0.735123
+    result_payload["measurement_keys"].pop()
+
     stored_chat = await repository.read_session(chat.session_id)
     assert stored_chat is not None
     assert stored_chat.collection_id == chat.collection_id
@@ -164,7 +179,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         user_id=chat.user_id, collection_id=chat.collection_id,
     )
     assert [(item.session.session_id, item.title) for item in history] == [
-        (chat.session_id, user_message.content),
+        (chat.session_id, "读取 collection"),
         (empty_chat.session_id, None),
     ]
     assert (await repository.list_sessions(
@@ -269,7 +284,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         is None
     )
 
-    write_result = ChatToolResult(tool_call_id=claimed.tool_call_id, status="succeeded")
+    write_result = ChatToolResult(tool_call_id=claimed.tool_call_id, status=ToolResultStatus.SUCCEEDED)
     finished = claimed.succeed("2026-08-19T00:01:04+00:00")
     batch = tuple(ChatToolCall.requested(
         tool_call_id=f"call-batch-{position}", session_id=chat.session_id,
@@ -285,11 +300,11 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     ))
     observations = (
         ChatToolResult(
-            tool_call_id=batch[0].tool_call_id, status="succeeded",
+            tool_call_id=batch[0].tool_call_id, status=ToolResultStatus.SUCCEEDED,
             data={"document_id": batch[0].arguments["document_id"]},
         ),
         ChatToolResult(
-            tool_call_id=batch[1].tool_call_id, status="failed",
+            tool_call_id=batch[1].tool_call_id, status=ToolResultStatus.FAILED,
             error_code="source_unavailable",
             error_message="The selected source could not be read.",
         ),
@@ -299,7 +314,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         ChatMessage(
             message_id="msg-write-result",
             session_id=chat.session_id,
-            role="tool",
+            role=ChatMessageRole.TOOL,
             content=json.dumps(
                 asdict(write_result),
                 ensure_ascii=True,
@@ -333,7 +348,7 @@ async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
             ChatMessage(
                 message_id=f"msg-result-{index}",
                 session_id=chat.session_id,
-                role="tool",
+                role=ChatMessageRole.TOOL,
                 content=json.dumps(
                     asdict(result),
                     ensure_ascii=True,

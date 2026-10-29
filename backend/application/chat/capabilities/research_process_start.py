@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,7 +60,7 @@ class StartResearchProcessCapability:
         if not documents:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="collection_has_no_papers",
                 error_message=(
                     "Upload at least one paper before starting literature analysis."
@@ -85,7 +87,7 @@ class StartResearchProcessCapability:
         if missing_ids:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
-                status="failed",
+                status=ToolResultStatus.FAILED,
                 error_code="document_not_found",
                 error_message=(
                     "The selected document is not part of this collection: "
@@ -104,7 +106,7 @@ class StartResearchProcessCapability:
         scope_is_collection = not requested_ids
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="queued",
+            status=ToolResultStatus.QUEUED,
             data={
                 "collection_id": context.collection_id,
                 "document_ids": list(selected_ids),

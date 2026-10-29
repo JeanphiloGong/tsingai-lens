@@ -106,7 +106,7 @@ class ChatSourceContextPayload(BaseModel):
     quote: str = Field(min_length=1, max_length=6000)
     heading_path: str | None = Field(default=None, max_length=1000)
     quote_truncated: bool = False
-    source_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    source_digest: str | None = Field(default=None, pattern=r"^[0-9a-fA-F]{64}$")
 
 
 class ChatToolResultResponse(BaseModel):
@@ -245,7 +245,7 @@ class ChatMessageFeedbackRequest(BaseModel):
 
     rating: Literal["helpful", "not_helpful"] | None
     reason: Literal["incorrect", "incomplete", "unclear", "other"] | None = None
-    comment: str | None = Field(default=None, max_length=2000)
+    comment: str | None = Field(default=None, max_length=2000, pattern=r"^[^\x00]*$")
 
     @model_validator(mode="after")
     def validate_details(self) -> ChatMessageFeedbackRequest:
@@ -253,8 +253,8 @@ class ChatMessageFeedbackRequest(BaseModel):
             self.reason is not None or self.comment is not None
         ):
             raise ValueError("withdrawn feedback cannot have a reason or comment")
-        if self.reason is not None and self.rating != "not_helpful":
-            raise ValueError("only negative feedback may have a reason")
+        if self.comment is not None:
+            self.comment = self.comment.strip() or None
         return self
 
 

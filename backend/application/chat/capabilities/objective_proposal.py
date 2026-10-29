@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from domain.chat import ToolResultStatus
+
 from hashlib import sha256
 import json
 from typing import Any, Annotated
@@ -154,7 +156,7 @@ class ProposeObjectiveDraftsCapability:
         )
         return ChatToolResult(
             tool_call_id=context.tool_call_id,
-            status="succeeded",
+            status=ToolResultStatus.SUCCEEDED,
             data={
                 "draft_count": len(records),
                 "drafts": records,

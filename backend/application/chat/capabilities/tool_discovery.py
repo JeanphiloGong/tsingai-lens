@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from domain.chat import ToolResultStatus
 
-from domain.chat import ToolResultStatus
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec

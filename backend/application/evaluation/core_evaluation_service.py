@@ -208,9 +208,9 @@ class CoreEvaluationService:
                         reason="comparison values do not match gold",
                     )
                 )
-            if self._text(gold.payload.get("direction")) and self._text(
-                prediction.payload.get("direction")
-            ) != self._text(gold.payload.get("direction")):
+            if gold.payload.get("direction") and (
+                prediction.payload.get("direction") != gold.payload["direction"]
+            ):
                 failures.append(
                     self._failure(
                         run_id=run_id,
@@ -221,9 +221,9 @@ class CoreEvaluationService:
                         reason="comparison direction does not match gold",
                     )
                 )
-        if self._text(gold.payload.get("unit")) != self._text(
-            prediction.payload.get("unit")
-        ):
+        if (gold.payload.get("unit") or "").lower() != (
+            prediction.payload.get("unit") or ""
+        ).lower():
             failures.append(
                 self._failure(
                     run_id=run_id,
@@ -407,12 +407,6 @@ class CoreEvaluationService:
             return float(value)
         except (TypeError, ValueError):
             return None
-
-    def _text(self, value: Any) -> str | None:
-        if value is None:
-            return None
-        text = str(value).strip().lower()
-        return text or None
 
     def _likely_layer(self, failure_type: str) -> str:
         if failure_type in {"unit_mismatch", "comparison_direction_mismatch"}:

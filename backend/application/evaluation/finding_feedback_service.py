@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from hashlib import sha1, sha256
 from typing import (
@@ -25,13 +26,6 @@ from domain.core.finding import (
     FindingMechanismRelation,
     FindingPaperContribution,
 )
-from domain.core.finding import _certainty as finding_certainty
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _non_negative_int as finding_non_negative_int
-from domain.core.finding import _positive_int as finding_positive_int
-from domain.core.finding import _stable_id as finding_stable_id
-from domain.core.finding import _strings as finding_strings
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import ObjectiveEvidence, PaperContribution
 from domain.core.scientific_fact import (
     SCIENTIFIC_CONTEXT_SCOPES,
@@ -39,10 +33,6 @@ from domain.core.scientific_fact import (
     ScientificAttribute,
     ScientificContext,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
 from domain.evaluation import FindingCuration, FindingFeedback
 from repositories.finding_review_repository import FindingReviewRepository
 from repositories.objective_repository import ObjectiveRepository
@@ -80,12 +70,6 @@ class FindingFeedbackService:
         note: str | None = None,
         reviewer: str | None = None,
     ) -> FindingFeedback:
-        await self._require_published_finding(
-            collection_id,
-            objective_id,
-            analysis_version,
-            finding_id,
-        )
         created_at = _now_iso()
         feedback = FindingFeedback(
             feedback_id=_stable_id(
@@ -109,6 +93,12 @@ class FindingFeedbackService:
             note=note,
             reviewer=reviewer,
             created_at=created_at,
+        )
+        await self._require_published_finding(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id,
         )
         return await self.review_repository.upsert_feedback(feedback)
 
@@ -1089,19 +1079,16 @@ def _dataset_status(
 
 def _source_snapshot_validity(
     source_findings: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
-    dataset_items: list[Any],
+    dataset_items: list[dict[str, Any]],
 ) -> tuple[str, list[str]]:
     if not source_findings:
         return "stale", ["source_finding_snapshot_missing"]
     current_by_finding_id = {
-        finding_id: item
-        for item in dataset_items
-        if isinstance(item, Mapping)
-        and (finding_id := _text(item.get("finding_id")))
+        item["finding_id"]: item for item in dataset_items
     }
     reasons: list[str] = []
     for source_finding in source_findings:
-        finding_id = _text(source_finding.get("finding_id"))
+        finding_id = source_finding["finding_id"]
         current = current_by_finding_id.get(finding_id)
         if current is None:
             reasons.append("source_finding_missing")
@@ -1109,21 +1096,13 @@ def _source_snapshot_validity(
         if current.get("dataset_use_status") != "training_ready":
             reasons.append("source_finding_no_longer_reviewed")
             continue
-        if _positive_int(current.get("analysis_version")) != _positive_int(
-            source_finding.get("analysis_version")
-        ):
+        if current["analysis_version"] != source_finding["analysis_version"]:
             reasons.append("source_analysis_version_changed")
-        if _text(current.get("finding_fingerprint")) != _text(
-            source_finding.get("finding_fingerprint")
-        ):
+        if current["finding_fingerprint"] != source_finding["finding_fingerprint"]:
             reasons.append("source_finding_changed")
-        if _text(current.get("evidence_fingerprint")) != _text(
-            source_finding.get("evidence_fingerprint")
-        ):
+        if current["evidence_fingerprint"] != source_finding["evidence_fingerprint"]:
             reasons.append("source_evidence_changed")
-        if _dataset_evidence_ids(current) != _strings(
-            source_finding.get("evidence_ids")
-        ):
+        if _dataset_evidence_ids(current) != tuple(source_finding["evidence_ids"]):
             reasons.append("source_evidence_ids_changed")
     if reasons:
         return "stale", list(dict.fromkeys(reasons))
@@ -1131,36 +1110,7 @@ def _source_snapshot_validity(
 
 
 def _dataset_evidence_ids(item: Mapping[str, Any]) -> tuple[str, ...]:
-    return _strings(
-        evidence.get("evidence_id")
-        for evidence in item.get("evidence", [])
-        if isinstance(evidence, Mapping)
-    )
-
-
-def _strings(values: Any) -> tuple[str, ...]:
-    if isinstance(values, (str, bytes)) or values is None:
-        values = ()
-    elif not isinstance(values, (list, tuple)):
-        values = tuple(values)
-    result: list[str] = []
-    for value in values:
-        text = _text(value)
-        if text and text not in result:
-            result.append(text)
-    return tuple(result)
-
-
-def _positive_int(value: Any) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return 0
-    return parsed if parsed > 0 else 0
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
+    return tuple(evidence["evidence_id"] for evidence in item["evidence"])
 
 
 def _training_messages(
@@ -1393,317 +1343,131 @@ __all__ = [
 
 
 def parse_curated_finding(payload: Mapping[str, Any]) -> Finding:
-    """Parse the complete canonical Finding submitted for expert review."""
-    candidate = Finding(
-        collection_id=finding_text(payload.get("collection_id")) or "",
-        objective_id=finding_text(payload.get("objective_id")) or "",
-        analysis_version=finding_positive_int(payload.get("analysis_version")),
-        finding_id=finding_text(payload.get("finding_id"))
-        or finding_stable_id(
-            "finding",
-            payload.get("objective_id"),
-            payload.get("analysis_version"),
-            finding_strings(payload.get("factors")),
-            finding_text(payload.get("outcome")) or "",
-            payload.get("supporting_evidence_ids"),
-        ),
-        statement=finding_text(payload.get("statement")) or "",
-        factors=finding_strings(payload.get("factors")),
-        outcome=finding_text(payload.get("outcome")) or "",
-        direction=finding_choice(
-            payload.get("direction"), SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
-        ),
-        assertion_strength=finding_choice(
-            payload.get("assertion_strength"),
-            FINDING_ASSERTION_STRENGTHS,
-            "descriptive",
-        ),
-        attribution_scope=finding_choice(
-            payload.get("attribution_scope"),
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
-        synthesis_status=finding_choice(
-            payload.get("synthesis_status"),
-            FINDING_SYNTHESIS_STATUSES,
-            "insufficient_confirmation",
-        ),
-        certainty=finding_certainty(payload.get("certainty")),
-        display_rank=finding_non_negative_int(payload.get("display_rank")),
-        mechanisms=tuple(
-            (
-                FindingMechanismRelation(
-                    source_term=finding_text(item.get("source_term")) or "",
-                    relation_type=finding_text(item.get("relation_type")) or "",
-                    target_term=finding_text(item.get("target_term")) or "",
-                    direction=finding_text(item.get("direction")),
-                    assertion_strength=finding_choice(
-                        item.get("assertion_strength"),
-                        FINDING_ASSERTION_STRENGTHS,
-                        "descriptive",
-                    ),
-                    supporting_evidence_ids=finding_strings(
-                        item.get("supporting_evidence_ids")
-                    ),
-                )
-                for item in tuple(
-                    (
-                        dict(item)
-                        for item in (
-                            payload.get("mechanisms")
-                            if isinstance(payload.get("mechanisms"), (list, tuple))
-                            else ()
-                        )
-                        if isinstance(item, Mapping)
-                    )
-                )
-            )
-        ),
-        scientific_context=_review_scientific_context(
-            payload.get("scientific_context")
-        ),
-        limitations=finding_strings(payload.get("limitations")),
-        paper_contributions=tuple(
-            (
-                FindingPaperContribution(
-                    document_id=finding_text(item.get("document_id")) or "",
-                    analysis_status=finding_choice(
-                        item.get("analysis_status"),
-                        PAPER_CONTRIBUTION_STATUSES,
-                        "pending",
-                    ),
-                    supporting_evidence_ids=finding_strings(
-                        item.get("supporting_evidence_ids")
-                    ),
-                    contradicting_evidence_ids=finding_strings(
-                        item.get("contradicting_evidence_ids")
-                    ),
-                    context_evidence_ids=finding_strings(
-                        item.get("context_evidence_ids")
-                    ),
-                    condition_boundary_evidence_ids=finding_strings(
-                        item.get("condition_boundary_evidence_ids")
-                    ),
-                )
-                for item in tuple(
-                    (
-                        dict(item)
-                        for item in (
-                            payload.get("paper_contributions")
-                            if isinstance(
-                                payload.get("paper_contributions"), (list, tuple)
-                            )
-                            else ()
-                        )
-                        if isinstance(item, Mapping)
-                    )
-                )
-            )
-        ),
-        origin=finding_choice(
-            payload.get("origin"), FINDING_ORIGINS, "system_generated"
-        ),
-        source_analysis_version=finding_positive_int(
-            payload.get("source_analysis_version")
-        )
-        or None,
-        parent_finding_id=finding_text(payload.get("parent_finding_id")),
-        created_by_user_id=finding_text(payload.get("created_by_user_id")),
-        created_by_tool_call_id=finding_text(payload.get("created_by_tool_call_id")),
-        created_at=_finding_creation_time(payload.get("created_at")),
-        warnings=finding_strings(payload.get("warnings")),
-        selection_ids=finding_strings(payload.get("selection_ids")),
-        comparison_group_ids=finding_strings(payload.get("comparison_group_ids")),
-    )
-    canonical = {
-        "collection_id": candidate.collection_id,
-        "objective_id": candidate.objective_id,
-        "analysis_version": candidate.analysis_version,
-        "finding_id": candidate.finding_id,
-        "statement": candidate.statement,
-        "factors": list(candidate.factors),
-        "outcome": candidate.outcome,
-        "direction": candidate.direction,
-        "assertion_strength": candidate.assertion_strength,
-        "attribution_scope": candidate.attribution_scope,
-        "synthesis_status": candidate.synthesis_status,
-        "certainty": candidate.certainty,
-        "display_rank": candidate.display_rank,
-        "mechanisms": [
-            {
-                "source_term": mechanism.source_term,
-                "relation_type": mechanism.relation_type,
-                "target_term": mechanism.target_term,
-                "direction": mechanism.direction,
-                "assertion_strength": mechanism.assertion_strength,
-                "supporting_evidence_ids": list(mechanism.supporting_evidence_ids),
-            }
-            for mechanism in candidate.mechanisms
-        ],
-        "scientific_context": {
-            "material": [
-                {
-                    "name": attribute.name,
-                    "value": attribute.value,
-                    "unit": attribute.unit,
-                    **(
-                        {"context_scope": attribute.context_scope}
-                        if attribute.context_scope != "unknown"
-                        else {}
-                    ),
-                    **(
-                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
-                        if attribute.applies_to_outcomes
-                        else {}
-                    ),
-                }
-                for attribute in candidate.scientific_context.material
-            ],
-            "sample": [
-                {
-                    "name": attribute.name,
-                    "value": attribute.value,
-                    "unit": attribute.unit,
-                    **(
-                        {"context_scope": attribute.context_scope}
-                        if attribute.context_scope != "unknown"
-                        else {}
-                    ),
-                    **(
-                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
-                        if attribute.applies_to_outcomes
-                        else {}
-                    ),
-                }
-                for attribute in candidate.scientific_context.sample
-            ],
-            "process": [
-                {
-                    "name": attribute.name,
-                    "value": attribute.value,
-                    "unit": attribute.unit,
-                    **(
-                        {"context_scope": attribute.context_scope}
-                        if attribute.context_scope != "unknown"
-                        else {}
-                    ),
-                    **(
-                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
-                        if attribute.applies_to_outcomes
-                        else {}
-                    ),
-                }
-                for attribute in candidate.scientific_context.process
-            ],
-            "test": [
-                {
-                    "name": attribute.name,
-                    "value": attribute.value,
-                    "unit": attribute.unit,
-                    **(
-                        {"context_scope": attribute.context_scope}
-                        if attribute.context_scope != "unknown"
-                        else {}
-                    ),
-                    **(
-                        {"applies_to_outcomes": list(attribute.applies_to_outcomes)}
-                        if attribute.applies_to_outcomes
-                        else {}
-                    ),
-                }
-                for attribute in candidate.scientific_context.test
-            ],
-        },
-        "limitations": list(candidate.limitations),
-        "paper_contributions": [
-            {
-                "document_id": contribution.document_id,
-                "analysis_status": contribution.analysis_status,
-                "supporting_evidence_ids": list(contribution.supporting_evidence_ids),
-                "contradicting_evidence_ids": list(
-                    contribution.contradicting_evidence_ids
-                ),
-                "context_evidence_ids": list(contribution.context_evidence_ids),
-                "condition_boundary_evidence_ids": list(
-                    contribution.condition_boundary_evidence_ids
-                ),
-            }
-            for contribution in candidate.paper_contributions
-        ],
-        "origin": candidate.origin,
-        "source_analysis_version": candidate.source_analysis_version,
-        "parent_finding_id": candidate.parent_finding_id,
-        "created_by_user_id": candidate.created_by_user_id,
-        "created_by_tool_call_id": candidate.created_by_tool_call_id,
-        "created_at": (
-            candidate.created_at.isoformat() if candidate.created_at else None
-        ),
-        **(
-            {"selection_ids": list(candidate.selection_ids)}
-            if candidate.selection_ids
-            else {}
-        ),
-        **(
-            {"comparison_group_ids": list(candidate.comparison_group_ids)}
-            if candidate.comparison_group_ids
-            else {}
-        ),
-        **({"warnings": list(candidate.warnings)} if candidate.warnings else {}),
+    """Reject malformed external review JSON, then construct the Finding once."""
+    required = {
+        "collection_id", "objective_id", "analysis_version", "finding_id", "statement",
+        "factors", "outcome", "direction", "assertion_strength", "attribution_scope",
+        "synthesis_status", "certainty", "display_rank", "mechanisms", "scientific_context",
+        "limitations", "paper_contributions", "origin", "source_analysis_version",
+        "parent_finding_id", "created_by_user_id", "created_by_tool_call_id", "created_at",
     }
-    if canonical != dict(payload):
-        missing = sorted(set(canonical) - set(payload))
-        unexpected = sorted(set(payload) - set(canonical))
-        details = []
-        if missing:
-            details.append("missing keys: " + ", ".join(missing[:8]))
-        if unexpected:
-            details.append("unexpected keys: " + ", ".join(unexpected[:8]))
-        details.append("preserve canonical value types and field names")
-        raise ValueError(
-            "curated_finding must use the complete canonical Finding contract; "
-            + "; ".join(details)
-        )
-    return candidate
-
-
-def _context_attributes(records: Any) -> tuple[ScientificAttribute, ...]:
-    return tuple(
-        ScientificAttribute(
-            name=scientific_text(item.get("name")) or "",
-            value=(
-                scientific_scalar(item.get("value"))
-                if scientific_scalar(item.get("value")) is not None
-                else ""
-            ),
-            unit=scientific_text(item.get("unit")),
-            context_scope=scientific_choice(
-                item.get("context_scope"), SCIENTIFIC_CONTEXT_SCOPES, "unknown"
-            ),
-            applies_to_outcomes=scientific_terms(item.get("applies_to_outcomes")),
-        )
-        for item in (records if isinstance(records, (list, tuple)) else ())
-        if isinstance(item, Mapping)
+    optional = {"selection_ids", "comparison_group_ids", "warnings"}
+    error = "curated_finding must use the complete canonical Finding contract"
+    if not isinstance(payload, Mapping) or not required <= payload.keys() or payload.keys() - required - optional:
+        raise ValueError(error)
+    for name in ("collection_id", "objective_id", "finding_id", "statement", "outcome"):
+        if not isinstance(payload[name], str) or not payload[name] or payload[name] != payload[name].strip():
+            raise ValueError(f"{error}: invalid {name}")
+    for name in ("parent_finding_id", "created_by_user_id", "created_by_tool_call_id"):
+        value = payload[name]
+        if value is not None and (not isinstance(value, str) or not value or value != value.strip()):
+            raise ValueError(f"{error}: invalid {name}")
+    for name, allowed in (
+        ("direction", SCIENTIFIC_RESULT_DIRECTIONS),
+        ("assertion_strength", FINDING_ASSERTION_STRENGTHS),
+        ("attribution_scope", EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"}),
+        ("synthesis_status", FINDING_SYNTHESIS_STATUSES),
+        ("origin", FINDING_ORIGINS),
+    ):
+        if not isinstance(payload[name], str) or payload[name] not in allowed:
+            raise ValueError(f"{error}: invalid {name}")
+    for name, minimum in (("analysis_version", 1), ("display_rank", 0), ("source_analysis_version", 1)):
+        value = payload[name]
+        if name == "source_analysis_version" and value is None:
+            continue
+        if type(value) is not int or value < minimum:
+            raise ValueError(f"{error}: invalid {name}")
+    if type(payload["certainty"]) not in (int, float) or not 0 <= payload["certainty"] <= 1:
+        raise ValueError(f"{error}: invalid certainty")
+    for name in ("factors", "limitations", "selection_ids", "comparison_group_ids", "warnings"):
+        values = payload.get(name, [])
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value or value != value.strip() for value in values):
+            raise ValueError(f"{error}: invalid {name}")
+    if not isinstance(payload["mechanisms"], list) or not isinstance(payload["paper_contributions"], list):
+        raise ValueError(f"{error}: mechanisms and paper_contributions must be lists")
+    mechanisms = []
+    for item in payload["mechanisms"]:
+        if not isinstance(item, Mapping) or item.keys() != {"source_term", "relation_type", "target_term", "direction", "assertion_strength", "supporting_evidence_ids"}:
+            raise ValueError(f"{error}: invalid mechanism fields")
+        for name in ("source_term", "relation_type", "target_term"):
+            if not isinstance(item[name], str) or not item[name] or item[name] != item[name].strip():
+                raise ValueError(f"{error}: invalid mechanism {name}")
+        if item["direction"] is not None and (not isinstance(item["direction"], str) or item["direction"] not in SCIENTIFIC_RESULT_DIRECTIONS):
+            raise ValueError(f"{error}: invalid mechanism direction")
+        if not isinstance(item["assertion_strength"], str) or item["assertion_strength"] not in FINDING_ASSERTION_STRENGTHS:
+            raise ValueError(f"{error}: invalid mechanism assertion_strength")
+        refs = item["supporting_evidence_ids"]
+        if not isinstance(refs, list) or any(not isinstance(ref, str) or not ref or ref != ref.strip() for ref in refs):
+            raise ValueError(f"{error}: invalid mechanism evidence")
+        mechanisms.append(FindingMechanismRelation(
+            source_term=item["source_term"], relation_type=item["relation_type"],
+            target_term=item["target_term"], direction=item["direction"],
+            assertion_strength=item["assertion_strength"], supporting_evidence_ids=tuple(refs),
+        ))
+    contributions = []
+    evidence_fields = ("supporting_evidence_ids", "contradicting_evidence_ids", "context_evidence_ids", "condition_boundary_evidence_ids")
+    for item in payload["paper_contributions"]:
+        if not isinstance(item, Mapping) or item.keys() != {"document_id", "analysis_status", *evidence_fields}:
+            raise ValueError(f"{error}: invalid paper contribution fields")
+        if not isinstance(item["document_id"], str) or not item["document_id"] or item["document_id"] != item["document_id"].strip():
+            raise ValueError(f"{error}: invalid contribution document_id")
+        if not isinstance(item["analysis_status"], str) or item["analysis_status"] not in PAPER_CONTRIBUTION_STATUSES:
+            raise ValueError(f"{error}: invalid contribution analysis_status")
+        for name in evidence_fields:
+            refs = item[name]
+            if not isinstance(refs, list) or any(not isinstance(ref, str) or not ref or ref != ref.strip() for ref in refs):
+                raise ValueError(f"{error}: invalid {name}")
+        contributions.append(FindingPaperContribution(
+            document_id=item["document_id"], analysis_status=item["analysis_status"],
+            supporting_evidence_ids=tuple(item["supporting_evidence_ids"]),
+            contradicting_evidence_ids=tuple(item["contradicting_evidence_ids"]),
+            context_evidence_ids=tuple(item["context_evidence_ids"]),
+            condition_boundary_evidence_ids=tuple(item["condition_boundary_evidence_ids"]),
+        ))
+    context = payload["scientific_context"]
+    if not isinstance(context, Mapping) or context.keys() != {"material", "sample", "process", "test"}:
+        raise ValueError(f"{error}: invalid scientific_context")
+    context_values = {}
+    for name in ("material", "sample", "process", "test"):
+        if not isinstance(context[name], list):
+            raise ValueError(f"{error}: {name} must be a list")
+        attributes = []
+        for item in context[name]:
+            if not isinstance(item, Mapping) or not {"name", "value", "unit"} <= item.keys() or item.keys() - {"name", "value", "unit", "context_scope", "applies_to_outcomes"}:
+                raise ValueError(f"{error}: invalid scientific attribute fields")
+            if not isinstance(item["name"], str) or not item["name"].strip() or type(item["value"]) not in (str, int, float, bool):
+                raise ValueError(f"{error}: invalid scientific attribute")
+            if isinstance(item["value"], float) and not math.isfinite(item["value"]):
+                raise ValueError(f"{error}: invalid scientific value")
+            if item["unit"] is not None and not isinstance(item["unit"], str):
+                raise ValueError(f"{error}: invalid scientific unit")
+            if not isinstance(item.get("context_scope", "unknown"), str) or item.get("context_scope", "unknown") not in SCIENTIFIC_CONTEXT_SCOPES:
+                raise ValueError(f"{error}: invalid scientific context_scope")
+            outcomes = item.get("applies_to_outcomes", [])
+            if not isinstance(outcomes, list) or any(not isinstance(value, str) for value in outcomes):
+                raise ValueError(f"{error}: invalid applies_to_outcomes")
+            attributes.append(ScientificAttribute(
+                name=item["name"], value=item["value"], unit=item["unit"],
+                context_scope=item.get("context_scope", "unknown"), applies_to_outcomes=tuple(outcomes),
+            ))
+        context_values[name] = tuple(attributes)
+    created_at = payload["created_at"]
+    if created_at is not None:
+        if not isinstance(created_at, str):
+            raise ValueError(f"{error}: invalid created_at")
+        created_at = datetime.fromisoformat(created_at)
+    return Finding(
+        collection_id=payload["collection_id"], objective_id=payload["objective_id"],
+        analysis_version=payload["analysis_version"], finding_id=payload["finding_id"],
+        statement=payload["statement"], factors=tuple(payload["factors"]),
+        outcome=payload["outcome"], direction=payload["direction"],
+        assertion_strength=payload["assertion_strength"], attribution_scope=payload["attribution_scope"],
+        synthesis_status=payload["synthesis_status"], certainty=payload["certainty"],
+        display_rank=payload["display_rank"], mechanisms=tuple(mechanisms),
+        scientific_context=ScientificContext(**context_values), limitations=tuple(payload["limitations"]),
+        paper_contributions=tuple(contributions), origin=payload["origin"],
+        source_analysis_version=payload["source_analysis_version"], parent_finding_id=payload["parent_finding_id"],
+        created_by_user_id=payload["created_by_user_id"], created_by_tool_call_id=payload["created_by_tool_call_id"],
+        created_at=created_at, warnings=tuple(payload.get("warnings", [])),
+        selection_ids=tuple(payload.get("selection_ids", [])), comparison_group_ids=tuple(payload.get("comparison_group_ids", [])),
     )
-
-
-def _review_scientific_context(value: Any) -> ScientificContext:
-    if not isinstance(value, Mapping):
-        return ScientificContext()
-    return ScientificContext(
-        material=_context_attributes(value.get("material")),
-        sample=_context_attributes(value.get("sample")),
-        process=_context_attributes(value.get("process")),
-        test=_context_attributes(value.get("test")),
-    )
-
-
-def _finding_creation_time(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    text = (str(value).strip() or None) if value is not None else None
-    if text is None:
-        return None
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("invalid Finding creation time") from exc

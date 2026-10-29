@@ -117,6 +117,32 @@ def _finding() -> dict[str, Any]:
     }
 
 
+def test_curated_finding_preserves_precise_values_and_exact_references() -> None:
+    payload = _finding()
+    payload["certainty"] = 0.735123
+    payload["selection_ids"] = ["selection-A", "selection-a", "001"]
+    payload["paper_contributions"][0]["supporting_evidence_ids"] = [
+        "evidence-A", "evidence-a", "001",
+    ]
+
+    finding = parse_curated_finding(payload)
+
+    assert finding.certainty == 0.735123
+    assert finding.selection_ids == ("selection-A", "selection-a", "001")
+    assert finding.paper_contributions[0].supporting_evidence_ids == (
+        "evidence-A", "evidence-a", "001",
+    )
+
+
+@pytest.mark.parametrize("scope", ([], {}, 1, "unsupported"))
+def test_curated_finding_rejects_invalid_scientific_scope(scope) -> None:
+    payload = _finding()
+    payload["scientific_context"]["material"][0]["context_scope"] = scope
+
+    with pytest.raises(ValueError, match="context_scope"):
+        parse_curated_finding(payload)
+
+
 async def test_import_accepts_canonical_finding_identity() -> None:
     feedback = _FeedbackService()
     result = await FindingReviewImportService(feedback).import_rows(

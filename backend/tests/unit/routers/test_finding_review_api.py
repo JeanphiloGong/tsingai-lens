@@ -17,18 +17,12 @@ from domain.core.finding import (
     FindingMechanismRelation,
     FindingPaperContribution,
 )
-from domain.core.finding import _certainty as finding_certainty
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _non_negative_int as finding_non_negative_int
-from domain.core.finding import _strings as finding_strings
-from domain.core.finding import _text as finding_text
 from domain.core.finding import (
     datetime,
 )
 from domain.core.research_objective import (
     ObjectiveEvidence,
     PreparedDocumentInput,
-    _text,
 )
 from domain.core.scientific_fact import (
     SCIENTIFIC_CONTEXT_SCOPES,
@@ -39,10 +33,10 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
-from domain.core.scientific_fact import _scientific_scalar as scientific_scalar
-from domain.core.scientific_fact import _terms as scientific_terms
-from domain.core.scientific_fact import _text as scientific_text
+
+
+
+
 from domain.evaluation import (
     FindingCuration,
     FindingFeedback,
@@ -66,8 +60,8 @@ class _Service:
 
         self.authoring_kwargs = kwargs
         analysis = ObjectiveAnalysis(
-            collection_id=_text(kwargs["collection_id"]) or "",
-            objective_id=_text(kwargs["objective_id"]) or "",
+            collection_id=kwargs["collection_id"] or "",
+            objective_id=kwargs["objective_id"] or "",
             analysis_version=int(2),
             document_inputs=(
                 PreparedDocumentInput(
@@ -85,63 +79,37 @@ class _Service:
             origin="hybrid",
             scientific_record_source="authored_snapshot",
             source_analysis_version=1,
-            created_by_user_id=_text(kwargs["created_by_user_id"]),
-            abstention_reason=_text(kwargs.get("abstention_reason")),
-            abstention_note=_text(
-                "\n".join(kwargs.get("limitations", ()))
+            created_by_user_id=kwargs["created_by_user_id"],
+            abstention_reason=kwargs.get("abstention_reason"),
+            abstention_note="\n".join(kwargs.get("limitations", ()))
                 if kwargs.get("abstention_reason")
-                else None
-            ),
+                else None,
         )
         finding = Finding(
-            collection_id=finding_text(_finding_record().get("collection_id", None))
+            collection_id=_finding_record().get('collection_id', None)
             or "",
-            objective_id=finding_text(_finding_record().get("objective_id", None))
+            objective_id=_finding_record().get('objective_id', None)
             or "",
             analysis_version=2,
             finding_id="finding-manual-1",
-            statement=finding_text(_finding_record().get("statement", None)) or "",
-            factors=finding_strings(_finding_record().get("factors", None)),
-            outcome=finding_text(_finding_record().get("outcome", None)) or "",
-            direction=finding_choice(
-                _finding_record().get("direction", None),
-                SCIENTIFIC_RESULT_DIRECTIONS,
-                "unknown",
-            ),
-            assertion_strength=finding_choice(
-                _finding_record().get("assertion_strength", None),
-                FINDING_ASSERTION_STRENGTHS,
-                "descriptive",
-            ),
-            attribution_scope=finding_choice(
-                _finding_record().get("attribution_scope", None),
-                EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-                "descriptive_only",
-            ),
-            synthesis_status=finding_choice(
-                _finding_record().get("synthesis_status", None),
-                FINDING_SYNTHESIS_STATUSES,
-                "insufficient_confirmation",
-            ),
-            certainty=finding_certainty(_finding_record().get("certainty", None)),
-            display_rank=finding_non_negative_int(
-                _finding_record().get("display_rank", None)
-            ),
+            statement=_finding_record().get('statement', None) or "",
+            factors=tuple(_finding_record().get('factors', None) or ()),
+            outcome=_finding_record().get('outcome', None) or "",
+            direction=_finding_record().get('direction', None),
+            assertion_strength=_finding_record().get('assertion_strength', None),
+            attribution_scope=_finding_record().get('attribution_scope', None),
+            synthesis_status=_finding_record().get('synthesis_status', None),
+            certainty=_finding_record().get('certainty', None),
+            display_rank=_finding_record().get('display_rank', None),
             mechanisms=tuple(
                 (
                     FindingMechanismRelation(
-                        source_term=finding_text(item.get("source_term")) or "",
-                        relation_type=finding_text(item.get("relation_type")) or "",
-                        target_term=finding_text(item.get("target_term")) or "",
-                        direction=finding_text(item.get("direction")),
-                        assertion_strength=finding_choice(
-                            item.get("assertion_strength"),
-                            FINDING_ASSERTION_STRENGTHS,
-                            "descriptive",
-                        ),
-                        supporting_evidence_ids=finding_strings(
-                            item.get("supporting_evidence_ids")
-                        ),
+                        source_term=item.get('source_term') or "",
+                        relation_type=item.get('relation_type') or "",
+                        target_term=item.get('target_term') or "",
+                        direction=item.get('direction'),
+                        assertion_strength=item.get('assertion_strength'),
+                        supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
                     )
                     for item in tuple(
                         (
@@ -163,21 +131,15 @@ class _Service:
                 material=tuple(
                     (
                         ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
+                            name=attribute.get("name") or "",
                             value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
+                                attribute.get("value")
+                                if attribute.get("value") is not None
                                 else ""
                             ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
+                            unit=attribute.get("unit"),
+                            context_scope=attribute.get("context_scope"),
+                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
                         )
                         for attribute in (
                             (
@@ -213,21 +175,15 @@ class _Service:
                 sample=tuple(
                     (
                         ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
+                            name=attribute.get("name") or "",
                             value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
+                                attribute.get("value")
+                                if attribute.get("value") is not None
                                 else ""
                             ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
+                            unit=attribute.get("unit"),
+                            context_scope=attribute.get("context_scope"),
+                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
                         )
                         for attribute in (
                             (
@@ -263,21 +219,15 @@ class _Service:
                 process=tuple(
                     (
                         ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
+                            name=attribute.get("name") or "",
                             value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
+                                attribute.get("value")
+                                if attribute.get("value") is not None
                                 else ""
                             ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
+                            unit=attribute.get("unit"),
+                            context_scope=attribute.get("context_scope"),
+                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
                         )
                         for attribute in (
                             (
@@ -313,21 +263,15 @@ class _Service:
                 test=tuple(
                     (
                         ScientificAttribute(
-                            name=scientific_text(attribute.get("name")) or "",
+                            name=attribute.get("name") or "",
                             value=(
-                                scientific_scalar(attribute.get("value"))
-                                if scientific_scalar(attribute.get("value")) is not None
+                                attribute.get("value")
+                                if attribute.get("value") is not None
                                 else ""
                             ),
-                            unit=scientific_text(attribute.get("unit")),
-                            context_scope=scientific_choice(
-                                attribute.get("context_scope"),
-                                SCIENTIFIC_CONTEXT_SCOPES,
-                                "unknown",
-                            ),
-                            applies_to_outcomes=scientific_terms(
-                                attribute.get("applies_to_outcomes")
-                            ),
+                            unit=attribute.get("unit"),
+                            context_scope=attribute.get("context_scope"),
+                            applies_to_outcomes=tuple(attribute.get("applies_to_outcomes") or ()),
                         )
                         for attribute in (
                             (
@@ -361,30 +305,16 @@ class _Service:
                     )
                 ),
             ),
-            limitations=finding_strings(
-                list(kwargs.get("limitations", ())) or ["Supported by one paper."]
-            ),
+            limitations=tuple((list(kwargs.get('limitations', ())) or ['Supported by one paper.']) or ()),
             paper_contributions=tuple(
                 (
                     FindingPaperContribution(
-                        document_id=finding_text(item.get("document_id")) or "",
-                        analysis_status=finding_choice(
-                            item.get("analysis_status"),
-                            PAPER_CONTRIBUTION_STATUSES,
-                            "pending",
-                        ),
-                        supporting_evidence_ids=finding_strings(
-                            item.get("supporting_evidence_ids")
-                        ),
-                        contradicting_evidence_ids=finding_strings(
-                            item.get("contradicting_evidence_ids")
-                        ),
-                        context_evidence_ids=finding_strings(
-                            item.get("context_evidence_ids")
-                        ),
-                        condition_boundary_evidence_ids=finding_strings(
-                            item.get("condition_boundary_evidence_ids")
-                        ),
+                        document_id=item.get('document_id') or "",
+                        analysis_status=item.get('analysis_status'),
+                        supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
+                        contradicting_evidence_ids=tuple(item.get('contradicting_evidence_ids') or ()),
+                        context_evidence_ids=tuple(item.get('context_evidence_ids') or ()),
+                        condition_boundary_evidence_ids=tuple(item.get('condition_boundary_evidence_ids') or ()),
                     )
                     for item in tuple(
                         (
@@ -402,23 +332,15 @@ class _Service:
                     )
                 )
             ),
-            origin=finding_choice(
-                "hybrid" if kwargs.get("parent_finding_id") else "human_authored",
-                FINDING_ORIGINS,
-                "system_generated",
-            ),
+            origin='hybrid' if kwargs.get('parent_finding_id') else 'human_authored',
             source_analysis_version=1,
-            parent_finding_id=finding_text(kwargs.get("parent_finding_id")),
-            created_by_user_id=finding_text(kwargs["created_by_user_id"]),
-            created_by_tool_call_id=finding_text(
-                _finding_record().get("created_by_tool_call_id", None)
-            ),
+            parent_finding_id=kwargs.get('parent_finding_id'),
+            created_by_user_id=kwargs['created_by_user_id'],
+            created_by_tool_call_id=_finding_record().get('created_by_tool_call_id', None),
             created_at=datetime.fromisoformat("2026-09-01T00:00:00+00:00"),
-            warnings=finding_strings(_finding_record().get("warnings", None)),
-            selection_ids=finding_strings(_finding_record().get("selection_ids", None)),
-            comparison_group_ids=finding_strings(
-                _finding_record().get("comparison_group_ids", None)
-            ),
+            warnings=tuple(_finding_record().get('warnings', None) or ()),
+            selection_ids=tuple(_finding_record().get('selection_ids', None) or ()),
+            comparison_group_ids=tuple(_finding_record().get('comparison_group_ids', None) or ()),
         )
         return FindingAuthoringResult(
             analysis=analysis,
@@ -527,16 +449,12 @@ def _finding_record(statement: str = "Temperature affects strength.") -> dict:
         objective_id="obj-1",
         analysis_version=1,
         finding_id="finding-1",
-        statement=finding_text(statement) or "",
+        statement=statement or "",
         factors=("temperature",),
         outcome="strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='isolated_effect',
         synthesis_status="insufficient_confirmation",
         certainty=0.5,
         display_rank=0,

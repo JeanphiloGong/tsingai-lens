@@ -107,12 +107,20 @@ class FindingReviewImportService:
     ) -> dict[str, Any]:
         if "expert_action" in row or "expert_note" in row:
             raise ValueError("expert_action and expert_note are not review JSONL fields")
-        action = _text(row.get("action")).lower()
+        action = row.get("action")
+        if not isinstance(action, str):
+            raise ValueError("action must be accept, reject, correct, or skip")
+        action = action.strip().lower()
         if action not in _ACTIONS:
             raise ValueError("action must be accept, reject, correct, or skip")
         identity = _identity(row)
         if action == "skip":
             return {"line": line_number, "action": action, "payload": identity}
+        note = row.get("note")
+        if note is not None:
+            if not isinstance(note, str):
+                raise ValueError("note must be text")
+            note = note.strip() or None
 
         if action == "accept":
             await self._require_dataset_item(identity)
@@ -123,12 +131,15 @@ class FindingReviewImportService:
                     **identity,
                     "review_status": "correct",
                     "issue_type": "none",
-                    "note": _optional_text(row.get("note")),
+                    "note": note,
                 },
             }
         if action == "reject":
             await self._require_dataset_item(identity)
-            issue_type = _text(row.get("issue_type")).lower()
+            issue_type = row.get("issue_type")
+            if not isinstance(issue_type, str):
+                raise ValueError("reject requires a valid issue_type")
+            issue_type = issue_type.strip().lower()
             if issue_type not in _ISSUES:
                 raise ValueError("reject requires a valid issue_type")
             return {
@@ -138,7 +149,7 @@ class FindingReviewImportService:
                     **identity,
                     "review_status": "incorrect",
                     "issue_type": issue_type,
-                    "note": _optional_text(row.get("note")),
+                    "note": note,
                 },
             }
 
@@ -150,7 +161,10 @@ class FindingReviewImportService:
             **identity,
             curated_finding=candidate,
         )
-        curated_status = _text(row.get("curated_status")) or "limited"
+        curated_status = row.get("curated_status", "limited")
+        if not isinstance(curated_status, str):
+            raise ValueError("curated_status must be text")
+        curated_status = curated_status.strip() or "limited"
         if curated_status not in {"supported", "limited", "conflicted", "unsupported"}:
             raise ValueError("correct requires a valid curated_status")
         return {
@@ -160,7 +174,7 @@ class FindingReviewImportService:
                 **identity,
                 "curated_status": curated_status,
                 "curated_finding": candidate,
-                "note": _optional_text(row.get("note")),
+                "note": note,
             },
         }
 
@@ -200,13 +214,19 @@ def read_review_jsonl(path: Path) -> list[dict[str, Any]]:
 def _identity(row: dict[str, Any]) -> dict[str, Any]:
     if "claim_id" in row:
         raise ValueError("claim_id is not part of the Finding review contract")
-    collection_id = _text(row.get("collection_id"))
-    objective_id = _text(row.get("objective_id"))
-    finding_id = _text(row.get("finding_id"))
+    for name in ("collection_id", "objective_id", "finding_id"):
+        if not isinstance(row.get(name), str) or not row[name].strip():
+            raise ValueError(f"{name} is required and must be text")
+    collection_id = row["collection_id"].strip()
+    objective_id = row["objective_id"].strip()
+    finding_id = row["finding_id"].strip()
+    version = row.get("analysis_version")
+    if type(version) not in (int, str):
+        raise ValueError("analysis_version must be a positive integer")
     try:
-        analysis_version = int(row.get("analysis_version") or 0)
+        analysis_version = int(version)
     except (TypeError, ValueError):
-        analysis_version = 0
+        raise ValueError("analysis_version must be a positive integer") from None
     if not collection_id or not objective_id or analysis_version < 1 or not finding_id:
         raise ValueError(
             "collection_id, objective_id, analysis_version, and finding_id are required"
@@ -220,7 +240,7 @@ def _identity(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _human_reviewer(value: str) -> str:
-    reviewer = _text(value)
+    reviewer = value.strip()
     if not reviewer:
         raise ValueError("reviewer is required")
     normalized = reviewer.lower()
@@ -250,14 +270,6 @@ def _summary(
         "errors": errors,
         "warnings": [],
     }
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _optional_text(value: Any) -> str | None:
-    return _text(value) or None
 
 
 __all__ = ["FindingReviewImportService", "read_review_jsonl"]

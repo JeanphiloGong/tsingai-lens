@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from domain.core.finding import Finding, FindingMechanismRelation, FindingPaperContribution
-from domain.core.finding import _stable_id as finding_stable_id
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
 from domain.evaluation.records import FindingCuration, FindingFeedback
 from infra.persistence.postgres.models.evaluation import (
@@ -202,7 +201,7 @@ class FindingReviewRepository:
             await db.flush()
             return replace(
                 curation,
-                curated_finding=replace(finding, certainty=round(finding.certainty, 2)),
+                curated_finding=finding,
                 note=row.note,
                 reviewer=row.reviewer,
                 updated_at=_isoformat(row.updated_at),
@@ -257,11 +256,7 @@ class FindingReviewRepository:
                     collection_id=stored["collection_id"],
                     objective_id=stored["objective_id"],
                     analysis_version=stored["analysis_version"],
-                    finding_id=stored.get("finding_id") or finding_stable_id(
-                        "finding", stored["objective_id"], stored["analysis_version"],
-                        tuple(stored["factors"]), stored["outcome"],
-                        stored.get("supporting_evidence_ids"),
-                    ),
+                    finding_id=stored["finding_id"],
                     statement=stored["statement"],
                     factors=tuple(stored["factors"]),
                     outcome=stored["outcome"],
@@ -269,7 +264,7 @@ class FindingReviewRepository:
                     assertion_strength=stored["assertion_strength"],
                     attribution_scope=stored["attribution_scope"],
                     synthesis_status=stored["synthesis_status"],
-                    certainty=round(stored["certainty"], 2),
+                    certainty=stored["certainty"],
                     display_rank=stored["display_rank"],
                     mechanisms=tuple(
                         FindingMechanismRelation(

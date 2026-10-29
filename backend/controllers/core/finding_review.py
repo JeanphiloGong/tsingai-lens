@@ -20,6 +20,7 @@ from domain.core.finding import (
     FindingPaperContribution,
 )
 from domain.core.scientific_fact import ScientificAttribute, ScientificContext
+from domain.evaluation.records import FindingFeedbackDecisionError
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -96,13 +97,6 @@ class FindingFeedbackCreateRequest(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
     reviewer: str | None = Field(default=None, max_length=120)
 
-    @model_validator(mode="after")
-    def validate_decision(self) -> "FindingFeedbackCreateRequest":
-        if self.review_status == "correct" and self.issue_type != "none":
-            raise ValueError("correct feedback cannot report an issue")
-        if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
-            raise ValueError(f"{self.review_status} feedback requires an issue")
-        return self
 
 
 class FindingFeedbackResponse(BaseModel):
@@ -479,6 +473,8 @@ async def record_finding_feedback(
             note=payload.note,
             reviewer=payload.reviewer,
         )
+    except FindingFeedbackDecisionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

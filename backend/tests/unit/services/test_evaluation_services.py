@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.core.research_objective import PaperStudyDispositionStatus
+
 from domain.core.research_objective import (
     PaperResearchScope,
     PaperResearchRelationship,
@@ -42,13 +44,11 @@ from domain.core.finding import (
     Finding,
     FindingPaperContribution,
 )
-from domain.core.finding import _choice as finding_choice
 from domain.core.research_objective import (
     ObjectiveEvidence,
     PaperContribution,
     PaperStudyDisposition,
     ResearchObjective,
-    _text,
     normalize_objective_terms,
 )
 from domain.core.scientific_fact import (
@@ -651,10 +651,10 @@ async def _published_objective_repository(*, postgres_session_factory) -> Object
             study_dispositions=(
                 PaperStudyDisposition(
                     document_id="doc-1",
-                    study_id=_text(_TEMPERATURE_STRENGTH_STUDY_ID) or "",
-                    relationship_id=_text(_TEMPERATURE_STRENGTH_RELATIONSHIP_ID) or "",
-                    status=PaperStudyDisposition._status("promoted"),
-                    objective_id=_text(objective.objective_id),
+                    study_id=_TEMPERATURE_STRENGTH_STUDY_ID or "",
+                    relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID or "",
+                    status=PaperStudyDispositionStatus("promoted"),
+                    objective_id=objective.objective_id,
                 ),
             ),
         ),
@@ -724,11 +724,7 @@ async def _published_objective_repository(*, postgres_session_factory) -> Object
         outcome="strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='isolated_effect',
         synthesis_status="insufficient_confirmation",
         certainty=0.5,
         display_rank=0,
@@ -1008,10 +1004,10 @@ async def test_prediction_snapshot_rejects_unconfirmed_objective(*, postgres_ses
             study_dispositions=(
                 PaperStudyDisposition(
                     document_id="doc-1",
-                    study_id=_text(_TEMPERATURE_STRENGTH_STUDY_ID) or "",
-                    relationship_id=_text(_TEMPERATURE_STRENGTH_RELATIONSHIP_ID) or "",
-                    status=PaperStudyDisposition._status("promoted"),
-                    objective_id=_text(objective.objective_id),
+                    study_id=_TEMPERATURE_STRENGTH_STUDY_ID or "",
+                    relationship_id=_TEMPERATURE_STRENGTH_RELATIONSHIP_ID or "",
+                    status=PaperStudyDispositionStatus("promoted"),
+                    objective_id=objective.objective_id,
                 ),
             ),
         ),
@@ -1062,30 +1058,16 @@ async def test_finding_feedback_rejects_inconsistent_review_decisions(*, postgre
         )
 
 
-async def test_finding_review_rejects_unknown_status_values(*, postgres_session_factory) -> None:
-    service = await _finding_feedback_service(postgres_session_factory=postgres_session_factory)
-    published = await service.objective_repository.read_finding(
-        "col-gold", "obj-1", 1, "finding-1"
+def test_review_input_rejects_unknown_status_values() -> None:
+    from pydantic import ValidationError
+    from controllers.core.finding_review import (
+        FindingFeedbackCreateRequest, FindingCurationCreateRequest,
     )
-    assert published is not None
-
-    with pytest.raises(ValueError, match="unsupported finding review status"):
-        await service.record_feedback(
-            collection_id="col-gold",
-            objective_id="obj-1",
-            analysis_version=1,
-            finding_id="finding-1",
-            review_status="bogus",
-            issue_type="none",
-        )
-    with pytest.raises(ValueError, match="unsupported finding curation status"):
-        await service.record_curation(
-            collection_id="col-gold",
-            objective_id="obj-1",
-            analysis_version=1,
-            finding_id="finding-1",
-            curated_status="bogus",
-            curated_finding=published,
+    with pytest.raises(ValidationError, match="review_status"):
+        FindingFeedbackCreateRequest(analysis_version=1, review_status="bogus")
+    with pytest.raises(ValidationError, match="curated_status"):
+        FindingCurationCreateRequest(
+            analysis_version=1, curated_status="bogus", curated_finding={},
         )
 
 

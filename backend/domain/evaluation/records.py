@@ -139,6 +139,10 @@ class EvaluationRun:
     failures: tuple[EvaluationFailure, ...] = ()
 
 
+class FindingFeedbackDecisionError(ValueError):
+    """A review decision conflicts with its reported issue."""
+
+
 @dataclass(frozen=True)
 class FindingFeedback:
     feedback_id: str
@@ -153,22 +157,14 @@ class FindingFeedback:
     created_at: str
 
     def __post_init__(self) -> None:
-        if self.note is not None:
-            object.__setattr__(self, "note", self.note.strip() or None)
-        if self.reviewer is not None:
-            object.__setattr__(self, "reviewer", self.reviewer.strip() or None)
         if not self.collection_id or not self.objective_id or not self.finding_id:
             raise ValueError("finding feedback requires objective and finding identity")
         if self.analysis_version < 1:
             raise ValueError("finding feedback requires a positive analysis_version")
-        if self.review_status not in FINDING_REVIEW_STATUSES:
-            raise ValueError(f"unsupported finding review status: {self.review_status}")
-        if self.issue_type not in FINDING_ISSUE_TYPES:
-            raise ValueError(f"unsupported finding issue type: {self.issue_type}")
         if self.review_status == "correct" and self.issue_type != "none":
-            raise ValueError("correct finding feedback cannot report an issue")
+            raise FindingFeedbackDecisionError("correct finding feedback cannot report an issue")
         if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
-            raise ValueError(f"{self.review_status} finding feedback requires an issue")
+            raise FindingFeedbackDecisionError(f"{self.review_status} finding feedback requires an issue")
 
 
 @dataclass(frozen=True)
@@ -185,18 +181,10 @@ class FindingCuration:
     updated_at: str
 
     def __post_init__(self) -> None:
-        if self.note is not None:
-            object.__setattr__(self, "note", self.note.strip() or None)
-        if self.reviewer is not None:
-            object.__setattr__(self, "reviewer", self.reviewer.strip() or None)
         if not self.collection_id or not self.objective_id or not self.finding_id:
             raise ValueError("finding curation requires objective and finding identity")
         if self.analysis_version < 1:
             raise ValueError("finding curation requires a positive analysis_version")
-        if self.curated_status not in FINDING_CURATION_STATUSES:
-            raise ValueError(
-                f"unsupported finding curation status: {self.curated_status}"
-            )
         if self.curated_finding.key != (
             self.collection_id,
             self.objective_id,

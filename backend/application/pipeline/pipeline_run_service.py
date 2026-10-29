@@ -134,7 +134,7 @@ class PipelineRunService:
         context: Mapping[str, Any] | None = None,
         reuse_completed: bool = True,
     ) -> tuple[dict[str, Any], bool]:
-        if not str(document_id).strip() or not str(input_fingerprint).strip():
+        if not document_id or not input_fingerprint:
             raise ValueError("document run requires document and input fingerprint")
         run, created = await self.repository.get_or_create_document_run(
             self._new_run(
@@ -217,7 +217,7 @@ class PipelineRunService:
         mode: str = "standard",
         context: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
-        if not str(input_fingerprint).strip():
+        if not input_fingerprint:
             raise ValueError("collection run requires an input fingerprint")
         run, created = await self.repository.get_or_create_collection_run(
             self._new_run(
@@ -390,7 +390,7 @@ class PipelineRunService:
             updated,
             current_node=current_node or stored.current_node,
             status=resolved_status,
-            errors=tuple(str(error) for error in errors or ()),
+            errors=tuple(errors or ()),
             now=now,
         )
         if resolved_status.is_terminal:
@@ -406,17 +406,17 @@ class PipelineRunService:
                 else stored.progress_percent
             ),
             progress_detail=(
-                dict(progress_detail)
+                progress_detail
                 if progress_detail is not None
                 else stored.progress_detail
             ),
             errors=(
-                tuple(str(error) for error in errors)
+                tuple(errors)
                 if errors is not None
                 else updated.errors
             ),
             warnings=(
-                tuple(str(warning) for warning in warnings)
+                tuple(warnings)
                 if warnings is not None
                 else updated.warnings
             ),

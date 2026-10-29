@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -51,31 +50,6 @@ class PipelineNodeStatus(StrEnum):
         }
 
 
-def _run_status(value: Any) -> PipelineRunStatus:
-    if isinstance(value, PipelineRunStatus):
-        return value
-    try:
-        return PipelineRunStatus(str(value or PipelineRunStatus.QUEUED.value))
-    except ValueError as exc:
-        raise ValueError(f"invalid pipeline run status: {value}") from exc
-
-
-def _node_status(value: Any) -> PipelineNodeStatus:
-    if isinstance(value, PipelineNodeStatus):
-        return value
-    try:
-        return PipelineNodeStatus(str(value or PipelineNodeStatus.QUEUED.value))
-    except ValueError as exc:
-        raise ValueError(f"invalid pipeline node status: {value}") from exc
-
-
-def _optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
 def _timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(
         f"{value[:-1]}+00:00" if value.endswith("Z") else value
@@ -93,14 +67,6 @@ class ExecutionTimestamps:
     updated_at: str | None = None
 
     def __post_init__(self) -> None:
-        if self.created_at is not None:
-            _timestamp(self.created_at)
-        if self.updated_at is not None:
-            _timestamp(self.updated_at)
-        if self.started_at is not None:
-            _timestamp(self.started_at)
-        if self.finished_at is not None:
-            _timestamp(self.finished_at)
         if (
             self.started_at is not None
             and self.finished_at is not None
@@ -149,8 +115,6 @@ class ModelUsage:
     unreported_request_count: int = 0
 
     def __post_init__(self) -> None:
-        if not self.model_name.strip():
-            raise ValueError("model_name cannot be empty")
         if self.request_count < 0:
             raise ValueError("request_count cannot be negative")
         if not 0 <= self.unreported_request_count <= self.request_count:
@@ -186,12 +150,6 @@ class ExecutionStats:
     def __post_init__(self) -> None:
         if self.duration_ms is not None and self.duration_ms < 0:
             raise ValueError("duration_ms cannot be negative")
-        object.__setattr__(self, "model_usage", tuple(self.model_usage))
-        object.__setattr__(
-            self,
-            "prompt_versions",
-            deepcopy(dict(self.prompt_versions)),
-        )
 
     @property
     def token_usage(self) -> TokenUsage | None:
@@ -243,16 +201,6 @@ class PipelineNodeRun:
     timestamps: ExecutionTimestamps = field(default_factory=ExecutionTimestamps)
     output_summary: Mapping[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        if not self.name.strip():
-            raise ValueError("pipeline node name cannot be empty")
-        object.__setattr__(self, "dependencies", tuple(self.dependencies))
-        object.__setattr__(self, "status", _node_status(self.status))
-        object.__setattr__(self, "errors", tuple(self.errors))
-        object.__setattr__(self, "warnings", tuple(self.warnings))
-        object.__setattr__(self, "output_summary", deepcopy(dict(self.output_summary)))
-
-
     def start(self, started_at: str) -> "PipelineNodeRun":
         return replace(
             self,
@@ -279,7 +227,7 @@ class PipelineNodeRun:
         return replace(
             self,
             status=PipelineNodeStatus.SUCCEEDED,
-            warnings=tuple(str(item) for item in warnings),
+            warnings=tuple(warnings),
             stats=execution_stats,
             timestamps=timestamps,
             output_summary=output_summary or {},
@@ -297,7 +245,7 @@ class PipelineNodeRun:
         return replace(
             self,
             status=PipelineNodeStatus.FAILED,
-            errors=(str(error),),
+            errors=(error,),
             stats=replace(
                 execution_stats,
                 duration_ms=timestamps.duration_ms(),
@@ -339,39 +287,10 @@ class PipelineRun:
     resumed_from_run_id: str | None = None
 
     def __post_init__(self) -> None:
-        for field_name in (
-            "pipeline_name",
-            "mode",
-            "run_id",
-            "collection_id",
-            "scope_type",
-            "scope_id",
-        ):
-            if not str(getattr(self, field_name)).strip():
-                raise ValueError(f"{field_name} cannot be empty")
-        object.__setattr__(self, "status", _run_status(self.status))
-        object.__setattr__(self, "nodes", tuple(self.nodes))
-        object.__setattr__(self, "errors", tuple(self.errors))
-        object.__setattr__(self, "warnings", tuple(self.warnings))
-        object.__setattr__(
-            self, "input_fingerprint", _optional_text(self.input_fingerprint)
-        )
-        object.__setattr__(self, "current_node", _optional_text(self.current_node))
-        object.__setattr__(
-            self, "resumed_from_run_id", _optional_text(self.resumed_from_run_id)
-        )
+        if not all((self.pipeline_name, self.mode, self.run_id, self.collection_id, self.scope_type, self.scope_id)):
+            raise ValueError("pipeline run identity is required")
         if not 0 <= self.progress_percent <= 100:
             raise ValueError("progress_percent must be between zero and 100")
-        object.__setattr__(
-            self,
-            "progress_detail",
-            (
-                deepcopy(dict(self.progress_detail))
-                if self.progress_detail is not None
-                else None
-            ),
-        )
-        object.__setattr__(self, "context", deepcopy(dict(self.context)))
         names = tuple(node.name for node in self.nodes)
         if len(set(names)) != len(names):
             raise ValueError("pipeline node names must be unique")
@@ -500,8 +419,7 @@ class PipelineRun:
         status: PipelineRunStatus,
         finished_at: str,
     ) -> "PipelineRun":
-        resolved_status = _run_status(status)
-        if not resolved_status.is_terminal:
+        if not status.is_terminal:
             raise ValueError("finished pipeline run requires a terminal status")
         timestamps = replace(
             self.timestamps,
@@ -510,7 +428,7 @@ class PipelineRun:
         )
         return replace(
             self,
-            status=resolved_status,
+            status=status,
             errors=self._node_messages(self.nodes, "errors"),
             warnings=self._node_messages(self.nodes, "warnings"),
             stats=ExecutionStats.aggregate(
@@ -658,7 +576,7 @@ class PipelineRunRepository:
                             PipelineNodeRun(
                                 name=name,
                                 dependencies=tuple(node.get("dependencies", ())),
-                                status=PipelineNodeStatus(node.get("status", "queued")),
+                                status=PipelineNodeStatus(node["status"]),
                                 errors=tuple(node.get("errors", ())),
                                 warnings=tuple(node.get("warnings", ())),
                                 stats=ExecutionStats(
@@ -857,7 +775,7 @@ class PipelineRunRepository:
                             PipelineNodeRun(
                                 name=name,
                                 dependencies=tuple(node.get("dependencies", ())),
-                                status=PipelineNodeStatus(node.get("status", "queued")),
+                                status=PipelineNodeStatus(node["status"]),
                                 errors=tuple(node.get("errors", ())),
                                 warnings=tuple(node.get("warnings", ())),
                                 stats=ExecutionStats(
@@ -1024,7 +942,7 @@ class PipelineRunRepository:
                     PipelineNodeRun(
                         name=name,
                         dependencies=tuple(node.get("dependencies", ())),
-                        status=PipelineNodeStatus(node.get("status", "queued")),
+                        status=PipelineNodeStatus(node["status"]),
                         errors=tuple(node.get("errors", ())),
                         warnings=tuple(node.get("warnings", ())),
                         stats=ExecutionStats(

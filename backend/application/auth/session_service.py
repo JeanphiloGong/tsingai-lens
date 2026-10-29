@@ -128,7 +128,7 @@ def _public_user(user: AuthUserRecord) -> dict[str, Any]:
     return {
         "user_id": user.user_id,
         "email": user.email,
-        "display_name": _clean_text(user.display_name),
+        "display_name": user.display_name,
     }
 
 
@@ -147,17 +147,17 @@ def _session_token_hash(session_token: str) -> str:
     return sha256(session_token.encode("utf-8")).hexdigest()
 
 
-def _required_text(value: Any, field_name: str) -> str:
+def _required_text(value: str, field_name: str) -> str:
     text = _clean_text(value)
     if not text:
         raise ValueError(f"{field_name} is required")
     return text
 
 
-def _clean_text(value: Any) -> str | None:
+def _clean_text(value: str | None) -> str | None:
     if value is None:
         return None
-    text = str(value).strip()
+    text = value.strip()
     return text or None
 
 

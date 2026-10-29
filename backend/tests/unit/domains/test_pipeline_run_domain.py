@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 
 from repositories.pipeline_run_repository import (
@@ -117,20 +115,10 @@ def test_execution_stats_aggregate_usage_by_model() -> None:
 
 
 def test_pipeline_statuses_reject_unknown_values() -> None:
-    run = PipelineRun.create(
-        pipeline_name="collection_build",
-        mode="standard",
-        run_id="run_1",
-        collection_id="col_1",
-        scope_type="collection",
-        scope_id="col_1",
-        node_dependencies={},
-        created_at="2026-08-11T01:00:00+00:00",
-    )
-    with pytest.raises(ValueError, match="pipeline run status"):
-        replace(run, status="done")
-    with pytest.raises(ValueError, match="pipeline node status"):
-        replace(PipelineNodeRun(name="source_artifacts"), status="done")
+    with pytest.raises(ValueError, match="PipelineRunStatus"):
+        PipelineRunStatus("done")
+    with pytest.raises(ValueError, match="PipelineNodeStatus"):
+        PipelineNodeStatus("done")
 
 
 def test_execution_timestamps_reject_finish_before_start() -> None:
@@ -157,7 +145,7 @@ def test_pipeline_run_rejects_invalid_dependency_graphs() -> None:
         run.with_node(
             PipelineNodeRun(
                 name="source_artifacts",
-                status="skipped",
+                status=PipelineNodeStatus.SKIPPED,
                 dependencies=("missing_node",),
             )
         )

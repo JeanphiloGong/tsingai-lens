@@ -12,17 +12,12 @@ from domain.core import (
 from domain.core.finding import (
     PAPER_CONTRIBUTION_STATUSES,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     PaperContribution,
     ResearchObjective,
 )
+
 from domain.core.research_objective import (
-    _positive_int_or_none as objective_positive_int_or_none,
-)
-from domain.core.research_objective import (
-    _text,
     build_research_objective_id,
     normalize_objective_terms,
 )
@@ -51,8 +46,8 @@ async def objective_repository(source_repository):
         )
     repository = ObjectiveRepository()
     objective = ResearchObjective(
-        collection_id=_text(COLLECTION_ID) or "",
-        objective_id=_text(OBJECTIVE_ID)
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID
         or build_research_objective_id(
             question="How does laser power affect tensile strength?",
             material_scope=("Ti-6Al-4V",),
@@ -103,10 +98,10 @@ async def _queue_and_claim(repository):
 
 def _contribution(version: int, document_id: str) -> PaperContribution:
     return PaperContribution(
-        collection_id=finding_text(COLLECTION_ID) or "",
-        objective_id=finding_text(OBJECTIVE_ID) or "",
-        analysis_version=objective_positive_int_or_none(version) or 0,
-        document_id=finding_text(document_id) or "",
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID or "",
+        analysis_version=version or 0,
+        document_id=document_id or "",
         analysis_status="analyzed",
         relevance="high",
         paper_role="primary_experiment",
@@ -167,7 +162,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
     sessions = database.AsyncSessionLocal
     repository = ObjectiveRepository()
     objective = ResearchObjective(
-        collection_id=_text(COLLECTION_ID) or "",
+        collection_id=COLLECTION_ID or "",
         objective_id="preheat-elongation",
         question="Does preheat change elongation in 316L?",
         material_scope=("316L",),
@@ -210,15 +205,11 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         )
     coverage = tuple(
         PaperContribution(
-            collection_id=finding_text(COLLECTION_ID) or "",
-            objective_id=finding_text(objective.objective_id) or "",
+            collection_id=COLLECTION_ID or "",
+            objective_id=objective.objective_id or "",
             analysis_version=1,
-            document_id=finding_text(doc) or "",
-            analysis_status=finding_choice(
-                "analyzed" if doc == "doc_a" else "excluded",
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
+            document_id=doc or "",
+            analysis_status='analyzed' if doc == 'doc_a' else 'excluded',
             relevance="uncertain",
             paper_role="uncertain",
             contribution_summary=None,
@@ -297,7 +288,7 @@ async def test_published_evidence_gap_survives_a_failed_followup(
 ) -> None:
     repository = ObjectiveRepository()
     objective = ResearchObjective(
-        collection_id=_text(COLLECTION_ID) or "",
+        collection_id=COLLECTION_ID or "",
         objective_id="laser-power-porosity",
         question="How does laser power affect porosity in Ti-6Al-4V?",
         material_scope=("Ti-6Al-4V",),

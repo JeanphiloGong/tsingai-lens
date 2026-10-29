@@ -14,16 +14,10 @@ from domain.core.finding import (
     Finding,
     FindingPaperContribution,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _positive_int as finding_positive_int
-from domain.core.finding import _strings as finding_strings
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     ObjectiveEvidence,
 )
-from domain.core.research_objective import (
-    _positive_int_or_none as objective_positive_int_or_none,
-)
+
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.scientific_fact import (
     ScientificComparison,
@@ -53,18 +47,18 @@ pytestmark = [
 def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
     return tuple(
         ObjectiveEvidence(
-            collection_id=finding_text(COLLECTION_ID) or "",
-            objective_id=finding_text(OBJECTIVE_ID) or "",
-            analysis_version=objective_positive_int_or_none(version) or 0,
-            evidence_id=finding_text(f"evidence-{document_id}")
+            collection_id=COLLECTION_ID or "",
+            objective_id=OBJECTIVE_ID or "",
+            analysis_version=version or 0,
+            evidence_id=f'evidence-{document_id}'
             or objective_scoped_id(
                 "oev",
-                finding_text(COLLECTION_ID) or "",
-                finding_text(OBJECTIVE_ID) or "",
-                objective_positive_int_or_none(version) or 0,
-                finding_text(document_id) or "",
+                COLLECTION_ID or "",
+                OBJECTIVE_ID or "",
+                version or 0,
+                document_id or "",
                 "text_window",
-                finding_text(f"block-{document_id}") or "",
+                f'block-{document_id}' or "",
                 "direct_result",
                 (
                     ScientificResult(
@@ -89,9 +83,9 @@ def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
                     else None
                 ),
             ),
-            document_id=finding_text(document_id) or "",
+            document_id=document_id or "",
             source_kind="text_window",
-            source_ref=finding_text(f"block-{document_id}") or "",
+            source_ref=f'block-{document_id}' or "",
             source_excerpt="Laser power increased from 100 W to 150 W.",
             page_numbers=(2,),
             related_source_refs=(),
@@ -130,20 +124,16 @@ def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
 
 def _finding(version: int) -> Finding:
     return Finding(
-        collection_id=finding_text(COLLECTION_ID) or "",
-        objective_id=finding_text(OBJECTIVE_ID) or "",
-        analysis_version=finding_positive_int(version),
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID or "",
+        analysis_version=version,
         finding_id="finding-strength",
         statement="Higher laser power was associated with higher tensile strength under the reported conditions.",
         factors=("laser power",),
         outcome="tensile strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='isolated_effect',
         synthesis_status="agreement",
         certainty=0.75,
         display_rank=0,
@@ -153,24 +143,12 @@ def _finding(version: int) -> Finding:
         paper_contributions=tuple(
             (
                 FindingPaperContribution(
-                    document_id=finding_text(item.get("document_id")) or "",
-                    analysis_status=finding_choice(
-                        item.get("analysis_status"),
-                        PAPER_CONTRIBUTION_STATUSES,
-                        "pending",
-                    ),
-                    supporting_evidence_ids=finding_strings(
-                        item.get("supporting_evidence_ids")
-                    ),
-                    contradicting_evidence_ids=finding_strings(
-                        item.get("contradicting_evidence_ids")
-                    ),
-                    context_evidence_ids=finding_strings(
-                        item.get("context_evidence_ids")
-                    ),
-                    condition_boundary_evidence_ids=finding_strings(
-                        item.get("condition_boundary_evidence_ids")
-                    ),
+                    document_id=item.get('document_id') or "",
+                    analysis_status=item.get('analysis_status'),
+                    supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
+                    contradicting_evidence_ids=tuple(item.get('contradicting_evidence_ids') or ()),
+                    context_evidence_ids=tuple(item.get('context_evidence_ids') or ()),
+                    condition_boundary_evidence_ids=tuple(item.get('condition_boundary_evidence_ids') or ()),
                 )
                 for item in tuple(
                     (

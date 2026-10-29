@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha1
@@ -10,7 +11,6 @@ from application.goal.protocol_contract import (
     proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
 )
-from application.goal.research_plan_contract import ResearchPlanStructure
 from domain.goal import ExperimentPlanRecord, ExperimentPlanStatus
 from repositories.experiment_plan_repository import (
     ExperimentPlanRepository,
@@ -67,7 +67,7 @@ class ExperimentPlanService:
             metadata={"source": "manual"},
             created_by=created_by,
             updated_by=created_by,
-            structured_plan=_validated_structure(structured_plan),
+            structured_plan=deepcopy(structured_plan),
             created_at=now,
             updated_at=now,
         )
@@ -88,9 +88,9 @@ class ExperimentPlanService:
     ) -> ExperimentPlanRecord:
         """Persist one approved plan draft against current Finding snapshots."""
 
-        if not str(created_by or "").strip():
+        if not created_by.strip():
             raise ValueError("research plan requires an authenticated creator")
-        if not str(created_by_tool_call_id or "").strip():
+        if not created_by_tool_call_id.strip():
             raise ValueError("research plan requires an approved tool call")
         if not source_findings:
             raise ValueError("research plan requires at least one source Finding")
@@ -144,7 +144,7 @@ class ExperimentPlanService:
             },
             created_by=created_by,
             updated_by=created_by,
-            structured_plan=_validated_structure(structured_plan),
+            structured_plan=deepcopy(structured_plan),
             created_at=now,
             updated_at=now,
         )
@@ -249,7 +249,7 @@ class ExperimentPlanService:
                 "source": "research_agent",
                 "review_gate": _HISTORICAL_REVIEW_GATE,
                 "source_findings": [dict(item) for item in source_findings],
-                "updated_by_tool_call_id": str(updated_by_tool_call_id).strip(),
+                "updated_by_tool_call_id": updated_by_tool_call_id,
                 "source_validity": "current",
                 "source_validity_reasons": [],
             }
@@ -260,11 +260,11 @@ class ExperimentPlanService:
                 checked = await self._with_source_validity(plan)
                 if checked.metadata.get("source_validity") != "current":
                     raise ValueError("historical source Findings are stale")
-        if not str(updated_by or "").strip():
+        if not updated_by or not updated_by.strip():
             raise ValueError("research plan revision requires an authenticated updater")
         now = _now_iso()
         next_structure = (
-            _validated_structure(structured_plan)
+            structured_plan
             if structured_plan is not None
             else plan.structured_plan
         )
@@ -394,13 +394,6 @@ def _has_protocol_draft_structure(content: str) -> bool:
     )
     return all(any(term in normalized for term in terms) for terms in required_terms)
 
-
-def _validated_structure(
-    value: Mapping[str, Any] | None,
-) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    return ResearchPlanStructure.model_validate(value).model_dump()
 
 
 __all__ = ["ExperimentPlanNotFoundError", "ExperimentPlanService"]

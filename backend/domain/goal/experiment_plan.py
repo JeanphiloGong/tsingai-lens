@@ -33,25 +33,6 @@ class ExperimentPlanRecord:
     updated_by: str | None = None
 
     def __post_init__(self) -> None:
-        for name, value in (
-            ("plan_id", self.plan_id),
-            ("collection_id", self.collection_id),
-            ("objective_id", self.objective_id),
-            ("title", self.title),
-            ("content", self.content),
-        ):
-            text = value.strip()
-            if not text:
-                raise ValueError(f"{name} is required")
-            object.__setattr__(self, name, text)
-        if self.created_by is not None:
-            object.__setattr__(self, "created_by", self.created_by.strip() or None)
-        if self.updated_by is not None:
-            object.__setattr__(self, "updated_by", self.updated_by.strip() or None)
-        if self.status not in EXPERIMENT_PLAN_STATUSES:
-            raise ValueError(
-                "experiment plan status must be one of: draft, ready_for_review, archived"
-            )
         if (
             isinstance(self.plan_version, bool)
             or not isinstance(self.plan_version, int)
@@ -66,10 +47,6 @@ class ExperimentPlanRecord:
             raise ValueError("parent_plan_id cannot equal plan_id")
         if self.plan_version > 1 and self.updated_by is None:
             raise ValueError("updated_by is required after the first revision")
-        if self.structured_plan is not None and not isinstance(
-            self.structured_plan, Mapping
-        ):
-            raise ValueError("structured_plan must be an object")
 
     def with_updates(
         self,
@@ -109,17 +86,14 @@ class ExperimentPlanRecord:
             plan_version=self.plan_version + 1,
             parent_plan_id=self.plan_id,
             structured_plan=(
-                deepcopy(dict(structured_plan))
+                deepcopy(structured_plan)
                 if structured_plan is not None
                 else None
             ),
             updated_by=updated_by,
             updated_at=updated_at,
-            source_links=tuple(
-                dict(item)
-                for item in (self.source_links if source_links is None else source_links)
-            ),
-            metadata=dict(self.metadata if metadata is None else metadata),
+            source_links=deepcopy(self.source_links if source_links is None else source_links),
+            metadata=deepcopy(self.metadata if metadata is None else metadata),
         )
 
 __all__ = [

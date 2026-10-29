@@ -23,7 +23,7 @@ class ExperimentPlanSourceLink(BaseModel):
 class ExperimentPlanCreateRequest(BaseModel):
     """Save one manual Objective-scoped experiment plan draft."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str = Field(..., min_length=1, max_length=400)
     content: str = Field(..., min_length=1, max_length=20000)
@@ -33,7 +33,7 @@ class ExperimentPlanCreateRequest(BaseModel):
 class ExperimentPlanUpdateRequest(BaseModel):
     """Edit a saved experiment plan draft."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str | None = Field(default=None, min_length=1, max_length=400)
     content: str | None = Field(default=None, min_length=1, max_length=20000)

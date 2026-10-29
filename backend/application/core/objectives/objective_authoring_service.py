@@ -84,8 +84,8 @@ class ObjectiveAuthoringService:
         outcome_terms = tuple(outcomes)
         mechanism_terms = tuple(mechanisms)
         constraint_terms = tuple(constraints)
-        comparator = _text(requested_comparator)
-        parent_id = _text(parent_objective_id)
+        comparator = requested_comparator
+        parent_id = parent_objective_id
         objective = ResearchObjective(
             collection_id=collection_id,
             objective_id=build_research_objective_id(
@@ -171,9 +171,9 @@ class ObjectiveAuthoringService:
         for item in derivation_basis:
             if not isinstance(item, Mapping):
                 raise ValueError("objective derivation basis entries must be mappings")
-            kind = _text(item.get("kind"))
-            reference_id = _text(item.get("reference_id"))
-            rationale = _text(item.get("rationale"))
+            kind = item.get("kind")
+            reference_id = item.get("reference_id")
+            rationale = item.get("rationale")
             if not kind or not reference_id or not rationale:
                 raise ValueError(
                     "objective derivation basis requires reference_id and rationale"
@@ -199,7 +199,7 @@ class ObjectiveAuthoringService:
                 if record is None:
                     raise ValueError("Finding is not part of the published parent analysis")
                 snapshot = {
-                    "statement": (_text(_record_field(record, "statement")) or "")[:1_000],
+                    "statement": (_record_field(record, "statement") or "")[:1_000],
                 }
             elif kind == "evidence_gap":
                 record = await self._published_evidence_by_id(
@@ -212,8 +212,8 @@ class ObjectiveAuthoringService:
                     raise ValueError(
                         "Evidence gap is not part of the published parent analysis"
                     )
-                selection_status = _text(_record_field(record, "selection_status")) or ""
-                evidence_status = _text(_record_field(record, "evidence_status")) or ""
+                selection_status = _record_field(record, "selection_status") or ""
+                evidence_status = _record_field(record, "evidence_status") or ""
                 if selection_status == "failed" or evidence_status == "extraction_failed":
                     raise ValueError("technical extraction failure cannot derive an Objective")
                 if selection_status == "rejected":
@@ -221,13 +221,13 @@ class ObjectiveAuthoringService:
                 snapshot = {
                     "evidence_status": evidence_status,
                     "reason": (
-                        _text(_record_field(record, "evidence_status_reason"))
-                        or _text(_record_field(record, "selection_reason"))
+                        _record_field(record, "evidence_status_reason")
+                        or _record_field(record, "selection_reason")
                         or ""
                     )[:1_000],
-                    "document_id": _text(_record_field(record, "document_id")),
-                    "source_kind": _text(_record_field(record, "source_kind")),
-                    "source_ref": _text(_record_field(record, "source_ref")),
+                    "document_id": _record_field(record, "document_id"),
+                    "source_kind": _record_field(record, "source_kind"),
+                    "source_ref": _record_field(record, "source_ref"),
                 }
             elif kind == "paper_contribution":
                 record = await self._published_paper_contribution_by_id(
@@ -240,18 +240,18 @@ class ObjectiveAuthoringService:
                     raise ValueError(
                         "paper contribution is not part of the published parent analysis"
                     )
-                analysis_status = _text(_record_field(record, "analysis_status")) or ""
-                disposition = _text(_record_field(record, "evidence_disposition")) or ""
+                analysis_status = _record_field(record, "analysis_status") or ""
+                disposition = _record_field(record, "evidence_disposition") or ""
                 if analysis_status in {"excluded", "failed"} or disposition in {
                     "excluded",
                     "extraction_failed",
                 }:
                     raise ValueError("excluded or failed paper cannot derive an Objective")
                 snapshot = {
-                    "document_id": _text(_record_field(record, "document_id")) or reference_id,
+                    "document_id": _record_field(record, "document_id") or reference_id,
                     "evidence_disposition": disposition,
                     "reason": (
-                        _text(_record_field(record, "evidence_disposition_reason")) or ""
+                        _record_field(record, "evidence_disposition_reason") or ""
                     )[:1_000],
                 }
             else:
@@ -296,7 +296,7 @@ class ObjectiveAuthoringService:
                     limit=500,
                 )
             for record in records:
-                if _text(_record_field(record, "evidence_id")) == evidence_id:
+                if _record_field(record, "evidence_id") == evidence_id:
                     return record
             offset += len(records)
             if not records or offset >= total:
@@ -327,7 +327,7 @@ class ObjectiveAuthoringService:
             (
                 record
                 for record in records
-                if _text(_record_field(record, "document_id")) == document_id
+                if _record_field(record, "document_id") == document_id
             ),
             None,
         )
@@ -347,9 +347,7 @@ class ObjectiveAuthoringService:
         )
 
 
-def _text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
+
 
 
 def _record_field(record: Any, name: str, default: Any = None) -> Any:

@@ -4,10 +4,6 @@ from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
     ResearchObjective,
-    _choice,
-    _objective_derivation_basis,
-    _positive_int_or_none,
-    _text,
     build_research_objective_id,
     normalize_objective_terms,
 )
@@ -36,14 +32,12 @@ from repositories.objective_repository import ObjectiveRepository
 
 def research_objective(payload: dict[str, Any]) -> ResearchObjective:
     return ResearchObjective(
-        collection_id=_text(payload.get("collection_id", "collection-test")) or "",
-        objective_id=_text(payload.get("objective_id", None))
+        collection_id=payload.get("collection_id", "collection-test") or "",
+        objective_id=payload.get("objective_id", None)
         or build_research_objective_id(
-            question=_text(
-                payload.get(
+            question=payload.get(
                     "question", "How does process condition affect the target outcome?"
                 )
-            )
             or "",
             material_scope=normalize_objective_terms(
                 payload.get('material_scope', ())
@@ -56,17 +50,13 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
             ),
             mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
             constraints=normalize_objective_terms(payload.get('constraints', ())),
-            requested_comparator=_text(payload.get("requested_comparator", None)),
-            parent_objective_id=_text(payload.get("parent_objective_id", None)),
-            parent_analysis_version=_positive_int_or_none(
-                payload.get("parent_analysis_version", None)
-            ),
+            requested_comparator=payload.get("requested_comparator", None),
+            parent_objective_id=payload.get("parent_objective_id", None),
+            parent_analysis_version=payload.get("parent_analysis_version", None),
         ),
-        question=_text(
-            payload.get(
+        question=payload.get(
                 "question", "How does process condition affect the target outcome?"
             )
-        )
         or "",
         material_scope=normalize_objective_terms(payload.get('material_scope', ())),
         variables=normalize_objective_terms(
@@ -75,7 +65,7 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
         outcomes=normalize_objective_terms(payload.get("outcomes", ["target outcome"])),
         mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
         constraints=normalize_objective_terms(payload.get('constraints', ())),
-        requested_comparator=_text(payload.get("requested_comparator", None)),
+        requested_comparator=payload.get("requested_comparator", None),
         seed_document_ids=normalize_objective_terms(
             payload.get('seed_document_ids', ())
         ),
@@ -83,34 +73,20 @@ def research_objective(payload: dict[str, Any]) -> ResearchObjective:
             payload.get('excluded_document_ids', ())
         ),
         confidence=payload.get('confidence', 0.0),
-        reason=_text(payload.get("reason", None)),
+        reason=payload.get("reason", None),
         source_relationship_ids=normalize_objective_terms(
             payload.get('source_relationship_ids', ())
         ),
-        parent_objective_id=_text(payload.get("parent_objective_id", None)),
-        parent_analysis_version=_positive_int_or_none(
-            payload.get("parent_analysis_version", None)
-        ),
-        derivation_basis=_objective_derivation_basis(
-            payload.get("derivation_basis", None)
-        ),
-        rank=_positive_int_or_none(payload.get("rank", None)),
-        confirmation_status=_choice(
-            payload.get("confirmation_status", None),
-            OBJECTIVE_CONFIRMATION_STATUSES,
-            "candidate",
-        ),
-        active_analysis_version=_positive_int_or_none(
-            payload.get("active_analysis_version", None)
-        ),
-        published_analysis_version=_positive_int_or_none(
-            payload.get("published_analysis_version", None)
-        ),
-        origin=_choice(
-            payload.get("origin", None), OBJECTIVE_ORIGINS, "system_discovered"
-        ),
-        created_by_user_id=_text(payload.get("created_by_user_id", None)),
-        created_by_tool_call_id=_text(payload.get("created_by_tool_call_id", None)),
+        parent_objective_id=payload.get("parent_objective_id", None),
+        parent_analysis_version=payload.get("parent_analysis_version", None),
+        derivation_basis=tuple(payload.get("derivation_basis", None) or ()),
+        rank=payload.get("rank", None),
+        confirmation_status=payload.get("confirmation_status", None),
+        active_analysis_version=payload.get("active_analysis_version", None),
+        published_analysis_version=payload.get("published_analysis_version", None),
+        origin=payload.get("origin", None),
+        created_by_user_id=payload.get("created_by_user_id", None),
+        created_by_tool_call_id=payload.get("created_by_tool_call_id", None),
     )
 
 

@@ -4,6 +4,7 @@ from dataclasses import replace
 from domain.core.research_objective import PaperResearchSignal, PaperSourceUnitCoverage
 
 from domain.core.research_objective import (
+    PaperSourceUnitCoverageStatus,
     PaperResearchSourceRef,
 )
 
@@ -1000,7 +1001,7 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
                 window_id="window-relationship",
                 source_kind="block",
                 source_ref="block-relationship",
-                status="relationship_emitted",
+                status=PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED,
                 reason=None,
             ),
             PaperSourceUnitCoverage(
@@ -1008,7 +1009,7 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
                 window_id="window-unresolved",
                 source_kind="figure",
                 source_ref="figure-unresolved",
-                status="unresolved_signal_emitted",
+                status=PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED,
                 reason=None,
             ),
             PaperSourceUnitCoverage(
@@ -1016,7 +1017,7 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
                 window_id="window-no-signal",
                 source_kind="block",
                 source_ref="block-no-signal",
-                status="no_study_signal",
+                status=PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL,
                 reason="The Source unit contains no study signal.",
             ),
             PaperSourceUnitCoverage(
@@ -1024,7 +1025,7 @@ def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
                 window_id="window-failed",
                 source_kind="table",
                 source_ref="table-failed",
-                status="extraction_failed",
+                status=PaperSourceUnitCoverageStatus.EXTRACTION_FAILED,
                 reason="The extraction response was invalid.",
             ),
         ),

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from domain.core.research_objective import (
-    _text,
     build_research_objective_id,
     normalize_objective_terms,
 )
@@ -329,7 +328,7 @@ class ObjectiveCandidateService:
                 ),
                 excluded_document_ids=(),
                 confidence=0,
-                reason=_text(proposal.reason),
+                reason=proposal.reason,
                 rank=rank,
             )
             candidates.append(CandidateQuestion(objective, selections))

@@ -4,10 +4,6 @@ from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
     ResearchObjective,
-    _choice,
-    _objective_derivation_basis,
-    _positive_int_or_none,
-    _text,
     build_research_objective_id,
     normalize_objective_terms,
 )
@@ -53,9 +49,9 @@ class _ObjectiveAuthoringService:
     async def create_chat_assisted_candidate(self, **kwargs) -> ResearchObjective:
         self.calls.append(kwargs)
         return ResearchObjective(
-            collection_id=_text(kwargs.get("collection_id", None)) or "",
+            collection_id=kwargs.get("collection_id", None) or "",
             objective_id="objective-derived",
-            question=_text(kwargs.get("question", None)) or "",
+            question=kwargs.get("question", None) or "",
             material_scope=normalize_objective_terms(
                 kwargs.get('material_scope', ())
             ),
@@ -63,7 +59,7 @@ class _ObjectiveAuthoringService:
             outcomes=normalize_objective_terms(kwargs.get('outcomes', ())),
             mechanisms=normalize_objective_terms(kwargs.get('mechanisms', ())),
             constraints=normalize_objective_terms(kwargs.get('constraints', ())),
-            requested_comparator=_text(kwargs.get("requested_comparator", None)),
+            requested_comparator=kwargs.get("requested_comparator", None),
             seed_document_ids=normalize_objective_terms(
                 kwargs.get('seed_document_ids', ())
             ),
@@ -71,32 +67,20 @@ class _ObjectiveAuthoringService:
                 kwargs.get('excluded_document_ids', ())
             ),
             confidence=0.0,
-            reason=_text(kwargs.get("reason", None)),
+            reason=kwargs.get("reason", None),
             source_relationship_ids=normalize_objective_terms(
                 kwargs.get('source_relationship_ids', ())
             ),
-            parent_objective_id=_text(kwargs.get("parent_objective_id", None)),
-            parent_analysis_version=_positive_int_or_none(
-                kwargs.get("parent_analysis_version", None)
-            ),
-            derivation_basis=_objective_derivation_basis(
-                kwargs.get("derivation_basis", None)
-            ),
-            rank=_positive_int_or_none(kwargs.get("rank", None)),
-            confirmation_status=_choice(
-                kwargs.get("confirmation_status", None),
-                OBJECTIVE_CONFIRMATION_STATUSES,
-                "candidate",
-            ),
-            active_analysis_version=_positive_int_or_none(
-                kwargs.get("active_analysis_version", None)
-            ),
-            published_analysis_version=_positive_int_or_none(
-                kwargs.get("published_analysis_version", None)
-            ),
+            parent_objective_id=kwargs.get("parent_objective_id", None),
+            parent_analysis_version=kwargs.get("parent_analysis_version", None),
+            derivation_basis=tuple(kwargs.get("derivation_basis", None) or ()),
+            rank=kwargs.get("rank", None),
+            confirmation_status=kwargs.get("confirmation_status", None),
+            active_analysis_version=kwargs.get("active_analysis_version", None),
+            published_analysis_version=kwargs.get("published_analysis_version", None),
             origin="chat_assisted",
-            created_by_user_id=_text(kwargs["user_id"]),
-            created_by_tool_call_id=_text(kwargs["tool_call_id"]),
+            created_by_user_id=kwargs["user_id"],
+            created_by_tool_call_id=kwargs["tool_call_id"],
         )
 
 
@@ -117,8 +101,8 @@ class _ParentObjectiveRepository:
             confidence=0.0,
             reason=None,
             confirmation_status="confirmed",
-            active_analysis_version=_positive_int_or_none(published_version),
-            published_analysis_version=_positive_int_or_none(published_version),
+            active_analysis_version=published_version,
+            published_analysis_version=published_version,
         )
         self.finding = SimpleNamespace(
             finding_id="finding-1",
@@ -362,7 +346,7 @@ async def test_derived_candidate_lineage_round_trips_through_postgres_repository
         reason=None,
         parent_objective_id="objective-parent",
         parent_analysis_version=3,
-        derivation_basis=_objective_derivation_basis(_lineage()),
+        derivation_basis=tuple(_lineage() or ()),
         origin="chat_assisted",
         created_by_user_id="user-1",
         created_by_tool_call_id="call-derived",
@@ -439,7 +423,7 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(*, 
         reason=None,
         parent_objective_id="objective-parent",
         parent_analysis_version=3,
-        derivation_basis=_objective_derivation_basis(_lineage()),
+        derivation_basis=tuple(_lineage() or ()),
         origin="chat_assisted",
         created_by_user_id="user-1",
         created_by_tool_call_id="call-idempotent",
@@ -782,10 +766,10 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
         "derivation_basis": _lineage(),
     }
     first = ResearchObjective(
-        collection_id=_text(common.get("collection_id", None)) or "",
-        objective_id=_text(common.get("objective_id", None))
+        collection_id=common.get("collection_id", None) or "",
+        objective_id=common.get("objective_id", None)
         or build_research_objective_id(
-            question=_text(common.get("question", None)) or "",
+            question=common.get("question", None) or "",
             material_scope=normalize_objective_terms(
                 common.get('material_scope', ())
             ),
@@ -793,19 +777,17 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
             outcomes=normalize_objective_terms(common.get('outcomes', ())),
             mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
             constraints=normalize_objective_terms(common.get('constraints', ())),
-            requested_comparator=_text(common.get("requested_comparator", None)),
+            requested_comparator=common.get("requested_comparator", None),
             parent_objective_id="objective-parent-a",
-            parent_analysis_version=_positive_int_or_none(
-                common.get("parent_analysis_version", None)
-            ),
+            parent_analysis_version=common.get("parent_analysis_version", None),
         ),
-        question=_text(common.get("question", None)) or "",
+        question=common.get("question", None) or "",
         material_scope=normalize_objective_terms(common.get('material_scope', ())),
         variables=normalize_objective_terms(common.get('variables', ())),
         outcomes=normalize_objective_terms(common.get('outcomes', ())),
         mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
         constraints=normalize_objective_terms(common.get('constraints', ())),
-        requested_comparator=_text(common.get("requested_comparator", None)),
+        requested_comparator=common.get("requested_comparator", None),
         seed_document_ids=normalize_objective_terms(
             common.get('seed_document_ids', ())
         ),
@@ -813,40 +795,26 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
             common.get('excluded_document_ids', ())
         ),
         confidence=common.get('confidence', 0.0),
-        reason=_text(common.get("reason", None)),
+        reason=common.get("reason", None),
         source_relationship_ids=normalize_objective_terms(
             common.get('source_relationship_ids', ())
         ),
         parent_objective_id="objective-parent-a",
-        parent_analysis_version=_positive_int_or_none(
-            common.get("parent_analysis_version", None)
-        ),
-        derivation_basis=_objective_derivation_basis(
-            common.get("derivation_basis", None)
-        ),
-        rank=_positive_int_or_none(common.get("rank", None)),
-        confirmation_status=_choice(
-            common.get("confirmation_status", None),
-            OBJECTIVE_CONFIRMATION_STATUSES,
-            "candidate",
-        ),
-        active_analysis_version=_positive_int_or_none(
-            common.get("active_analysis_version", None)
-        ),
-        published_analysis_version=_positive_int_or_none(
-            common.get("published_analysis_version", None)
-        ),
-        origin=_choice(
-            common.get("origin", None), OBJECTIVE_ORIGINS, "system_discovered"
-        ),
-        created_by_user_id=_text(common.get("created_by_user_id", None)),
-        created_by_tool_call_id=_text(common.get("created_by_tool_call_id", None)),
+        parent_analysis_version=common.get("parent_analysis_version", None),
+        derivation_basis=tuple(common.get("derivation_basis", None) or ()),
+        rank=common.get("rank", None),
+        confirmation_status=common.get("confirmation_status", None),
+        active_analysis_version=common.get("active_analysis_version", None),
+        published_analysis_version=common.get("published_analysis_version", None),
+        origin=common.get("origin", None),
+        created_by_user_id=common.get("created_by_user_id", None),
+        created_by_tool_call_id=common.get("created_by_tool_call_id", None),
     )
     second = ResearchObjective(
-        collection_id=_text(common.get("collection_id", None)) or "",
-        objective_id=_text(common.get("objective_id", None))
+        collection_id=common.get("collection_id", None) or "",
+        objective_id=common.get("objective_id", None)
         or build_research_objective_id(
-            question=_text(common.get("question", None)) or "",
+            question=common.get("question", None) or "",
             material_scope=normalize_objective_terms(
                 common.get('material_scope', ())
             ),
@@ -854,19 +822,17 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
             outcomes=normalize_objective_terms(common.get('outcomes', ())),
             mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
             constraints=normalize_objective_terms(common.get('constraints', ())),
-            requested_comparator=_text(common.get("requested_comparator", None)),
+            requested_comparator=common.get("requested_comparator", None),
             parent_objective_id="objective-parent-b",
-            parent_analysis_version=_positive_int_or_none(
-                common.get("parent_analysis_version", None)
-            ),
+            parent_analysis_version=common.get("parent_analysis_version", None),
         ),
-        question=_text(common.get("question", None)) or "",
+        question=common.get("question", None) or "",
         material_scope=normalize_objective_terms(common.get('material_scope', ())),
         variables=normalize_objective_terms(common.get('variables', ())),
         outcomes=normalize_objective_terms(common.get('outcomes', ())),
         mechanisms=normalize_objective_terms(common.get('mechanisms', ())),
         constraints=normalize_objective_terms(common.get('constraints', ())),
-        requested_comparator=_text(common.get("requested_comparator", None)),
+        requested_comparator=common.get("requested_comparator", None),
         seed_document_ids=normalize_objective_terms(
             common.get('seed_document_ids', ())
         ),
@@ -874,34 +840,20 @@ def test_derived_objective_identity_includes_parent_analysis_lineage() -> None:
             common.get('excluded_document_ids', ())
         ),
         confidence=common.get('confidence', 0.0),
-        reason=_text(common.get("reason", None)),
+        reason=common.get("reason", None),
         source_relationship_ids=normalize_objective_terms(
             common.get('source_relationship_ids', ())
         ),
         parent_objective_id="objective-parent-b",
-        parent_analysis_version=_positive_int_or_none(
-            common.get("parent_analysis_version", None)
-        ),
-        derivation_basis=_objective_derivation_basis(
-            common.get("derivation_basis", None)
-        ),
-        rank=_positive_int_or_none(common.get("rank", None)),
-        confirmation_status=_choice(
-            common.get("confirmation_status", None),
-            OBJECTIVE_CONFIRMATION_STATUSES,
-            "candidate",
-        ),
-        active_analysis_version=_positive_int_or_none(
-            common.get("active_analysis_version", None)
-        ),
-        published_analysis_version=_positive_int_or_none(
-            common.get("published_analysis_version", None)
-        ),
-        origin=_choice(
-            common.get("origin", None), OBJECTIVE_ORIGINS, "system_discovered"
-        ),
-        created_by_user_id=_text(common.get("created_by_user_id", None)),
-        created_by_tool_call_id=_text(common.get("created_by_tool_call_id", None)),
+        parent_analysis_version=common.get("parent_analysis_version", None),
+        derivation_basis=tuple(common.get("derivation_basis", None) or ()),
+        rank=common.get("rank", None),
+        confirmation_status=common.get("confirmation_status", None),
+        active_analysis_version=common.get("active_analysis_version", None),
+        published_analysis_version=common.get("published_analysis_version", None),
+        origin=common.get("origin", None),
+        created_by_user_id=common.get("created_by_user_id", None),
+        created_by_tool_call_id=common.get("created_by_tool_call_id", None),
     )
 
     assert first.objective_id != second.objective_id

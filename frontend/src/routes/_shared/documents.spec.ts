@@ -13,13 +13,14 @@ const { buildDocumentWorkbenchModel, fetchDocumentMarkdown, fetchDocumentProfile
 describe('documents shared helpers', () => {
 	beforeEach(() => requestJson.mockReset());
 
-	it('normalizes the maintained document profile contract', async () => {
+	it('preserves the maintained document profile contract', async () => {
 		requestJson.mockResolvedValue({
 			collection_id: 'col_123',
 			total: 1,
 			count: 1,
 			summary: {
 				total_documents: 1,
+				technical_failure_count: 0,
 				by_doc_type: { experimental: 1 },
 				warnings: []
 			},
@@ -28,6 +29,7 @@ describe('documents shared helpers', () => {
 					document_id: 'doc_1',
 					title: 'Paper A',
 					doc_type: 'experimental',
+					profile_status: 'completed',
 					profile_warnings: [],
 					confidence: 0.9
 				}
@@ -36,7 +38,7 @@ describe('documents shared helpers', () => {
 
 		const response = await fetchDocumentProfiles('col_123');
 
-		expect(response.summary.doc_type_counts.experimental).toBe(1);
+		expect(response.summary.by_doc_type.experimental).toBe(1);
 		expect(response.items[0]).toMatchObject({
 			document_id: 'doc_1',
 			doc_type: 'experimental',
@@ -51,7 +53,7 @@ describe('documents shared helpers', () => {
 			collection_id: 'col_123',
 			total: 0,
 			count: 0,
-			summary: { total_documents: 131, by_doc_type: {}, warnings: [] },
+			summary: { total_documents: 131, technical_failure_count: 0, by_doc_type: {}, warnings: [] },
 			items: []
 		});
 
@@ -69,7 +71,7 @@ describe('documents shared helpers', () => {
 		);
 	});
 
-	it('normalizes Markdown source mappings and rejects entries without stable anchors', async () => {
+	it('preserves Markdown whitespace and stable Source anchors', async () => {
 		requestJson.mockResolvedValue({
 			collection_id: 'col_123',
 			document_id: 'doc_1',
@@ -86,15 +88,14 @@ describe('documents shared helpers', () => {
 					page: 1,
 					heading_path: 'Abstract',
 					text_unit_ids: ['tu-1']
-				},
-				{ markdown_anchor: '', artifact_type: 'block', artifact_id: 'invalid' }
+				}
 			],
 			warnings: ['layout_warning']
 		});
 
 		const response = await fetchDocumentMarkdown('col_123', 'doc_1');
 
-		expect(response.markdown).toBe('# Paper A\n\nText.');
+		expect(response.markdown).toBe('  # Paper A\n\nText.  ');
 		expect(response.source_map).toHaveLength(1);
 		expect(response.source_map[0]).toMatchObject({
 			artifact_id: 'abstract',
@@ -102,6 +103,14 @@ describe('documents shared helpers', () => {
 			page: 1,
 			heading_path: 'Abstract'
 		});
+	});
+
+	it('rejects a missing Source anchor instead of dropping the invalid mapping', async () => {
+		requestJson.mockResolvedValue({
+			collection_id: 'col_123', document_id: 'doc_1', markdown: '# Paper',
+			source_map: [{ markdown_anchor: '', artifact_type: 'block', artifact_id: 'invalid' }]
+		});
+		await expect(fetchDocumentMarkdown('col_123', 'doc_1')).rejects.toThrow('Document Markdown response');
 	});
 
 	it('builds source navigation only from parsed Source blocks', () => {

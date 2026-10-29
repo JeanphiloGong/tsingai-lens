@@ -54,6 +54,7 @@ function profile(index: number) {
 		document_id: `doc-${index}`,
 		title: `Paper ${index}`,
 		doc_type: 'experimental',
+		profile_status: 'completed',
 		profile_warnings: [],
 		confidence: 0.9,
 		page_count: 10
@@ -83,7 +84,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				total: 2,
 				count: 2,
 				summary: {
-					total_documents: 2,
+					technical_failure_count: 0, total_documents: 2,
 					by_doc_type: { experimental: 1, review: 1 },
 					warnings: []
 				},
@@ -128,7 +129,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: 1,
 				count: 1,
-				summary: { total_documents: 1, by_doc_type: {}, warnings: [] },
+				summary: { technical_failure_count: 0, total_documents: 1, by_doc_type: {}, warnings: [] },
 				items: [
 					{
 						...profile(1),
@@ -157,7 +158,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: 131,
 				count: 25,
-				summary: { total_documents: 131, by_doc_type: { experimental: 131 }, warnings: [] },
+				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: { experimental: 131 }, warnings: [] },
 				items: Array.from({ length: 25 }, (_, index) => profile(index + 1))
 			})
 		);
@@ -180,7 +181,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: 131,
 				count: 25,
-				summary: { total_documents: 131, by_doc_type: {}, warnings: [] },
+				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: {}, warnings: [] },
 				items: Array.from({ length: 25 }, (_, index) => profile(offset + index + 1))
 			});
 		});
@@ -204,7 +205,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: query ? 1 : 131,
 				count: query ? 1 : 25,
-				summary: { total_documents: 131, by_doc_type: {}, warnings: [] },
+				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: {}, warnings: [] },
 				items: query ? [{ ...profile(88), title: 'Laser porosity study' }] : [profile(1)]
 			});
 		});
@@ -232,7 +233,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				total: filtered ? 1 : 131,
 				count: filtered ? 1 : 25,
 				summary: {
-					total_documents: 131,
+					technical_failure_count: 0, total_documents: 131,
 					by_doc_type: { experimental: 100, review: 25, mixed: 4, uncertain: 2 },
 					warnings: []
 				},
@@ -275,7 +276,7 @@ describe('collections/[id]/documents/+page.svelte', () => {
 				collection_id: 'col_123',
 				total: isFiltered ? 26 : 131,
 				count: 25,
-				summary: { total_documents: 131, by_doc_type: {}, warnings: [] },
+				summary: { technical_failure_count: 0, total_documents: 131, by_doc_type: {}, warnings: [] },
 				items: Array.from({ length: 25 }, (_, index) => ({
 					...profile(offset + index + 1),
 					title: isFiltered

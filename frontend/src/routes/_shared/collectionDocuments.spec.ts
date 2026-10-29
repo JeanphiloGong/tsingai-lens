@@ -14,6 +14,7 @@ describe('collection document API', () => {
 
 	it('preserves the current preparation versions and fingerprint', async () => {
 		request.mockResolvedValue({
+			count: 9,
 			items: [
 				{
 					document_id: 'doc_1',
@@ -38,6 +39,7 @@ describe('collection document API', () => {
 		const result = await listCollectionDocuments('col_1');
 
 		expect(request).toHaveBeenCalledWith('/collections/col_1/documents', { method: 'GET' });
+		expect(result.count).toBe(9);
 		expect(result.items[0]).toMatchObject({
 			document_id: 'doc_1',
 			status: 'ready',

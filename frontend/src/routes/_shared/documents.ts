@@ -10,7 +10,7 @@ export type DocumentProfile = {
 	profile_status: ProfileStatus;
 	profile_warnings: string[];
 	confidence: number | null;
-	page_count: number | null;
+	page_count?: number | null;
 };
 
 export type DocumentProfilesResponse = {
@@ -19,7 +19,7 @@ export type DocumentProfilesResponse = {
 	count: number;
 	summary: {
 		total_documents: number;
-		doc_type_counts: Record<DocumentType, number>;
+		by_doc_type: Partial<Record<DocumentType, number>>;
 		technical_failure_count: number;
 		warnings: string[];
 	};
@@ -142,139 +142,6 @@ export type DocumentWorkbenchModel = {
 
 const DOCUMENT_TYPES = new Set<DocumentType>(['experimental', 'review', 'mixed', 'uncertain']);
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-	return value && typeof value === 'object' && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: null;
-}
-
-function optionalText(value: unknown) {
-	return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function stringList(value: unknown) {
-	return Array.isArray(value)
-		? value
-				.map(String)
-				.map((item) => item.trim())
-				.filter(Boolean)
-		: [];
-}
-
-function finiteNumber(value: unknown, fallback = 0) {
-	const parsed = Number(value ?? fallback);
-	return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function nullableNumber(value: unknown) {
-	if (value === null || value === undefined || value === '') return null;
-	const parsed = Number(value);
-	return Number.isFinite(parsed) ? parsed : null;
-}
-
-function normalizeProfile(value: unknown): DocumentProfile | null {
-	const record = asRecord(value);
-	const documentId = String(record?.document_id ?? '').trim();
-	if (!record || !documentId) return null;
-	const rawType = String(record.doc_type ?? 'uncertain') as DocumentType;
-	return {
-		document_id: documentId,
-		title: optionalText(record.title),
-		doc_type: DOCUMENT_TYPES.has(rawType) ? rawType : 'uncertain',
-		profile_status:
-			String(record.profile_status ?? 'completed') === 'extraction_failed'
-				? 'extraction_failed'
-				: 'completed',
-		profile_warnings: stringList(record.profile_warnings),
-		confidence: nullableNumber(record.confidence),
-		page_count: nullableNumber(record.page_count)
-	};
-}
-
-function normalizeContentBlock(value: unknown): DocumentContentBlock | null {
-	const record = asRecord(value);
-	const blockId = String(record?.block_id ?? '').trim();
-	if (!record || !blockId) return null;
-	return {
-		block_id: blockId,
-		block_type: optionalText(record.block_type),
-		heading_path: optionalText(record.heading_path),
-		heading_level: finiteNumber(record.heading_level),
-		order: finiteNumber(record.order),
-		text: String(record.text ?? ''),
-		text_unit_ids: stringList(record.text_unit_ids),
-		page: nullableNumber(record.page)
-	};
-}
-
-function normalizeDocumentContent(
-	value: unknown,
-	collectionId: string,
-	documentId: string
-): DocumentContentResponse {
-	const record = asRecord(value);
-	if (!record || String(record.document_id ?? '').trim() !== documentId) {
-		throw new Error('Document content response is invalid.');
-	}
-	return {
-		collection_id: String(record.collection_id ?? collectionId),
-		document_id: documentId,
-		title: optionalText(record.title),
-		source_filename: optionalText(record.source_filename),
-		content_text: String(record.content_text ?? ''),
-		blocks: Array.isArray(record.blocks)
-			? record.blocks
-					.map(normalizeContentBlock)
-					.filter((block): block is DocumentContentBlock => block !== null)
-			: [],
-		warnings: stringList(record.warnings)
-	};
-}
-
-function normalizeSourceMapItem(value: unknown): DocumentMarkdownSourceMapItem | null {
-	const record = asRecord(value);
-	const markdownAnchor = String(record?.markdown_anchor ?? '').trim();
-	const artifactId = String(record?.artifact_id ?? '').trim();
-	if (!record || !markdownAnchor || !artifactId) return null;
-	return {
-		markdown_anchor: markdownAnchor,
-		artifact_type: String(record.artifact_type ?? ''),
-		artifact_id: artifactId,
-		block_id: optionalText(record.block_id),
-		table_id: optionalText(record.table_id),
-		figure_id: optionalText(record.figure_id),
-		block_type: optionalText(record.block_type),
-		page: nullableNumber(record.page),
-		heading_path: optionalText(record.heading_path),
-		text_unit_ids: stringList(record.text_unit_ids)
-	};
-}
-
-export function normalizeDocumentMarkdown(
-	value: unknown,
-	collectionId: string,
-	documentId: string
-): DocumentMarkdownResponse {
-	const record = asRecord(value);
-	if (!record || String(record.document_id ?? '').trim() !== documentId) {
-		throw new Error('Document Markdown response is invalid.');
-	}
-	return {
-		collection_id: String(record.collection_id ?? collectionId),
-		document_id: documentId,
-		title: optionalText(record.title),
-		source_filename: optionalText(record.source_filename),
-		parser: optionalText(record.parser),
-		markdown: String(record.markdown ?? '').trim(),
-		source_map: Array.isArray(record.source_map)
-			? record.source_map
-					.map(normalizeSourceMapItem)
-					.filter((item): item is DocumentMarkdownSourceMapItem => item !== null)
-			: [],
-		warnings: stringList(record.warnings)
-	};
-}
-
 function sourceSpan(documentId: string, block: DocumentContentBlock): WorkbenchSourceSpan {
 	const page = block.page && block.page > 0 ? Math.trunc(block.page) : 1;
 	const section = block.heading_path || block.block_type || 'Document text';
@@ -387,31 +254,18 @@ export async function fetchDocumentProfiles(
 	const data = (await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/profiles${queryString ? `?${queryString}` : ''}`,
 		{ method: 'GET' }
-	)) as Record<string, unknown>;
-	const items = Array.isArray(data.items)
-		? data.items
-				.map((item) => normalizeProfile(item))
-				.filter((item): item is DocumentProfile => item !== null)
-		: [];
-	const summary = asRecord(data.summary);
-	const counts = asRecord(summary?.by_doc_type);
-	return {
-		collection_id: String(data.collection_id ?? collectionId),
-		total: finiteNumber(data.total, items.length),
-		count: finiteNumber(data.count, items.length),
-		summary: {
-			total_documents: finiteNumber(summary?.total_documents, items.length),
-			doc_type_counts: {
-				experimental: finiteNumber(counts?.experimental),
-				review: finiteNumber(counts?.review),
-				mixed: finiteNumber(counts?.mixed),
-				uncertain: finiteNumber(counts?.uncertain)
-			},
-			technical_failure_count: finiteNumber(summary?.technical_failure_count),
-			warnings: stringList(summary?.warnings)
-		},
-		items
-	};
+	)) as DocumentProfilesResponse;
+	if (!data || data.collection_id !== collectionId || !Array.isArray(data.items) ||
+		typeof data.total !== 'number' || !Number.isFinite(data.total) || data.total < 0 ||
+		typeof data.count !== 'number' || !Number.isFinite(data.count) || data.count < 0 ||
+		!data.summary || typeof data.summary.total_documents !== 'number' ||
+		!data.summary.by_doc_type || typeof data.summary.technical_failure_count !== 'number' ||
+		data.items.some((item) => !item || typeof item.document_id !== 'string' || !item.document_id ||
+			!DOCUMENT_TYPES.has(item.doc_type) || !['completed', 'extraction_failed'].includes(item.profile_status) ||
+			(item.confidence !== null && (typeof item.confidence !== 'number' || !Number.isFinite(item.confidence))))) {
+		throw new Error('Document profiles response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchDocumentContent(
@@ -421,8 +275,13 @@ export async function fetchDocumentContent(
 	const data = await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/content`,
 		{ method: 'GET' }
-	);
-	return normalizeDocumentContent(data, collectionId, documentId);
+	) as DocumentContentResponse;
+	if (!data || data.collection_id !== collectionId || data.document_id !== documentId ||
+		typeof data.content_text !== 'string' || !Array.isArray(data.blocks) ||
+		data.blocks.some((block) => !block || typeof block.block_id !== 'string' || !block.block_id)) {
+		throw new Error('Document content response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchDocumentMarkdown(
@@ -432,8 +291,14 @@ export async function fetchDocumentMarkdown(
 	const data = await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/markdown`,
 		{ method: 'GET' }
-	);
-	return normalizeDocumentMarkdown(data, collectionId, documentId);
+	) as DocumentMarkdownResponse;
+	if (!data || data.collection_id !== collectionId || data.document_id !== documentId ||
+		typeof data.markdown !== 'string' || !Array.isArray(data.source_map) ||
+		data.source_map.some((item) => !item || typeof item.markdown_anchor !== 'string' || !item.markdown_anchor ||
+			typeof item.artifact_id !== 'string' || !item.artifact_id)) {
+		throw new Error('Document Markdown response is invalid.');
+	}
+	return data;
 }
 
 export async function fetchDocumentProfile(
@@ -443,8 +308,11 @@ export async function fetchDocumentProfile(
 	const data = await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/profile`,
 		{ method: 'GET' }
-	);
-	const profile = normalizeProfile(data);
-	if (!profile) throw new Error('Document profile response is invalid.');
-	return profile;
+	) as DocumentProfile;
+	if (!data || data.document_id !== documentId || !DOCUMENT_TYPES.has(data.doc_type) ||
+		!['completed', 'extraction_failed'].includes(data.profile_status) ||
+		typeof data.confidence !== 'number' || !Number.isFinite(data.confidence)) {
+		throw new Error('Document profile response is invalid.');
+	}
+	return data;
 }

@@ -32,38 +32,6 @@ export type CollectionDocumentUploadResponse = CollectionDocumentsResponse & {
 	failures: CollectionDocumentUploadFailure[];
 };
 
-function normalizeCollectionDocument(item: unknown): CollectionDocument | null {
-	if (!item || typeof item !== 'object') return null;
-	const record = item as Record<string, unknown>;
-	const documentId = String(record.document_id ?? '').trim();
-	if (!documentId) return null;
-
-	return {
-		document_id: documentId,
-		original_filename: String(record.original_filename ?? ''),
-		stored_filename: String(record.stored_filename ?? ''),
-		storage_key: String(record.storage_key ?? ''),
-		sha256: String(record.sha256 ?? ''),
-		media_type: typeof record.media_type === 'string' ? record.media_type : null,
-		status: String(record.status ?? 'unknown'),
-		size_bytes:
-			typeof record.size_bytes === 'number' ? record.size_bytes : Number(record.size_bytes ?? 0),
-		created_at: String(record.created_at ?? ''),
-		updated_at: String(record.updated_at ?? record.created_at ?? ''),
-		parser_version: typeof record.parser_version === 'string' ? record.parser_version : null,
-		document_analysis_version:
-			typeof record.document_analysis_version === 'string'
-				? record.document_analysis_version
-				: null,
-		source_fingerprint:
-			typeof record.source_fingerprint === 'string' ? record.source_fingerprint : null,
-		profile_fingerprint:
-			typeof record.profile_fingerprint === 'string' ? record.profile_fingerprint : null,
-		preparation_fingerprint:
-			typeof record.preparation_fingerprint === 'string' ? record.preparation_fingerprint : null
-	};
-}
-
 export async function listCollectionDocuments(
 	collectionId: string
 ): Promise<CollectionDocumentsResponse> {
@@ -79,11 +47,11 @@ export async function listCollectionDocuments(
 		throw new Error('Collection documents response is missing items.');
 	}
 
-	const items = ((data as Record<string, unknown>).items as unknown[])
-		.map((item) => normalizeCollectionDocument(item))
-		.filter((item): item is CollectionDocument => item !== null);
-
-	return { count: items.length, items };
+	const items = (data as CollectionDocumentsResponse).items;
+	if (items.some((item) => !item || typeof item.document_id !== 'string' || !item.document_id)) {
+		throw new Error('Collection documents response is missing document_id.');
+	}
+	return data as CollectionDocumentsResponse;
 }
 
 export async function uploadCollectionDocument(
@@ -102,8 +70,8 @@ export async function uploadCollectionDocument(
 		}
 	);
 
-	const uploaded = normalizeCollectionDocument(data);
-	if (!uploaded) {
+	const uploaded = data as CollectionDocument;
+	if (!uploaded || typeof uploaded.document_id !== 'string' || !uploaded.document_id) {
 		throw new Error('Document upload response is missing document_id.');
 	}
 	return uploaded;

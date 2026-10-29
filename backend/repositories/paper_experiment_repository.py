@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import (
     Any,
-    Mapping,
 )
 
 from domain.core.paper_experiment import (
@@ -66,14 +65,13 @@ class PaperExperimentRepository:
         writers a deterministic document-level lock order.
         """
 
-        normalized = str(document_id).strip()
-        if not normalized:
+        if not document_id.strip():
             raise ValueError("paper experiment document lock requires document_id")
         await db.execute(
             select(
                 func.pg_advisory_xact_lock(
                     func.hashtextextended(
-                        f"paper-experiment-document:{normalized}", 0
+                        f"paper-experiment-document:{document_id}", 0
                     )
                 )
             )
@@ -614,364 +612,161 @@ async def load_experiment_revision(
     return StoredPaperExperimentRevision(
         revision_id=revision_id,
         revision=PaperExperimentRevision(
-            experiment_id=_text(row.experiment_id),
-            document_id=_text(row.document_id),
-            experiment_version=int(row.experiment_version or 0),
-            source_fingerprint=_text(row.source_fingerprint),
-            label=_text(row.label),
-            scope_description=_text(row.scope_description),
-            design_type=_text(row.design_type) or "unknown",
-            identity_status=_text(row.identity_status) or "unknown",
-            binding_status=_text(row.binding_status) or "draft",
+            experiment_id=row.experiment_id,
+            document_id=row.document_id,
+            experiment_version=row.experiment_version,
+            source_fingerprint=row.source_fingerprint,
+            label=row.label,
+            scope_description=row.scope_description,
+            design_type=row.design_type,
+            identity_status=row.identity_status,
+            binding_status=row.binding_status,
             variants=tuple(
-                (
-                    ExperimentalVariant(
-                        variant_key=_text(item.variant_key or None),
-                        variant_label=_text(item.variant_label),
-                        subject_attributes=tuple(
-                            (
-                                ScientificAttribute(
-                                    name=item["name"],
-                                    value=item["value"],
-                                    unit=item.get("unit"),
-                                    context_scope=item.get("context_scope", "unknown"),
-                                    applies_to_outcomes=tuple(
-                                        item.get("applies_to_outcomes", ())
-                                    ),
-                                )
-                                for item in list(item.subject_attributes_json) or ()
-                            )
-                        ),
-                        intervention_attributes=tuple(
-                            (
-                                ScientificAttribute(
-                                    name=item["name"],
-                                    value=item["value"],
-                                    unit=item.get("unit"),
-                                    context_scope=item.get("context_scope", "unknown"),
-                                    applies_to_outcomes=tuple(
-                                        item.get("applies_to_outcomes", ())
-                                    ),
-                                )
-                                for item in list(item.intervention_attributes_json)
-                                or ()
-                            )
-                        ),
-                        state=tuple(
-                            (
-                                ScientificAttribute(
-                                    name=item["name"],
-                                    value=item["value"],
-                                    unit=item.get("unit"),
-                                    context_scope=item.get("context_scope", "unknown"),
-                                    applies_to_outcomes=tuple(
-                                        item.get("applies_to_outcomes", ())
-                                    ),
-                                )
-                                for item in list(item.state_json) or ()
-                            )
-                        ),
-                        population_scope=(
-                            _mapping(item.population_scope_json)
-                            if item.population_scope_json is not None
-                            else None
-                        ),
-                        source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        binding_source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.binding_source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        binding_status=_text(item.binding_status) or "uncertain",
-                        notes=_strings(list(item.notes_json)),
-                        identity_specificity=_text(item.identity_specificity)
-                        or "unknown",
-                        missing_dimensions=_strings(list(item.missing_dimensions_json)),
-                        identity_evidence=_strings(list(item.identity_evidence_json)),
-                    )
-                    for item in variants
+                ExperimentalVariant(
+                    variant_key=item.variant_key,
+                    variant_label=item.variant_label,
+                    subject_attributes=tuple(
+                        ScientificAttribute(
+                            name=value["name"], value=value["value"],
+                            unit=value["unit"],
+                            context_scope=value.get("context_scope", "unknown"),
+                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                        )
+                        for value in item.subject_attributes_json
+                    ),
+                    intervention_attributes=tuple(
+                        ScientificAttribute(
+                            name=value["name"], value=value["value"],
+                            unit=value["unit"],
+                            context_scope=value.get("context_scope", "unknown"),
+                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                        )
+                        for value in item.intervention_attributes_json
+                    ),
+                    state=tuple(
+                        ScientificAttribute(
+                            name=value["name"], value=value["value"],
+                            unit=value["unit"],
+                            context_scope=value.get("context_scope", "unknown"),
+                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                        )
+                        for value in item.state_json
+                    ),
+                    population_scope=item.population_scope_json,
+                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    binding_source_refs=tuple(
+                        SourceReference(**value) for value in item.binding_source_refs_json
+                    ),
+                    binding_status=item.binding_status,
+                    notes=tuple(item.notes_json),
+                    identity_specificity=item.identity_specificity,
+                    missing_dimensions=tuple(item.missing_dimensions_json),
+                    identity_evidence=tuple(item.identity_evidence_json),
                 )
+                for item in variants
             ),
             test_conditions=tuple(
-                (
-                    ExperimentTestCondition(
-                        test_key=_text(item.test_key or None),
-                        test_type=_text(item.test_type or None),
-                        parameters=tuple(
-                            (
-                                ScientificAttribute(
-                                    name=item["name"],
-                                    value=item["value"],
-                                    unit=item.get("unit"),
-                                    context_scope=item.get("context_scope", "unknown"),
-                                    applies_to_outcomes=tuple(
-                                        item.get("applies_to_outcomes", ())
-                                    ),
-                                )
-                                for item in list(item.parameters_json) or ()
-                            )
-                        ),
-                        population_scope=(
-                            _mapping(item.population_scope_json)
-                            if item.population_scope_json is not None
-                            else None
-                        ),
-                        source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        binding_status=_text(item.binding_status) or "uncertain",
-                        notes=_strings(list(item.notes_json)),
-                        protocol_specificity=_text(item.protocol_specificity)
-                        or "unknown",
-                        test_identity_status=_text(item.test_identity_status)
-                        or "unknown",
-                        protocol_completeness=_text(item.protocol_completeness)
-                        or "unknown",
-                        missing_parameters=_strings(list(item.missing_parameters_json)),
-                        method=_text(item.method) or None,
-                        standard=_text(item.standard) or None,
-                        outcome_scope=_strings(list(item.outcome_scope_json)),
-                        binding_source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.binding_source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        protocol_evidence=_strings(list(item.protocol_evidence_json)),
-                    )
-                    for item in tests
+                ExperimentTestCondition(
+                    test_key=item.test_key,
+                    test_type=item.test_type,
+                    parameters=tuple(
+                        ScientificAttribute(
+                            name=value["name"], value=value["value"],
+                            unit=value["unit"],
+                            context_scope=value.get("context_scope", "unknown"),
+                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                        )
+                        for value in item.parameters_json
+                    ),
+                    population_scope=item.population_scope_json,
+                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    binding_status=item.binding_status,
+                    notes=tuple(item.notes_json),
+                    protocol_specificity=item.protocol_specificity,
+                    test_identity_status=item.test_identity_status,
+                    protocol_completeness=item.protocol_completeness,
+                    missing_parameters=tuple(item.missing_parameters_json),
+                    method=item.method,
+                    standard=item.standard,
+                    outcome_scope=tuple(item.outcome_scope_json),
+                    binding_source_refs=tuple(
+                        SourceReference(**value) for value in item.binding_source_refs_json
+                    ),
+                    protocol_evidence=tuple(item.protocol_evidence_json),
                 )
+                for item in tests
             ),
             measurements=tuple(
-                (
-                    ExperimentMeasurementResult(
-                        measurement_key=_text(item.measurement_key or None),
-                        outcome=_text(item.outcome or None),
-                        variant_key=_text(item.variant_key or None) or None,
-                        test_key=_text(item.test_key or None) or None,
-                        value=_domain_value(item.value_numeric, item.value_text),
-                        unit=_text(item.unit) or None,
-                        result_text=_text(item.result_text or None) or None,
-                        statistics=_mapping(dict(item.statistics_json)),
-                        measurement_scope=_mapping(dict(item.measurement_scope_json)),
-                        result_kind=_text(item.result_kind) or "measured",
-                        source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        binding_source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.binding_source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        binding_status=_text(item.binding_status) or "uncertain",
-                        notes=_strings(list(item.notes_json)),
-                    )
-                    for item in measurements
+                ExperimentMeasurementResult(
+                    measurement_key=item.measurement_key,
+                    outcome=item.outcome,
+                    variant_key=item.variant_key,
+                    test_key=item.test_key,
+                    value=_domain_value(item.value_numeric, item.value_text),
+                    unit=item.unit,
+                    result_text=item.result_text,
+                    statistics=item.statistics_json,
+                    measurement_scope=item.measurement_scope_json,
+                    result_kind=item.result_kind,
+                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    binding_source_refs=tuple(
+                        SourceReference(**value) for value in item.binding_source_refs_json
+                    ),
+                    binding_status=item.binding_status,
+                    notes=tuple(item.notes_json),
                 )
+                for item in measurements
             ),
             comparisons=tuple(
-                (
-                    ExperimentComparison(
-                        comparison_key=_text(item.comparison_key or None),
-                        baseline_variant_key=_text(item.baseline_variant_key or None),
-                        target_variant_key=_text(item.target_variant_key or None),
-                        outcome=_text(item.outcome),
-                        baseline_measurement_keys=_strings(
-                            links_by_comparison.get(item.comparison_key, {}).get(
-                                "baseline", []
-                            )
-                            or None
-                        ),
-                        target_measurement_keys=_strings(
-                            links_by_comparison.get(item.comparison_key, {}).get(
-                                "target", []
-                            )
-                            or None
-                        ),
-                        changed_variables=tuple(
-                            (
-                                ScientificVariable(
-                                    name=item["name"],
-                                    baseline_value=item.get("baseline_value"),
-                                    target_value=item.get("target_value"),
-                                    unit=item.get("unit"),
-                                )
-                                for item in list(item.changed_variables_json) or ()
-                            )
-                        ),
-                        matched_conditions=tuple(
-                            (
-                                ScientificAttribute(
-                                    name=item["name"],
-                                    value=item["value"],
-                                    unit=item.get("unit"),
-                                    context_scope=item.get("context_scope", "unknown"),
-                                    applies_to_outcomes=tuple(
-                                        item.get("applies_to_outcomes", ())
-                                    ),
-                                )
-                                for item in list(item.matched_conditions_json) or ()
-                            )
-                        ),
-                        basis=_text(item.basis) or "reported",
-                        direction=_text(item.direction) or "unknown",
-                        reported_statement=_text(item.reported_statement) or None,
-                        attribution_scope=_text(item.attribution_scope)
-                        or "undetermined",
-                        status=_text(item.status) or "insufficient_context",
-                        reasons=_strings(list(item.reasons_json)),
-                        source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        binding_source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.binding_source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                        relation_status=_text(item.relation_status) or "uncertain",
-                    )
-                    for item in comparisons
+                ExperimentComparison(
+                    comparison_key=item.comparison_key,
+                    baseline_variant_key=item.baseline_variant_key,
+                    target_variant_key=item.target_variant_key,
+                    outcome=item.outcome,
+                    baseline_measurement_keys=tuple(
+                        links_by_comparison[item.comparison_key]["baseline"]
+                    ),
+                    target_measurement_keys=tuple(
+                        links_by_comparison[item.comparison_key]["target"]
+                    ),
+                    changed_variables=tuple(
+                        ScientificVariable(**value) for value in item.changed_variables_json
+                    ),
+                    matched_conditions=tuple(
+                        ScientificAttribute(
+                            name=value["name"], value=value["value"],
+                            unit=value["unit"],
+                            context_scope=value.get("context_scope", "unknown"),
+                            applies_to_outcomes=tuple(value.get("applies_to_outcomes", ())),
+                        )
+                        for value in item.matched_conditions_json
+                    ),
+                    basis=item.basis,
+                    direction=item.direction,
+                    reported_statement=item.reported_statement,
+                    attribution_scope=item.attribution_scope,
+                    status=item.status,
+                    reasons=tuple(item.reasons_json),
+                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
+                    binding_source_refs=tuple(
+                        SourceReference(**value) for value in item.binding_source_refs_json
+                    ),
+                    relation_status=item.relation_status,
                 )
+                for item in comparisons
             ),
             reported_interpretations=tuple(
-                (
-                    ReportedInterpretation(
-                        statement=_text(item.statement),
-                        kind=_text(item.kind) or "result_summary",
-                        measurement_keys=_strings(
-                            list(item.measurement_keys_json) or None
-                        ),
-                        comparison_keys=_strings(
-                            list(item.comparison_keys_json) or None
-                        ),
-                        source_refs=tuple(
-                            (
-                                SourceReference(
-                                    document_id=_text(item.get("document_id")),
-                                    source_fingerprint=_text(
-                                        item.get("source_fingerprint")
-                                    ),
-                                    source_kind=_text(item.get("source_kind")),
-                                    source_ref=_text(item.get("source_ref")),
-                                    quote=_text(item.get("quote")),
-                                )
-                                for item in list(item.source_refs_json) or ()
-                                if isinstance(item, Mapping)
-                            )
-                        ),
-                    )
-                    for item in interpretations
+                ReportedInterpretation(
+                    statement=item.statement,
+                    kind=item.kind,
+                    measurement_keys=tuple(item.measurement_keys_json),
+                    comparison_keys=tuple(item.comparison_keys_json),
+                    source_refs=tuple(SourceReference(**value) for value in item.source_refs_json),
                 )
+                for item in interpretations
             ),
-            source_refs=tuple(
-                (
-                    SourceReference(
-                        document_id=_text(item.get("document_id")),
-                        source_fingerprint=_text(item.get("source_fingerprint")),
-                        source_kind=_text(item.get("source_kind")),
-                        source_ref=_text(item.get("source_ref")),
-                        quote=_text(item.get("quote")),
-                    )
-                    for item in list(row.source_refs_json) or ()
-                    if isinstance(item, Mapping)
-                )
-            ),
-            unresolved_issues=tuple(
-                (
-                    dict(item)
-                    for item in list(row.unresolved_issues_json) or ()
-                    if isinstance(item, Mapping)
-                )
-            ),
+            source_refs=tuple(SourceReference(**value) for value in row.source_refs_json),
+            unresolved_issues=tuple(row.unresolved_issues_json),
         ),
         created_at=_aware(row.created_at),
         created_by=row.created_by,
@@ -1008,17 +803,3 @@ def _constraint_name(exc: IntegrityError) -> str | None:
 
 
 __all__ = ['PaperExperimentRepository', 'PaperExperimentRevisionConflictError', 'StoredPaperExperimentRevision']
-
-
-def _text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
-
-
-def _strings(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, (list, tuple, set)):
-        return ()
-    return tuple(item for item in (_text(item) for item in value) if item)
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}

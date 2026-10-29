@@ -16,7 +16,6 @@ from application.feedback.sample_builder_support import (
     readable_sources,
     snapshot_digest,
     SampleContentGenerator,
-    generation_missing_reasons,
 )
 
 
@@ -64,7 +63,7 @@ class SftSampleBuilder:
         annotation: FeedbackAnnotation | None,
         review_note: str | None = None,
     ) -> SftBuildCandidate | SftBuildNeedsInput:
-        snapshot = dict(case.context_snapshot or {})
+        snapshot = case.context_snapshot
         question = question_from_snapshot(snapshot)
         if not question:
             return SftBuildNeedsInput(("question_missing",))
@@ -79,12 +78,10 @@ class SftSampleBuilder:
                 task_type="sft", question=question, context=readable_sources_value,
                 snapshot=snapshot, construction_spec=dataset.construction_spec, review_note=review_note,
             )
-            reasons = generation_missing_reasons(value)
+            reasons = tuple(value.missing_reasons)
             if reasons:
                 return SftBuildNeedsInput(reasons)
-            if not isinstance(value.get("target"), str) or not value["target"].strip():
-                raise ValueError("sample_generation_target_invalid")
-            target, target_origin = value["target"].strip(), "model_candidate"
+            target, target_origin = value.target, "model_candidate"
             generated = True
         if not target:
             missing.append("candidate_target_missing")
@@ -94,9 +91,9 @@ class SftSampleBuilder:
         content = SftRevisionContent(
             schema_version="literature-sft.v1",
             messages=messages_from_snapshot(snapshot),
-            context=tuple(readable_sources_value),
+            context=readable_sources_value,
             target=target,
-            evidence=tuple(readable_sources_value),
+            evidence=readable_sources_value,
         )
         provenance = {
             "builder": self.generator.model_name if generated else self.model_name,
@@ -109,7 +106,7 @@ class SftSampleBuilder:
             "analysis_result_ids": list(case.analysis_result_ids),
             "signal_analysis_result_ids": list(case.signal_analysis_result_ids),
             "tool_failure_analysis_result_ids": list(case.tool_failure_analysis_result_ids),
-            "original_answer": str(snapshot.get("answer") or ""),
+            "original_answer": snapshot.get("answer", ""),
             "source_refs": [item["source_ref"] for item in source_provenance if item.get("source_ref")],
             "evidence_records": source_provenance,
             "target_origin": target_origin,

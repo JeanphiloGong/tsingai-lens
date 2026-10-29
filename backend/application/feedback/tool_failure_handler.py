@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 
 from domain.feedback.tool_failure import TOOL_FAILURE_SIGNAL_TYPE
 
@@ -13,7 +12,7 @@ from hashlib import sha256
 from typing import Any, Protocol
 from uuid import uuid4
 
-from application.feedback.analysis_handler import AnalysisInputError
+from application.feedback.analysis_handler import AnalysisInputError, conversation_before_answer
 from domain.chat import ChatMessage, ChatMessageRole, ToolCallStatus, ToolResultStatus
 from domain.feedback import (
     EvidenceCoverage,
@@ -86,9 +85,9 @@ class ToolFailureAnalysisHandler:
             or job.payload_version != TOOL_FAILURE_PAYLOAD_VERSION
         ):
             raise AnalysisInputError("unsupported_tool_failure_analysis_job")
-        payload = dict(job.payload or {})
+        payload = job.payload
         values = {
-            name: str(payload.get(name) or "").strip()
+            name: payload.get(name)
             for name in (
                 "session_id",
                 "tool_call_id",
@@ -97,7 +96,7 @@ class ToolFailureAnalysisHandler:
                 "result_digest",
             )
         }
-        if any(not value for value in values.values()):
+        if any(not isinstance(value, str) or not value for value in values.values()):
             raise AnalysisInputError("tool_failure_payload_invalid")
         expected_key = tool_failure_idempotency_key(**values)
         if job.idempotency_key != expected_key:
@@ -145,7 +144,7 @@ class ToolFailureAnalysisHandler:
         if (
             request is None
             or request.name != call.name
-            or dict(request.arguments) != dict(call.arguments)
+            or request.arguments != call.arguments
             or request.position != call.position
         ):
             raise AnalysisInputError("tool_failure_identity_mismatch")
@@ -155,7 +154,7 @@ class ToolFailureAnalysisHandler:
         actual_digest = tool_result_digest({
             "tool_call_id": result.tool_call_id,
             "status": result.status.value,
-            "data": deepcopy(dict(result.data)),
+            "data": result.data,
             "resource_refs": [
                 {
                     "resource_type": item.resource_type,
@@ -218,7 +217,7 @@ class ToolFailureAnalysisHandler:
             "result": {
                 "tool_call_id": result.tool_call_id,
                 "status": result.status.value,
-                "data": deepcopy(dict(result.data)),
+                "data": result.data,
                 "resource_refs": [
                     {
                         "resource_type": item.resource_type,
@@ -262,6 +261,7 @@ class ToolFailureAnalysisHandler:
         )
         snapshot = {
             "question": _previous_user_question(messages, result_message),
+            "messages": conversation_before_answer(messages, assistant),
             "answer": answer.content if answer is not None else assistant.content,
             # The failed tool call is the signal anchor.  A later final answer
             # is the user-facing case anchor when the run produced one.

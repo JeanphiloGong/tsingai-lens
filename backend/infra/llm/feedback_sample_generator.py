@@ -8,6 +8,11 @@ from typing import Any, Mapping
 
 from openai import AsyncOpenAI
 
+from application.feedback.sample_builder_support import (
+    SftSampleModelOutput,
+    PreferenceSampleModelOutput,
+    EvaluationSampleModelOutput,
+)
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 from domain.feedback.sample_revision import strip_internal_references
 
@@ -100,7 +105,7 @@ class OpenAIFeedbackSampleGenerator:
         self, *, task_type: str, question: str, context: tuple[dict[str, str], ...],
         snapshot: Mapping[str, Any], construction_spec: Mapping[str, Any],
         review_note: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> SftSampleModelOutput | PreferenceSampleModelOutput | EvaluationSampleModelOutput:
         if task_type not in _TASK_OUTPUTS or not question:
             raise ValueError("sample_generation_input_invalid")
         correction = snapshot.get("correction_signal") or {}
@@ -156,14 +161,37 @@ class OpenAIFeedbackSampleGenerator:
             value = json.loads(choice.message.content or "")
         except (ValueError, TypeError) as exc:
             raise ValueError("sample_generation_response_invalid") from exc
-        if not isinstance(value, dict):
-            raise ValueError("sample_generation_response_invalid")
-        for key in ("target", "reference", "response_a", "response_b", "rationale"):
-            if isinstance(value.get(key), str):
-                value[key] = strip_internal_references(value[key])
-        if isinstance(value.get("criteria"), list):
-            value["criteria"] = [
-                strip_internal_references(item) if isinstance(item, str) else item
-                for item in value["criteria"]
-            ]
-        return value
+        if task_type == "sft":
+            result = SftSampleModelOutput.model_validate(value)
+            if result.target is not None:
+                result.target = strip_internal_references(result.target)
+                if not result.target:
+                    raise ValueError("sample_generation_target_invalid")
+            return result
+        if task_type == "preference":
+            result = PreferenceSampleModelOutput.model_validate(value)
+            if not review_note and (result.response_a is not None or result.response_b is not None):
+                raise ValueError("sample_generation_fixed_pair_cannot_be_rewritten")
+            if review_note and not result.missing_reasons and (
+                result.response_a is None or result.response_b is None
+            ):
+                raise ValueError("sample_generation_preference_responses_missing")
+            if result.response_a is not None:
+                result.response_a = strip_internal_references(result.response_a)
+            if result.response_b is not None:
+                result.response_b = strip_internal_references(result.response_b)
+            if result.rationale is not None:
+                result.rationale = strip_internal_references(result.rationale)
+                if not result.rationale:
+                    raise ValueError("sample_generation_preference_rationale_missing")
+            return result
+        result = EvaluationSampleModelOutput.model_validate(value)
+        if result.reference is not None:
+            result.reference = strip_internal_references(result.reference)
+        if result.criteria is not None:
+            result.criteria = [strip_internal_references(item) for item in result.criteria]
+            if any(not item for item in result.criteria):
+                raise ValueError("sample_generation_evaluation_criteria_missing")
+        if not result.missing_reasons and snapshot.get("evaluation_mode", "reference") == "reference" and not result.reference:
+            raise ValueError("sample_generation_evaluation_reference_missing")
+        return result

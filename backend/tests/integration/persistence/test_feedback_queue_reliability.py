@@ -327,7 +327,9 @@ async def test_source_change_requeues_confirmed_worker_candidate(feedback_chain,
         model_name = "test-grounded-candidate"
 
         async def generate(self, **kwargs):
-            return {"target": "Paper B records 200 C preheating in the supplied caption.", "missing_reasons": []}
+            from application.feedback.sample_builder_support import SftSampleModelOutput
+
+            return SftSampleModelOutput(target="Paper B records 200 C preheating in the supplied caption.")
 
     worker = DatasetSampleBuildWorker(
         job_repository=chain.jobs, dataset_repository=service.repository,

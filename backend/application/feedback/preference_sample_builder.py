@@ -4,11 +4,10 @@ from __future__ import annotations
 
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from application.feedback.sample_builder_support import (
     SampleContentGenerator,
-    generation_missing_reasons,
     input_digest,
     question_from_snapshot,
     messages_from_snapshot,
@@ -21,7 +20,6 @@ from domain.feedback.dataset_sample import DatasetSample
 from domain.feedback.feedback_case import FeedbackCase
 from domain.feedback.sample_revision import (
     PreferenceRevisionContent,
-    PreferenceChoice,
     SampleRevision,
     strip_internal_references,
 )
@@ -56,25 +54,17 @@ class PreferenceSampleBuilder:
         review_note: str | None = None,
         previous_revision: SampleRevision | None = None,
     ) -> PreferenceBuildCandidate | PreferenceBuildNeedsInput:
-        snapshot = dict(case.context_snapshot or {})
+        snapshot = case.context_snapshot
         question = question_from_snapshot(snapshot)
         sources, source_provenance = readable_sources(snapshot, annotation)
         messages = messages_from_snapshot(snapshot)
-        response_a = strip_internal_references(_first_text(
-            snapshot,
-            "response_a",
-            "original_answer",
-            "answer",
-        ))
-        response_b = strip_internal_references(_first_text(
-            snapshot,
-            "response_b",
-            "corrected_answer",
-            "candidate_target",
-        ))
+        response_a = strip_internal_references(snapshot.get("answer"))
+        response_b = strip_internal_references(
+            snapshot.get("corrected_answer") or snapshot.get("candidate_target")
+        )
         corrected_question = strip_internal_references(snapshot.get("corrected_question"))
         assessment = snapshot.get("pairing_assessment")
-        relation = assessment.get("task_relation") if isinstance(assessment, Mapping) else None
+        relation = assessment["task_relation"] if assessment is not None else None
         reviewing_previous = (
             bool(review_note)
             and previous_revision is not None
@@ -114,8 +104,8 @@ class PreferenceSampleBuilder:
             return PreferenceBuildNeedsInput(tuple(dict.fromkeys(missing)))
 
         generated = False
-        suggested = _preference_choice(snapshot)
-        rationale = _rationale(snapshot)
+        suggested = snapshot.get("suggested_preference")
+        rationale = strip_internal_references(snapshot.get("rationale"))
         if reviewing_previous:
             suggested, rationale = previous.suggested_preference, previous.rationale
         if self.generator is not None:
@@ -134,33 +124,19 @@ class PreferenceSampleBuilder:
                 construction_spec=dataset.construction_spec,
                 review_note=review_note,
             )
-            reasons = generation_missing_reasons(value)
+            reasons = tuple(value.missing_reasons)
             if reasons:
                 return PreferenceBuildNeedsInput(reasons)
             if review_note:
-                if any(not isinstance(value.get(key), str) for key in ("response_a", "response_b")):
-                    raise ValueError("sample_generation_preference_responses_invalid")
-                response_a = strip_internal_references(value.get("response_a"))
-                response_b = strip_internal_references(value.get("response_b"))
-                if not response_a or not response_b:
-                    raise ValueError("sample_generation_preference_responses_invalid")
-                if response_a == response_b:
-                    raise ValueError("sample_generation_preference_responses_identical")
-            suggested = _choice_from_value(value.get("suggested_preference"))
-            if suggested is None:
-                raise ValueError("sample_generation_preference_choice_missing")
-            if not isinstance(value.get("rationale"), str):
-                raise ValueError("sample_generation_preference_rationale_invalid")
-            rationale = strip_internal_references(value.get("rationale"))
-            if not rationale:
-                raise ValueError("sample_generation_preference_rationale_missing")
+                response_a, response_b = value.response_a, value.response_b
+            suggested, rationale = value.suggested_preference, value.rationale
             generated = True
         elif review_note:
             return PreferenceBuildNeedsInput(("preference_rebuild_generator_unavailable",))
         elif suggested is None or not rationale:
             return PreferenceBuildNeedsInput(("preference_assessment_generator_unavailable",))
 
-        context = tuple(sources)
+        context = sources
         content = PreferenceRevisionContent(
             schema_version="literature-preference.v1",
             messages=messages,
@@ -204,75 +180,8 @@ class PreferenceSampleBuilder:
         return PreferenceBuildCandidate(content=content, provenance=provenance)
 
 
-def validate_preference(value: Mapping[str, Any]) -> PreferenceRevisionContent:
-    """Validate a pair before it is accepted at a builder or HTTP boundary."""
-
-    if value.get("input_digest_a") != value.get("input_digest_b"):
-        raise ValueError("preference_inputs_differ")
-    response_a = strip_internal_references(value.get("response_a"))
-    response_b = strip_internal_references(value.get("response_b"))
-    if not response_a or not response_b:
-        raise ValueError("preference_response_missing")
-    if response_a == response_b:
-        raise ValueError("preference_responses_identical")
-    return PreferenceRevisionContent(
-        schema_version=str(value.get('schema_version') or ''),
-        messages=tuple(value.get('messages') or ()),
-        context=tuple(value.get('context') or ()),
-        response_a=str(value.get('response_a') or ''),
-        response_b=str(value.get('response_b') or ''),
-        suggested_preference=value.get('suggested_preference'),
-        rationale=str(value.get('rationale') or ''),
-        evidence=tuple(value.get('evidence') or ()),
-        human_preference=value.get('human_preference', value.get('preference')),
-    )
-
-
-def _first_text(snapshot: Mapping[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = str(snapshot.get(key) or "").strip()
-        if value:
-            return strip_internal_references(value)
-    return ""
-
-
-def _preference_choice(snapshot: Mapping[str, Any]) -> PreferenceChoice | None:
-    analysis = snapshot.get("analysis")
-    values = (
-        snapshot.get("suggested_preference"),
-        snapshot.get("preference"),
-        analysis.get("suggested_preference") if isinstance(analysis, Mapping) else None,
-    )
-    for value in values:
-        choice = str(value or "").strip().lower()
-        if choice in {"a", "b", "tie", "unclear"}:
-            return choice  # type: ignore[return-value]
-    return None
-
-
-def _choice_from_value(value: Any) -> PreferenceChoice | None:
-    if value is None:
-        return None
-    choice = str(value).strip().lower()
-    if choice not in {"a", "b", "tie", "unclear"}:
-        raise ValueError("sample_generation_preference_choice_invalid")
-    return choice  # type: ignore[return-value]
-
-
-def _rationale(snapshot: Mapping[str, Any]) -> str:
-    analysis = snapshot.get("analysis")
-    values = (
-        snapshot.get("rationale"),
-        snapshot.get("suggested_reason"),
-        analysis.get("rationale") if isinstance(analysis, Mapping) else None,
-        analysis.get("reason") if isinstance(analysis, Mapping) else None,
-    )
-    return next((strip_internal_references(value) for value in values if str(value or "").strip()), "")
-
-
 __all__ = [
     "PreferenceBuildCandidate",
     "PreferenceBuildNeedsInput",
     "PreferenceSampleBuilder",
-    "validate_preference",
 ]

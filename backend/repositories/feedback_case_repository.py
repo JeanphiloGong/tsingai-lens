@@ -137,7 +137,7 @@ class FeedbackCaseRepository:
                 anchor_message_id=row.anchor_message_id,
                 source_signal_ids=tuple(row.source_signal_ids or ()),
                 analysis_result_ids=tuple(row.analysis_result_ids or ()),
-                context_snapshot=deepcopy(row.context_snapshot or {}),
+                context_snapshot=row.context_snapshot,
                 status=row.status,
                 created_at=_iso(row.created_at),
                 updated_at=_iso(row.updated_at),
@@ -261,7 +261,7 @@ class FeedbackCaseRepository:
                 anchor_message_id=row.anchor_message_id,
                 source_signal_ids=tuple(row.source_signal_ids or ()),
                 analysis_result_ids=tuple(row.analysis_result_ids or ()),
-                context_snapshot=deepcopy(row.context_snapshot or {}),
+                context_snapshot=row.context_snapshot,
                 status=row.status,
                 created_at=_iso(row.created_at),
                 updated_at=_iso(row.updated_at),
@@ -389,7 +389,7 @@ class FeedbackCaseRepository:
                 anchor_message_id=row.anchor_message_id,
                 source_signal_ids=tuple(row.source_signal_ids or ()),
                 analysis_result_ids=tuple(row.analysis_result_ids or ()),
-                context_snapshot=deepcopy(row.context_snapshot or {}),
+                context_snapshot=row.context_snapshot,
                 status=row.status,
                 created_at=_iso(row.created_at),
                 updated_at=_iso(row.updated_at),
@@ -411,7 +411,7 @@ class FeedbackCaseRepository:
                     anchor_message_id=row.anchor_message_id,
                     source_signal_ids=tuple(row.source_signal_ids or ()),
                     analysis_result_ids=tuple(row.analysis_result_ids or ()),
-                    context_snapshot=deepcopy(row.context_snapshot or {}),
+                    context_snapshot=row.context_snapshot,
                     status=row.status,
                     created_at=_iso(row.created_at),
                     updated_at=_iso(row.updated_at),
@@ -690,7 +690,7 @@ class FeedbackCaseRepository:
                     anchor_message_id=row.anchor_message_id,
                     source_signal_ids=tuple(row.source_signal_ids or ()),
                     analysis_result_ids=tuple(row.analysis_result_ids or ()),
-                    context_snapshot=deepcopy(row.context_snapshot or {}),
+                    context_snapshot=row.context_snapshot,
                     status=row.status,
                     created_at=_iso(row.created_at),
                     updated_at=_iso(row.updated_at),
@@ -1184,7 +1184,7 @@ def _merge_context_snapshot(
 ) -> dict[str, Any]:
     """Merge source projections without erasing facts from another signal."""
 
-    merged = deepcopy(existing or {})
+    merged = dict(existing or {})
     correction_keys = {
         "correction_signal", "corrected_answer", "corrected_message_id",
         "corrected_evidence_coverage", "original_message_id", "pairing_basis",
@@ -1206,14 +1206,14 @@ def _merge_context_snapshot(
             unique = {
                 json.dumps(item, ensure_ascii=False, sort_keys=True): item for item in values
             }
-            merged[key] = deepcopy(list(unique.values()))
+            merged[key] = list(unique.values())
         elif value is not None and value != "":
-            merged[key] = deepcopy(value)
-    return merged
+            merged[key] = value
+    return deepcopy(merged)
 
 
 def _ordered_unique(values: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(str(value) for value in values if value))
+    return tuple(dict.fromkeys(values))
 
 
 def _datetime(value: Any) -> datetime:

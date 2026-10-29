@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback.sample_builder_support import PreferenceSampleModelOutput
+
 from domain.feedback.sample_revision import PreferenceRevisionContent
 
 
@@ -9,7 +11,6 @@ from application.feedback.preference_sample_builder import (
     PreferenceBuildCandidate,
     PreferenceBuildNeedsInput,
     PreferenceSampleBuilder,
-    validate_preference,
 )
 from domain.feedback import (
     Dataset,
@@ -61,8 +62,8 @@ def _case(snapshot: dict) -> FeedbackCase:
 @pytest.mark.parametrize("response_b", ["Vary both factors.", ""])
 async def test_conversation_pair_requires_answers_but_not_excerpts(response_b) -> None:
     result = await PreferenceSampleBuilder().build(dataset=_dataset(), sample=_sample(), annotation=None,
-        case=_case({"question": "Summarize our fixed-speed comparison.",
-            "response_a": "Vary power at fixed speed.", "response_b": response_b,
+        case=_case({"messages": [{"role": "user", "content": "Summarize our fixed-speed comparison."}], "question": "Summarize our fixed-speed comparison.",
+            "answer": "Vary power at fixed speed.", "candidate_target": response_b,
             "suggested_preference": "a", "rationale": "Preserves the fixed condition."}))
     if response_b:
         assert isinstance(result, PreferenceBuildCandidate)
@@ -78,8 +79,8 @@ async def test_builder_creates_same_input_pair_without_selecting_for_human() -> 
         sample=_sample(),
         case=_case(
             {
-                "question": "比较 A、B 的预热条件。",
-                "original_answer": "回答 A",
+                "messages": [{"role": "user", "content": "比较 A、B 的预热条件。"}], "question": "比较 A、B 的预热条件。",
+                "answer": "回答 A",
                 "candidate_target": "回答 B",
                 "suggested_preference": "b",
                 "rationale": "回答 B 与图注一致。",
@@ -108,12 +109,12 @@ async def test_first_build_assesses_fixed_answers_without_selecting_for_human(ch
             assert inputs["snapshot"]["response_a"] == "B 没有预热。"
             assert inputs["snapshot"]["response_b"] == "B 预热到 200 C。"
             assert inputs["context"] == ({"document_title": "B", "text": "Preheated at 200 C."},)
-            return {"suggested_preference": choice, "rationale": "根据原文核对预热条件。", "missing_reasons": []}
+            return PreferenceSampleModelOutput.model_validate({"suggested_preference": choice, "rationale": "根据原文核对预热条件。", "missing_reasons": []})
 
     result = await PreferenceSampleBuilder(generator=Generator()).build(
         dataset=_dataset(), sample=_sample(), annotation=None,
         case=_case({
-            "question": "B 的预热条件是什么？", "answer": "B 没有预热。",
+            "messages": [{"role": "user", "content": "B 的预热条件是什么？"}], "question": "B 的预热条件是什么？", "answer": "B 没有预热。",
             "corrected_answer": "B 预热到 200 C。", "pairing_assessment": {"task_relation": "same_task"},
             "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}],
         }),
@@ -128,25 +129,6 @@ async def test_first_build_assesses_fixed_answers_without_selecting_for_human(ch
     assert result.provenance["candidate_origin"] == "model_assessment"
 
 
-@pytest.mark.parametrize("assessment", [
-    {"suggested_preference": None, "rationale": "缺少判断。"},
-    {"suggested_preference": "b_preferred", "rationale": "无效选择。"},
-    {"suggested_preference": "b", "rationale": " "},
-    {"suggested_preference": "b", "rationale": 1},
-])
-async def test_first_build_rejects_an_invalid_or_unexplained_opinion(assessment) -> None:
-    class Generator:
-        model_name = "preference-judge"
-
-        async def generate(self, **inputs):
-            return assessment
-
-    with pytest.raises(ValueError, match="sample_generation_preference_"):
-        await PreferenceSampleBuilder(generator=Generator()).build(
-            dataset=_dataset(), sample=_sample(), annotation=None,
-            case=_case({"question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
-                "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
-        )
 
 
 async def test_first_build_abstains_on_missing_evidence_without_inventing_an_opinion() -> None:
@@ -154,11 +136,11 @@ async def test_first_build_abstains_on_missing_evidence_without_inventing_an_opi
         model_name = "preference-judge"
 
         async def generate(self, **inputs):
-            return {"missing_reasons": ["measurement_context_missing"]}
+            return PreferenceSampleModelOutput.model_validate({"missing_reasons": ["measurement_context_missing"]})
 
     result = await PreferenceSampleBuilder(generator=Generator()).build(
         dataset=_dataset(), sample=_sample(), annotation=None,
-        case=_case({"question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
+        case=_case({"messages": [{"role": "user", "content": "B 的预热条件？"}], "question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
             "inspected_sources": [{"document_title": "B", "quote": "Processing conditions varied."}]}),
     )
     assert isinstance(result, PreferenceBuildNeedsInput)
@@ -168,7 +150,7 @@ async def test_first_build_abstains_on_missing_evidence_without_inventing_an_opi
 async def test_first_build_does_not_publish_an_unassessed_pair_without_a_generator() -> None:
     result = await PreferenceSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,
-        case=_case({"question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
+        case=_case({"messages": [{"role": "user", "content": "B 的预热条件？"}], "question": "B 的预热条件？", "answer": "没有预热。", "candidate_target": "200 C。",
             "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
     )
     assert isinstance(result, PreferenceBuildNeedsInput)
@@ -180,8 +162,8 @@ async def test_builder_rejects_missing_or_identical_pair() -> None:
         dataset=_dataset(),
         sample=_sample(),
         case=_case({
-            "question": "比较 A、B。",
-            "original_answer": "同一答案",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。",
+            "answer": "同一答案",
             "candidate_target": "同一答案",
             "inspected_sources": [{"document_title": "A", "quote": "证据"}],
         }),
@@ -195,7 +177,7 @@ async def test_builder_rejects_pair_for_a_changed_question() -> None:
     result = await PreferenceSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,
         case=_case({
-            "question": "比较 A、B。", "corrected_question": "只总结 B。",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。", "corrected_question": "只总结 B。",
             "answer": "A、B 的比较。", "corrected_answer": "B 的总结。",
             "pairing_assessment": {"task_relation": "different_task"},
             "inspected_sources": [{"document_title": "B", "quote": "证据"}],
@@ -213,17 +195,17 @@ async def test_rebuild_uses_review_note_to_revise_pair() -> None:
             assert inputs["task_type"] == "preference"
             assert inputs["review_note"] == "修正 B 的温度并保留比较边界。"
             assert inputs["snapshot"]["response_a"] == "B 没有预热。"
-            return {
+            return PreferenceSampleModelOutput.model_validate({
                 "response_a": "B 没有预热。", "response_b": "B 预热到 200 C；A 未报告。",
                 "suggested_preference": "b", "rationale": "B 的温度与原文一致。",
                 "missing_reasons": [],
-            }
+            })
 
     result = await PreferenceSampleBuilder(generator=Generator()).build(
         dataset=_dataset(), sample=_sample(), annotation=None,
         review_note="修正 B 的温度并保留比较边界。",
         case=_case({
-            "question": "比较 A、B 的预热条件。", "answer": "B 没有预热。",
+            "messages": [{"role": "user", "content": "比较 A、B 的预热条件。"}], "question": "比较 A、B 的预热条件。", "answer": "B 没有预热。",
             "corrected_answer": "B 预热到 300 C。",
             "pairing_assessment": {"task_relation": "same_task"},
             "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}],
@@ -236,31 +218,8 @@ async def test_rebuild_uses_review_note_to_revise_pair() -> None:
     assert result.provenance["review_note"] == "修正 B 的温度并保留比较边界。"
 
 
-@pytest.mark.parametrize("choice", ["response_b", "b_preferred", True])
-async def test_rebuild_rejects_invalid_generated_preference(choice) -> None:
-    class Generator:
-        model_name = "review-model"
-
-        async def generate(self, **inputs):
-            return {
-                "response_a": "B had no preheating.", "response_b": "B was preheated at 200 C.",
-                "suggested_preference": choice, "rationale": "B agrees with the source.",
-            }
-
-    with pytest.raises(ValueError, match="sample_generation_preference_choice_invalid"):
-        await PreferenceSampleBuilder(generator=Generator()).build(
-            dataset=_dataset(), sample=_sample(), annotation=None,
-            review_note="Correct B's temperature.", case=_case({
-                "question": "Compare A and B's preheating.", "answer": "B had no preheating.",
-                "candidate_target": "B was preheated at 300 C.",
-                "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}],
-            }),
-        )
 
 
-def test_validation_rejects_different_inputs_and_treats_label_as_explicit() -> None:
-    with pytest.raises(ValueError, match="preference_inputs_differ"):
-        validate_preference({"input_digest_a": "a", "input_digest_b": "b"})
 
 
 @pytest.mark.parametrize("extra,reason", [
@@ -298,7 +257,7 @@ async def test_builder_does_not_invent_matching_input_digests(extra, reason, has
         dataset=_dataset(), sample=_sample(), annotation=None,
         previous_revision=previous, review_note="核对同一任务。" if has_previous else None,
         case=_case({
-            "question": "比较 A、B。", "answer": "回答 A", "corrected_answer": "回答 B",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。", "answer": "回答 A", "corrected_answer": "回答 B",
             "inspected_sources": [{"document_title": "B", "quote": "证据"}], **extra,
         }),
     )
@@ -336,13 +295,13 @@ async def test_rebuild_uses_current_evidence_when_previous_revision_is_stale(inp
             assert inputs["question"] == "当前问题"
             assert inputs["context"] == ({"document_title": "B", "text": "新证据"},)
             assert inputs["snapshot"]["response_a"] == "当前回答 A"
-            return {"response_a": "当前回答 A", "response_b": "基于新证据的回答 B",
-                "suggested_preference": "b", "rationale": "参考新证据。"}
+            return PreferenceSampleModelOutput.model_validate({"response_a": "当前回答 A", "response_b": "基于新证据的回答 B",
+                "suggested_preference": "b", "rationale": "参考新证据。"})
 
     result = await PreferenceSampleBuilder(generator=Generator()).build(
         dataset=_dataset(), sample=_sample(), annotation=None, previous_revision=previous,
         review_note="重新核对证据。", case=_case({
-            "question": "当前问题", "answer": "当前回答 A", "candidate_target": "当前回答 B",
+            "messages": [{"role": "user", "content": "当前问题"}], "question": "当前问题", "answer": "当前回答 A", "candidate_target": "当前回答 B",
             "inspected_sources": [{"document_title": "B", "quote": "新证据"}],
         }),
     )

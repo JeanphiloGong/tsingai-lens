@@ -15,7 +15,6 @@ from sqlalchemy.exc import IntegrityError
 
 from infra.persistence.database import AsyncSessionLocal
 
-from domain.feedback.tool_failure import _text as _tool_failure_text
 from infra.persistence.postgres.models.feedback import AnalysisJobRow
 from infra.persistence.postgres.models.feedback_dataset import FeedbackDatasetSampleRow
 
@@ -66,16 +65,9 @@ def tool_failure_idempotency_key(
 ) -> str:
     """Return a bounded key for one immutable tool failure observation."""
 
-    values = tuple(
-        _tool_failure_text(value, name)
-        for name, value in (
-            ("session_id", session_id),
-            ("tool_call_id", tool_call_id),
-            ("assistant_message_id", assistant_message_id),
-            ("result_message_id", result_message_id),
-            ("result_digest", result_digest),
-        )
-    )
+    values = (session_id, tool_call_id, assistant_message_id, result_message_id, result_digest)
+    if any(not value for value in values):
+        raise ValueError("tool failure identity is incomplete")
     return "tool-failure:" + sha256("\x1f".join(values).encode("utf-8")).hexdigest()
 
 
@@ -113,7 +105,6 @@ class AnalysisJob:
             raise ValueError("analysis job lease version must be non-negative")
         if not self.idempotency_key:
             raise ValueError("analysis job idempotency key is required")
-        object.__setattr__(self, "payload", dict(self.payload))
         if (
             self.status in {"succeeded", "failed", "cancelled"}
             and self.finished_at is None
@@ -122,8 +113,7 @@ class AnalysisJob:
 
     @property
     def feedback_id(self) -> str | None:
-        value = self.payload.get("feedback_id")
-        return str(value) if value else None
+        return self.payload.get("feedback_id")
 
     def requeue_failed_feedback_analysis(self, available_at: str) -> "AnalysisJob":
         if self.job_type != "feedback_analysis":
@@ -183,7 +173,7 @@ class AnalysisJobRepository:
                         job_id=existing.job_id,
                         job_type=existing.job_type,
                         payload_version=existing.payload_version,
-                        payload=dict(existing.payload or {}),
+                        payload=existing.payload,
                         status=existing.status,
                         idempotency_key=existing.idempotency_key,
                         available_at=_iso(existing.available_at),
@@ -219,7 +209,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -249,7 +239,7 @@ class AnalysisJobRepository:
                     job_id=existing.job_id,
                     job_type=existing.job_type,
                     payload_version=existing.payload_version,
-                    payload=dict(existing.payload or {}),
+                    payload=existing.payload,
                     status=existing.status,
                     idempotency_key=existing.idempotency_key,
                     available_at=_iso(existing.available_at),
@@ -317,7 +307,7 @@ class AnalysisJobRepository:
                         job_id=existing.job_id,
                         job_type=existing.job_type,
                         payload_version=existing.payload_version,
-                        payload=dict(existing.payload or {}),
+                        payload=existing.payload,
                         status=existing.status,
                         idempotency_key=existing.idempotency_key,
                         available_at=_iso(existing.available_at),
@@ -353,7 +343,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -382,7 +372,7 @@ class AnalysisJobRepository:
                     job_id=existing.job_id,
                     job_type=existing.job_type,
                     payload_version=existing.payload_version,
-                    payload=dict(existing.payload or {}),
+                    payload=existing.payload,
                     status=existing.status,
                     idempotency_key=existing.idempotency_key,
                     available_at=_iso(existing.available_at),
@@ -454,7 +444,7 @@ class AnalysisJobRepository:
                         job_id=existing.job_id,
                         job_type=existing.job_type,
                         payload_version=existing.payload_version,
-                        payload=dict(existing.payload or {}),
+                        payload=existing.payload,
                         status=existing.status,
                         idempotency_key=existing.idempotency_key,
                         available_at=_iso(existing.available_at),
@@ -490,7 +480,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -519,7 +509,7 @@ class AnalysisJobRepository:
                     job_id=existing.job_id,
                     job_type=existing.job_type,
                     payload_version=existing.payload_version,
-                    payload=dict(existing.payload or {}),
+                    payload=existing.payload,
                     status=existing.status,
                     idempotency_key=existing.idempotency_key,
                     available_at=_iso(existing.available_at),
@@ -564,7 +554,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -611,7 +601,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -658,7 +648,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -700,7 +690,7 @@ class AnalysisJobRepository:
             )
             if row is None:
                 return None
-            payload = dict(row.payload or {})
+            payload = row.payload
             sample_id = str(payload.get("sample_id") or "").strip()
             generation = payload.get("generation")
             if not sample_id or not isinstance(generation, int) or generation < 1:
@@ -713,7 +703,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -748,7 +738,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -774,7 +764,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -877,7 +867,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -905,7 +895,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -997,7 +987,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -1110,7 +1100,7 @@ class AnalysisJobRepository:
                         job_id=row.job_id,
                         job_type=row.job_type,
                         payload_version=row.payload_version,
-                        payload=dict(row.payload or {}),
+                        payload=row.payload,
                         status=row.status,
                         idempotency_key=row.idempotency_key,
                         available_at=_iso(row.available_at),
@@ -1138,7 +1128,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -1166,7 +1156,7 @@ class AnalysisJobRepository:
                 job_id=row.job_id,
                 job_type=row.job_type,
                 payload_version=row.payload_version,
-                payload=dict(row.payload or {}),
+                payload=row.payload,
                 status=row.status,
                 idempotency_key=row.idempotency_key,
                 available_at=_iso(row.available_at),
@@ -1190,7 +1180,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -1239,7 +1229,7 @@ class AnalysisJobRepository:
                     job_id=row.job_id,
                     job_type=row.job_type,
                     payload_version=row.payload_version,
-                    payload=dict(row.payload or {}),
+                    payload=row.payload,
                     status=row.status,
                     idempotency_key=row.idempotency_key,
                     available_at=_iso(row.available_at),
@@ -1315,12 +1305,12 @@ def _clear_lease(row: AnalysisJobRow) -> None:
 
 
 def _ensure_correction_identity(row: AnalysisJobRow, payload: dict[str, str]) -> None:
-    if row.job_type != CORRECTION_SIGNAL_JOB_TYPE or dict(row.payload or {}) != payload:
+    if row.job_type != CORRECTION_SIGNAL_JOB_TYPE or row.payload != payload:
         raise ValueError("idempotency key is already bound to another analysis input")
 
 
 def _ensure_tool_failure_identity(row: AnalysisJobRow, payload: dict[str, str]) -> None:
-    if row.job_type != TOOL_FAILURE_JOB_TYPE or dict(row.payload or {}) != payload:
+    if row.job_type != TOOL_FAILURE_JOB_TYPE or row.payload != payload:
         raise ValueError("idempotency key is already bound to another analysis input")
 
 

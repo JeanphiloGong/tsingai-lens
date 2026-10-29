@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback.sample_builder_support import EvaluationSampleModelOutput
+
 
 import pytest
 
@@ -7,7 +9,6 @@ from application.feedback.evaluation_sample_builder import (
     EvaluationBuildCandidate,
     EvaluationBuildNeedsInput,
     EvaluationSampleBuilder,
-    validate_evaluation,
 )
 from domain.feedback import Dataset, DatasetSample, FeedbackCase
 
@@ -45,7 +46,7 @@ def _case(snapshot: dict) -> FeedbackCase:
 async def test_conversation_evaluation_does_not_require_paper_excerpts(has_criteria) -> None:
     result = await EvaluationSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,
-        case=_case({"question": "Summarize our decision.",
+        case=_case({"messages": [{"role": "user", "content": "Summarize our decision."}], "question": "Summarize our decision.",
             "evaluation_reference": "Hold scan speed fixed.",
             "evaluation_criteria": ["Preserve fixed scan speed."] if has_criteria else []}),
     )
@@ -60,7 +61,7 @@ async def test_builder_creates_reference_evaluation() -> None:
     result = await EvaluationSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,
         case=_case({
-            "question": "比较 A、B。",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。",
             "evaluation_reference": "B 有预热。",
             "evaluation_criteria": ["指出 B 的预热条件", "引用图注证据"],
             "inspected_sources": [{"document_title": "B", "source_ref": "source-b", "quote": "图注原文"}],
@@ -75,7 +76,7 @@ async def test_builder_requires_executable_criteria() -> None:
     result = await EvaluationSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,
         case=_case({
-            "question": "比较 A、B。",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。",
             "evaluation_reference": "B 有预热。",
             "inspected_sources": [{"document_title": "B", "quote": "图注原文"}],
         }),
@@ -88,7 +89,7 @@ async def test_builder_rejects_unknown_evaluation_mode() -> None:
     result = await EvaluationSampleBuilder().build(
         dataset=_dataset(), sample=_sample(), annotation=None,
         case=_case({
-            "question": "比较 A、B。",
+            "messages": [{"role": "user", "content": "比较 A、B。"}], "question": "比较 A、B。",
             "evaluation_reference": "B 有预热。",
             "evaluation_criteria": ["指出 B 的预热条件"],
             "evaluation_mode": "unsupported-mode",
@@ -99,17 +100,6 @@ async def test_builder_rejects_unknown_evaluation_mode() -> None:
     assert result.missing_reasons == ("evaluation_mode_invalid",)
 
 
-def test_rubric_does_not_require_unique_reference() -> None:
-    content = validate_evaluation({
-        "schema_version": "literature-evaluation.v1",
-        "messages": [{"role": "user", "content": "问题"}],
-        "context": [{"document_title": "文献", "text": "原文"}],
-        "reference": "",
-        "criteria": ["必须引用证据"],
-        "evaluation_mode": "rubric",
-        "evidence": [{"document_title": "文献", "text": "原文"}],
-    })
-    assert content.evaluation_mode == "rubric"
 
 
 async def test_builder_generates_reference_and_executable_criteria() -> None:
@@ -118,12 +108,12 @@ async def test_builder_generates_reference_and_executable_criteria() -> None:
 
         async def generate(self, **inputs):
             assert inputs["task_type"] == "evaluation"
-            return {"reference": "B was preheated at 200 C.",
-                    "criteria": ["Identifies B's 200 C preheating", "Does not invent A's condition"]}
+            return EvaluationSampleModelOutput.model_validate({"reference": "B was preheated at 200 C.",
+                    "criteria": ["Identifies B's 200 C preheating", "Does not invent A's condition"]})
 
     result = await EvaluationSampleBuilder(generator=Generator()).build(
         dataset=_dataset(), sample=_sample(), annotation=None,
-        case=_case({"question": "Compare A and B's preheating.",
+        case=_case({"messages": [{"role": "user", "content": "Compare A and B's preheating."}], "question": "Compare A and B's preheating.",
                     "inspected_sources": [{"document_title": "B", "quote": "Preheated at 200 C."}]}),
     )
     assert isinstance(result, EvaluationBuildCandidate)

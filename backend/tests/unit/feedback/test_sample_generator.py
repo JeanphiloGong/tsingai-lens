@@ -30,7 +30,7 @@ async def test_generator_accepts_conversation_without_excerpts(task_type):
         client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())), model="test-model"
     ).generate(task_type=task_type, question=messages[-1]["content"], context=(),
         snapshot={"messages": messages}, construction_spec={})
-    assert value["missing_reasons"] == ["Decision not supplied"]
+    assert value.missing_reasons == ["Decision not supplied"]
 
 
 async def test_provider_receives_readable_evidence_and_returns_generated_content():
@@ -54,7 +54,7 @@ async def test_provider_receives_readable_evidence_and_returns_generated_content
                 snapshot={"answer": "No preheating", "source_ref": "private-source"},
                 construction_spec={"language": "en"}, review_note="Preserve the temperature.",
             )
-    assert value["target"] == "B was preheated at 200 C."
+    assert value.target == "B was preheated at 200 C."
 
 
 async def test_generated_content_drops_internal_references_even_when_provider_copies_them():
@@ -71,8 +71,8 @@ async def test_generated_content_drops_internal_references_even_when_provider_co
         task_type="sft", question="问题", context=({"document_title": "B", "text": "原文"},),
         snapshot={}, construction_spec={}
     )
-    assert "blk_doc_" not in value["target"]
-    assert "tbl_doc_" not in value["target"]
+    assert "blk_doc_" not in value.target
+    assert "tbl_doc_" not in value.target
 
 
 async def test_preference_rebuild_transmits_pair_note_and_explicit_choice_contract():
@@ -100,8 +100,8 @@ async def test_preference_rebuild_transmits_pair_note_and_explicit_choice_contra
         snapshot={"response_a": "B had no preheating.", "response_b": "B was preheated at 300 C."},
         construction_spec={}, review_note="Keep A; correct B's temperature.",
     )
-    assert value["response_b"] == "B was preheated at 200 C."
-    assert value["suggested_preference"] == "b"
+    assert value.response_b == "B was preheated at 200 C."
+    assert value.suggested_preference == "b"
 
 
 async def test_first_preference_assessment_requests_an_opinion_without_rewriting_answers():
@@ -130,7 +130,7 @@ async def test_first_preference_assessment_requests_an_opinion_without_rewriting
         snapshot={"response_a": "B had no preheating.", "response_b": "B was preheated at 200 C."},
         construction_spec={},
     )
-    assert value["suggested_preference"] == "b"
+    assert value.suggested_preference == "b"
 
 
 @pytest.mark.parametrize("content,finish_reason", [("not JSON", "stop"), ('{"target":"unfinished"}', "length")])
@@ -145,3 +145,32 @@ async def test_invalid_or_truncated_generation_is_a_technical_failure(content, f
     with pytest.raises(ValueError, match="sample_generation_"):
         await generator.generate(task_type="evaluation", question="Question",
             context=({"document_title": "B", "text": "Source text"},), snapshot={}, construction_spec={})
+
+
+@pytest.mark.parametrize("task_type,content", [
+    ("sft", {"target": 42}),
+    ("sft", {"missing_reasons": "no source"}),
+    ("sft", {"target": "Answer", "missing_reasons": [False]}),
+    ("preference", {"suggested_preference": "b_preferred", "rationale": "Reason"}),
+    ("preference", {"suggested_preference": True, "rationale": "Reason"}),
+    ("preference", {"suggested_preference": "b", "rationale": " "}),
+    ("preference", {"suggested_preference": "b", "rationale": 1}),
+    ("preference", {"response_a": "Rewritten", "suggested_preference": "b", "rationale": "Reason"}),
+    ("evaluation", {"reference": "Answer", "criteria": [17]}),
+    ("evaluation", {"reference": "Answer", "criteria": []}),
+    ("evaluation", {"criteria": ["Keep conditions"]}),
+    ("evaluation", {"missing_reasons": [""]}),
+])
+async def test_invalid_provider_content_fails_instead_of_becoming_needs_input(task_type, content):
+    class Completions:
+        async def create(self, **request):
+            return SimpleNamespace(choices=[SimpleNamespace(
+                finish_reason="stop", message=SimpleNamespace(content=json.dumps(content)),
+            )])
+
+    generator = OpenAIFeedbackSampleGenerator(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())), model="test-model",
+    )
+    with pytest.raises(ValueError):
+        await generator.generate(task_type=task_type, question="What does the passage support?",
+            context=({"document_title": "B", "text": "Preheated at 200 C."},), snapshot={}, construction_spec={})

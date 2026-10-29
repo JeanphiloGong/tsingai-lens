@@ -20,19 +20,6 @@ FeedbackProblemType = Literal[
 ]
 
 
-_PROBLEM_TYPES = {
-    "fact_error",
-    "source_missing",
-    "evidence_mismatch",
-    "retrieval_failure",
-    "tool_failure",
-    "intent_mismatch",
-    "incomplete_answer",
-    "style_or_format",
-    "undetermined_dissatisfaction",
-}
-
-
 @dataclass(frozen=True)
 class AnalysisResult:
     result_id: str
@@ -52,11 +39,7 @@ class AnalysisResult:
     created_at: str
 
     def __post_init__(self) -> None:
-        if self.problem_type not in _PROBLEM_TYPES:
-            raise ValueError("invalid feedback problem type")
         if not 0 <= self.confidence <= 1:
             raise ValueError("analysis confidence must be between zero and one")
         if len(self.input_digest) != 64:
             raise ValueError("analysis input digest must be sha256")
-        object.__setattr__(self, "related_message_ids", tuple(self.related_message_ids))
-        object.__setattr__(self, "suggested_evidence", tuple(self.suggested_evidence))

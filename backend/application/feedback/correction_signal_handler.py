@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from domain.feedback.correction_signal import CORRECTION_SIGNAL_TYPE
 
 import json
@@ -77,7 +76,7 @@ class RuleBasedCorrectionSignalAnalysisEngine:
             problem_type="fact_error" if explicit_target else "undetermined_dissatisfaction",
             confidence=0.58 if explicit_target else 0.24,
             suggested_evidence=tuple(
-                str(item.get("source_ref"))
+                item["source_ref"]
                 for item in coverage.inspected_sources
                 if item.get("source_ref")
             ),
@@ -109,12 +108,12 @@ class CorrectionSignalAnalysisHandler:
             or job.payload_version != CORRECTION_SIGNAL_PAYLOAD_VERSION
         ):
             raise AnalysisInputError("unsupported_correction_signal_job")
-        payload = dict(job.payload or {})
-        session_id = str(payload.get("session_id") or "").strip()
-        anchor_id = str(payload.get("anchor_message_id") or "").strip()
-        trigger_id = str(payload.get("trigger_message_id") or "").strip()
-        trigger_digest = str(payload.get("trigger_digest") or "").strip().lower()
-        if not all((session_id, anchor_id, trigger_id, trigger_digest)):
+        payload = job.payload
+        session_id = payload.get("session_id")
+        anchor_id = payload.get("anchor_message_id")
+        trigger_id = payload.get("trigger_message_id")
+        trigger_digest = payload.get("trigger_digest")
+        if any(not isinstance(value, str) or not value for value in (session_id, anchor_id, trigger_id, trigger_digest)):
             raise AnalysisInputError("correction_signal_payload_invalid")
         expected_idempotency_key = correction_signal_idempotency_key(
             session_id=session_id,
@@ -145,9 +144,8 @@ class CorrectionSignalAnalysisHandler:
             raise AnalysisInputError("correction_signal_trigger_invalid")
         if positions.get(trigger_id) != positions.get(anchor_id, -2) + 1:
             raise AnalysisInputError("correction_signal_order_invalid")
-        # ``CorrectionSignal`` canonicalizes message content by trimming the
-        # transport whitespace.  Hash the same representation here so a user
-        # message with accidental surrounding whitespace is not withdrawn.
+        # Correction-signal identity hashes the challenge without surrounding
+        # transport whitespace; preserve that established digest representation.
         canonical_trigger_content = trigger.content.strip()
         actual_digest = sha256(canonical_trigger_content.encode("utf-8")).hexdigest()
         if actual_digest != trigger_digest:
@@ -218,7 +216,7 @@ class CorrectionSignalAnalysisHandler:
                     {
                         "tool_call_id": call.tool_call_id,
                         "name": call.name,
-                        "arguments": deepcopy(dict(call.arguments)),
+                        "arguments": call.arguments,
                         "position": call.position,
                     }
                     for call in anchor.tool_calls
@@ -227,7 +225,7 @@ class CorrectionSignalAnalysisHandler:
                     {
                         "tool_call_id": anchor.tool_result.tool_call_id,
                         "status": anchor.tool_result.status.value,
-                        "data": deepcopy(dict(anchor.tool_result.data)),
+                        "data": anchor.tool_result.data,
                         "resource_refs": [
                             {
                                 "resource_type": item.resource_type,
@@ -278,7 +276,7 @@ class CorrectionSignalAnalysisHandler:
                         {
                             "tool_call_id": call.tool_call_id,
                             "name": call.name,
-                            "arguments": deepcopy(dict(call.arguments)),
+                            "arguments": call.arguments,
                             "position": call.position,
                         }
                         for call in corrected.tool_calls
@@ -287,7 +285,7 @@ class CorrectionSignalAnalysisHandler:
                         {
                             "tool_call_id": corrected.tool_result.tool_call_id,
                             "status": corrected.tool_result.status.value,
-                            "data": deepcopy(dict(corrected.tool_result.data)),
+                            "data": corrected.tool_result.data,
                             "resource_refs": [
                                 {
                                     "resource_type": item.resource_type,

@@ -55,14 +55,14 @@ def is_correction_challenge(text: str) -> bool:
     original message remains the evidence shown to a human annotator.
     """
 
-    normalized = " ".join(str(text or "").strip().casefold().split())
+    normalized = " ".join(text.strip().casefold().split())
     return bool(normalized) and any(marker.casefold() in normalized for marker in _CORRECTION_MARKERS)
 
 
 def correction_signal_id(trigger_message_id: str) -> str:
     """Build the stable source-signal identity for one trigger message."""
 
-    value = str(trigger_message_id or "").strip()
+    value = trigger_message_id
     if not value:
         raise ValueError("trigger_message_id is required")
     return f"correction_signal:{value}"
@@ -81,30 +81,10 @@ class CorrectionSignal:
     created_at: str
 
     def __post_init__(self) -> None:
-        for name in (
-            "signal_id",
-            "session_id",
-            "anchor_message_id",
-            "trigger_message_id",
-            "content",
-            "created_at",
-        ):
-            value = str(getattr(self, name) or "").strip()
-            if not value:
-                raise ValueError(f"{name} is required")
-            object.__setattr__(self, name, value)
         if self.anchor_message_id == self.trigger_message_id:
             raise ValueError("anchor and trigger messages must differ")
-        digest = str(self.trigger_digest or "").strip().lower()
-        if len(digest) != 64:
-            raise ValueError("trigger_digest must be a SHA-256 hex digest")
-        try:
-            int(digest, 16)
-        except ValueError as exc:
-            raise ValueError("trigger_digest must be a SHA-256 hex digest") from exc
-        if sha256(self.content.encode("utf-8")).hexdigest() != digest:
+        if sha256(self.content.encode("utf-8")).hexdigest() != self.trigger_digest:
             raise ValueError("trigger_digest does not match content")
-        object.__setattr__(self, "trigger_digest", digest)
 
 
 @dataclass(frozen=True)
@@ -132,18 +112,6 @@ class CorrectionSignalAnalysisResult:
     def __post_init__(self) -> None:
         if self.signal_type != CORRECTION_SIGNAL_TYPE:
             raise ValueError("invalid correction signal type")
-        if self.problem_type not in {
-            "fact_error",
-            "source_missing",
-            "evidence_mismatch",
-            "retrieval_failure",
-            "tool_failure",
-            "intent_mismatch",
-            "incomplete_answer",
-            "style_or_format",
-            "undetermined_dissatisfaction",
-        }:
-            raise ValueError("invalid correction signal problem type")
         if not self.signal_id or not self.job_id or not self.session_id:
             raise ValueError("correction analysis identity is required")
         if not 0 <= self.confidence <= 1:
@@ -152,12 +120,7 @@ class CorrectionSignalAnalysisResult:
             raise ValueError("correction signal cannot suggest a training target")
         if len(self.input_digest) != 64:
             raise ValueError("analysis input digest must be sha256")
-        try:
-            int(self.input_digest, 16)
-        except ValueError as exc:
-            raise ValueError("analysis input digest must be sha256") from exc
-        object.__setattr__(self, "related_message_ids", tuple(self.related_message_ids))
-        object.__setattr__(self, "suggested_evidence", tuple(self.suggested_evidence))
+
 
 
 __all__ = [

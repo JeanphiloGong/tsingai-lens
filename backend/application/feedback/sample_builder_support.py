@@ -4,10 +4,57 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
-from typing import Any, Mapping, Protocol
+from typing import Annotated, Any, Literal, Mapping, Protocol
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from domain.feedback.annotation import FeedbackAnnotation
 from domain.feedback.sample_revision import strip_internal_references
+
+
+class SftSampleModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    target: Annotated[str, Field(min_length=1, max_length=100000)] | None = None
+    missing_reasons: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_candidate(self) -> "SftSampleModelOutput":
+        if not self.missing_reasons and self.target is None:
+            raise ValueError("sample_generation_target_missing")
+        return self
+
+
+class PreferenceSampleModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    response_a: Annotated[str, Field(min_length=1, max_length=100000)] | None = None
+    response_b: Annotated[str, Field(min_length=1, max_length=100000)] | None = None
+    suggested_preference: Literal["a", "b", "tie", "unclear"] | None = None
+    rationale: Annotated[str, Field(min_length=1, max_length=100000)] | None = None
+    missing_reasons: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_assessment(self) -> "PreferenceSampleModelOutput":
+        if not self.missing_reasons and (
+            self.suggested_preference is None or self.rationale is None
+        ):
+            raise ValueError("sample_generation_preference_assessment_missing")
+        return self
+
+
+class EvaluationSampleModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    reference: Annotated[str, Field(max_length=100000)] | None = None
+    criteria: list[Annotated[str, Field(min_length=1, max_length=100000)]] | None = Field(default=None, min_length=1, max_length=100)
+    missing_reasons: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_criteria(self) -> "EvaluationSampleModelOutput":
+        if not self.missing_reasons and self.criteria is None:
+            raise ValueError("sample_generation_evaluation_criteria_missing")
+        return self
 
 
 class SampleContentGenerator(Protocol):
@@ -17,14 +64,7 @@ class SampleContentGenerator(Protocol):
         self, *, task_type: str, question: str, context: tuple[dict[str, str], ...],
         snapshot: Mapping[str, Any], construction_spec: Mapping[str, Any],
         review_note: str | None = None,
-    ) -> dict[str, Any]: ...
-
-
-def generation_missing_reasons(value: Mapping[str, Any]) -> tuple[str, ...]:
-    reasons = value.get("missing_reasons", [])
-    if not isinstance(reasons, list) or any(not isinstance(item, str) or not item.strip() for item in reasons):
-        raise ValueError("sample_generation_invalid_missing_reasons")
-    return tuple(dict.fromkeys(item.strip()[:500] for item in reasons))
+    ) -> SftSampleModelOutput | PreferenceSampleModelOutput | EvaluationSampleModelOutput: ...
 
 
 def question_from_snapshot(snapshot: Mapping[str, Any]) -> str:
@@ -32,17 +72,11 @@ def question_from_snapshot(snapshot: Mapping[str, Any]) -> str:
 
 
 def messages_from_snapshot(snapshot: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
-    """Keep the captured pre-answer conversation, with legacy question fallback."""
-    messages = tuple(
+    """Use the conversation captured before the answer under review."""
+    return tuple(
         {"role": item["role"], "content": strip_internal_references(item["content"])}
-        for item in snapshot.get("messages") or ()
-        if isinstance(item, Mapping) and item.get("role") in {"user", "assistant"}
-        and isinstance(item.get("content"), str) and strip_internal_references(item["content"])
+        for item in snapshot["messages"]
     )
-    question = question_from_snapshot(snapshot)
-    if messages and messages[-1] == {"role": "user", "content": question}:
-        return messages
-    return ({"role": "user", "content": question},)
 
 
 def readable_sources(
@@ -61,15 +95,12 @@ def readable_sources(
     candidates.extend(
         (raw, "human_annotation_selected_context")
         for raw in snapshot.get("requested_scope") or ()
-        if isinstance(raw, Mapping)
-        and str(raw.get("source_ref") or raw.get("table_ref") or "") in supported_refs
+        if raw.get("source_ref") in supported_refs
         and raw.get("origin") == "user_selected_context"
     )
     for raw, audit_basis in candidates:
-        if not isinstance(raw, Mapping):
-            continue
-        title = strip_internal_references(raw.get("document_title") or raw.get("title"))
-        text = strip_internal_references(raw.get("quote") or raw.get("text") or raw.get("content"))
+        title = strip_internal_references(raw.get("document_title"))
+        text = strip_internal_references(raw.get("quote"))
         if not title or not text:
             continue
         key = (title, text)
@@ -81,7 +112,7 @@ def readable_sources(
             {
                 "document_id": raw.get("document_id"),
                 "source_kind": raw.get("source_kind"),
-                "source_ref": raw.get("source_ref") or raw.get("table_ref"),
+                "source_ref": raw.get("source_ref"),
                 "source_digest": raw.get("source_digest"),
                 "document_title": title,
                 "page": raw.get("page"),
@@ -95,7 +126,7 @@ def readable_sources(
 
 def snapshot_digest(snapshot: Mapping[str, Any]) -> str:
     encoded = json.dumps(
-        dict(snapshot),
+        snapshot,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

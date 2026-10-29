@@ -35,7 +35,6 @@ from domain.core import (
     is_question_shaped_objective,
     normalize_objective_terms,
 )
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
@@ -44,15 +43,11 @@ from domain.core.research_objective import (
     PaperContribution,
     PreparedDocumentInput,
     ResearchObjective,
-    _choice,
 )
-from domain.core.research_objective import (
-    _objective_derivation_basis,
-)
-from domain.core.research_objective import _positive_int_or_none
+
+
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.research_objective import (
-    _text,
     build_research_objective_id,
     normalize_objective_terms,
 )
@@ -217,7 +212,7 @@ def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
         window_id="results-1",
         source_kind="block",
         source_ref="block-1",
-        status="no_study_signal",
+        status=PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL,
         reason="The unit contains only general background.",
     )
 
@@ -227,7 +222,7 @@ def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
         replace(no_signal, reason=None)
 
     with pytest.raises(ValueError, match="cannot have a reason"):
-        replace(no_signal, status='relationship_emitted')
+        replace(no_signal, status=PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED)
 
 
 def test_paper_map_retains_unique_source_unit_coverage() -> None:
@@ -236,7 +231,7 @@ def test_paper_map_retains_unique_source_unit_coverage() -> None:
         window_id="methods-1",
         source_kind="block",
         source_ref="block-1",
-        status="extraction_failed",
+        status=PaperSourceUnitCoverageStatus.EXTRACTION_FAILED,
         reason="The window extraction failed validation.",
     )
     skim = PaperResearchMap(
@@ -281,57 +276,45 @@ def _objective(**overrides) -> ResearchObjective:
     }
     payload.update(overrides)
     return ResearchObjective(
-        collection_id=_text(payload.get("collection_id")) or "",
-        objective_id=_text(payload.get("objective_id"))
+        collection_id=payload.get("collection_id") or "",
+        objective_id=payload.get("objective_id")
         or build_research_objective_id(
-            question=_text(payload.get("question")) or "",
+            question=payload.get("question") or "",
             material_scope=normalize_objective_terms(payload.get('material_scope', ())),
             variables=normalize_objective_terms(payload.get('variables', ())),
             outcomes=normalize_objective_terms(payload.get('outcomes', ())),
             mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
             constraints=normalize_objective_terms(payload.get('constraints', ())),
-            requested_comparator=_text(payload.get("requested_comparator")),
-            parent_objective_id=_text(payload.get("parent_objective_id")),
-            parent_analysis_version=_positive_int_or_none(
-                payload.get("parent_analysis_version")
-            ),
+            requested_comparator=payload.get("requested_comparator"),
+            parent_objective_id=payload.get("parent_objective_id"),
+            parent_analysis_version=payload.get("parent_analysis_version"),
         ),
-        question=_text(payload.get("question")) or "",
+        question=payload.get("question") or "",
         material_scope=normalize_objective_terms(payload.get('material_scope', ())),
         variables=normalize_objective_terms(payload.get('variables', ())),
         outcomes=normalize_objective_terms(payload.get('outcomes', ())),
         mechanisms=normalize_objective_terms(payload.get('mechanisms', ())),
         constraints=normalize_objective_terms(payload.get('constraints', ())),
-        requested_comparator=_text(payload.get("requested_comparator")),
+        requested_comparator=payload.get("requested_comparator"),
         seed_document_ids=normalize_objective_terms(payload.get('seed_document_ids', ())),
         excluded_document_ids=normalize_objective_terms(
             payload.get('excluded_document_ids', ())
         ),
         confidence=payload.get('confidence', 0.0),
-        reason=_text(payload.get("reason")),
+        reason=payload.get("reason"),
         source_relationship_ids=normalize_objective_terms(
             payload.get('source_relationship_ids', ())
         ),
-        parent_objective_id=_text(payload.get("parent_objective_id")),
-        parent_analysis_version=_positive_int_or_none(
-            payload.get("parent_analysis_version")
-        ),
-        derivation_basis=_objective_derivation_basis(payload.get("derivation_basis")),
-        rank=_positive_int_or_none(payload.get("rank")),
-        confirmation_status=_choice(
-            payload.get("confirmation_status"),
-            OBJECTIVE_CONFIRMATION_STATUSES,
-            "candidate",
-        ),
-        active_analysis_version=_positive_int_or_none(
-            payload.get("active_analysis_version")
-        ),
-        published_analysis_version=_positive_int_or_none(
-            payload.get("published_analysis_version")
-        ),
-        origin=_choice(payload.get("origin"), OBJECTIVE_ORIGINS, "system_discovered"),
-        created_by_user_id=_text(payload.get("created_by_user_id")),
-        created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
+        parent_objective_id=payload.get("parent_objective_id"),
+        parent_analysis_version=payload.get("parent_analysis_version"),
+        derivation_basis=tuple(payload.get("derivation_basis") or ()),
+        rank=payload.get("rank"),
+        confirmation_status=payload.get("confirmation_status", "candidate"),
+        active_analysis_version=payload.get("active_analysis_version"),
+        published_analysis_version=payload.get("published_analysis_version"),
+        origin=payload.get("origin", "system_discovered"),
+        created_by_user_id=payload.get("created_by_user_id"),
+        created_by_tool_call_id=payload.get("created_by_tool_call_id"),
     )
 
 
@@ -850,7 +833,7 @@ def test_paper_contribution_preserves_inspected_source_lineage_without_evidence(
             InspectedObjectiveSourceRef(
                 source_kind="text_window",
                 source_ref="block-results",
-                source_digest=finding_text("a" * 64),
+                source_digest='a' * 64,
             ),
         ),
     )
@@ -1532,64 +1515,6 @@ def test_paper_research_signal_identity_uses_only_preliminary_scope() -> None:
     ).unresolved_signals[0]
 
     assert base.signal_id == other_test.signal_id
-    with pytest.raises(ValueError, match="design type"):
-        PaperResearchMap(
-            document_id="paper-1",
-            doc_role="uncertain",
-            studies=(),
-            evidence_density="unknown",
-            confidence=0.0,
-            warnings=(),
-            unresolved_signals=(
-                build_paper_research_signal(
-                    document_id="paper-1",
-                    signal_type="outcome",
-                    label="yield strength",
-                    variable_role="not_applicable",
-                    design_type="invalid",
-                    claim_scope="current_work",
-                    experiment_label="tensile study",
-                    material_scope=("316L",),
-                    process_context=("LPBF",),
-                    source_refs=(
-                        PaperResearchSourceRef(
-                            source_kind="block", source_ref="results-1"
-                        ),
-                    ),
-                    confidence=0.8,
-                    reason=None,
-                ),
-            ),
-        )
-    with pytest.raises(ValueError, match="claim scope"):
-        PaperResearchMap(
-            document_id="paper-1",
-            doc_role="uncertain",
-            studies=(),
-            evidence_density="unknown",
-            confidence=0.0,
-            warnings=(),
-            unresolved_signals=(
-                build_paper_research_signal(
-                    document_id="paper-1",
-                    signal_type="outcome",
-                    label="yield strength",
-                    variable_role="not_applicable",
-                    design_type="experimental",
-                    claim_scope="invalid",
-                    experiment_label="tensile study",
-                    material_scope=("316L",),
-                    process_context=("LPBF",),
-                    source_refs=(
-                        PaperResearchSourceRef(
-                            source_kind="block", source_ref="results-1"
-                        ),
-                    ),
-                    confidence=0.8,
-                    reason=None,
-                ),
-            ),
-        )
 
 
 def test_paper_study_signal_identity_is_scoped_to_its_document() -> None:

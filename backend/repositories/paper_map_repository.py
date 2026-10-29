@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from domain.core.research_objective import (
+    PaperSourceUnitCoverageStatus,
     PaperResearchMap,
     PaperResearchSourceRef,
     ReviewKnowledgeItem,
@@ -345,7 +346,7 @@ class PaperMapRepository:
                         window_id=item["window_id"],
                         source_kind=item["source_kind"],
                         source_ref=item["source_ref"],
-                        status=item["status"],
+                        status=PaperSourceUnitCoverageStatus(item["status"]),
                         reason=item.get("reason"),
                     )
                     for item in payload.get("source_unit_coverage", ())
@@ -573,7 +574,7 @@ class PaperMapRepository:
                             window_id=item["window_id"],
                             source_kind=item["source_kind"],
                             source_ref=item["source_ref"],
-                            status=item["status"],
+                            status=PaperSourceUnitCoverageStatus(item["status"]),
                             reason=item.get("reason"),
                         )
                         for item in payload.get("source_unit_coverage", ())

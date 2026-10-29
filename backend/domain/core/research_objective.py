@@ -140,14 +140,6 @@ class PaperResearchSourceRef:
     source_kind: str
     source_ref: str
 
-    def __post_init__(self) -> None:
-        if not self.source_kind.strip() or not self.source_ref.strip():
-            raise ValueError("paper research Source reference cannot be empty")
-        if self.source_kind not in _PAPER_RESEARCH_SOURCE_KINDS:
-            raise ValueError(
-                f"unsupported paper research Source kind: {self.source_kind}"
-            )
-
 
 @dataclass(frozen=True)
 class ReviewKnowledgeItem:
@@ -162,8 +154,6 @@ class ReviewKnowledgeItem:
     confidence: float
 
     def __post_init__(self) -> None:
-        if not self.content.strip():
-            raise ValueError("review knowledge content cannot be empty")
         if not self.source_refs:
             raise ValueError("review knowledge requires a source reference")
 
@@ -201,12 +191,8 @@ class PaperResearchRelationship:
     confidence: float
 
     def __post_init__(self) -> None:
-        if not self.relationship_id.strip():
-            raise ValueError("paper research relationship requires relationship_id")
         if not self.varied_factors:
             raise ValueError("paper research relationship requires varied factors")
-        if not self.outcome.strip():
-            raise ValueError("paper research relationship requires an outcome")
         if not self.source_refs:
             raise ValueError(
                 "paper research relationship requires a source reference"
@@ -241,15 +227,6 @@ class PaperResearchScope:
     def __post_init__(self) -> None:
         if not self.study_id.strip() or not self.document_id.strip():
             raise ValueError("paper research scope requires study and document ids")
-        if self.design_type not in _PAPER_RESEARCH_DESIGN_TYPES:
-            raise ValueError(
-                f"unsupported paper research design type: {self.design_type}"
-            )
-        if self.claim_scope not in _PAPER_RESEARCH_CLAIM_SCOPES:
-            raise ValueError(
-                f"unsupported paper research claim scope: {self.claim_scope}"
-            )
-        object.__setattr__(self, "relationships", tuple(self.relationships))
         if not self.relationships:
             raise ValueError("paper research scope requires at least one relationship")
         relationship_ids = [item.relationship_id for item in self.relationships]
@@ -282,28 +259,18 @@ class PaperStudyDisposition:
             raise ValueError(
                 "paper study disposition requires document, study, and relationship ids"
             )
-        object.__setattr__(self, "status", self._status(self.status))
         if self.status is PaperStudyDispositionStatus.PROMOTED:
-            if not _text(self.objective_id):
+            if not self.objective_id:
                 raise ValueError("promoted paper study disposition requires objective_id")
-            if _text(self.reason):
+            if self.reason:
                 raise ValueError("promoted paper study disposition cannot have a reason")
         elif self.status is PaperStudyDispositionStatus.REJECTED:
-            if _text(self.objective_id):
+            if self.objective_id:
                 raise ValueError("rejected paper study disposition cannot link an objective")
-            if not _text(self.reason):
+            if not self.reason:
                 raise ValueError("rejected paper study disposition requires a reason")
-        elif _text(self.objective_id) or _text(self.reason):
+        elif self.objective_id or self.reason:
             raise ValueError("pending paper study disposition cannot have a result")
-
-    @staticmethod
-    def _status(value: Any) -> PaperStudyDispositionStatus:
-        if isinstance(value, PaperStudyDispositionStatus):
-            return value
-        try:
-            return PaperStudyDispositionStatus(str(value))
-        except ValueError as exc:
-            raise ValueError(f"unsupported paper study disposition status: {value}") from exc
 
 
 @dataclass(frozen=True)
@@ -324,24 +291,12 @@ class PaperResearchSignal:
     reason: str | None = None
 
     def __post_init__(self) -> None:
-        if self.signal_type not in {"variable", "outcome"}:
-            raise ValueError("paper research signal type must be variable or outcome")
         if self.signal_type == "variable" and (
             self.variable_role not in _PAPER_RESEARCH_VARIABLE_ROLES
         ):
             raise ValueError("variable signal requires a scientific variable role")
         if self.signal_type == "outcome" and self.variable_role != "not_applicable":
             raise ValueError("outcome signal variable role must be not_applicable")
-        if self.design_type not in _PAPER_RESEARCH_DESIGN_TYPES:
-            raise ValueError(
-                f"unsupported paper research signal design type: {self.design_type}"
-            )
-        if self.claim_scope not in _PAPER_RESEARCH_CLAIM_SCOPES:
-            raise ValueError(
-                f"unsupported paper research signal claim scope: {self.claim_scope}"
-            )
-        if not self.label.strip():
-            raise ValueError("paper research signal label cannot be empty")
         if not self.source_refs:
             raise ValueError("paper research signal requires at least one source")
 
@@ -375,34 +330,18 @@ class PaperSourceUnitCoverage:
             )
         ):
             raise ValueError("paper Source-unit coverage fields cannot be empty")
-        if self.source_kind not in _PAPER_RESEARCH_SOURCE_KINDS:
-            raise ValueError(
-                f"unsupported paper Source-unit kind: {self.source_kind}"
-            )
-        object.__setattr__(self, "status", self._status(self.status))
         if self.status in {
             PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL,
             PaperSourceUnitCoverageStatus.EXTRACTION_FAILED,
         }:
-            if not _text(self.reason):
+            if not self.reason:
                 raise ValueError(
                     f"{self.status.value} Source-unit coverage requires a reason"
                 )
-        elif _text(self.reason):
+        elif self.reason:
             raise ValueError(
                 f"{self.status.value} Source-unit coverage cannot have a reason"
             )
-
-    @staticmethod
-    def _status(value: Any) -> PaperSourceUnitCoverageStatus:
-        if isinstance(value, PaperSourceUnitCoverageStatus):
-            return value
-        try:
-            return PaperSourceUnitCoverageStatus(str(value))
-        except ValueError as exc:
-            raise ValueError(
-                f"unsupported paper Source-unit coverage status: {value}"
-            ) from exc
 
 
 @dataclass(frozen=True)
@@ -427,20 +366,6 @@ class PaperResearchMap:
     def __post_init__(self) -> None:
         if not self.document_id.strip():
             raise ValueError("paper research map requires document_id")
-        object.__setattr__(self, "studies", tuple(self.studies))
-        object.__setattr__(self, "unresolved_signals", tuple(self.unresolved_signals))
-        object.__setattr__(
-            self,
-            "source_unit_coverage",
-            tuple(self.source_unit_coverage),
-        )
-        if self.map_status not in {"unknown", "sufficient", "insufficient_map"}:
-            raise ValueError(f"unsupported paper map status: {self.map_status}")
-        object.__setattr__(
-            self,
-            "map_limitations",
-            normalize_objective_terms(self.map_limitations),
-        )
         if self.doc_role != "review" and not self.review_synthesis.is_empty:
             raise ValueError("review synthesis requires a review paper")
         if any(study.document_id != self.document_id for study in self.studies):
@@ -472,9 +397,9 @@ class PreparedDocumentInput:
     preparation_fingerprint: str
 
     def __post_init__(self) -> None:
-        if not _text(self.document_id):
+        if not self.document_id:
             raise ValueError("prepared document input requires document_id")
-        if not _text(self.preparation_fingerprint):
+        if not self.preparation_fingerprint:
             raise ValueError(
                 "prepared document input requires preparation_fingerprint"
             )
@@ -508,11 +433,11 @@ class ResearchObjective:
     created_by_tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not _text(self.collection_id):
+        if not self.collection_id:
             raise ValueError("research objective requires collection_id")
-        if not _text(self.objective_id):
+        if not self.objective_id:
             raise ValueError("research objective requires objective_id")
-        if not _text(self.question):
+        if not self.question:
             raise ValueError("research objective requires question")
         if not self.variables:
             raise ValueError("research objective requires at least one variable")
@@ -539,15 +464,9 @@ class ResearchObjective:
                 "objective constraints duplicate variables or outcomes: "
                 + ", ".join(sorted(duplicate_constraints))
             )
-        if self.confirmation_status not in OBJECTIVE_CONFIRMATION_STATUSES:
-            raise ValueError(
-                f"unsupported objective confirmation status: {self.confirmation_status}"
-            )
-        if self.origin not in OBJECTIVE_ORIGINS:
-            raise ValueError(f"unsupported objective origin: {self.origin}")
         creator_values = (
-            _text(self.created_by_user_id),
-            _text(self.created_by_tool_call_id),
+            self.created_by_user_id,
+            self.created_by_tool_call_id,
         )
         if self.origin == "chat_assisted" and not all(creator_values):
             raise ValueError(
@@ -557,7 +476,7 @@ class ResearchObjective:
             raise ValueError(
                 "system-discovered objective cannot have Chat creator provenance"
             )
-        parent_objective_id = _text(self.parent_objective_id)
+        parent_objective_id = self.parent_objective_id
         if parent_objective_id is not None and parent_objective_id == self.objective_id:
             raise ValueError("objective cannot derive from itself")
         if (parent_objective_id is None) != (self.parent_analysis_version is None):
@@ -566,11 +485,12 @@ class ResearchObjective:
             )
         if self.parent_analysis_version is not None and self.parent_analysis_version < 1:
             raise ValueError("parent_analysis_version must be a positive integer")
-        basis = _objective_derivation_basis(self.derivation_basis)
+        basis = self.derivation_basis
         if basis and parent_objective_id is None:
             raise ValueError("derivation basis requires a parent objective")
-        object.__setattr__(self, "parent_objective_id", parent_objective_id)
-        object.__setattr__(self, "derivation_basis", basis)
+        basis_refs = [(item["kind"], item["reference_id"]) for item in basis]
+        if len(basis_refs) != len(set(basis_refs)):
+            raise ValueError("objective derivation basis references must be unique")
         overlap = set(self.seed_document_ids) & set(self.excluded_document_ids)
         if overlap:
             raise ValueError(
@@ -644,14 +564,8 @@ class InspectedObjectiveSourceRef:
     source_digest: str | None = None
 
     def __post_init__(self) -> None:
-        if self.source_kind not in SOURCE_KIND_VALUES:
-            raise ValueError(f"unsupported inspected Source kind: {self.source_kind}")
-        if not _text(self.source_ref):
+        if not self.source_ref:
             raise ValueError("inspected Source reference cannot be empty")
-        if self.source_digest is not None and not re.fullmatch(
-            r"[0-9a-fA-F]{64}", self.source_digest
-        ):
-            raise ValueError("inspected Source digest must be a SHA-256 hex digest")
 
 
 @dataclass(frozen=True)
@@ -685,20 +599,12 @@ class PaperContribution:
 
     def __post_init__(self) -> None:
         if not all(
-            _text(value)
+            value
             for value in (self.collection_id, self.objective_id, self.document_id)
         ):
             raise ValueError("paper contribution requires scoped identity")
         if self.analysis_version < 1:
             raise ValueError("paper contribution requires positive analysis_version")
-        if self.analysis_status not in PAPER_CONTRIBUTION_STATUSES:
-            raise ValueError(
-                f"unsupported paper contribution status: {self.analysis_status}"
-            )
-        if self.relevance not in PAPER_RELEVANCE_VALUES:
-            raise ValueError(f"unsupported paper relevance: {self.relevance}")
-        if self.paper_role not in PAPER_ROLE_VALUES:
-            raise ValueError(f"unsupported paper role: {self.paper_role}")
         if self.analysis_status in {"excluded", "failed"} and not (
             self.exclusion_reason
             or self.warnings
@@ -883,11 +789,8 @@ class ObjectiveEvidence:
     warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        variable_names = [item.name.casefold() for item in self.changed_variables]
-        if len(variable_names) != len(set(variable_names)):
-            raise ValueError("objective evidence changed variables must be unique")
         if not all(
-            _text(value)
+            value
             for value in (
                 self.collection_id,
                 self.objective_id,
@@ -898,28 +801,8 @@ class ObjectiveEvidence:
             )
         ):
             raise ValueError("objective evidence requires scoped identity and source")
-        if len(self.evidence_id) > 128:
-            raise ValueError("objective evidence ID exceeds 128 characters")
         if self.analysis_version < 1:
             raise ValueError("objective evidence requires positive analysis_version")
-        if self.source_kind not in SOURCE_KIND_VALUES:
-            raise ValueError(f"unsupported objective evidence source: {self.source_kind}")
-        if self.evidence_role not in EVIDENCE_ROLE_VALUES:
-            raise ValueError(f"unsupported objective evidence role: {self.evidence_role}")
-        if self.selection_status not in OBJECTIVE_EVIDENCE_STATES:
-            raise ValueError(
-                f"unsupported objective evidence state: {self.selection_status}"
-            )
-        if self.attribution_scope not in EVIDENCE_ATTRIBUTION_SCOPES:
-            raise ValueError(
-                f"unsupported objective evidence attribution: {self.attribution_scope}"
-            )
-        if self.resolution_status not in EVIDENCE_RESOLUTION_STATUS_VALUES:
-            raise ValueError(
-                f"unsupported evidence resolution status: {self.resolution_status}"
-            )
-        if self.origin not in EVIDENCE_ORIGINS:
-            raise ValueError(f"unsupported objective evidence origin: {self.origin}")
         if self.source_analysis_version is not None and self.source_analysis_version < 1:
             raise ValueError("objective evidence source version must be positive")
         if self.supersedes_evidence_id == self.evidence_id:
@@ -937,33 +820,37 @@ class ObjectiveEvidence:
         ):
             raise ValueError("system-generated evidence cannot contain authoring provenance")
         if self.origin == "agent_authored":
-            if not _text(self.created_by_user_id) or not _text(
-                self.created_by_tool_call_id
-            ):
+            if not self.created_by_user_id or not self.created_by_tool_call_id:
                 raise ValueError(
                     "agent-authored evidence requires user and tool-call provenance"
                 )
             if self.created_at is None:
                 raise ValueError("authored evidence requires creation time")
         elif self.origin != "system_generated":
-            if self.source_analysis_version is None or not _text(self.created_by_user_id):
+            if self.source_analysis_version is None or not self.created_by_user_id:
                 raise ValueError(
                     "authored evidence requires source version and authenticated creator"
                 )
             if self.created_at is None:
                 raise ValueError("authored evidence requires creation time")
-        if self.origin == "human_revised" and not _text(
-            self.supersedes_evidence_id
-        ):
+        if self.origin == "human_revised" and not self.supersedes_evidence_id:
             raise ValueError("revised evidence requires supersession lineage")
-        if self.selection_status == "failed" and not _text(self.failure_reason):
+        if self.selection_status == "failed" and not self.failure_reason:
             raise ValueError("failed objective evidence requires failure_reason")
         if self.selection_status == "extracted":
             if self.resolution_status not in {"resolved", "partial"}:
                 raise ValueError("extracted evidence must be resolved or partial")
             if not self._has_scientific_content():
                 raise ValueError("extracted evidence requires scientific content")
-        self._validate_attribution()
+        self._validate_attribution(
+            evidence_role=self.evidence_role,
+            selection_status=self.selection_status,
+            attribution_scope=self.attribution_scope,
+            has_reported_result=self.reported_result is not None,
+            comparison_comparable=(self.comparison.comparable if self.comparison else None),
+            comparison_axes=self.comparison.axis_names if self.comparison else (),
+            changed_variables=self.changed_variables,
+        )
 
     @property
     def key(self) -> tuple[str, str, int, str]:
@@ -1060,7 +947,7 @@ class ObjectiveEvidence:
         return self._transition(
             "selected",
             evidence_role=evidence_role,
-            selection_reason=_text(reason),
+            selection_reason=reason,
         )
 
     def mark_extracted(self, **scientific_content: Any) -> "ObjectiveEvidence":
@@ -1071,15 +958,19 @@ class ObjectiveEvidence:
         return self._transition("extracted", **scientific_content)
 
     def reject(self, reason: str) -> "ObjectiveEvidence":
+        if not reason.strip():
+            raise ValueError("rejected evidence requires reason")
         return self._transition(
             "rejected",
-            selection_reason=_required_text(reason, "rejected evidence requires reason"),
+            selection_reason=reason,
         )
 
     def fail(self, reason: str) -> "ObjectiveEvidence":
+        if not reason.strip():
+            raise ValueError("failed evidence requires reason")
         return self._transition(
             "failed",
-            failure_reason=_required_text(reason, "failed evidence requires reason"),
+            failure_reason=reason,
         )
 
     def _transition(self, target: str, **changes: Any) -> "ObjectiveEvidence":
@@ -1098,41 +989,54 @@ class ObjectiveEvidence:
             or self.scientific_context.has_content
         )
 
-    def _validate_attribution(self) -> None:
-        result_role = self.evidence_role in {"direct_result", "contradictory_result"}
-        if self.selection_status == "extracted" and result_role:
-            if self.reported_result is None:
+    @staticmethod
+    def _validate_attribution(
+        *,
+        evidence_role: str,
+        selection_status: str,
+        attribution_scope: str,
+        has_reported_result: bool,
+        comparison_comparable: bool | None,
+        comparison_axes: Iterable[str],
+        changed_variables: tuple[ScientificVariable, ...],
+    ) -> None:
+        names = [item.name.casefold() for item in changed_variables]
+        if len(names) != len(set(names)):
+            raise ValueError("objective evidence changed variables must be unique")
+        result_role = evidence_role in {"direct_result", "contradictory_result"}
+        if selection_status == "extracted" and result_role:
+            if not has_reported_result:
                 raise ValueError("result evidence requires one reported result")
-        if not result_role and self.reported_result is not None:
+        if not result_role and has_reported_result:
             raise ValueError("context evidence cannot report an experimental result")
-        if not result_role and self.attribution_scope in {
+        if not result_role and attribution_scope in {
             "isolated_effect",
             "joint_effect",
         }:
             raise ValueError("context evidence cannot claim experimental attribution")
-        if self.comparison is not None and not self.comparison.comparable:
-            if self.attribution_scope != "not_attributable":
+        if comparison_comparable is False:
+            if attribution_scope != "not_attributable":
                 raise ValueError("incomparable evidence cannot be attributed")
-        if self.attribution_scope not in {"isolated_effect", "joint_effect"}:
+        if attribution_scope not in {"isolated_effect", "joint_effect"}:
             return
-        if self.comparison is None or not self.comparison.comparable:
+        if comparison_comparable is not True:
             raise ValueError("experimental attribution requires a comparable comparison")
-        variable_names = {item.name.casefold() for item in self.changed_variables}
-        axis_names = {item.casefold() for item in self.comparison.axis_names}
+        variable_names = {item.name.casefold() for item in changed_variables}
+        axis_names = {item.casefold() for item in comparison_axes}
         if variable_names != axis_names:
             raise ValueError("comparison axes must match all changed variables")
         if any(
             item.baseline_value is None or item.target_value is None
-            for item in self.changed_variables
+            for item in changed_variables
         ):
             raise ValueError("experimental attribution requires baseline and target values")
         if any(
-            item.baseline_value == item.target_value for item in self.changed_variables
+            item.baseline_value == item.target_value for item in changed_variables
         ):
             raise ValueError("experimental attribution requires changed variable values")
-        if self.attribution_scope == "isolated_effect" and len(variable_names) != 1:
+        if attribution_scope == "isolated_effect" and len(variable_names) != 1:
             raise ValueError("isolated effect requires exactly one changed variable")
-        if self.attribution_scope == "joint_effect" and len(variable_names) < 2:
+        if attribution_scope == "joint_effect" and len(variable_names) < 2:
             raise ValueError("joint effect requires at least two changed variables")
 
 
@@ -1146,17 +1050,6 @@ class ObjectiveFactSet:
     study_dispositions: tuple[PaperStudyDisposition, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "document_inputs", tuple(self.document_inputs))
-        object.__setattr__(
-            self,
-            "research_objectives",
-            tuple(self.research_objectives),
-        )
-        object.__setattr__(
-            self,
-            "study_dispositions",
-            tuple(self.study_dispositions),
-        )
         document_ids = [item.document_id for item in self.document_inputs]
         if len(document_ids) != len(set(document_ids)):
             raise ValueError("objective discovery document inputs must be unique")
@@ -1243,7 +1136,7 @@ def build_research_objective_id(
     parent_objective_id: str | None = None,
     parent_analysis_version: int | None = None,
 ) -> str:
-    normalized_question = (_text(question) or "unspecified").lower()
+    normalized_question = (question.strip() or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
     if not slug:
         slug = "unspecified"
@@ -1275,8 +1168,8 @@ def build_research_objective_id(
     return f"obj_{slug[:72].strip('-')}_{digest}"
 
 
-def _is_question_shaped(value: Any) -> bool:
-    question = (_text(value) or "").lower()
+def _is_question_shaped(value: str) -> bool:
+    question = value.strip().lower()
     return bool(
         question.endswith(("?", "？"))
         or any(term in question for term in _QUESTION_SIGNAL_TERMS)

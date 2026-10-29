@@ -46,12 +46,8 @@ class ScientificAttribute:
     applies_to_outcomes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not _text(self.name) or _scientific_scalar(self.value) is None:
+        if not self.name.strip() or self.value is None:
             raise ValueError("scientific attribute requires name and value")
-        if self.context_scope not in SCIENTIFIC_CONTEXT_SCOPES:
-            raise ValueError(
-                f"unsupported scientific context scope: {self.context_scope}"
-            )
 
 
 @dataclass(frozen=True)
@@ -62,10 +58,6 @@ class ScientificVariable:
     baseline_value: ScientificScalar | None
     target_value: ScientificScalar | None
     unit: str | None = None
-
-    def __post_init__(self) -> None:
-        if not _text(self.name):
-            raise ValueError("scientific variable requires name")
 
 
 @dataclass(frozen=True)
@@ -79,7 +71,7 @@ class ScientificComparison:
     incomparability_reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not _text(self.baseline_label) or not _text(self.target_label):
+        if not self.baseline_label or not self.target_label:
             raise ValueError("scientific comparison requires both groups")
         if not self.axis_names:
             raise ValueError("scientific comparison requires axes")
@@ -103,14 +95,6 @@ class ScientificResult:
     baseline_value: ScientificScalar | None = None
     target_value: ScientificScalar | None = None
     result_kind: str = "observed"
-
-    def __post_init__(self) -> None:
-        if not _text(self.outcome) or not _text(self.result_text):
-            raise ValueError("scientific result requires outcome and result text")
-        if self.direction not in SCIENTIFIC_RESULT_DIRECTIONS:
-            raise ValueError(f"unsupported scientific result direction: {self.direction}")
-        if self.result_kind not in SCIENTIFIC_RESULT_KINDS:
-            raise ValueError(f"unsupported scientific result kind: {self.result_kind}")
 
 
 @dataclass(frozen=True)

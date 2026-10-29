@@ -97,6 +97,7 @@ class _MultiAxisExtractor:
             signals.append(
                 {
                     "signal_type": "variable",
+                    "variable_role": "varied",
                     "label": "laser energy",
                     "source_unit_ids": source_ids("VARIABLE_SIGNAL"),
                     "confidence": 0.9,
@@ -112,6 +113,7 @@ class _MultiAxisExtractor:
                 signals.append(
                     {
                         "signal_type": "outcome",
+                    "variable_role": "not_applicable",
                         "label": outcome,
                         "source_unit_ids": source_ids(marker),
                         "confidence": 0.9,

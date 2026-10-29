@@ -24,14 +24,14 @@ class AnalysisDiagnosticCollector:
         self._records: list[dict[str, Any]] = []
 
     def record(self, payload: Mapping[str, Any]) -> None:
-        record = deepcopy(dict(payload))
+        record = deepcopy(payload)
         with self._lock:
             self._records.append(record)
 
     @property
     def records(self) -> tuple[dict[str, Any], ...]:
         with self._lock:
-            return tuple(deepcopy(self._records))
+            return tuple(self._records)
 
 
 _ACTIVE_DIAGNOSTIC_COLLECTOR: ContextVar[AnalysisDiagnosticCollector | None] = (
@@ -50,14 +50,13 @@ def capture_analysis_diagnostics() -> Iterator[AnalysisDiagnosticCollector]:
 
 
 def record_analysis_diagnostic(payload: Mapping[str, Any]) -> None:
-    record = deepcopy(dict(payload))
     logger.info(
         "Objective analysis internal diagnostic trace=%s",
-        json.dumps(record, ensure_ascii=True, separators=(",", ":")),
+        json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
     )
     collector = _ACTIVE_DIAGNOSTIC_COLLECTOR.get()
     if collector is not None:
-        collector.record(record)
+        collector.record(payload)
 
 
 def record_analysis_failure(error: Exception, **context: str | int) -> None:

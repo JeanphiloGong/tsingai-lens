@@ -34,7 +34,7 @@ class PaperMapFactorAssertionModelOutput(_PaperResearchMapResponse):
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "PaperMapFactorAssertionModelOutput":
-        normalized = [value.strip() for value in self.source_labels]
+        normalized = self.source_labels
         if any(not value for value in normalized):
             raise ValueError("paper-map factor Source labels cannot be empty")
         if len(normalized) != len(set(normalized)):
@@ -56,7 +56,7 @@ class PaperMapRelationshipModelOutput(_PaperResearchMapResponse):
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "PaperMapRelationshipModelOutput":
-        normalized = [value.strip() for value in self.source_labels]
+        normalized = self.source_labels
         if any(not value for value in normalized):
             raise ValueError("paper-map relationship Source labels cannot be empty")
         if len(normalized) != len(set(normalized)):
@@ -139,15 +139,11 @@ class PaperMapSignalModelOutput(_PaperResearchMapResponse):
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "PaperMapSignalModelOutput":
-        normalized = [value.strip() for value in self.source_labels]
+        normalized = self.source_labels
         if any(not value for value in normalized):
             raise ValueError("paper-map signal Source labels cannot be empty")
         if len(normalized) != len(set(normalized)):
             raise ValueError("paper-map signal Source labels must be unique")
-        if self.signal_type == "variable" and self.variable_role == "not_applicable":
-            raise ValueError("variable signal requires a scientific variable role")
-        if self.signal_type == "outcome" and self.variable_role != "not_applicable":
-            raise ValueError("outcome signal variable role must be not_applicable")
         return self
 
 
@@ -297,7 +293,7 @@ class ReviewMapKnowledgeItemModelOutput(_PaperResearchMapResponse):
 
     @model_validator(mode="after")
     def _validate_source_labels(self) -> "ReviewMapKnowledgeItemModelOutput":
-        normalized = [value.strip() for value in self.source_labels]
+        normalized = self.source_labels
         if len(normalized) != len(set(normalized)):
             raise ValueError("review knowledge Source labels must be unique")
         return self

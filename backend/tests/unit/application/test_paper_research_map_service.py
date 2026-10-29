@@ -1473,6 +1473,7 @@ def test_review_cited_experiment_cannot_become_current_work():
         unresolved_signals=[
             {
                 "signal_type": "outcome",
+                "variable_role": "not_applicable",
                 "label": "phase constitution",
                 "experiment_label": "SAAM C-Mn steel experiment",
                 "design_type": "experimental",
@@ -1626,6 +1627,7 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
                 unresolved_signals=[
                     {
                         "signal_type": "outcome",
+                "variable_role": "not_applicable",
                         "label": "porosity",
                         "experiment_label": "Smith et al.",
                         "claim_scope": "background",

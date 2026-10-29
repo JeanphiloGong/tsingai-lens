@@ -6,6 +6,7 @@ from dataclasses import replace, asdict
 
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -329,7 +330,7 @@ def test_first_revision_request_passes_null_revision_and_generation_to_service()
     payload = SampleRevisionUpdateRequest.model_validate({
         "expected_revision_id": None,
         "expected_generation": 3,
-        "content": asdict(_revision().content),
+        "content": json.loads(json.dumps(asdict(_revision().content))),
     })
     response = asyncio.run(task_datasets.update_dataset_sample(
         "fdset_1", "sample-1", payload, _request(Service()),
@@ -378,8 +379,9 @@ def test_sample_update_rejects_missing_message_content_before_write(
         )
 
     assert response.status_code == 422
-    assert response.json()["detail"]["code"] == (
-        "SFT messages require a valid role and content"
+    assert any(
+        error["loc"][-3:] == ["messages", 0, "content"] and error["type"] == "missing"
+        for error in response.json()["detail"]
     )
     service.update_sample.assert_not_awaited()
 

@@ -63,40 +63,54 @@ class DatasetCollectionResponse(BaseModel):
     items: list[DatasetCollectionItemResponse]
 
 
+class RevisionMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    role: Literal["system", "user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class RevisionSourceTextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    document_title: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
 class SftRevisionContentRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     schema_version: Literal["literature-sft.v1"]
-    messages: list[dict[str, str]] = Field(min_length=1, max_length=100)
-    context: list[dict[str, str]] = Field(min_length=1, max_length=1000)
+    messages: list[RevisionMessageRequest] = Field(min_length=1, max_length=100)
+    context: list[RevisionSourceTextRequest] = Field(min_length=1, max_length=1000)
     target: str = Field(min_length=1, max_length=100000)
-    evidence: list[dict[str, str]] = Field(min_length=1, max_length=1000)
+    evidence: list[RevisionSourceTextRequest] = Field(min_length=1, max_length=1000)
 
 
 class PreferenceRevisionContentRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     schema_version: Literal["literature-preference.v1"]
-    messages: list[dict[str, str]] = Field(min_length=1, max_length=100)
-    context: list[dict[str, str]] = Field(min_length=1, max_length=1000)
+    messages: list[RevisionMessageRequest] = Field(min_length=1, max_length=100)
+    context: list[RevisionSourceTextRequest] = Field(min_length=1, max_length=1000)
     response_a: str = Field(min_length=1, max_length=100000)
     response_b: str = Field(min_length=1, max_length=100000)
     suggested_preference: Literal["a", "b", "tie", "unclear"] | None = None
     rationale: str = Field(default="", max_length=100000)
-    evidence: list[dict[str, str]] = Field(min_length=1, max_length=1000)
+    evidence: list[RevisionSourceTextRequest] = Field(min_length=1, max_length=1000)
     human_preference: Literal["a", "b", "tie", "unclear"] | None = None
 
 
 class EvaluationRevisionContentRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     schema_version: Literal["literature-evaluation.v1"]
-    messages: list[dict[str, str]] = Field(min_length=1, max_length=100)
-    context: list[dict[str, str]] = Field(min_length=1, max_length=1000)
+    messages: list[RevisionMessageRequest] = Field(min_length=1, max_length=100)
+    context: list[RevisionSourceTextRequest] = Field(min_length=1, max_length=1000)
     reference: str = Field(default="", max_length=100000)
-    criteria: list[str] = Field(min_length=1, max_length=100)
+    criteria: list[Annotated[str, Field(min_length=1, max_length=100000)]] = Field(min_length=1, max_length=100)
     evaluation_mode: Literal["reference", "rubric"] = "reference"
-    evidence: list[dict[str, str]] = Field(min_length=1, max_length=1000)
+    evidence: list[RevisionSourceTextRequest] = Field(min_length=1, max_length=1000)
 
 
 RevisionContentRequest = Annotated[

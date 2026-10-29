@@ -466,34 +466,22 @@ async def update_dataset_sample(
     try:
         value = payload.content
         messages = tuple(
-            (
-                {**item, "content": strip_internal_references(item.get("content"))}
-                for item in value.messages
-            )
+            {"role": item.role, "content": strip_internal_references(item.content)}
+            for item in value.messages
         )
         context = tuple(
-            (
-                {
-                    **item,
-                    "document_title": strip_internal_references(
-                        item.get("document_title")
-                    ),
-                    "text": strip_internal_references(item.get("text")),
-                }
-                for item in value.context
-            )
+            {
+                "document_title": strip_internal_references(item.document_title),
+                "text": strip_internal_references(item.text),
+            }
+            for item in value.context
         )
         evidence = tuple(
-            (
-                {
-                    **item,
-                    "document_title": strip_internal_references(
-                        item.get("document_title")
-                    ),
-                    "text": strip_internal_references(item.get("text")),
-                }
-                for item in value.evidence
-            )
+            {
+                "document_title": strip_internal_references(item.document_title),
+                "text": strip_internal_references(item.text),
+            }
+            for item in value.evidence
         )
         if isinstance(value, SftRevisionContentRequest):
             content = SftRevisionContent(

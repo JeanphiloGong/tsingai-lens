@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.feedback.feedback_case_service import FeedbackCaseService
 from controllers.dependencies.auth import current_user_id
@@ -58,6 +58,8 @@ class FeedbackCaseDetailResponse(BaseModel):
 
 
 class FeedbackAnnotationRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     expected_digest: str | None = Field(default=None, min_length=64, max_length=64)
     problem_type: Literal[
         "fact_error",
@@ -79,6 +81,17 @@ class FeedbackAnnotationRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=4000)
 
 
+    @field_validator("target")
+    @classmethod
+    def empty_target_is_none(cls, value: str | None) -> str | None:
+        return value or None
+
+    @field_validator("support_source_refs", "dataset_uses")
+    @classmethod
+    def unique_values(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value for value in values if value))
+
+
 class FeedbackAnnotationResponse(BaseModel):
     annotation_id: str
     case_id: str
@@ -96,7 +109,9 @@ class FeedbackAnnotationResponse(BaseModel):
 
 
 class FeedbackReviewRequest(BaseModel):
-    expected_annotation_digest: str = Field(min_length=64, max_length=64)
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    expected_annotation_digest: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
     decision: Literal["accept", "reject", "insufficient", "withdraw"]
     reason: str = Field(min_length=1, max_length=4000)
 

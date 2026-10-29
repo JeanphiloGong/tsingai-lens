@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
-import string
 from typing import Any, Literal
 
 from domain.feedback.analysis_result import FeedbackProblemType
@@ -13,22 +12,6 @@ from domain.feedback.analysis_result import FeedbackProblemType
 
 AnnotationSeverity = Literal["low", "medium", "high", "critical"]
 DatasetUse = Literal["evaluation", "sft", "preference"]
-
-_SEVERITIES = {"low", "medium", "high", "critical"}
-_DATASET_USES = {"evaluation", "sft", "preference"}
-_PROBLEM_TYPES = {
-    "fact_error",
-    "source_missing",
-    "evidence_mismatch",
-    "retrieval_failure",
-    "tool_failure",
-    "intent_mismatch",
-    "incomplete_answer",
-    "style_or_format",
-    "undetermined_dissatisfaction",
-}
-_HEX_DIGITS = frozenset(string.hexdigits)
-
 
 @dataclass(frozen=True)
 class FeedbackAnnotation:
@@ -53,40 +36,16 @@ class FeedbackAnnotation:
             raise ValueError("annotation identity is required")
         if self.version < 1:
             raise ValueError("annotation version must be positive")
-        if self.problem_type not in _PROBLEM_TYPES:
-            raise ValueError("invalid annotation problem type")
-        if self.severity not in _SEVERITIES:
-            raise ValueError("invalid annotation severity")
-        if self.target is not None:
-            target = self.target.strip()
-            if not target:
-                object.__setattr__(self, "target", None)
-            elif len(target) > 20000:
-                raise ValueError("annotation target cannot exceed 20000 characters")
-            else:
-                object.__setattr__(self, "target", target)
-        reason = self.reason.strip()
-        if not reason:
+        if not self.reason.strip():
             raise ValueError("annotation reason is required")
-        if len(reason) > 4000:
-            raise ValueError("annotation reason cannot exceed 4000 characters")
-        object.__setattr__(self, "reason", reason)
-        refs = tuple(dict.fromkeys(str(item).strip() for item in self.support_source_refs if str(item).strip()))
-        uses = tuple(dict.fromkeys(str(item) for item in self.dataset_uses))
-        if any(item not in _DATASET_USES for item in uses):
-            raise ValueError("invalid dataset use")
-        if "sft" in uses and not self.target:
+        if "sft" in self.dataset_uses and not self.target:
             raise ValueError("sft annotation requires a target")
-        if "sft" in uses and not refs:
+        if "sft" in self.dataset_uses and not self.support_source_refs:
             raise ValueError("sft annotation requires support sources")
-        if "preference" in uses and not self.target:
+        if "preference" in self.dataset_uses and not self.target:
             raise ValueError("preference annotation requires a target")
-        if "preference" in uses and not refs:
+        if "preference" in self.dataset_uses and not self.support_source_refs:
             raise ValueError("preference annotation requires support sources")
-        object.__setattr__(self, "support_source_refs", refs)
-        object.__setattr__(self, "dataset_uses", uses)
-        if not _is_sha256(self.annotation_digest):
-            raise ValueError("annotation digest must be sha256")
         expected_digest = self.digest_for(
             case_id=self.case_id,
             problem_type=self.problem_type,
@@ -115,10 +74,10 @@ class FeedbackAnnotation:
             "case_id": case_id,
             "problem_type": problem_type,
             "severity": severity,
-            "target": target.strip() if isinstance(target, str) else None,
-            "support_source_refs": sorted(dict.fromkeys(str(item) for item in support_source_refs)),
-            "dataset_uses": sorted(dict.fromkeys(str(item) for item in dataset_uses)),
-            "reason": reason.strip(),
+            "target": target,
+            "support_source_refs": sorted(set(support_source_refs)),
+            "dataset_uses": sorted(set(dataset_uses)),
+            "reason": reason,
         }
         encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
@@ -176,7 +135,3 @@ class FeedbackAnnotation:
 
 
 __all__ = ["AnnotationSeverity", "DatasetUse", "FeedbackAnnotation"]
-
-
-def _is_sha256(value: str) -> bool:
-    return len(value) == 64 and all(character in _HEX_DIGITS for character in value)

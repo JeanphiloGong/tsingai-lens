@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import string
 from dataclasses import dataclass
 from typing import Literal
 
 ReviewDecisionValue = Literal["accept", "reject", "insufficient", "withdraw"]
-_DECISIONS = {"accept", "reject", "insufficient", "withdraw"}
-_HEX_DIGITS = frozenset(string.hexdigits)
 
 
 @dataclass(frozen=True)
@@ -25,20 +22,10 @@ class ReviewDecision:
     def __post_init__(self) -> None:
         if not self.decision_id or not self.case_id or not self.created_by:
             raise ValueError("review decision identity is required")
-        if not _is_sha256(self.annotation_digest):
-            raise ValueError("review annotation digest must be sha256")
-        if self.decision not in _DECISIONS:
-            raise ValueError("invalid review decision")
         if self.seq < 1:
             raise ValueError("review decision sequence must be positive")
-        reason = self.reason.strip() if self.reason is not None else None
-        if self.decision in {"accept", "reject", "insufficient", "withdraw"} and not reason:
+        if not self.reason or not self.reason.strip():
             raise ValueError("review decision reason is required")
-        object.__setattr__(self, "reason", reason)
 
 
 __all__ = ["ReviewDecision", "ReviewDecisionValue"]
-
-
-def _is_sha256(value: str) -> bool:
-    return len(value) == 64 and all(character in _HEX_DIGITS for character in value)

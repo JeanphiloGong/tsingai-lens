@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.chat import ChatMessageRole
+
 from copy import deepcopy
 import json
 import subprocess
@@ -55,6 +57,7 @@ from repositories.collection_repository import (
 from repositories.dataset_snapshot_repository import (
     DatasetSnapshotRepository,
 )
+from repositories.feedback_dataset_sample_repository import source_digest_for_case
 from repositories.feedback_case_repository import (
     FeedbackCaseRepository,
 )
@@ -451,7 +454,7 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     tool_message = ChatMessage(
         message_id="feedback-chain-tool-result",
         session_id=SESSION_ID,
-        role="tool",
+        role=ChatMessageRole.TOOL,
         content=json.dumps(
             asdict(failed_result),
             ensure_ascii=True,
@@ -677,6 +680,7 @@ async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
         reason="incorrect",
     )
     job = (await chain.jobs.list_jobs(job_type="feedback_analysis"))[0]
+    excerpt = {"document_title": "Paper B", "quote": "Preheated at 200 C."}
     result = AnalysisResult(
         result_id="analysis-result-first",
         job_id=job.job_id,
@@ -689,7 +693,7 @@ async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
         related_message_ids=(chain.question.message_id, chain.answer.message_id),
         suggested_evidence=(),
         suggested_target=None,
-        evidence_coverage=EvidenceCoverage(coverage_status="partial"),
+        evidence_coverage=EvidenceCoverage(inspected_sources=(excerpt,), coverage_status="partial"),
         model="test",
         input_digest="a" * 64,
         created_at=NOW,
@@ -697,20 +701,31 @@ async def test_analysis_result_replay_after_worker_crash_reuses_saved_result(
     snapshot = {
         "question": chain.question.content,
         "answer": chain.answer.content,
-        "inspected_sources": [],
+        "inspected_sources": [excerpt],
     }
-    await chain.cases.upsert_case_from_analysis(
+    frozen_case = await chain.cases.upsert_case_from_analysis(
         result,
         context_snapshot=snapshot,
         now=NOW,
     )
+
+    frozen_digest = source_digest_for_case(frozen_case)
+    excerpt["quote"] = "Changed outside the workbench."
+    returned = asdict(frozen_case)
+    returned["context_snapshot"]["inspected_sources"][0]["quote"] = "Changed by a reader."
+    assert frozen_case.context_snapshot["inspected_sources"][0]["quote"] == "Preheated at 200 C."
+    assert source_digest_for_case(frozen_case) == frozen_digest
+    reread = await chain.cases.read_case(frozen_case.case_id)
+    assert reread.context_snapshot == frozen_case.context_snapshot
+    stored_analysis = (await chain.cases.read_analysis_results((result.result_id,)))[0]
+    assert stored_analysis.evidence_coverage.inspected_sources[0]["quote"] == "Preheated at 200 C."
 
     # Simulate the worker retrying after the result transaction committed but
     # before the job status update was observed by the worker.
     replay = replace(result, result_id="analysis-result-retry")
     await chain.cases.upsert_case_from_analysis(
         replay,
-        context_snapshot=snapshot,
+        context_snapshot=frozen_case.context_snapshot,
         now=NOW,
     )
 

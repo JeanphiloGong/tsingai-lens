@@ -40,19 +40,14 @@ from domain.core.finding import (
     Finding,
     FindingPaperContribution,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _positive_int as finding_positive_int
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     ObjectiveEvidence,
     PaperContribution,
     ResearchObjective,
-    _choice,
 )
-from domain.core.research_objective import _positive_int_or_none
-from domain.core.research_objective import (
-    _positive_int_or_none as objective_positive_int_or_none,
-)
+
+
 from domain.core.research_objective import (
     normalize_objective_terms,
 )
@@ -108,11 +103,9 @@ def _objective(
         excluded_document_ids=(),
         confidence=0.9,
         reason=None,
-        confirmation_status=_choice(
-            confirmation_status, OBJECTIVE_CONFIRMATION_STATUSES, "candidate"
-        ),
-        active_analysis_version=_positive_int_or_none(published),
-        published_analysis_version=_positive_int_or_none(published),
+        confirmation_status=confirmation_status,
+        active_analysis_version=published,
+        published_analysis_version=published,
     )
 
 
@@ -146,7 +139,7 @@ def _evidence(version: int) -> ObjectiveEvidence:
     return ObjectiveEvidence(
         collection_id="collection-1",
         objective_id="objective-1",
-        analysis_version=objective_positive_int_or_none(version) or 0,
+        analysis_version=version or 0,
         evidence_id="evidence-1",
         document_id="paper-1",
         source_kind="text_window",
@@ -189,18 +182,14 @@ def _finding(version: int) -> Finding:
     return Finding(
         collection_id="collection-1",
         objective_id="objective-1",
-        analysis_version=finding_positive_int(version),
+        analysis_version=version,
         finding_id="finding-1",
         statement="Temperature was associated with strength.",
         factors=("temperature",),
         outcome="strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='isolated_effect',
         synthesis_status="insufficient_confirmation",
         certainty=0.5,
         display_rank=0,
@@ -225,18 +214,14 @@ def _native_finding(version: int) -> Finding:
     return Finding(
         collection_id="collection-1",
         objective_id="objective-1",
-        analysis_version=finding_positive_int(version),
+        analysis_version=version,
         finding_id="experiment-finding-1",
         statement="Temperature was associated with strength.",
         factors=("temperature",),
         outcome="strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='isolated_effect',
         synthesis_status="single_study",
         certainty=0.5,
         display_rank=0,
@@ -256,7 +241,7 @@ def _artifacts(version: int) -> ObjectiveExperimentAnalysisArtifacts:
             PaperContribution(
                 collection_id="collection-1",
                 objective_id="objective-1",
-                analysis_version=objective_positive_int_or_none(version) or 0,
+                analysis_version=version or 0,
                 document_id="paper-1",
                 analysis_status="analyzed",
                 relevance="high",

@@ -15,9 +15,6 @@ from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     Finding,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _positive_int as finding_positive_int
-from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
     ExperimentalVariant,
@@ -172,20 +169,16 @@ class _Findings:
     async def list_findings(self, db, collection_id, objective_id, analysis_version):
         return (
             Finding(
-                collection_id=finding_text(collection_id) or "",
-                objective_id=finding_text(objective_id) or "",
-                analysis_version=finding_positive_int(analysis_version),
+                collection_id=collection_id or "",
+                objective_id=objective_id or "",
+                analysis_version=analysis_version,
                 finding_id="finding-1",
                 statement="Preheat was associated with higher elongation.",
                 factors=("preheat",),
                 outcome="elongation",
                 direction="increase",
                 assertion_strength="associative",
-                attribution_scope=finding_choice(
-                    "isolated_effect",
-                    EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-                    "descriptive_only",
-                ),
+                attribution_scope='isolated_effect',
                 synthesis_status="single_study",
                 certainty=0.8,
                 display_rank=0,

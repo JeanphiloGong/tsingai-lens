@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from domain.core.research_objective import PaperStudyDispositionStatus
+
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -31,14 +33,11 @@ from domain.core.finding import (
     Finding,
     FindingPaperContribution,
 )
-from domain.core.finding import _choice as finding_choice
 from domain.core.research_objective import (
     ObjectiveEvidence,
     PaperContribution,
     PaperStudyDisposition,
     ResearchObjective,
-    _positive_int_or_none,
-    _text,
     build_research_objective_id,
     normalize_objective_terms,
 )
@@ -135,11 +134,7 @@ def _finding() -> Finding:
         outcome="strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='isolated_effect',
         synthesis_status="insufficient_confirmation",
         certainty=0.5,
         display_rank=0,
@@ -1039,9 +1034,9 @@ def _client(
 def _ranked_objective(rank: int) -> ResearchObjective:
     return ResearchObjective(
         collection_id="col-1",
-        objective_id=_text(f"obj-{rank}")
+        objective_id=f"obj-{rank}"
         or build_research_objective_id(
-            question=_text(f"How does variable {rank} affect outcome {rank}?") or "",
+            question=f"How does variable {rank} affect outcome {rank}?" or "",
             material_scope=(),
             variables=normalize_objective_terms([f"variable {rank}"]),
             outcomes=normalize_objective_terms([f"outcome {rank}"]),
@@ -1051,7 +1046,7 @@ def _ranked_objective(rank: int) -> ResearchObjective:
             parent_objective_id=None,
             parent_analysis_version=None,
         ),
-        question=_text(f"How does variable {rank} affect outcome {rank}?") or "",
+        question=f"How does variable {rank} affect outcome {rank}?" or "",
         material_scope=(),
         variables=normalize_objective_terms([f"variable {rank}"]),
         outcomes=normalize_objective_terms([f"outcome {rank}"]),
@@ -1063,7 +1058,7 @@ def _ranked_objective(rank: int) -> ResearchObjective:
         confidence=1 - rank / 100,
         reason=None,
         source_relationship_ids=normalize_objective_terms([f"relationship-{rank}"]),
-        rank=_positive_int_or_none(rank),
+        rank=rank,
     )
 
 
@@ -1079,11 +1074,11 @@ def _ranked_facts(count: int) -> ObjectiveFactSet:
         ),
         study_dispositions=tuple(
             PaperStudyDisposition(
-                document_id=_text(f"paper-{rank}") or "",
-                study_id=_text(f"study-{rank}") or "",
-                relationship_id=_text(f"relationship-{rank}") or "",
-                status=PaperStudyDisposition._status("promoted"),
-                objective_id=_text(f"obj-{rank}"),
+                document_id=f"paper-{rank}" or "",
+                study_id=f"study-{rank}" or "",
+                relationship_id=f"relationship-{rank}" or "",
+                status=PaperStudyDispositionStatus("promoted"),
+                objective_id=f"obj-{rank}",
             )
             for rank in range(1, count + 1)
         ),
@@ -1104,7 +1099,7 @@ def _default_objective_facts() -> ObjectiveFactSet:
                 document_id="paper-1",
                 study_id="study-1",
                 relationship_id="relationship-1",
-                status=PaperStudyDisposition._status("promoted"),
+                status=PaperStudyDispositionStatus("promoted"),
                 objective_id="obj-1",
             ),
         ),

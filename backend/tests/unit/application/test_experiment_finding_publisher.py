@@ -5,11 +5,7 @@ from application.core.objectives.analysis.experiment_finding_publisher import (
     ExperimentFindingPublisher,
 )
 from domain.core import ComparisonGroup, ComparisonGroupMember, Finding
-from domain.core.finding import (
-    EVIDENCE_ATTRIBUTION_SCOPES,
-    Finding,
-    _choice,
-)
+from domain.core.finding import EVIDENCE_ATTRIBUTION_SCOPES, Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.scientific_fact import (
     ScientificContext,
@@ -71,11 +67,7 @@ def _finding(**overrides) -> Finding:
         "outcome": "elongation",
         "direction": "increase",
         "assertion_strength": "descriptive",
-        "attribution_scope": _choice(
-            "descriptive_only",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        "attribution_scope": 'descriptive_only',
         "synthesis_status": "single_study",
         "certainty": 0.4,
         "display_rank": 0,

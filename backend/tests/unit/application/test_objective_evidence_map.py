@@ -19,22 +19,14 @@ from domain.core.finding import (
     Finding,
     FindingPaperContribution,
 )
-from domain.core.finding import _certainty as finding_certainty
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _strings as finding_strings
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     EVIDENCE_ROLE_VALUES,
     ObjectiveEvidence,
     PaperContribution,
     ResearchObjective,
 )
-from domain.core.research_objective import (
-    _non_negative_int_or_none as objective_non_negative_int_or_none,
-)
-from domain.core.research_objective import (
-    _positive_int_or_none,
-)
+
+
 from domain.core.research_objective import _scoped_id as objective_scoped_id
 from domain.core.scientific_fact import (
     SCIENTIFIC_RESULT_DIRECTIONS,
@@ -44,7 +36,7 @@ from domain.core.scientific_fact import (
     ScientificResult,
     ScientificVariable,
 )
-from domain.core.scientific_fact import _choice as scientific_choice
+
 from repositories.objective_repository import ObjectiveAnalysis
 
 
@@ -64,8 +56,8 @@ def _objective(*, published_version: int | None = 1) -> ResearchObjective:
         confidence=0.9,
         reason=None,
         confirmation_status="confirmed",
-        active_analysis_version=_positive_int_or_none(published_version),
-        published_analysis_version=_positive_int_or_none(published_version),
+        active_analysis_version=published_version,
+        published_analysis_version=published_version,
     )
 
 
@@ -102,54 +94,42 @@ def _evidence(
         collection_id="collection-1",
         objective_id="objective-1",
         analysis_version=1,
-        evidence_id=finding_text(evidence_id)
+        evidence_id=evidence_id
         or objective_scoped_id(
             "oev",
             "collection-1",
             "objective-1",
             1,
-            finding_text(document_id) or "",
+            document_id or "",
             "table",
-            finding_text(source_ref) or "",
-            finding_choice(
-                "direct_result" if direction == "decrease" else "contradictory_result",
-                EVIDENCE_ROLE_VALUES,
-                "irrelevant",
-            ),
+            source_ref or "",
+            'direct_result' if direction == 'decrease' else 'contradictory_result',
             (
                 ScientificResult(
                     outcome="ultimate tensile strength",
                     value=None,
                     unit=None,
-                    direction=scientific_choice(
-                        direction, SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
-                    ),
+                    direction=direction,
                     result_text="Ultimate tensile strength changed after treatment.",
                 ).outcome
                 if ScientificResult(
                     outcome="ultimate tensile strength",
                     value=None,
                     unit=None,
-                    direction=scientific_choice(
-                        direction, SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
-                    ),
+                    direction=direction,
                     result_text="Ultimate tensile strength changed after treatment.",
                 )
                 is not None
                 else None
             ),
         ),
-        document_id=finding_text(document_id) or "",
+        document_id=document_id or "",
         source_kind="table",
-        source_ref=finding_text(source_ref) or "",
+        source_ref=source_ref or "",
         source_excerpt="Heat-treatment results from Table 7.",
         page_numbers=(20,),
         related_source_refs=(),
-        evidence_role=finding_choice(
-            "direct_result" if direction == "decrease" else "contradictory_result",
-            EVIDENCE_ROLE_VALUES,
-            "irrelevant",
-        ),
+        evidence_role='direct_result' if direction == 'decrease' else 'contradictory_result',
         selection_status="extracted",
         selection_reason=None,
         changed_variables=(
@@ -169,9 +149,7 @@ def _evidence(
             outcome="ultimate tensile strength",
             value=None,
             unit=None,
-            direction=scientific_choice(
-                direction, SCIENTIFIC_RESULT_DIRECTIONS, "unknown"
-            ),
+            direction=direction,
             result_text="Ultimate tensile strength changed after treatment.",
         ),
         attribution_scope="isolated_effect",
@@ -195,8 +173,8 @@ def _contribution(
         collection_id="collection-1",
         objective_id="objective-1",
         analysis_version=1,
-        document_id=finding_text(document_id) or "",
-        analysis_status=finding_choice(status, PAPER_CONTRIBUTION_STATUSES, "pending"),
+        document_id=document_id or "",
+        analysis_status=status,
         relevance="high",
         paper_role="primary_experiment",
         contribution_summary=None,
@@ -204,19 +182,15 @@ def _contribution(
         changed_variables=(),
         measured_property_scope=(),
         test_environment_scope=(),
-        exclusion_reason=finding_text("provider timeout" if failed else None),
+        exclusion_reason='provider timeout' if failed else None,
         warnings=(),
         confidence=0.8,
-        evidence_disposition=finding_text(disposition),
+        evidence_disposition=disposition,
         routed_source_count=1,
-        extracted_source_count=objective_non_negative_int_or_none(0 if failed else 1),
-        comparable_evidence_count=objective_non_negative_int_or_none(
-            0 if failed else 1
-        ),
-        failed_source_count=objective_non_negative_int_or_none(1 if failed else 0),
-        evidence_disposition_reason=finding_text(
-            "provider timeout" if failed else None
-        ),
+        extracted_source_count=0 if failed else 1,
+        comparable_evidence_count=0 if failed else 1,
+        failed_source_count=1 if failed else 0,
+        evidence_disposition_reason='provider timeout' if failed else None,
     )
 
 
@@ -230,21 +204,21 @@ def _needs_context_evidence(
         collection_id="collection-1",
         objective_id="objective-1",
         analysis_version=1,
-        evidence_id=finding_text(evidence_id)
+        evidence_id=evidence_id
         or objective_scoped_id(
             "oev",
             "collection-1",
             "objective-1",
             1,
-            finding_text(document_id) or "",
+            document_id or "",
             "text_window",
-            finding_text(source_ref) or "",
+            source_ref or "",
             "direct_result",
             None,
         ),
-        document_id=finding_text(document_id) or "",
+        document_id=document_id or "",
         source_kind="text_window",
-        source_ref=finding_text(source_ref) or "",
+        source_ref=source_ref or "",
         source_excerpt="Porosity was measured after the heat-treatment experiments.",
         page_numbers=(8,),
         related_source_refs=(),
@@ -289,13 +263,9 @@ def _finding(evidence: tuple[ObjectiveEvidence, ...]) -> Finding:
         outcome="ultimate tensile strength",
         direction="decrease",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "isolated_effect",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='isolated_effect',
         synthesis_status="conflict",
-        certainty=finding_certainty(Finding.certainty_for("conflict", evidence)),
+        certainty=Finding.certainty_for('conflict', evidence),
         display_rank=0,
         mechanisms=(),
         scientific_context=ScientificContext(
@@ -305,24 +275,12 @@ def _finding(evidence: tuple[ObjectiveEvidence, ...]) -> Finding:
         paper_contributions=tuple(
             (
                 FindingPaperContribution(
-                    document_id=finding_text(item.get("document_id")) or "",
-                    analysis_status=finding_choice(
-                        item.get("analysis_status"),
-                        PAPER_CONTRIBUTION_STATUSES,
-                        "pending",
-                    ),
-                    supporting_evidence_ids=finding_strings(
-                        item.get("supporting_evidence_ids")
-                    ),
-                    contradicting_evidence_ids=finding_strings(
-                        item.get("contradicting_evidence_ids")
-                    ),
-                    context_evidence_ids=finding_strings(
-                        item.get("context_evidence_ids")
-                    ),
-                    condition_boundary_evidence_ids=finding_strings(
-                        item.get("condition_boundary_evidence_ids")
-                    ),
+                    document_id=item.get('document_id') or "",
+                    analysis_status=item.get('analysis_status'),
+                    supporting_evidence_ids=tuple(item.get('supporting_evidence_ids') or ()),
+                    contradicting_evidence_ids=tuple(item.get('contradicting_evidence_ids') or ()),
+                    context_evidence_ids=tuple(item.get('context_evidence_ids') or ()),
+                    condition_boundary_evidence_ids=tuple(item.get('condition_boundary_evidence_ids') or ()),
                 )
                 for item in tuple(
                     (

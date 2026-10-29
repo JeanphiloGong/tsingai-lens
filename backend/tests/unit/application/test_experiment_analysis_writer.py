@@ -26,8 +26,6 @@ from application.core.objectives.finding_authoring_service import (
 from domain.core.finding import (
     PAPER_CONTRIBUTION_STATUSES,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _text as finding_text
 from domain.core.research_objective import (
     ObjectiveFactSet,
     PaperContribution,
@@ -728,15 +726,11 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(m
     )
     coverage = tuple(
         PaperContribution(
-            collection_id=finding_text(collection_id) or "",
-            objective_id=finding_text(objective.objective_id) or "",
+            collection_id=collection_id or "",
+            objective_id=objective.objective_id or "",
             analysis_version=1,
-            document_id=finding_text(paper) or "",
-            analysis_status=finding_choice(
-                "analyzed" if paper == "paper-a" else "excluded",
-                PAPER_CONTRIBUTION_STATUSES,
-                "pending",
-            ),
+            document_id=paper or "",
+            analysis_status='analyzed' if paper == 'paper-a' else 'excluded',
             relevance="uncertain",
             paper_role="uncertain",
             contribution_summary=None,

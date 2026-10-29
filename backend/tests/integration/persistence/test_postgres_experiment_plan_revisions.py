@@ -4,7 +4,6 @@ from infra.persistence import database
 
 from domain.core.research_objective import (
     ResearchObjective,
-    _text,
     build_research_objective_id,
 )
 
@@ -33,8 +32,8 @@ OBJECTIVE_ID = "objective-plan-revisions"
 @pytest.fixture
 async def experiment_plan_repository(source_repository):
     objective = ResearchObjective(
-        collection_id=_text(COLLECTION_ID) or "",
-        objective_id=_text(OBJECTIVE_ID)
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID
         or build_research_objective_id(
             question="How does laser power affect porosity?",
             material_scope=("Ti-6Al-4V",),

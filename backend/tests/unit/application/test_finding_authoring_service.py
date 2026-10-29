@@ -13,8 +13,6 @@ from application.core.objectives.finding_authoring_service import (
 from domain.core.finding import (
     PAPER_CONTRIBUTION_STATUSES,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.research_objective import (
     ObjectiveFactSet,
@@ -22,11 +20,8 @@ from domain.core.research_objective import (
     PreparedDocumentInput,
     ResearchObjective,
 )
+
 from domain.core.research_objective import (
-    _positive_int_or_none as objective_positive_int_or_none,
-)
-from domain.core.research_objective import (
-    _text,
     normalize_objective_terms,
 )
 from repositories.objective_repository import (
@@ -75,7 +70,7 @@ def _analysis(version: int, status: str) -> ObjectiveAnalysis:
         model_name=None,
         prompt_versions={str(key): str(value) for key, value in dict({}).items()},
         stats=ExecutionStats(duration_ms=None, model_usage=(), prompt_versions={}),
-        status=_text(status) or "queued",
+        status=status or "queued",
         processed_document_count=int(1),
         total_document_count=int(1),
     )
@@ -147,7 +142,7 @@ class _Repository:
             PaperContribution(
                 collection_id="collection-1",
                 objective_id="objective-1",
-                analysis_version=objective_positive_int_or_none(args[-1]) or 0,
+                analysis_version=args[-1] or 0,
                 document_id="paper-1",
                 analysis_status="analyzed",
                 relevance="uncertain",
@@ -321,10 +316,8 @@ async def test_authored_publication_preserves_coverage_with_real_repository(monk
             collection_id="collection-1",
             objective_id="objective-1",
             analysis_version=1,
-            document_id=finding_text(paper) or "",
-            analysis_status=finding_choice(
-                status, PAPER_CONTRIBUTION_STATUSES, "pending"
-            ),
+            document_id=paper or "",
+            analysis_status=status,
             relevance="uncertain",
             paper_role="uncertain",
             contribution_summary=None,

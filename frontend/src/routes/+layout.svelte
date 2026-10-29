@@ -17,7 +17,6 @@
   let langMenu: HTMLDivElement | null = null;
   let isThemeOpen = false;
   let themeMenu: HTMLDivElement | null = null;
-  let globalSearch = '';
   let authError = '';
   const appVersion = `v${version}`;
 
@@ -48,11 +47,12 @@
 
   function closeLangMenu() {
     isLangOpen = false;
+    langMenu?.querySelector('button')?.focus();
   }
 
   function setLanguage(value: 'en' | 'zh') {
     language.set(value);
-    isLangOpen = false;
+    closeLangMenu();
   }
 
   function handleLangKeydown(event: KeyboardEvent) {
@@ -70,11 +70,12 @@
 
   function closeThemeMenu() {
     isThemeOpen = false;
+    themeMenu?.querySelector('button')?.focus();
   }
 
   function setTheme(value: ThemePreference) {
     themePreference.set(value);
-    isThemeOpen = false;
+    closeThemeMenu();
   }
 
   function handleThemeKeydown(event: KeyboardEvent) {
@@ -142,8 +143,6 @@
   class:app-shell--feedback={isFeedbackRoute}
   class:app-shell--login={isLoginRoute}
 >
-  <div class="bg-grid" aria-hidden="true"></div>
-
   <header class="site-header" class:site-header--collection={isCollectionRoute}>
     <div class="header-left">
       <a class="brand" href="/">
@@ -165,8 +164,6 @@
 
       {#if isCollectionRoute}
         <nav class="header-breadcrumb" aria-label={$t('header.breadcrumbLabel')}>
-          <a href="/">{ $t('header.breadcrumbWorkspace') }</a>
-          <span aria-hidden="true">/</span>
           <a href="/">{ $t('header.breadcrumbCollection') }</a>
           <span aria-hidden="true">/</span>
           <span class="header-breadcrumb__current">{headerCollectionName}</span>
@@ -174,24 +171,10 @@
       {/if}
     </div>
 
-    <form class="global-search" role="search" on:submit|preventDefault>
-      <span class="global-search__icon" aria-hidden="true"></span>
-      <label class="sr-only" for="global-search-input">{$t('header.globalSearchLabel')}</label>
-      <input
-        id="global-search-input"
-        bind:value={globalSearch}
-        placeholder={$t('header.globalSearchPlaceholder')}
-      />
-      <span class="global-search__kbd" aria-hidden="true">Ctrl K</span>
-    </form>
-
     <div class="header-actions">
       {#if authenticatedUser}
         <ResearchAgentLauncher collectionId={headerCollectionId} />
       {/if}
-      <button class="icon-button" type="button" aria-label={$t('header.notificationsLabel')}>
-        <span class="notification-icon" aria-hidden="true"></span>
-      </button>
       <div
         class="theme-menu"
         bind:this={themeMenu}
@@ -201,7 +184,7 @@
         <button
           type="button"
           class="header-action"
-          aria-haspopup="menu"
+          aria-controls="theme-options"
           aria-expanded={isThemeOpen}
           on:click|stopPropagation={toggleThemeMenu}
           on:keydown={handleThemeKeydown}
@@ -219,14 +202,14 @@
           <span class="chevron" aria-hidden="true">▾</span>
         </button>
         {#if isThemeOpen}
-          <div class="lang-dropdown" role="menu" tabindex="-1" on:keydown={handleThemeKeydown}>
-            <button type="button" role="menuitem" class:active={$themePreference === 'system'} on:click={() => setTheme('system')}>
+          <div id="theme-options" class="lang-dropdown" role="group" aria-label={$t('header.themeLabel')}>
+            <button type="button" on:keydown={handleThemeKeydown} aria-pressed={$themePreference === 'system'} class:active={$themePreference === 'system'} on:click={() => setTheme('system')}>
               {$t('header.themeSystem')}
             </button>
-            <button type="button" role="menuitem" class:active={$themePreference === 'light'} on:click={() => setTheme('light')}>
+            <button type="button" on:keydown={handleThemeKeydown} aria-pressed={$themePreference === 'light'} class:active={$themePreference === 'light'} on:click={() => setTheme('light')}>
               {$t('header.themeLight')}
             </button>
-            <button type="button" role="menuitem" class:active={$themePreference === 'dark'} on:click={() => setTheme('dark')}>
+            <button type="button" on:keydown={handleThemeKeydown} aria-pressed={$themePreference === 'dark'} class:active={$themePreference === 'dark'} on:click={() => setTheme('dark')}>
               {$t('header.themeDark')}
             </button>
           </div>
@@ -241,7 +224,7 @@
         <button
           type="button"
           class="header-action"
-          aria-haspopup="menu"
+          aria-controls="language-options"
           aria-expanded={isLangOpen}
           on:click|stopPropagation={toggleLangMenu}
           on:keydown={handleLangKeydown}
@@ -250,21 +233,19 @@
           <span class="chevron" aria-hidden="true">▾</span>
         </button>
         {#if isLangOpen}
-          <div class="lang-dropdown" role="menu" tabindex="-1" on:keydown={handleLangKeydown}>
-            <button type="button" role="menuitem" class:active={$language === 'en'} on:click={() => setLanguage('en')}>
+          <div id="language-options" class="lang-dropdown" role="group" aria-label={$t('header.languageLabel')}>
+            <button type="button" on:keydown={handleLangKeydown} aria-pressed={$language === 'en'} class:active={$language === 'en'} on:click={() => setLanguage('en')}>
               EN
             </button>
-            <button type="button" role="menuitem" class:active={$language === 'zh'} on:click={() => setLanguage('zh')}>
+            <button type="button" on:keydown={handleLangKeydown} aria-pressed={$language === 'zh'} class:active={$language === 'zh'} on:click={() => setLanguage('zh')}>
               中文
             </button>
           </div>
         {/if}
       </div>
-      <button class="avatar-placeholder" type="button" aria-label={$t('header.userMenuLabel')}>
-        <span aria-hidden="true">{userInitial}</span>
-      </button>
       {#if authenticatedUser}
         <div class="session-summary" title={authenticatedUser.email}>
+          <span class="avatar-placeholder" aria-hidden="true">{userInitial}</span>
           <span class="session-summary__name">
             {authenticatedUser.display_name || authenticatedUser.email}
           </span>

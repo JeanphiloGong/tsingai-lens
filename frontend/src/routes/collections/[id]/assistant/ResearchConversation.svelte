@@ -1917,7 +1917,6 @@
 
 	:global(.app-shell:has(.research-agent.standalone) .site-header),
 	:global(.app-shell:has(.research-agent.standalone) .site-footer),
-	:global(.app-shell:has(.research-agent.standalone) .bg-grid),
 	:global(
 		.collection-header:has(+ .collection-tabs + .collection-panel .research-agent.standalone)
 	),

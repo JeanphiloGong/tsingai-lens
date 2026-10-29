@@ -2,6 +2,13 @@
 
 This node owns the Collection route family.
 
+The Collection is the current research workspace boundary. Shared navigation
+keeps Overview, Papers, Objectives, and AI Copilot directly visible; Evidence Map,
+Feedback, and Settings live under More. Active routes expose `aria-current` and
+an underline. Objective list and detail routes use compact collection context.
+Findings remain inside their Objective results, with exact Source return context.
+The visual rules are documented in [DESIGN.md](../../../docs/DESIGN.md).
+
 ## Primary Routes
 
 - `collections/[id]/+page.svelte`

@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-29T08:00:00Z",
+  "title": "Design System: TsingAI-Lens",
+  "extensions": {
+    "shadows": [
+      {
+        "name": "shadow-xs",
+        "value": "0 1px 2px rgba(15, 23, 42, 0.04)",
+        "purpose": "Primary action depth."
+      },
+      {
+        "name": "shadow-sm",
+        "value": "0 4px 12px rgba(15, 23, 42, 0.06)",
+        "purpose": "Control hover and small surfaces."
+      },
+      {
+        "name": "shadow-md",
+        "value": "0 12px 32px rgba(15, 23, 42, 0.08)",
+        "purpose": "Raised surfaces."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "0.2s ease",
+        "purpose": "Existing button and field state transitions; reduced motion disables them."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "680px"
+      },
+      {
+        "name": "mobile",
+        "value": "720px"
+      },
+      {
+        "name": "stacked",
+        "value": "900px"
+      },
+      {
+        "name": "medium",
+        "value": "1100px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main action; uses the theme-aware on-brand foreground.",
+      "html": "<button class=\"ds-button\">Create collection</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border:1px solid transparent;border-radius:var(--radius-md);font:inherit;font-weight:600;cursor:pointer;transition:background .2s ease,box-shadow .2s ease}.ds-button:focus-visible{outline:2px solid var(--brand-primary);outline-offset:3px}.ds-button:disabled{opacity:.6;cursor:not-allowed}.ds-button:not(:disabled):hover{box-shadow:var(--shadow-sm)}.ds-button{background:var(--brand-primary);color:var(--on-brand)}.ds-button:not(:disabled):hover{background:var(--brand-primary-hover)}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary actions beside the main action.",
+      "html": "<button class=\"ds-button\">Cancel</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;border:1px solid transparent;border-radius:var(--radius-md);font:inherit;font-weight:600;cursor:pointer;transition:background .2s ease,box-shadow .2s ease}.ds-button:focus-visible{outline:2px solid var(--brand-primary);outline-offset:3px}.ds-button:disabled{opacity:.6;cursor:not-allowed}.ds-button:not(:disabled):hover{box-shadow:var(--shadow-sm)}.ds-button{background:var(--surface-card);color:var(--text-primary);border-color:var(--border-strong)}.ds-button:not(:disabled):hover{background:var(--bg-subtle)}"
+    },
+    {
+      "name": "Text field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labeled input with visible keyboard focus.",
+      "html": "<label class=\"ds-field\">Collection name<input class=\"ds-input\" placeholder=\"Research scope\"></label>",
+      "css": ".ds-field{display:grid;gap:8px;font:inherit;color:var(--text-secondary)}.ds-input{font:inherit;padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface-card);color:var(--text-primary);caret-color:var(--brand-primary)}.ds-input:hover{border-color:var(--brand-primary)}.ds-input:focus-visible{outline:2px solid var(--brand-primary);outline-offset:3px}"
+    },
+    {
+      "name": "Collection navigation",
+      "kind": "nav",
+      "description": "Active destination identified by text, underline, and aria-current.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Collection\"><a href=\"#papers\">Papers</a><a href=\"#objectives\" aria-current=\"page\">Objectives</a></nav>",
+      "css": ".ds-nav{display:flex;flex-wrap:wrap;gap:6px;padding:6px 10px;background:var(--surface-card)}.ds-nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border-radius:12px;font:700 14px/22px sans-serif;color:var(--text-secondary);text-decoration:none}.ds-nav a:hover{background:var(--bg-subtle);color:var(--text-primary)}.ds-nav a[aria-current]{background:var(--brand-soft);color:var(--brand-primary);text-decoration:underline;text-underline-offset:6px;text-decoration-thickness:2px}.ds-nav a:focus-visible{outline:2px solid var(--brand-primary);outline-offset:3px}"
+    },
+    {
+      "name": "Metadata pill",
+      "kind": "chip",
+      "description": "Existing noninteractive pill for compact metadata.",
+      "html": "<span class=\"ds-pill\">3 papers</span>",
+      "css": ".ds-pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:rgba(43,111,247,.12);color:#123a84;font:600 .78rem/1.6 sans-serif}"
+    },
+    {
+      "name": "Content card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Existing shared card surface for grouped content.",
+      "html": "<article class=\"ds-card\"><h3>Research scope</h3><p>Review the selected papers before analysis.</p></article>",
+      "css": ".ds-card{display:flex;flex-direction:column;gap:16px;padding:20px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--surface-card);color:var(--text-primary);box-shadow:var(--shadow-sm)}.ds-card h3{margin:0;font-size:1.1rem}.ds-card p{margin:0;color:var(--text-secondary)}"
+    }
+  ],
+  "narrative": {
+    "overview": "The visual system supports reading and comparing research evidence. Preserve the existing A2 Lens mark, blue actions, slate text, and quiet surfaces.",
+    "dos": [
+      "Do preserve the collection → papers → Objective → Finding → Source context.",
+      "Do use existing semantic tokens and verify both light and dark themes."
+    ],
+    "donts": [
+      "Don’t advertise unavailable search, shortcuts, notification, or account actions."
+    ]
+  }
+}

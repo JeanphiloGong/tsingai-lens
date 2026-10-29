@@ -27,7 +27,7 @@
 	place-items: center;
 	border-radius: 4px;
 	background: var(--brand-primary);
-	color: #fff;
+	color: var(--on-brand);
 	font-size: 10px;
 	font-weight: 750;
 	letter-spacing: 0;

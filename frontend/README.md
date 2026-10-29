@@ -27,6 +27,10 @@ to code.
 
 ## Key Docs
 
+- [`docs/DESIGN.md`](docs/DESIGN.md)
+  Extracted visual tokens, component states, keyboard and responsive rules
+- [`docs/ui-quality-review.md`](docs/ui-quality-review.md)
+  Current-code design critique, applied polish, technical findings and verification limits
 - [`docs/frontend-plan.md`](docs/frontend-plan.md)
   Frontend same-origin API integration guide
 - [`docs/research-agent-chat.md`](docs/research-agent-chat.md)

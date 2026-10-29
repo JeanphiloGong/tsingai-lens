@@ -420,7 +420,6 @@
 
 	<section class={`research-state research-state--${collectionStage}`} aria-live="polite">
 		<div class="research-state__copy">
-			<span class="eyebrow">{$t('overview.currentModel.stateEyebrow')}</span>
 			<h3>{$t(`overview.currentModel.state.${collectionStage}.title`)}</h3>
 			<p>
 				{$t(`overview.currentModel.state.${collectionStage}.body`, {
@@ -923,15 +922,6 @@
 
 	.research-state__copy {
 		max-width: 680px;
-	}
-
-	.eyebrow {
-		display: block;
-		margin-bottom: 8px;
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-		text-transform: uppercase;
 	}
 
 	.research-state h3 {

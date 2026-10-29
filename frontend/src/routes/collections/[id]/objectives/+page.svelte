@@ -1014,7 +1014,7 @@
 	}
 
 	.heading h3 a:focus-visible {
-		outline: 2px solid var(--accent-primary, #2563eb);
+		outline: 2px solid var(--brand-primary);
 		outline-offset: 3px;
 	}
 
@@ -1031,8 +1031,8 @@
 	}
 
 	.heading > span.published {
-		border-color: #3a7d5d;
-		color: #256346;
+		border-color: var(--success-text);
+		color: var(--success-text);
 	}
 
 	.heading > span.failed {
@@ -1063,8 +1063,9 @@
 		display: grid;
 		gap: 8px;
 		padding: 12px 14px;
-		border-left: 3px solid #3676a8;
-		background: var(--surface-subtle);
+		border: 1px solid var(--info-border);
+		border-radius: var(--radius-sm);
+		background: var(--bg-subtle);
 	}
 
 	.analysis-progress__header {
@@ -1091,7 +1092,7 @@
 		display: block;
 		height: 100%;
 		border-radius: inherit;
-		background: var(--accent-primary, #2563eb);
+		background: var(--brand-primary);
 		transition: width 180ms ease;
 	}
 

@@ -45,7 +45,8 @@ finding_id)`. Dataset URLs preserve the selected label and dataset-use
   Objective-scoped, human-authored experiment-plan drafts. Historical plans
   may retain source provenance returned by the API.
 - `i18n.ts`
-  Shared labels for active routes and states.
+  Shared labels for active routes and states. The selected language also updates
+  the document language for assistive technology.
 
 There is one browser contract. Do not add alternate API origins, compatibility
 normalizers, or parallel Objective result types.

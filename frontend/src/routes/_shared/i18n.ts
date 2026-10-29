@@ -7086,6 +7086,7 @@ export const language = writable<Language>(detectLanguage());
 if (browser) {
 	language.subscribe((value) => {
 		localStorage.setItem('retrieval.lang', value);
+		document.documentElement.lang = value === 'zh' ? 'zh-CN' : 'en';
 	});
 }
 

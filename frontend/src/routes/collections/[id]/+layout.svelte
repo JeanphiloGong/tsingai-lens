@@ -25,6 +25,9 @@
 		collection?.documents.filter((document) => document.status === 'processing').length ?? 0;
 	$: currentPath = $page.url.pathname;
 	$: isFindingRoute = Boolean($page.params.objective_id);
+	$: isObjectivesRoute = currentPath.startsWith(`/collections/${collectionId}/objectives`);
+	$: isMoreRoute = ['graph', 'feedback', 'settings'].some((route) => currentPath.startsWith(`/collections/${collectionId}/${route}`));
+	let moreMenu: HTMLDetailsElement;
 	$: isFeedbackRoute = currentPath.startsWith(`/collections/${collectionId}/feedback`);
 	$: statusTone = processingDocumentCount ? 'processing' : readyDocumentCount ? 'ready' : 'pending';
 	$: statusLabel = processingDocumentCount
@@ -45,8 +48,11 @@
 		}
 	});
 
-	function tabClass(pathPrefix: string) {
-		return currentPath.startsWith(pathPrefix) ? 'active' : '';
+	function closeMoreOnEscape(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			moreMenu.open = false;
+			moreMenu.querySelector('summary')?.focus();
+		}
 	}
 
 	function formatDate(value?: string | null) {
@@ -76,7 +82,7 @@
 	}
 </script>
 
-{#if isFindingRoute || isFeedbackRoute}
+{#if isObjectivesRoute || isFeedbackRoute}
 	<div class="collection-context-bar">
 		<a
 			href={resolve('/collections/[id]', { id: collectionId })}
@@ -89,7 +95,6 @@
 {:else}
 	<section class="collection-header">
 		<div class="collection-header__main">
-			<p class="collection-eyebrow">{$t('collection.eyebrow')}</p>
 			<div class="collection-title-row">
 				<h1>{collectionName || $t('collection.unknownName')}</h1>
 			</div>
@@ -120,53 +125,22 @@
 	<div class="status status--error" role="alert">{deleteError}</div>
 {/if}
 
-<nav
-	class="collection-tabs"
-	class:collection-tabs--compact={isFindingRoute}
-	aria-label={$t('collection.tabsLabel')}
->
-	<a
-		href={resolve('/collections/[id]', { id: collectionId })}
-		class:active={$page.url.pathname === `/collections/${collectionId}`}
-	>
-		{$t('collection.tabs.overview')}
-	</a>
-	<a
-		href={resolve('/collections/[id]/objectives', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/objectives`)}
-	>
-		{$t('collection.tabs.objectives')}
-	</a>
-	<a
-		href={resolve('/collections/[id]/graph', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/graph`)}
-	>
-		{$t('collection.tabs.graph')}
-	</a>
-	<a
-		href={resolve('/collections/[id]/documents', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/documents`)}
-	>
-		{$t('collection.tabs.papers')}
-	</a>
-	<a
-		href={resolve('/collections/[id]/assistant', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/assistant`)}
-	>
-		{$t('collection.tabs.assistant')}
-	</a>
-	<a
-		href={resolve('/collections/[id]/feedback', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/feedback`)}
-	>
-		{$t('collection.tabs.feedback')}
-	</a>
-	<a
-		href={resolve('/collections/[id]/settings', { id: collectionId })}
-		class={tabClass(`/collections/${collectionId}/settings`)}
-	>
-		{$t('collection.tabs.settings')}
-	</a>
+<nav class="collection-tabs" class:collection-tabs--compact={isFindingRoute} aria-label={$t('collection.tabsLabel')}>
+	{#each [['', 'overview'], ['/documents', 'papers'], ['/objectives', 'objectives'], ['/assistant', 'assistant']] as [suffix, label]}
+		{@const href = `/collections/${collectionId}${suffix}`}
+		{@const active = suffix ? currentPath.startsWith(href) : currentPath === href}
+		<a {href} class:active aria-current={active ? 'page' : undefined}>{$t(`collection.tabs.${label}`)}</a>
+	{/each}
+	<details class="collection-tabs__more" class:active={isMoreRoute} bind:this={moreMenu}>
+		<summary on:keydown={closeMoreOnEscape}>{$t('collection.moreLabel')}</summary>
+		<div class="collection-tabs__menu">
+			{#each ['graph', 'feedback', 'settings'] as route}
+				{@const href = `/collections/${collectionId}/${route}`}
+				{@const active = currentPath.startsWith(href)}
+				<a {href} class:active aria-current={active ? 'page' : undefined} on:keydown={closeMoreOnEscape} on:click={() => (moreMenu.open = false)}>{$t(`collection.tabs.${route}`)}</a>
+			{/each}
+		</div>
+	</details>
 </nav>
 
 <div class="collection-panel">
@@ -197,9 +171,7 @@
 		font-size: 12px;
 	}
 	.collection-tabs--compact {
-		flex-wrap: nowrap;
 		min-width: 0;
-		overflow-x: auto;
 		border-radius: 6px;
 		box-shadow: none;
 	}

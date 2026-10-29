@@ -13,10 +13,6 @@ from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     Finding,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _positive_int as finding_positive_int
-from domain.core.finding import _strings as finding_strings
-from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
     ExperimentalVariant,
@@ -128,20 +124,16 @@ def _cross_paper_finding(
     selection_ids: tuple[str, str],
 ) -> Finding:
     return Finding(
-        collection_id=finding_text(COLLECTION_ID) or "",
-        objective_id=finding_text(OBJECTIVE_ID) or "",
-        analysis_version=finding_positive_int(analysis_version),
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID or "",
+        analysis_version=analysis_version,
         finding_id="finding-transaction",
         statement="The reported tensile strength was comparable across papers.",
         factors=("process condition",),
         outcome="tensile strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "association_only",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='association_only',
         synthesis_status="agreement",
         certainty=0.7,
         display_rank=0,
@@ -149,7 +141,7 @@ def _cross_paper_finding(
         scientific_context=ScientificContext(),
         limitations=(),
         paper_contributions=(),
-        selection_ids=finding_strings(list(selection_ids)),
+        selection_ids=tuple(list(selection_ids) or ()),
         comparison_group_ids=("group-transaction",),
     )
 

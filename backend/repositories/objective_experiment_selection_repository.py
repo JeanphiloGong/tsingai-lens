@@ -136,6 +136,8 @@ async def _add_selection(
         raise ValueError("selection measurements use another outcome")
     if any(item.outcome != selection.outcome for item in comparisons):
         raise ValueError("selection comparisons use another outcome")
+    measurements_by_key = {item.measurement_key: item for item in measurements}
+    comparisons_by_key = {item.comparison_key: item for item in comparisons}
 
     row = ObjectiveExperimentSelectionRow(
         selection_id=selection.selection_id,
@@ -154,19 +156,19 @@ async def _add_selection(
         SelectionMeasurementRow(
             selection_id=selection.selection_id,
             revision_id=revision_id,
-            measurement_id=item.id,
-            measurement_key=item.measurement_key,
+            measurement_id=measurements_by_key[key].id,
+            measurement_key=key,
         )
-        for item in measurements
+        for key in selection.measurement_keys
     )
     db.add_all(
         SelectionComparisonRow(
             selection_id=selection.selection_id,
             revision_id=revision_id,
-            comparison_id=item.id,
-            comparison_key=item.comparison_key,
+            comparison_id=comparisons_by_key[key].id,
+            comparison_key=key,
         )
-        for item in comparisons
+        for key in selection.comparison_keys
     )
     try:
         await db.flush()

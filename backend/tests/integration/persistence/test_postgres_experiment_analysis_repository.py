@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from infra.persistence import database
 
 import pytest
@@ -9,17 +11,12 @@ from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
     Finding,
 )
-from domain.core.finding import _choice as finding_choice
-from domain.core.finding import _positive_int as finding_positive_int
-from domain.core.finding import _strings as finding_strings
-from domain.core.finding import _text as finding_text
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import (
     ExperimentalVariant,
     ExperimentMeasurementResult,
     ExperimentTestCondition,
     PaperExperimentRevision,
-    _text,
 )
 from domain.core.scientific_fact import (
     ScientificContext,
@@ -81,7 +78,7 @@ def _revision(
         ),
         measurements=(
             ExperimentMeasurementResult(
-                measurement_key=_text(measurement_key or None),
+                measurement_key=measurement_key,
                 outcome="tensile strength",
                 variant_key="reported-condition",
                 test_key="tensile",
@@ -139,31 +136,25 @@ def _group(*, analysis_version: int) -> ComparisonGroup:
 
 def _finding(*, analysis_version: int, with_group: bool) -> Finding:
     return Finding(
-        collection_id=finding_text(COLLECTION_ID) or "",
-        objective_id=finding_text(OBJECTIVE_ID) or "",
-        analysis_version=finding_positive_int(analysis_version),
+        collection_id=COLLECTION_ID or "",
+        objective_id=OBJECTIVE_ID or "",
+        analysis_version=analysis_version,
         finding_id="finding-strength-across-papers",
         statement="Both papers report higher tensile strength.",
         factors=("laser power",),
         outcome="tensile strength",
         direction="increase",
         assertion_strength="associative",
-        attribution_scope=finding_choice(
-            "association_only",
-            EVIDENCE_ATTRIBUTION_SCOPES - {"not_attributable"},
-            "descriptive_only",
-        ),
+        attribution_scope='association_only',
         synthesis_status="agreement",
-        certainty=0.7,
+        certainty=0.735123,
         display_rank=0,
         mechanisms=(),
         scientific_context=ScientificContext(),
         limitations=(),
         paper_contributions=(),
         selection_ids=("selection-a", "selection-b"),
-        comparison_group_ids=finding_strings(
-            ["strength-across-papers"] if with_group else []
-        ),
+        comparison_group_ids=tuple((['strength-across-papers'] if with_group else []) or ()),
     )
 
 
@@ -177,6 +168,13 @@ async def test_complete_analysis_graph_commits_once_and_is_idempotent(
         measurement_key="strength-a",
         value=900,
     )
+    revision_a = replace(
+        revision_a,
+        measurements=tuple(
+            replace(revision_a.measurements[0], measurement_key=key)
+            for key in ("strength-A", "strength-a", "001")
+        ),
+    )
     revision_b = _revision(
         experiment_id="experiment-b",
         document_id="doc_b",
@@ -188,6 +186,9 @@ async def test_complete_analysis_graph_commits_once_and_is_idempotent(
         experiment_id="experiment-a",
         measurement_key="strength-a",
         analysis_version=analysis.analysis_version,
+    )
+    selection_a = replace(
+        selection_a, measurement_keys=("strength-A", "strength-a", "001")
     )
     selection_b = _selection(
         selection_id="selection-b",

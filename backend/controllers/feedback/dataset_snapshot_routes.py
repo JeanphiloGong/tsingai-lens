@@ -76,7 +76,7 @@ async def create_dataset_snapshot(
     payload: DatasetSnapshotCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    snapshot = await dataset_snapshot_service.create_for_user(
+    snapshot = await dataset_snapshot_service.create_dataset_snapshot_for_user(
         owner_id=user_id,
         collection_id=payload.collection_id,
         dataset_type=payload.dataset_type,
@@ -99,7 +99,7 @@ async def list_dataset_snapshots(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
-    items = await dataset_snapshot_service.list_for_user(
+    items = await dataset_snapshot_service.list_dataset_snapshots_for_user(
         owner_id=user_id,
         collection_id=collection_id,
         dataset_type=dataset_type,
@@ -125,7 +125,7 @@ async def download_dataset_snapshot(
     dataset_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    snapshot, payload = await dataset_snapshot_service.jsonl_for_user(
+    snapshot, payload = await dataset_snapshot_service.export_dataset_snapshot_jsonl_for_user(
         owner_id=user_id, dataset_id=dataset_id
     )
     return Response(
@@ -146,7 +146,7 @@ async def get_dataset_snapshot(
     dataset_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    snapshot = await dataset_snapshot_service.read_for_user(
+    snapshot = await dataset_snapshot_service.get_dataset_snapshot_for_user(
         owner_id=user_id, dataset_id=dataset_id
     )
     return make_api_response(

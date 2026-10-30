@@ -164,7 +164,7 @@ def _fixture(*, target: str | None = "A corrected answer"):
 def test_evaluation_snapshot_freezes_rows_and_digest() -> None:
     service, snapshots = _fixture(target=None)
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
@@ -189,7 +189,7 @@ def test_evaluation_snapshot_freezes_rows_and_digest() -> None:
 def test_sft_without_target_is_excluded_but_empty_snapshot_is_valid() -> None:
     service, _ = _fixture(target=None)
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
@@ -205,7 +205,7 @@ def test_sft_without_target_is_excluded_but_empty_snapshot_is_valid() -> None:
 def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
     service, _ = _fixture()
     sft = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
@@ -213,7 +213,7 @@ def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
         )
     )
     preference = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="preference",
@@ -230,7 +230,7 @@ def test_sft_and_preference_rows_use_distinct_frozen_shapes() -> None:
 def test_download_rows_keep_readable_evidence_but_hide_internal_ids() -> None:
     service, _ = _fixture()
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
@@ -239,7 +239,7 @@ def test_download_rows_keep_readable_evidence_but_hide_internal_ids() -> None:
     )
 
     _, payload = asyncio.run(
-        service.jsonl_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
+        service.export_dataset_snapshot_jsonl_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
     )
     row = json.loads(payload.decode().splitlines()[0])
 
@@ -266,7 +266,7 @@ def test_sft_is_excluded_when_support_source_has_no_readable_content() -> None:
         },
     )
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
@@ -298,7 +298,7 @@ def test_sft_is_excluded_when_evidence_has_no_readable_document_title() -> None:
     )
 
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
@@ -313,7 +313,7 @@ def test_sft_is_excluded_when_evidence_has_no_readable_document_title() -> None:
 def test_selection_order_is_canonical_for_digest() -> None:
     service, _ = _fixture(target=None)
     first = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
@@ -321,7 +321,7 @@ def test_selection_order_is_canonical_for_digest() -> None:
         )
     )
     second = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
@@ -334,7 +334,7 @@ def test_selection_order_is_canonical_for_digest() -> None:
 def test_duplicate_case_is_excluded_without_experiment_grouping() -> None:
     service, _ = _fixture()
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
@@ -350,7 +350,7 @@ def test_historical_snapshot_download_preserves_bytes_and_digests() -> None:
 
     service, snapshots = _fixture()
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
@@ -406,7 +406,7 @@ def test_historical_snapshot_download_preserves_bytes_and_digests() -> None:
     )
     snapshots.saved = [historical]
     read, downloaded = asyncio.run(
-        service.jsonl_for_user(owner_id="user-1", dataset_id=historical.dataset_id)
+        service.export_dataset_snapshot_jsonl_for_user(owner_id="user-1", dataset_id=historical.dataset_id)
     )
     assert downloaded == payload
     assert read.manifest == manifest
@@ -416,7 +416,7 @@ def test_cross_collection_access_is_rejected_before_reading_cases() -> None:
     service, _ = _fixture()
     with pytest.raises(FileNotFoundError):
         asyncio.run(
-            service.create_for_user(
+            service.create_dataset_snapshot_for_user(
                 owner_id="other-user",
                 collection_id="collection-1",
                 dataset_type="evaluation",
@@ -485,7 +485,7 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
     service.FeedbackCaseRepo = _Cases(case, annotation, review, (result,))
 
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="sft",
@@ -498,7 +498,7 @@ def test_suggested_evidence_is_a_valid_support_source_for_export() -> None:
 def test_read_rejects_snapshot_when_provenance_digest_no_longer_matches() -> None:
     service, snapshots = _fixture(target=None)
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
@@ -509,7 +509,7 @@ def test_read_rejects_snapshot_when_provenance_digest_no_longer_matches() -> Non
 
     with pytest.raises(DatasetSnapshotIntegrityError) as failure:
         asyncio.run(
-            service.read_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
+            service.get_dataset_snapshot_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
         )
     assert failure.value.reason == "dataset_snapshot_provenance_digest_mismatch"
 
@@ -517,7 +517,7 @@ def test_read_rejects_snapshot_when_provenance_digest_no_longer_matches() -> Non
 def test_download_rejects_snapshot_when_manifest_digest_no_longer_matches() -> None:
     service, snapshots = _fixture(target=None)
     snapshot = asyncio.run(
-        service.create_for_user(
+        service.create_dataset_snapshot_for_user(
             owner_id="user-1",
             collection_id="collection-1",
             dataset_type="evaluation",
@@ -528,6 +528,6 @@ def test_download_rejects_snapshot_when_manifest_digest_no_longer_matches() -> N
 
     with pytest.raises(DatasetSnapshotIntegrityError) as failure:
         asyncio.run(
-            service.jsonl_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
+            service.export_dataset_snapshot_jsonl_for_user(owner_id="user-1", dataset_id=snapshot.dataset_id)
         )
     assert failure.value.reason == "dataset_snapshot_manifest_digest_mismatch"

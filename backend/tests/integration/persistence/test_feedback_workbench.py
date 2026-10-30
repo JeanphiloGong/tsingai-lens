@@ -308,7 +308,7 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     assert reviewed_case.status == "accepted"
     assert await chain.cases.read_review_decisions(case.case_id) == (review,)
 
-    snapshot = await chain.snapshot_service.create_for_user(
+    snapshot = await chain.snapshot_service.create_dataset_snapshot_for_user(
         owner_id=USER_ID,
         collection_id=COLLECTION_ID,
         dataset_type="preference",
@@ -329,7 +329,7 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     payload = jsonl_bytes_for_rows(snapshot.rows)
     assert payload.endswith(b"\n")
     assert len(payload) > 0
-    loaded_snapshot, loaded_payload = await chain.snapshot_service.jsonl_for_user(
+    loaded_snapshot, loaded_payload = await chain.snapshot_service.export_dataset_snapshot_jsonl_for_user(
         owner_id=USER_ID, dataset_id=snapshot.dataset_id
     )
     assert loaded_snapshot == snapshot

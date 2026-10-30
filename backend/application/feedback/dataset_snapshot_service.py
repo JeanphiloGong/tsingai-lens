@@ -49,7 +49,7 @@ from repositories.dataset_snapshot_repository import DatasetSnapshotRepo
 from repositories.feedback_case_repository import FeedbackCaseRepo
 
 
-async def create_for_user(
+async def create_dataset_snapshot_for_user(
     *,
     owner_id: str,
     collection_id: str,
@@ -145,7 +145,7 @@ async def create_for_user(
     return await DatasetSnapshotRepo.save(snapshot)
 
 
-async def list_for_user(
+async def list_dataset_snapshots_for_user(
     *,
     owner_id: str,
     collection_id: str | None = None,
@@ -176,7 +176,7 @@ async def list_for_user(
     )
 
 
-async def read_for_user(*, owner_id: str, dataset_id: str) -> DatasetSnapshot:
+async def get_dataset_snapshot_for_user(*, owner_id: str, dataset_id: str) -> DatasetSnapshot:
     snapshot = await DatasetSnapshotRepo.read(dataset_id)
     if snapshot is None or snapshot.owner_id != owner_id:
         raise ResourceNotFoundException(
@@ -188,10 +188,10 @@ async def read_for_user(*, owner_id: str, dataset_id: str) -> DatasetSnapshot:
     return snapshot
 
 
-async def jsonl_for_user(
+async def export_dataset_snapshot_jsonl_for_user(
     *, owner_id: str, dataset_id: str
 ) -> tuple[DatasetSnapshot, bytes]:
-    snapshot = await read_for_user(owner_id=owner_id, dataset_id=dataset_id)
+    snapshot = await get_dataset_snapshot_for_user(owner_id=owner_id, dataset_id=dataset_id)
     payload = jsonl_bytes_for_rows(snapshot.rows)
     return snapshot, payload
 
@@ -608,8 +608,8 @@ __all__ = [
     "DatasetSnapshotError",
     "DatasetSnapshotIntegrityError",
     "jsonl_bytes_for_rows",
-    "create_for_user",
-    "list_for_user",
-    "read_for_user",
-    "jsonl_for_user",
+    "create_dataset_snapshot_for_user",
+    "list_dataset_snapshots_for_user",
+    "get_dataset_snapshot_for_user",
+    "export_dataset_snapshot_jsonl_for_user",
 ]

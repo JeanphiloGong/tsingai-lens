@@ -33,11 +33,7 @@ class ExperimentPlanRecord:
     updated_by: str | None = None
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.plan_version, bool)
-            or not isinstance(self.plan_version, int)
-            or self.plan_version < 1
-        ):
+        if self.plan_version < 1:
             raise ValueError("plan_version must be a positive integer")
         if self.plan_version == 1 and self.parent_plan_id is not None:
             raise ValueError("the first revision cannot have a parent_plan_id")

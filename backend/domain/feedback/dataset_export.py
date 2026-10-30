@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -52,7 +53,7 @@ class ExportMember:
             raise ValueError("export member digests must be sha256")
         if self.content_digest != content_digest_for(self.content):
             raise ValueError("export member content digest does not match content")
-        object.__setattr__(self, "provenance", _copy(self.provenance))
+        object.__setattr__(self, "provenance", deepcopy(self.provenance))
 
     @property
     def row_key(self) -> str:
@@ -142,7 +143,7 @@ class ExportPreview:
                     "content": content_payload,
                     "content_digest": member.content_digest,
                     "input_digest": member.input_digest,
-                    "provenance": _copy(member.provenance),
+                    "provenance": deepcopy(member.provenance),
                     "row_key": member.row_key,
                 }
             )
@@ -218,9 +219,9 @@ class DatasetExport:
             raise ValueError("export provenance digest does not match provenance")
         if self.manifest_digest != digest_for_value(self.manifest):
             raise ValueError("export manifest digest does not match manifest")
-        object.__setattr__(self, "rows", tuple(_copy(row) for row in self.rows))
-        object.__setattr__(self, "provenance", tuple(_copy(row) for row in self.provenance))
-        object.__setattr__(self, "manifest", _copy(self.manifest))
+        object.__setattr__(self, "rows", tuple(deepcopy(row) for row in self.rows))
+        object.__setattr__(self, "provenance", tuple(deepcopy(row) for row in self.provenance))
+        object.__setattr__(self, "manifest", deepcopy(self.manifest))
 
     @property
     def row_count(self) -> int:
@@ -270,10 +271,6 @@ def _digest(value: Any) -> str:
         "utf-8"
     )
     return sha256(encoded).hexdigest()
-
-
-def _copy(value: Any) -> Any:
-    return json.loads(json.dumps(value, ensure_ascii=False))
 
 
 def _is_sha256(value: str) -> bool:

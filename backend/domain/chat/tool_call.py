@@ -97,7 +97,7 @@ class ChatToolCall:
     authorization_revision: int | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.position, int) or isinstance(self.position, bool) or self.position < 0:
+        if self.position < 0:
             raise ValueError("tool call position must be a non-negative integer")
         if self.decision_basis not in {"explicit", "scope_grant"}:
             raise ValueError("invalid decision basis")

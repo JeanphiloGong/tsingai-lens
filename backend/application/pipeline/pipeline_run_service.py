@@ -67,57 +67,7 @@ async def create_run(
         context=context,
     )
     run = await PipelineRunRepo.add_run(run)
-    return _sanitize_preparation_errors(
-        {
-            **{key: value for key, value in asdict(run).items() if key != "timestamps"},
-            "status": run.status.value,
-            "nodes": {
-                node.name: {
-                    **asdict(node),
-                    "dependencies": list(node.dependencies),
-                    "status": node.status.value,
-                    "errors": list(node.errors),
-                    "warnings": list(node.warnings),
-                    "stats": {
-                        "duration_ms": node.stats.duration_ms,
-                        "token_usage": (
-                            asdict(node.stats.token_usage)
-                            if node.stats.token_usage is not None
-                            else None
-                        ),
-                        "model_usage": [
-                            asdict(item) for item in node.stats.model_usage
-                        ],
-                        "unreported_request_count": node.stats.unreported_request_count,
-                        "prompt_versions": dict(node.stats.prompt_versions),
-                    },
-                    "timestamps": {
-                        key: value
-                        for key, value in asdict(node.timestamps).items()
-                        if value is not None or key in ("started_at", "finished_at")
-                    },
-                }
-                for node in run.nodes
-            },
-            "errors": list(run.errors),
-            "warnings": list(run.warnings),
-            "stats": {
-                "duration_ms": run.stats.duration_ms,
-                "token_usage": (
-                    asdict(run.stats.token_usage)
-                    if run.stats.token_usage is not None
-                    else None
-                ),
-                "model_usage": [asdict(item) for item in run.stats.model_usage],
-                "unreported_request_count": run.stats.unreported_request_count,
-                "prompt_versions": dict(run.stats.prompt_versions),
-            },
-            "created_at": run.timestamps.created_at,
-            "updated_at": run.timestamps.updated_at,
-            "started_at": run.timestamps.started_at,
-            "finished_at": run.timestamps.finished_at,
-        }
-    )
+    return pipeline_run_response(run)
 
 
 async def get_or_create_document_run(
@@ -145,61 +95,7 @@ async def get_or_create_document_run(
         reuse_completed=reuse_completed,
     )
     return (
-        _sanitize_preparation_errors(
-            {
-                **{
-                    key: value
-                    for key, value in asdict(run).items()
-                    if key != "timestamps"
-                },
-                "status": run.status.value,
-                "nodes": {
-                    node.name: {
-                        **asdict(node),
-                        "dependencies": list(node.dependencies),
-                        "status": node.status.value,
-                        "errors": list(node.errors),
-                        "warnings": list(node.warnings),
-                        "stats": {
-                            "duration_ms": node.stats.duration_ms,
-                            "token_usage": (
-                                asdict(node.stats.token_usage)
-                                if node.stats.token_usage is not None
-                                else None
-                            ),
-                            "model_usage": [
-                                asdict(item) for item in node.stats.model_usage
-                            ],
-                            "unreported_request_count": node.stats.unreported_request_count,
-                            "prompt_versions": dict(node.stats.prompt_versions),
-                        },
-                        "timestamps": {
-                            key: value
-                            for key, value in asdict(node.timestamps).items()
-                            if value is not None or key in ("started_at", "finished_at")
-                        },
-                    }
-                    for node in run.nodes
-                },
-                "errors": list(run.errors),
-                "warnings": list(run.warnings),
-                "stats": {
-                    "duration_ms": run.stats.duration_ms,
-                    "token_usage": (
-                        asdict(run.stats.token_usage)
-                        if run.stats.token_usage is not None
-                        else None
-                    ),
-                    "model_usage": [asdict(item) for item in run.stats.model_usage],
-                    "unreported_request_count": run.stats.unreported_request_count,
-                    "prompt_versions": dict(run.stats.prompt_versions),
-                },
-                "created_at": run.timestamps.created_at,
-                "updated_at": run.timestamps.updated_at,
-                "started_at": run.timestamps.started_at,
-                "finished_at": run.timestamps.finished_at,
-            }
-        ),
+        pipeline_run_response(run),
         created,
     )
 
@@ -226,61 +122,7 @@ async def get_or_create_collection_run(
         )
     )
     return (
-        _sanitize_preparation_errors(
-            {
-                **{
-                    key: value
-                    for key, value in asdict(run).items()
-                    if key != "timestamps"
-                },
-                "status": run.status.value,
-                "nodes": {
-                    node.name: {
-                        **asdict(node),
-                        "dependencies": list(node.dependencies),
-                        "status": node.status.value,
-                        "errors": list(node.errors),
-                        "warnings": list(node.warnings),
-                        "stats": {
-                            "duration_ms": node.stats.duration_ms,
-                            "token_usage": (
-                                asdict(node.stats.token_usage)
-                                if node.stats.token_usage is not None
-                                else None
-                            ),
-                            "model_usage": [
-                                asdict(item) for item in node.stats.model_usage
-                            ],
-                            "unreported_request_count": node.stats.unreported_request_count,
-                            "prompt_versions": dict(node.stats.prompt_versions),
-                        },
-                        "timestamps": {
-                            key: value
-                            for key, value in asdict(node.timestamps).items()
-                            if value is not None or key in ("started_at", "finished_at")
-                        },
-                    }
-                    for node in run.nodes
-                },
-                "errors": list(run.errors),
-                "warnings": list(run.warnings),
-                "stats": {
-                    "duration_ms": run.stats.duration_ms,
-                    "token_usage": (
-                        asdict(run.stats.token_usage)
-                        if run.stats.token_usage is not None
-                        else None
-                    ),
-                    "model_usage": [asdict(item) for item in run.stats.model_usage],
-                    "unreported_request_count": run.stats.unreported_request_count,
-                    "prompt_versions": dict(run.stats.prompt_versions),
-                },
-                "created_at": run.timestamps.created_at,
-                "updated_at": run.timestamps.updated_at,
-                "started_at": run.timestamps.started_at,
-                "finished_at": run.timestamps.finished_at,
-            }
-        ),
+        pipeline_run_response(run),
         created,
     )
 
@@ -297,57 +139,7 @@ async def get_run(run_id: str, *, user_id: str) -> dict[str, Any]:
             "Pipeline run not found.",
             data={"code": "pipeline_run_not_found", "run_id": run_id},
         )
-    return _sanitize_preparation_errors(
-        {
-            **{key: value for key, value in asdict(run).items() if key != "timestamps"},
-            "status": run.status.value,
-            "nodes": {
-                node.name: {
-                    **asdict(node),
-                    "dependencies": list(node.dependencies),
-                    "status": node.status.value,
-                    "errors": list(node.errors),
-                    "warnings": list(node.warnings),
-                    "stats": {
-                        "duration_ms": node.stats.duration_ms,
-                        "token_usage": (
-                            asdict(node.stats.token_usage)
-                            if node.stats.token_usage is not None
-                            else None
-                        ),
-                        "model_usage": [
-                            asdict(item) for item in node.stats.model_usage
-                        ],
-                        "unreported_request_count": node.stats.unreported_request_count,
-                        "prompt_versions": dict(node.stats.prompt_versions),
-                    },
-                    "timestamps": {
-                        key: value
-                        for key, value in asdict(node.timestamps).items()
-                        if value is not None or key in ("started_at", "finished_at")
-                    },
-                }
-                for node in run.nodes
-            },
-            "errors": list(run.errors),
-            "warnings": list(run.warnings),
-            "stats": {
-                "duration_ms": run.stats.duration_ms,
-                "token_usage": (
-                    asdict(run.stats.token_usage)
-                    if run.stats.token_usage is not None
-                    else None
-                ),
-                "model_usage": [asdict(item) for item in run.stats.model_usage],
-                "unreported_request_count": run.stats.unreported_request_count,
-                "prompt_versions": dict(run.stats.prompt_versions),
-            },
-            "created_at": run.timestamps.created_at,
-            "updated_at": run.timestamps.updated_at,
-            "started_at": run.timestamps.started_at,
-            "finished_at": run.timestamps.finished_at,
-        }
-    )
+    return pipeline_run_response(run)
 
 
 async def list_runs(
@@ -364,7 +156,7 @@ async def list_runs(
             data={"code": "collection_not_found", "collection_id": collection_id},
         )
     return [
-        _sanitize_preparation_errors(asdict(run))
+        pipeline_run_response(run)
         for run in await PipelineRunRepo.list_runs(
             collection_id=collection_id,
             status=status,
@@ -377,7 +169,7 @@ async def list_runs(
 async def list_interrupted_runs() -> list[dict[str, Any]]:
     """Read durable queued/running work before startup recovery admits requests."""
     return [
-        _sanitize_preparation_errors(asdict(run))
+        pipeline_run_response(run)
         for status in ("queued", "running")
         for run in await PipelineRunRepo.list_runs(status=status)
     ]
@@ -450,61 +242,7 @@ async def update_run(
             "Pipeline run not found.",
             data={"code": "pipeline_run_not_found", "run_id": run_id},
         )
-    return _sanitize_preparation_errors(
-        {
-            **{
-                key: value
-                for key, value in asdict(updated).items()
-                if key != "timestamps"
-            },
-            "status": updated.status.value,
-            "nodes": {
-                node.name: {
-                    **asdict(node),
-                    "dependencies": list(node.dependencies),
-                    "status": node.status.value,
-                    "errors": list(node.errors),
-                    "warnings": list(node.warnings),
-                    "stats": {
-                        "duration_ms": node.stats.duration_ms,
-                        "token_usage": (
-                            asdict(node.stats.token_usage)
-                            if node.stats.token_usage is not None
-                            else None
-                        ),
-                        "model_usage": [
-                            asdict(item) for item in node.stats.model_usage
-                        ],
-                        "unreported_request_count": node.stats.unreported_request_count,
-                        "prompt_versions": dict(node.stats.prompt_versions),
-                    },
-                    "timestamps": {
-                        key: value
-                        for key, value in asdict(node.timestamps).items()
-                        if value is not None or key in ("started_at", "finished_at")
-                    },
-                }
-                for node in updated.nodes
-            },
-            "errors": list(updated.errors),
-            "warnings": list(updated.warnings),
-            "stats": {
-                "duration_ms": updated.stats.duration_ms,
-                "token_usage": (
-                    asdict(updated.stats.token_usage)
-                    if updated.stats.token_usage is not None
-                    else None
-                ),
-                "model_usage": [asdict(item) for item in updated.stats.model_usage],
-                "unreported_request_count": updated.stats.unreported_request_count,
-                "prompt_versions": dict(updated.stats.prompt_versions),
-            },
-            "created_at": updated.timestamps.created_at,
-            "updated_at": updated.timestamps.updated_at,
-            "started_at": updated.timestamps.started_at,
-            "finished_at": updated.timestamps.finished_at,
-        }
-    )
+    return pipeline_run_response(updated)
 
 
 async def finish_run(
@@ -701,6 +439,63 @@ def _semantic_node(run: PipelineRun, phase: str | None) -> str | None:
     return None
 
 
+def pipeline_run_response(run: PipelineRun) -> dict[str, Any]:
+    """Build the existing HTTP/SSE run shape from one domain run."""
+
+    if not hasattr(run, "nodes"):
+        return _sanitize_preparation_errors(asdict(run))
+
+    return _sanitize_preparation_errors(
+        {
+            **{key: value for key, value in asdict(run).items() if key != "timestamps"},
+            "status": run.status.value,
+            "nodes": {
+                node.name: {
+                    **asdict(node),
+                    "dependencies": list(node.dependencies),
+                    "status": node.status.value,
+                    "errors": list(node.errors),
+                    "warnings": list(node.warnings),
+                    "stats": {
+                        "duration_ms": node.stats.duration_ms,
+                        "token_usage": (
+                            asdict(node.stats.token_usage)
+                            if node.stats.token_usage is not None
+                            else None
+                        ),
+                        "model_usage": [asdict(item) for item in node.stats.model_usage],
+                        "unreported_request_count": node.stats.unreported_request_count,
+                        "prompt_versions": dict(node.stats.prompt_versions),
+                    },
+                    "timestamps": {
+                        key: value
+                        for key, value in asdict(node.timestamps).items()
+                        if value is not None or key in ("started_at", "finished_at")
+                    },
+                }
+                for node in run.nodes
+            },
+            "errors": list(run.errors),
+            "warnings": list(run.warnings),
+            "stats": {
+                "duration_ms": run.stats.duration_ms,
+                "token_usage": (
+                    asdict(run.stats.token_usage)
+                    if run.stats.token_usage is not None
+                    else None
+                ),
+                "model_usage": [asdict(item) for item in run.stats.model_usage],
+                "unreported_request_count": run.stats.unreported_request_count,
+                "prompt_versions": dict(run.stats.prompt_versions),
+            },
+            "created_at": run.timestamps.created_at,
+            "updated_at": run.timestamps.updated_at,
+            "started_at": run.timestamps.started_at,
+            "finished_at": run.timestamps.finished_at,
+        }
+    )
+
+
 def _sanitize_preparation_errors(payload: dict[str, Any]) -> dict[str, Any]:
     if payload["pipeline_name"] != "document_preparation":
         return payload
@@ -723,4 +518,5 @@ __all__ = [
     "update_run",
     "finish_run",
     "append_error",
+    "pipeline_run_response",
 ]

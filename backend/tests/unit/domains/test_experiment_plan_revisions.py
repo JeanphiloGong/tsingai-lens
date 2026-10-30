@@ -78,9 +78,10 @@ def test_first_revision_cannot_point_to_a_parent() -> None:
         ExperimentPlanRecord(**_plan_payload(parent_plan_id="another-plan"))
 
 
-def test_plan_version_rejects_non_integral_values() -> None:
+@pytest.mark.parametrize("plan_version", [0, -1])
+def test_plan_version_must_be_positive(plan_version: int) -> None:
     with pytest.raises(ValueError, match="positive integer"):
-        ExperimentPlanRecord(**_plan_payload(plan_version=1.5))
+        ExperimentPlanRecord(**_plan_payload(plan_version=plan_version))
 
 
 def test_next_revision_is_direct_validated_and_copies_structured_content(

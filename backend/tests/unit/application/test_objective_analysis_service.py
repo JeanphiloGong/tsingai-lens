@@ -311,8 +311,6 @@ def _document_extraction_service(result: PaperExperimentExtractionResult):
     experiment_analysis_service.PaperMapRepo = object()
     experiment_analysis_service.ObjectiveRepo = object()
     experiment_analysis_service.objective_input_service = object()
-    experiment_analysis_service._objective_source_screener = object()
-    experiment_analysis_service._paper_experiment_extractor = extractor
     return (
         experiment_analysis_service,
         extractor,
@@ -417,6 +415,8 @@ def test_document_source_accounting_uses_authoritative_catalog(
         objective=_objective(),
         objective_inputs=_document_objective_inputs(),
         progress_callback=None,
+        source_screener=object(),
+        paper_experiment_extractor=_extractor,
     )
 
     assert artifacts.contribution.evidence_disposition == "no_grounded_evidence"
@@ -452,6 +452,8 @@ def test_document_provider_failure_marks_bundle_sources_failed(
         objective=_objective(),
         objective_inputs=_document_objective_inputs(),
         progress_callback=None,
+        source_screener=object(),
+        paper_experiment_extractor=_extractor,
     )
 
     assert artifacts.contribution.evidence_disposition == "extraction_failed"
@@ -485,6 +487,8 @@ def test_document_omitted_source_remains_uninspected(
         objective=_objective(),
         objective_inputs=_document_objective_inputs(),
         progress_callback=None,
+        source_screener=object(),
+        paper_experiment_extractor=_extractor,
     )
 
     assert artifacts.contribution.evidence_disposition == "coverage_incomplete"
@@ -836,6 +840,7 @@ class NativeRecordingExperimentAnalysisWriter:
         if self.error is not None:
             raise self.error
         return SimpleNamespace(
+            revisions=(),
             findings=(
                 self.findings
                 if self.findings is not None
@@ -1060,9 +1065,11 @@ def test_partial_experiment_archive_is_insufficient_not_no_grounded_evidence() -
         selections=(),
         revisions=(
             SimpleNamespace(
-                measurements=(SimpleNamespace(measurement_key="m1"),),
-                comparisons=(),
-                reported_interpretations=(),
+                revision=SimpleNamespace(
+                    measurements=(SimpleNamespace(measurement_key="m1"),),
+                    comparisons=(),
+                    reported_interpretations=(),
+                ),
             ),
         ),
     )

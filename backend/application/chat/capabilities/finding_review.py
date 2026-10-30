@@ -82,15 +82,6 @@ class CurateFindingToolRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_complete_finding(self) -> "CurateFindingToolRequest":
-        direction = self.curated_finding.get("direction")
-        if (
-            not isinstance(direction, str)
-            or direction not in SCIENTIFIC_RESULT_DIRECTIONS
-        ):
-            raise ValueError(
-                "curated_finding.direction must be one of: "
-                + ", ".join(sorted(SCIENTIFIC_RESULT_DIRECTIONS))
-            )
         candidate = parse_curated_finding(self.curated_finding)
         self._parsed_finding = candidate
         if candidate.objective_id != self.objective_id:

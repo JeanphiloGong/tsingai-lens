@@ -26,6 +26,9 @@ from application.core.objectives.analysis import (
     experiment_analysis_writer,
     experiment_compatibility_projection,
 )
+from application.core.objectives.analysis.experiment_analysis_writer import (
+    ExperimentAnalysisWriteResult,
+)
 from application.core.objectives.analysis.analysis_record_source import (
     is_experiment_backed_analysis,
     should_read_experiment_projection,
@@ -144,11 +147,13 @@ def _record_value(record: Any, name: str) -> Any:
     return getattr(record, name, None)
 
 
-def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
+def _experiment_abstention(
+    result: ExperimentAnalysisWriteResult,
+) -> tuple[str | None, str | None]:
     """Explain a successful experiment analysis with no published Finding."""
 
-    findings = tuple(getattr(result, "findings", ()) or ())
-    selections = tuple(getattr(result, "selections", ()) or ())
+    findings = result.findings
+    selections = result.selections
     if findings:
         return None, None
     if not selections:
@@ -158,23 +163,11 @@ def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
         # ``no_grounded_evidence`` would erase the distinction between
         # "nothing was recovered" and "something was recovered but needs
         # context".
-        revisions = tuple(getattr(result, "revisions", ()) or ())
+        revisions = result.revisions
         if any(
-            getattr(
-                getattr(revision, "revision", revision),
-                "measurements",
-                (),
-            )
-            or getattr(
-                getattr(revision, "revision", revision),
-                "comparisons",
-                (),
-            )
-            or getattr(
-                getattr(revision, "revision", revision),
-                "reported_interpretations",
-                (),
-            )
+            revision.revision.measurements
+            or revision.revision.comparisons
+            or revision.revision.reported_interpretations
             for revision in revisions
         ):
             return (
@@ -186,7 +179,7 @@ def _experiment_abstention(result: Any) -> tuple[str | None, str | None]:
             "No Objective-relevant experiment selection was recovered from the prepared Sources.",
         )
     comparison_count = sum(
-        bool(getattr(selection, "comparison_keys", ())) for selection in selections
+        bool(selection.comparison_keys) for selection in selections
     )
     if comparison_count:
         return (

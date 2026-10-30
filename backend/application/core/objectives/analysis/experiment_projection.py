@@ -28,7 +28,6 @@ from domain.core.paper_experiment import (
     SourceReference,
 )
 from domain.core.research_objective import (
-    SOURCE_KIND_VALUES,
     ObjectiveEvidence,
     PaperContribution,
 )
@@ -65,17 +64,17 @@ async def list_analysis_findings(
     *,
     offset: int = 0,
     limit: int = 50,
-) -> tuple[tuple[dict[str, Any], ...], int]:
+) -> tuple[tuple[Finding, ...], int]:
     state = await _state(collection_id, objective_id, analysis_version)
     records = tuple(
-        _project_finding(finding, state)[1] for finding in state.bundle.findings
+        _project_finding(finding, state)[0] for finding in state.bundle.findings
     )
     records = tuple(
         sorted(
             records,
             key=lambda item: (
-                int(item.get("display_rank") or 0),
-                str(item.get("finding_id") or ""),
+                item.display_rank,
+                item.finding_id,
             ),
         )
     )
@@ -89,13 +88,13 @@ async def read_analysis_finding(
     objective_id: str,
     analysis_version: int,
     finding_id: str,
-) -> dict[str, Any] | None:
+) -> Finding | None:
     state = await _state(collection_id, objective_id, analysis_version)
     finding = next(
         (item for item in state.bundle.findings if item.finding_id == finding_id),
         None,
     )
-    return _project_finding(finding, state)[1] if finding is not None else None
+    return _project_finding(finding, state)[0] if finding is not None else None
 
 
 async def list_analysis_evidence(
@@ -106,7 +105,7 @@ async def list_analysis_evidence(
     finding_id: str | None = None,
     offset: int = 0,
     limit: int = 100,
-) -> tuple[tuple[dict[str, Any], ...], int]:
+) -> tuple[tuple[ObjectiveEvidence, ...], int]:
     state = await _state(collection_id, objective_id, analysis_version)
     allowed: set[str] | None = None
     if finding_id is not None:
@@ -123,7 +122,7 @@ async def list_analysis_evidence(
         }
     records = tuple(
         item
-        for evidence_id, item in sorted(state.evidence_by_id.items())
+        for evidence_id, item in sorted(state.evidence_values_by_id.items())
         if allowed is None or evidence_id in allowed
     )
     start = max(0, offset)
@@ -135,10 +134,11 @@ async def list_analysis_contributions(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[PaperContribution, ...]:
     state = await _state(collection_id, objective_id, analysis_version)
     return tuple(
-        record for _, record in _project_contributions(state, state.bundle.selections)
+        replace(value, uninspected_source_count=record["uninspected_source_count"])
+        for value, record in _project_contributions(state, state.bundle.selections)
     )
 
 
@@ -357,7 +357,7 @@ async def build_evidence_map(
     ]
     edges: list[dict[str, Any]] = []
     profiles_by_document_id = {
-        str(_value(item, "document_id") or ""): item for item in profiles
+        item.document_id: item for item in profiles
     }
     contribution_by_document = {
         str(item.get("document_id") or ""): item for item in contributions
@@ -371,7 +371,7 @@ async def build_evidence_map(
     for document_id in document_ids:
         contribution = contribution_by_document.get(document_id)
         profile = profiles_by_document_id.get(document_id)
-        title = _value(profile, "title") if profile is not None else None
+        title = profile.title if profile is not None else None
         document_node_id = f"document:{document_id}"
         nodes.append(
             {
@@ -934,11 +934,7 @@ def _measurement_record(
         analysis_version=analysis_version,
         evidence_id=evidence_id,
         document_id=revision.document_id,
-        source_kind=(
-            source_refs[0].source_kind
-            if source_refs[0].source_kind in SOURCE_KIND_VALUES
-            else "text_window"
-        ),
+        source_kind=source_refs[0].source_kind,
         source_ref=source_refs[0].source_ref,
         source_excerpt=source_refs[0].quote,
         page_numbers=(),
@@ -1094,11 +1090,7 @@ def _comparison_record(
         analysis_version=analysis_version,
         evidence_id=evidence_id,
         document_id=revision.document_id,
-        source_kind=(
-            source_refs[0].source_kind
-            if source_refs[0].source_kind in SOURCE_KIND_VALUES
-            else "text_window"
-        ),
+        source_kind=source_refs[0].source_kind,
         source_ref=source_refs[0].source_ref,
         source_excerpt=source_refs[0].quote,
         page_numbers=(),
@@ -1355,10 +1347,23 @@ def _confidence(status: str) -> float:
     }.get(status, 0.5)
 
 
-def _value(record: Any, name: str) -> Any:
-    if isinstance(record, Mapping):
-        return record.get(name)
-    return getattr(record, name, None)
+
+def experiment_evidence_disposition(evidence: ObjectiveEvidence) -> tuple[str, str]:
+    """Render the established experiment read disposition from scientific facts."""
+    if evidence.comparison is not None:
+        if evidence.comparison.comparable:
+            return "comparable", "The paper reports a source-grounded comparison."
+        return (
+            "non_comparable",
+            "; ".join(evidence.comparison.incomparability_reasons)
+            or "The paper comparison lacks sufficient context.",
+        )
+    if evidence.resolution_status == "resolved":
+        return (
+            "descriptive",
+            "The selected experiment reports this outcome without a paper-internal comparison.",
+        )
+    return "needs_context", "The selected measurement has incomplete binding context."
 
 
 def _ordered_unique(values: list[str]) -> tuple[str, ...]:

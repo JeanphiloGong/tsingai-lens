@@ -11,6 +11,7 @@ from application.core.objectives.finding_summary import (
     FindingSummaryUnavailable,
     summarize_finding_evidence,
 )
+from domain.core.research_objective import ObjectiveEvidence
 from domain.core import Finding
 from domain.core.finding import (
     Finding,
@@ -18,6 +19,7 @@ from domain.core.finding import (
 )
 from domain.core.scientific_fact import (
     ScientificContext,
+    ScientificResult,
 )
 from exceptions import ResourceConflictException
 
@@ -324,11 +326,30 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
     )
 
     finding, evidence = review_input()
+    records = tuple(
+        ObjectiveEvidence(
+            collection_id="col-1", objective_id="obj-1", analysis_version=1,
+            evidence_id=item["evidence_id"], document_id=item["document_id"],
+            source_kind=item["source_kind"], source_ref=item["source_ref"],
+            source_excerpt=item["source_excerpt"], page_numbers=tuple(item["page_numbers"]),
+            related_source_refs=(), evidence_role="direct_result",
+            selection_status="extracted", selection_reason=None,
+            changed_variables=(), comparison=None,
+            reported_result=ScientificResult(
+                outcome="tensile strength", result_text=item["source_excerpt"],
+                value=item.get("reported_result", {}).get("value"),
+                unit="MPa", direction="unknown",
+            ),
+            attribution_scope="descriptive_only", scientific_context=ScientificContext(),
+            resolution_status="resolved", failure_reason=None, confidence=0.8,
+        )
+        for item in evidence
+    )
     objective_analysis_service.ObjectiveRepo = SimpleNamespace(
         read_analysis=AsyncMock(return_value=SimpleNamespace(
             status="succeeded", origin="human_authored", scientific_record_source="authored_snapshot",
         )),
-        list_evidence=AsyncMock(return_value=(tuple(evidence), 2)),
+        list_evidence=AsyncMock(return_value=(records, 2)),
     )
     analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
     objective_analysis_service.experiment_analysis_service = None

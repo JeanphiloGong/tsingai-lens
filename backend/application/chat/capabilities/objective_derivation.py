@@ -72,7 +72,7 @@ class DeriveObjectiveCapability:
             context.collection_id, arguments.objective_id, user_id=context.user_id
         )
         published = state.get("published_analysis")
-        version = _field(published, "analysis_version")
+        version = (published.analysis_version if published is not None else None)
         analysis_ref = ChatResourceRef(
             resource_type="objective_analysis",
             resource_id=(
@@ -101,11 +101,7 @@ class DeriveObjectiveCapability:
                 ),
             )
 
-        findings = {
-            finding_id: item
-            for item in state.get("findings") or ()
-            if (finding_id := (_field(item, "finding_id") or ""))
-        }
+        findings = {item.finding_id: item for item in state["findings"]}
         omitted_finding_count = int(state.get("omitted_finding_count") or 0)
         evidence_review = state.get("evidence_review")
         evidence_review = (
@@ -118,9 +114,7 @@ class DeriveObjectiveCapability:
             and (evidence_id := (item.get("evidence_id") or ""))
         }
         contributions = {
-            document_id: item
-            for item in state.get("paper_contributions") or ()
-            if (document_id := (_field(item, "document_id") or ""))
+            item["document_id"]: item for item in state["paper_contributions"]
         }
 
         accepted: list[dict[str, Any]] = []
@@ -257,7 +251,7 @@ class DeriveObjectiveCapability:
                 {
                     **common,
                     "snapshot": {
-                        "statement": (_field(finding, "statement") or "")[:1_000],
+                        "statement": finding.statement[:1_000],
                     },
                 },
                 ChatResourceRef(
@@ -313,7 +307,7 @@ class DeriveObjectiveCapability:
         contribution = contributions.get(reference_id)
         if contribution is None:
             return {}, None, f"unknown_paper_contribution:{reference_id}"
-        disposition = _field(contribution, "evidence_disposition") or ""
+        disposition = contribution["evidence_disposition"]
         if disposition in {"extraction_failed", "excluded"}:
             return (
                 {},
@@ -327,7 +321,7 @@ class DeriveObjectiveCapability:
                     "document_id": reference_id,
                     "evidence_disposition": disposition,
                     "reason": (
-                        _field(contribution, "evidence_disposition_reason") or ""
+                        contribution["evidence_disposition_reason"] or ""
                     )[:1_000],
                 },
             },
@@ -376,12 +370,6 @@ def _draft_id(
         separators=(",", ":"),
     )
     return f"draft_{sha256(identity.encode('utf-8')).hexdigest()[:20]}"
-
-
-def _field(value: Any, name: str, default: Any = None) -> Any:
-    if isinstance(value, Mapping):
-        return value.get(name, default)
-    return getattr(value, name, default)
 
 
 def _deduplicate_refs(refs: list[ChatResourceRef]) -> tuple[ChatResourceRef, ...]:

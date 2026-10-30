@@ -1026,25 +1026,13 @@ async def test_analysis_shutdown_and_concurrency_are_owned_by_each_app(monkeypat
 
 class RecordingExperimentProjection:
     async def list_analysis_findings(self, *args, **kwargs):
-        return (
-            ({"finding_id": "projected-finding", "paper_contributions": []},),
-            1,
-        )
+        return (replace(_finding(1), finding_id="projected-finding"),), 1
 
     async def read_analysis_finding(self, *args, **kwargs):
-        return {"finding_id": "projected-finding", "paper_contributions": []}
+        return replace(_finding(1), finding_id="projected-finding")
 
     async def list_analysis_evidence(self, *args, **kwargs):
-        return (
-            (
-                {
-                    "evidence_id": "projected-evidence",
-                    "supports_finding": True,
-                    "eligible_for_finding_authoring": True,
-                },
-            ),
-            1,
-        )
+        return (replace(_evidence(1), evidence_id="projected-evidence"),), 1
 
 
 async def test_analysis_queries_use_experiment_projection_without_changing_arguments() -> (

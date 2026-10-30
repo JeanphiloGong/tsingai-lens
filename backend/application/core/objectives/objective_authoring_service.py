@@ -183,7 +183,7 @@ async def _canonicalize_derived_objective_basis(
             if record is None:
                 raise ValueError("Finding is not part of the published parent analysis")
             snapshot = {
-                "statement": (_record_field(record, "statement") or "")[:1_000],
+                "statement": (record.statement)[:1_000],
             }
         elif kind == "evidence_gap":
             record = await _published_evidence_by_id(
@@ -196,8 +196,8 @@ async def _canonicalize_derived_objective_basis(
                 raise ValueError(
                     "Evidence gap is not part of the published parent analysis"
                 )
-            selection_status = _record_field(record, "selection_status") or ""
-            evidence_status = _record_field(record, "evidence_status") or ""
+            selection_status = record.selection_status
+            evidence_status = record.evidence_status
             if selection_status == "failed" or evidence_status == "extraction_failed":
                 raise ValueError(
                     "technical extraction failure cannot derive an Objective"
@@ -207,13 +207,13 @@ async def _canonicalize_derived_objective_basis(
             snapshot = {
                 "evidence_status": evidence_status,
                 "reason": (
-                    _record_field(record, "evidence_status_reason")
-                    or _record_field(record, "selection_reason")
+                    record.evidence_status_reason
+                    or record.selection_reason
                     or ""
                 )[:1_000],
-                "document_id": _record_field(record, "document_id"),
-                "source_kind": _record_field(record, "source_kind"),
-                "source_ref": _record_field(record, "source_ref"),
+                "document_id": record.document_id,
+                "source_kind": record.source_kind,
+                "source_ref": record.source_ref,
             }
         elif kind == "paper_contribution":
             record = await _published_paper_contribution_by_id(
@@ -226,17 +226,17 @@ async def _canonicalize_derived_objective_basis(
                 raise ValueError(
                     "paper contribution is not part of the published parent analysis"
                 )
-            analysis_status = _record_field(record, "analysis_status") or ""
-            disposition = _record_field(record, "evidence_disposition") or ""
+            analysis_status = record.analysis_status
+            disposition = record.evidence_disposition
             if analysis_status in {"excluded", "failed"} or disposition in {
                 "excluded",
                 "extraction_failed",
             }:
                 raise ValueError("excluded or failed paper cannot derive an Objective")
             snapshot = {
-                "document_id": _record_field(record, "document_id") or reference_id,
+                "document_id": record.document_id,
                 "evidence_disposition": disposition,
-                "reason": (_record_field(record, "evidence_disposition_reason") or "")[
+                "reason": (record.evidence_disposition_reason or "")[
                     :1_000
                 ],
             }
@@ -284,7 +284,7 @@ async def _published_evidence_by_id(
                 limit=500,
             )
         for record in records:
-            if _record_field(record, "evidence_id") == evidence_id:
+            if record.evidence_id == evidence_id:
                 return record
         offset += len(records)
         if not records or offset >= total:
@@ -317,15 +317,7 @@ async def _published_paper_contribution_by_id(
         (
             record
             for record in records
-            if _record_field(record, "document_id") == document_id
+            if record.document_id == document_id
         ),
         None,
     )
-
-
-
-
-def _record_field(record: Any, name: str, default: Any = None) -> Any:
-    if isinstance(record, Mapping):
-        return record.get(name, default)
-    return getattr(record, name, default)

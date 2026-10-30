@@ -64,7 +64,11 @@ Automatic `experiment_graph` analyses use the experiment projection; authored an
 historical snapshots retain their saved scientific records. A missing or unfinished
 analysis is rejected before record selection. Projection module availability is
 not a storage-source flag, and a view that already loaded its analysis reuses
-that source decision rather than rereading the same metadata.
+that source decision rather than rereading the same metadata. Both sources return
+existing Finding, ObjectiveEvidence and PaperContribution values; internal readers
+use their fields directly. Experiment display statuses and reasons retain the
+established client vocabulary in the concrete read views. Evaluation snapshots
+use the same domain identities, so a single-paper Finding keeps its document ID.
 
 ## Candidate Contract and Scientific Gates
 

@@ -238,15 +238,15 @@ async def test_projection_preserves_existing_finding_and_evidence_shapes() -> No
     )
 
     assert total == 1
-    assert findings[0]["paper_contributions"][0]["document_id"] == "paper-1"
-    assert findings[0]["paper_contributions"][0]["supporting_evidence_ids"]
+    assert findings[0].paper_contributions[0].document_id == "paper-1"
+    assert findings[0].paper_contributions[0].supporting_evidence_ids
     assert evidence_total == 3
-    assert {item["document_id"] for item in evidence} == {"paper-1"}
-    assert {item["source_ref"] for item in evidence} == {"table-2"}
-    assert any(item["reported_result"]["value"] == 82 for item in evidence)
-    FindingResponse.model_validate(findings[0])
+    assert {item.document_id for item in evidence} == {"paper-1"}
+    assert {item.source_ref for item in evidence} == {"table-2"}
+    assert any(item.reported_result.value == 82 for item in evidence)
+    FindingResponse.model_validate(findings[0], from_attributes=True)
     for item in evidence:
-        ObjectiveEvidenceResponse.model_validate(item)
+        ObjectiveEvidenceResponse.model_validate(item, from_attributes=True)
 
 
 async def test_projection_returns_no_legacy_evidence_for_unknown_finding() -> None:
@@ -313,16 +313,45 @@ async def test_projection_builds_the_existing_evidence_map_contract() -> None:
     )
 
 
-async def test_projection_keeps_captured_response_and_typed_review_values() -> None:
+async def test_projection_keeps_captured_response_and_typed_review_values(monkeypatch) -> None:
     import json
     from pathlib import Path
 
     service = _service()
     identity = ("collection-1", "objective-1", 1)
+    from unittest.mock import AsyncMock
+    from application.core.objectives import analysis_service
+
+    monkeypatch.setattr(analysis_service, "experiment_projection", service)
+    monkeypatch.setattr(analysis_service, "collection_service", SimpleNamespace(
+        get_collection_for_user=AsyncMock(),
+    ))
+    monkeypatch.setattr(analysis_service, "_published_version", AsyncMock(return_value=1))
+    monkeypatch.setattr(analysis_service, "should_read_experiment_projection", AsyncMock(return_value=True))
+    objective = SimpleNamespace(
+        objective_id="objective-1", active_analysis_version=None,
+        published_analysis_version=1,
+    )
+    analysis = SimpleNamespace(
+        analysis_version=1, origin="system_generated", status="succeeded",
+        scientific_record_source="experiment_graph",
+    )
+    monkeypatch.setattr(analysis_service, "ObjectiveRepo", SimpleNamespace(
+        read_objective_record=AsyncMock(return_value=SimpleNamespace(objective=objective)),
+        read_analysis=AsyncMock(return_value=analysis),
+    ))
+    collection_id, objective_id, version = identity
+    findings_view = await analysis_service.list_findings(
+        collection_id, objective_id, analysis_version=version, user_id="user-1",
+    )
+    evidence_view = await analysis_service.list_evidence(
+        collection_id, objective_id, analysis_version=version, user_id="user-1",
+    )
+    state = await analysis_service._result(collection_id, objective_id)
     payload = {
-        "findings": (await service.list_analysis_findings(*identity))[0],
-        "evidence": (await service.list_analysis_evidence(*identity))[0],
-        "contributions": await service.list_analysis_contributions(*identity),
+        "findings": findings_view["items"],
+        "evidence": evidence_view["items"],
+        "contributions": state["paper_contributions"],
     }
     baseline = json.loads(
         (

@@ -260,9 +260,9 @@ class AssessObjectiveQualityCapability:
         )
         published = payload.get("published_analysis")
         active = payload.get("analysis")
-        active_version = _field(active, "analysis_version")
-        published_version = _field(published, "analysis_version")
-        active_failed = _field(active, "status") == "failed"
+        active_version = (active.analysis_version if active is not None else None)
+        published_version = (published.analysis_version if published is not None else None)
+        active_failed = (active.status if active is not None else None) == "failed"
         newer_failed_analysis = bool(
             active_failed
             and active_version is not None
@@ -347,7 +347,7 @@ class AssessObjectiveQualityCapability:
             for item in next_inspections
             if item.get("document_id") and item.get("source_ref")
         )
-        published_version = _field(published, "analysis_version")
+        published_version = (published.analysis_version if published is not None else None)
         warnings_list = [str(item)[:500] for item in payload.get("warnings") or ()]
         if newer_failed_analysis:
             warnings_list.append(
@@ -361,9 +361,9 @@ class AssessObjectiveQualityCapability:
                 "objective_id": arguments.objective_id,
                 "published_analysis_version": published_version,
                 "active_analysis_version": active_version,
-                "active_analysis_status": _field(active, "status"),
-                "active_analysis_error_code": _field(active, "error_code"),
-                "active_analysis_error_message": _field(active, "error_message"),
+                "active_analysis_status": (active.status if active is not None else None),
+                "active_analysis_error_code": (active.error_code if active is not None else None),
+                "active_analysis_error_message": (active.error_message if active is not None else None),
                 "runtime_state": runtime_state,
                 "quality_status": quality_status,
                 "finding_count": finding_count,
@@ -375,8 +375,8 @@ class AssessObjectiveQualityCapability:
                 "failed_paper_count": failed_paper_count,
                 "scientific_gap_count": len(scientific_gaps),
                 "status_counts": status_counts,
-                "abstention_reason": _field(published, "abstention_reason"),
-                "abstention_note": _field(published, "abstention_note"),
+                "abstention_reason": (published.abstention_reason if published is not None else None),
+                "abstention_note": (published.abstention_note if published is not None else None),
                 "paper_contributions": contribution_records[:50],
                 "next_inspections": next_inspections,
                 "omitted_inspection_count": max(
@@ -482,12 +482,6 @@ def _analysis_ref(
         ),
         href=f"/collections/{collection_id}/objectives/{objective_id}",
     )
-
-
-def _field(value: Any, name: str, default: Any = None) -> Any:
-    if isinstance(value, Mapping):
-        return value.get(name, default)
-    return getattr(value, name, default)
 
 
 __all__ = [

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis.experiment_projection import experiment_evidence_disposition
+
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
@@ -67,6 +69,10 @@ async def _objective_first_items(
         if analysis_version is None:
             continue
         published_analysis_count += 1
+        experiment_backed = await should_read_experiment_projection(
+            collection_id=collection_id, objective_id=objective.objective_id,
+            analysis_version=analysis_version,
+        )
         finding_offset = 0
         while True:
             findings, finding_total = await _list_findings(
@@ -74,12 +80,13 @@ async def _objective_first_items(
                 objective.objective_id,
                 analysis_version,
                 offset=finding_offset,
+                experiment_backed=experiment_backed,
                 limit=200,
             )
             if not findings:
                 break
             for finding in findings:
-                finding_id = str(_field(finding, "finding_id") or "")
+                finding_id = finding.finding_id
                 evidence_records: list[Any] = []
                 evidence_offset = 0
                 while True:
@@ -89,6 +96,7 @@ async def _objective_first_items(
                         analysis_version,
                         finding_id=finding_id,
                         offset=evidence_offset,
+                        experiment_backed=experiment_backed,
                         limit=500,
                     )
                     if not evidence_page:
@@ -102,21 +110,18 @@ async def _objective_first_items(
                         (
                             objective.objective_id,
                             analysis_version,
-                            str(_field(evidence, "evidence_id") or ""),
+                            evidence.evidence_id,
                         )
                     )
                 contributing_documents = tuple(
-                    _field(item, "document_id")
-                    for item in (_field(finding, "paper_contributions") or ())
-                    if _field(item, "document_id")
+                    item.document_id
+                    for item in finding.paper_contributions
                 )
                 item_key = (
                     f"{objective.objective_id}:v{analysis_version}:" f"{finding_id}"
                 )
                 payload = (
-                    dict(finding)
-                    if isinstance(finding, Mapping)
-                    else {
+                    {
                         "collection_id": finding.collection_id,
                         "objective_id": finding.objective_id,
                         "analysis_version": finding.analysis_version,
@@ -286,9 +291,7 @@ async def _objective_first_items(
                 )
                 payload["evidence"] = [
                     (
-                        dict(evidence)
-                        if isinstance(evidence, Mapping)
-                        else {
+                        {
                             "collection_id": evidence.collection_id,
                             "objective_id": evidence.objective_id,
                             "analysis_version": evidence.analysis_version,
@@ -301,8 +304,14 @@ async def _objective_first_items(
                             "evidence_role": evidence.evidence_role,
                             "selection_status": evidence.selection_status,
                             "selection_reason": evidence.selection_reason,
-                            "evidence_status": evidence.evidence_status,
-                            "evidence_status_reason": evidence.evidence_status_reason,
+                            "evidence_status": (
+                                experiment_evidence_disposition(evidence)[0]
+                                if experiment_backed else evidence.evidence_status
+                            ),
+                            "evidence_status_reason": (
+                                experiment_evidence_disposition(evidence)[1]
+                                if experiment_backed else evidence.evidence_status_reason
+                            ),
                             "changed_variables": [
                                 {
                                     "name": variable.name,
@@ -455,6 +464,11 @@ async def _objective_first_items(
                                 else None
                             ),
                             "authoring_note": evidence.authoring_note,
+                            **({
+                                "supports_finding": evidence.comparison is None or evidence.comparison.comparable,
+                                "eligible_for_finding_authoring": evidence.comparison is None or evidence.comparison.comparable,
+                                "warnings": list(evidence.warnings),
+                            } if experiment_backed else {}),
                             **(
                                 {"warnings": list(evidence.warnings)}
                                 if evidence.warnings
@@ -477,18 +491,18 @@ async def _objective_first_items(
                 ]
                 source_refs = tuple(
                     {
-                        "evidence_id": _field(evidence, "evidence_id"),
-                        "document_id": _field(evidence, "document_id"),
-                        "source_kind": _field(evidence, "source_kind"),
-                        "source_ref": _field(evidence, "source_ref"),
-                        "source_excerpt": _field(evidence, "source_excerpt"),
+                        "evidence_id": evidence.evidence_id,
+                        "document_id": evidence.document_id,
+                        "source_kind": evidence.source_kind,
+                        "source_ref": evidence.source_ref,
+                        "source_excerpt": evidence.source_excerpt,
                         "page_numbers": list(
-                            _field(evidence, "page_numbers") or ()
+                            evidence.page_numbers
                         ),
                         "related_source_refs": [
                             dict(locator)
                             for locator in (
-                                _field(evidence, "related_source_refs") or ()
+                                evidence.related_source_refs
                             )
                         ],
                     }
@@ -506,7 +520,7 @@ async def _objective_first_items(
                         item_key=item_key,
                         payload=payload,
                         source_refs=source_refs,
-                        confidence=float(_field(finding, "certainty") or 0),
+                        confidence=finding.certainty,
                     )
                 )
             finding_offset += len(findings)
@@ -526,12 +540,9 @@ async def _list_findings(
     *,
     offset: int,
     limit: int,
+    experiment_backed: bool,
 ) -> tuple[tuple[Any, ...], int]:
-    if await should_read_experiment_projection(
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=analysis_version,
-    ):
+    if experiment_backed:
         return await experiment_projection.list_analysis_findings(
             collection_id,
             objective_id,
@@ -556,12 +567,9 @@ async def _list_evidence(
     finding_id: str,
     offset: int,
     limit: int,
+    experiment_backed: bool,
 ) -> tuple[tuple[Any, ...], int]:
-    if await should_read_experiment_projection(
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=analysis_version,
-    ):
+    if experiment_backed:
         return await experiment_projection.list_analysis_evidence(
             collection_id,
             objective_id,
@@ -579,11 +587,6 @@ async def _list_evidence(
         limit=limit,
     )
 
-
-def _field(record: Any, name: str) -> Any:
-    if isinstance(record, Mapping):
-        return record.get(name)
-    return getattr(record, name, None)
 
 
 def _timestamp_id() -> str:

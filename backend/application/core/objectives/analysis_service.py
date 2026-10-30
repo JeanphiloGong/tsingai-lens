@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis.experiment_projection import experiment_evidence_disposition
+
 import logging
 from asyncio import (
     CancelledError,
@@ -14,7 +16,7 @@ from asyncio import (
 )
 from dataclasses import asdict, replace
 from time import perf_counter
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from application.core.document_profiles import service as document_profile_service
 from application.core.objectives import (
@@ -58,6 +60,8 @@ from application.core.objectives.objective_analysis_service import (
 )
 from application.source import collection_service
 from domain.core import ResearchObjective
+from domain.core.finding import Finding
+from domain.core.research_objective import ObjectiveEvidence
 from exceptions import (
     ResourceConflictException,
     ResourceNotFoundException,
@@ -77,7 +81,9 @@ _EVIDENCE_REVIEW_GAP_LIMIT = 200
 
 
 def _evidence_review_summary(
-    evidence_records: tuple[Any, ...],
+    evidence_records: tuple[ObjectiveEvidence, ...],
+    *,
+    experiment_backed: bool = False,
 ) -> dict[str, Any]:
     """Build the researcher-facing disposition of every published Evidence.
 
@@ -92,37 +98,35 @@ def _evidence_review_summary(
     result_count = 0
     gaps: list[dict[str, Any]] = []
     for evidence in evidence_records:
-        status = str(
-            _record_value(evidence, "evidence_status")
-            or _record_value(evidence, "resolution_status")
-            or "unknown"
+        status, reason = (
+            experiment_evidence_disposition(evidence)
+            if experiment_backed
+            else (evidence.evidence_status, evidence.evidence_status_reason)
         )
         status_counts[status] = status_counts.get(status, 0) + 1
-        if _record_value(evidence, "reported_result") is not None:
+        if evidence.reported_result is not None:
             result_count += 1
         if status == "comparable":
             continue
-        result = getattr(evidence, "reported_result", None)
-        if isinstance(evidence, dict):
-            result = evidence.get("reported_result")
+        result = evidence.reported_result
         gaps.append(
             {
-                "evidence_id": str(_record_value(evidence, "evidence_id") or ""),
-                "document_id": str(_record_value(evidence, "document_id") or ""),
-                "source_kind": str(_record_value(evidence, "source_kind") or ""),
-                "source_ref": str(_record_value(evidence, "source_ref") or ""),
-                "page_numbers": list(_record_value(evidence, "page_numbers") or ()),
+                "evidence_id": evidence.evidence_id,
+                "document_id": evidence.document_id,
+                "source_kind": evidence.source_kind,
+                "source_ref": evidence.source_ref,
+                "page_numbers": list(evidence.page_numbers),
                 "evidence_status": status,
                 "reason": str(
-                    _record_value(evidence, "evidence_status_reason")
+                    reason
                     or "Evidence is not ready for a strict cross-paper comparison."
                 ),
                 "outcome": (
-                    str(_record_value(result, "outcome") or "")
+                    result.outcome
                     if result is not None
                     else None
                 ),
-                "source_excerpt": str(_record_value(evidence, "source_excerpt") or "")[
+                "source_excerpt": evidence.source_excerpt[
                     :1200
                 ],
             }
@@ -146,13 +150,6 @@ def _evidence_review_summary(
         "omitted_gap_count": max(0, len(ordered_gaps) - _EVIDENCE_REVIEW_GAP_LIMIT),
     }
 
-
-def _record_value(record: Any, name: str) -> Any:
-    """Read a legacy domain object or a compatibility projection mapping."""
-
-    if isinstance(record, Mapping):
-        return record.get(name)
-    return getattr(record, name, None)
 
 
 def _experiment_abstention(
@@ -603,9 +600,7 @@ async def list_findings(
         "analysis_version": version,
         "items": [
             (
-                dict(finding)
-                if isinstance(finding, Mapping)
-                else {
+                {
                     "collection_id": finding.collection_id,
                     "objective_id": finding.objective_id,
                     "analysis_version": finding.analysis_version,
@@ -824,9 +819,7 @@ async def get_finding(
         "objective_id": objective_id,
         "analysis_version": version,
         "finding": (
-            dict(finding)
-            if isinstance(finding, Mapping)
-            else {
+            {
                 "collection_id": finding.collection_id,
                 "objective_id": finding.objective_id,
                 "analysis_version": finding.analysis_version,
@@ -986,7 +979,7 @@ async def get_finding(
             await _finding_evidence_reviews(
                 collection_id, objective_id, version, (finding,)
             )
-        )[_record_value(finding, "finding_id")],
+        )[finding.finding_id],
     }
 
 
@@ -994,7 +987,7 @@ async def _finding_evidence_reviews(
     collection_id: str,
     objective_id: str,
     version: int,
-    findings: tuple[Any, ...],
+    findings: tuple[Finding, ...],
 ) -> dict[str, Any]:
     if not findings:
         return {}
@@ -1005,16 +998,12 @@ async def _finding_evidence_reviews(
         ),
     )
     evidence_by_id = {
-        str(_record_value(item, "evidence_id") or ""): item for item in evidence
+        item.evidence_id: item for item in evidence
     }
     reviews = {}
     for finding in findings:
-        if isinstance(finding, Mapping):
-            finding_id = str(finding.get("finding_id") or "")
-            replacements = {}
-        else:
-            finding_id = finding.finding_id
-            replacements = finding.evidence_replacements(evidence_by_id)
+        finding_id = finding.finding_id
+        replacements = finding.evidence_replacements(evidence_by_id)
         reviews[finding_id] = {
             "needs_review": bool(replacements),
             "evidence_replacements": replacements,
@@ -1044,11 +1033,12 @@ async def summarize_finding(
             "The published analysis has changed. Reload before generating a summary.",
             data={"code": "summary_stale_analysis"},
         ) from exc
-    if await should_read_experiment_projection(
+    experiment_backed = await should_read_experiment_projection(
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
-    ):
+    )
+    if experiment_backed:
         records, total = await experiment_projection.list_analysis_evidence(
             collection_id,
             objective_id,
@@ -1073,9 +1063,7 @@ async def summarize_finding(
         finding=detail["finding"],
         evidence=[
             (
-                dict(item)
-                if isinstance(item, Mapping)
-                else {
+                {
                     "collection_id": item.collection_id,
                     "objective_id": item.objective_id,
                     "analysis_version": item.analysis_version,
@@ -1088,8 +1076,14 @@ async def summarize_finding(
                     "evidence_role": item.evidence_role,
                     "selection_status": item.selection_status,
                     "selection_reason": item.selection_reason,
-                    "evidence_status": item.evidence_status,
-                    "evidence_status_reason": item.evidence_status_reason,
+                    "evidence_status": (
+                            experiment_evidence_disposition(item)[0]
+                            if experiment_backed else item.evidence_status
+                        ),
+                    "evidence_status_reason": (
+                            experiment_evidence_disposition(item)[1]
+                            if experiment_backed else item.evidence_status_reason
+                        ),
                     "changed_variables": [
                         {
                             "name": variable.name,
@@ -1232,6 +1226,11 @@ async def summarize_finding(
                         else None
                     ),
                     "authoring_note": item.authoring_note,
+                    **({
+                        "supports_finding": item.comparison is None or item.comparison.comparable,
+                        "eligible_for_finding_authoring": item.comparison is None or item.comparison.comparable,
+                        "warnings": list(item.warnings),
+                    } if experiment_backed else {}),
                     **({"warnings": list(item.warnings)} if item.warnings else {}),
                     **(
                         {
@@ -1274,11 +1273,12 @@ async def list_evidence(
         objective_id,
         analysis_version,
     )
-    if await should_read_experiment_projection(
+    experiment_backed = await should_read_experiment_projection(
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=version,
-    ):
+    )
+    if experiment_backed:
         evidence, total = await experiment_projection.list_analysis_evidence(
             collection_id,
             objective_id,
@@ -1304,9 +1304,7 @@ async def list_evidence(
         "items": [
             {
                 **(
-                    dict(item)
-                    if isinstance(item, Mapping)
-                    else {
+                    {
                         "collection_id": item.collection_id,
                         "objective_id": item.objective_id,
                         "analysis_version": item.analysis_version,
@@ -1319,8 +1317,14 @@ async def list_evidence(
                         "evidence_role": item.evidence_role,
                         "selection_status": item.selection_status,
                         "selection_reason": item.selection_reason,
-                        "evidence_status": item.evidence_status,
-                        "evidence_status_reason": item.evidence_status_reason,
+                        "evidence_status": (
+                            experiment_evidence_disposition(item)[0]
+                            if experiment_backed else item.evidence_status
+                        ),
+                        "evidence_status_reason": (
+                            experiment_evidence_disposition(item)[1]
+                            if experiment_backed else item.evidence_status_reason
+                        ),
                         "changed_variables": [
                             {
                                 "name": variable.name,
@@ -1463,6 +1467,7 @@ async def list_evidence(
                             else None
                         ),
                         "authoring_note": item.authoring_note,
+                        **({"warnings": list(item.warnings)} if experiment_backed else {}),
                         **({"warnings": list(item.warnings)} if item.warnings else {}),
                         **(
                             {
@@ -1477,14 +1482,12 @@ async def list_evidence(
                     }
                 ),
                 "supports_finding": (
-                    item.get("supports_finding")
-                    if isinstance(item, Mapping)
-                    else item.supports_finding
+                    item.comparison is None or item.comparison.comparable
+                    if experiment_backed else item.supports_finding
                 ),
                 "eligible_for_finding_authoring": (
-                    item.get("eligible_for_finding_authoring")
-                    if isinstance(item, Mapping)
-                    else item.eligible_for_finding_authoring
+                    item.comparison is None or item.comparison.comparable
+                    if experiment_backed else item.eligible_for_finding_authoring
                 ),
             }
             for item in evidence
@@ -1556,7 +1559,7 @@ async def _all_published_findings(
     analysis_version: int,
     *,
     experiment_backed: bool,
-) -> tuple[Any, ...]:
+) -> tuple[Finding, ...]:
     if experiment_backed:
         findings, _ = await experiment_projection.list_analysis_findings(
             collection_id,
@@ -1588,7 +1591,7 @@ async def _all_published_evidence(
     analysis_version: int,
     *,
     experiment_backed: bool,
-) -> tuple[Any, ...]:
+) -> tuple[ObjectiveEvidence, ...]:
     if experiment_backed:
         evidence, _ = await experiment_projection.list_analysis_evidence(
             collection_id,
@@ -1682,11 +1685,13 @@ async def _result(
     warnings: list[str] = []
     if published is not None:
         if is_experiment_backed_analysis(published):
-            paper_contributions = (
-                await experiment_projection.list_analysis_contributions(
-                    collection_id,
-                    objective.objective_id,
-                    published.analysis_version,
+            paper_contributions = tuple(
+                {
+                    **asdict(item),
+                    "evidence_status_counts": dict(item.evidence_status_counts),
+                }
+                for item in await experiment_projection.list_analysis_contributions(
+                    collection_id, objective.objective_id, published.analysis_version,
                 )
             )
             findings, finding_total = (
@@ -1751,19 +1756,19 @@ async def _result(
                 seen_warnings.add(scoped_status)
                 warnings.append(scoped_status)
         for evidence in evidence_records:
-            for warning in _record_value(evidence, "warnings") or ():
+            for warning in evidence.warnings:
                 scoped_warning = (
-                    f"{_record_value(evidence, 'document_id')}/"
-                    f"{_record_value(evidence, 'source_ref')}: {warning}"
+                    f"{evidence.document_id}/"
+                    f"{evidence.source_ref}: {warning}"
                 )
                 if scoped_warning in seen_warnings:
                     continue
                 seen_warnings.add(scoped_warning)
                 warnings.append(scoped_warning)
         for finding in findings:
-            for warning in _record_value(finding, "warnings") or ():
+            for warning in finding.warnings:
                 scoped_warning = (
-                    f"Finding {_record_value(finding, 'finding_id')}: {warning}"
+                    f"Finding {finding.finding_id}: {warning}"
                 )
                 if scoped_warning in seen_warnings:
                     continue
@@ -1778,7 +1783,9 @@ async def _result(
         "finding_total": finding_total,
         "omitted_finding_count": max(0, finding_total - len(findings)),
         "paper_contributions": paper_contributions,
-        "evidence_review": _evidence_review_summary(evidence_records),
+        "evidence_review": _evidence_review_summary(
+            evidence_records, experiment_backed=is_experiment_backed_analysis(published),
+        ),
         "warnings": warnings,
     }
 

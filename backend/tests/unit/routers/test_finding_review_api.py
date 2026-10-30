@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 from typing import Mapping
+from unittest.mock import AsyncMock
+
+import pytest
 
 from application.evaluation.finding_feedback_service import parse_curated_finding
 from controllers.core import finding_review_routes
@@ -1003,6 +1006,49 @@ def test_curation_api_uses_finding_evidence_ids() -> None:
     assert response.json()["data"]["curated_finding"]["paper_contributions"][0][
         "supporting_evidence_ids"
     ] == ["evidence-1"]
+
+
+@pytest.mark.parametrize("timestamp, expected", [
+    (None, None),
+    ("2026-09-01T12:30:00Z", "2026-09-01T12:30:00+00:00"),
+    ("2026-09-01T12:30:00+08:00", "2026-09-01T12:30:00+08:00"),
+])
+def test_curation_timestamp_is_parsed_by_request_and_preserves_json(timestamp, expected):
+    payload = {
+        "analysis_version": 1,
+        "curated_finding": {**_finding_record(), "created_at": timestamp},
+    }
+    parsed = finding_review_routes.FindingCurationCreateRequest.model_validate(payload)
+    assert parsed.curated_finding.created_at == (
+        datetime.fromisoformat(expected) if expected is not None else None
+    )
+
+    response = _client().put(
+        "/collections/col-1/objectives/obj-1/findings/finding-1/curation", json=payload,
+    )
+
+    assert response.json()["code"] == 200
+    assert response.json()["data"]["curated_finding"]["created_at"] == expected
+
+
+def test_curation_invalid_timestamp_stops_at_request_boundary_without_writing():
+    service = _Service()
+    service.record_curation = AsyncMock()
+
+    response = _client(service).put(
+        "/collections/col-1/objectives/obj-1/findings/finding-1/curation",
+        json={
+            "analysis_version": 1,
+            "curated_finding": {**_finding_record(), "created_at": "not-a-date"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["code"] == 200100
+    assert response.json()["data"]["errors"][0]["loc"] == [
+        "body", "curated_finding", "created_at",
+    ]
+    service.record_curation.assert_not_awaited()
 
 
 def test_curation_api_rejects_retired_finding_fields() -> None:

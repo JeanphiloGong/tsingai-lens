@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from application.core.objectives import finding_authoring_service
@@ -357,11 +356,7 @@ async def record_finding_curation(
             parent_finding_id=value.parent_finding_id,
             created_by_user_id=value.created_by_user_id,
             created_by_tool_call_id=value.created_by_tool_call_id,
-            created_at=(
-                datetime.fromisoformat(value.created_at.replace("Z", "+00:00"))
-                if value.created_at
-                else None
-            ),
+            created_at=value.created_at,
             warnings=tuple(value.warnings),
         )
     except ValueError as exc:

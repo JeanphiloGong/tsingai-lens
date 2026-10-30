@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Any, Literal
 
 from repositories.objective_repository import ObjectiveAnalysis
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 AnalysisStatus = Literal["queued", "running", "succeeded", "failed"]
 
@@ -236,8 +237,12 @@ class FindingResponse(BaseModel):
     parent_finding_id: str | None = None
     created_by_user_id: str | None = None
     created_by_tool_call_id: str | None = None
-    created_at: str | None = None
+    created_at: datetime | None = None
     warnings: list[str] = Field(default_factory=list)
+
+    @field_serializer("created_at", when_used="json")
+    def serialize_created_at(self, value: datetime | None) -> str | None:
+        return value.isoformat() if value is not None else None
 
     @model_validator(mode="after")
     def validate_source_links(self) -> "FindingResponse":

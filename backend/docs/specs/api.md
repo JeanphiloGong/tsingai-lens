@@ -1479,6 +1479,10 @@ version-local Evidence/PaperContribution binding. Unknown, stale, unpublished,
 partial, and cross-version references return `200201`, `200204`, or `200100` and are
 never silently rebound.
 
+Optional `curated_finding.created_at` is parsed as a datetime by the request
+model. Invalid timestamps return `200100` before curation runs. JSON timestamps
+remain ISO 8601 strings with their UTC offsets preserved.
+
 The Finding workbench and Research Agent share these same service operations.
 The Agent first reads the complete published Finding and linked Evidence,
 inspects exact Sources as needed, and proposes the same feedback or curation

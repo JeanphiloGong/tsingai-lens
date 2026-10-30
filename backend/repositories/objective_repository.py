@@ -197,24 +197,6 @@ class ObjectiveAnalysis:
     def key(self) -> tuple[str, str, int]:
         return (self.collection_id, self.objective_id, self.analysis_version)
 
-    @property
-    def uses_experiment_records(self) -> bool:
-        """Whether scientific records are owned by the PaperExperiment graph.
-
-        Automatic analyses are published by ``ExperimentAnalysisWriter``.  An
-        authored or hybrid version is a new immutable snapshot of the prior
-        published records and therefore continues to use the authored record
-        contract. Keeping this decision on the analysis snapshot prevents query
-        callers from treating the mere presence of a projection dependency as
-        proof that every analysis version is experiment-backed.
-        """
-
-        return (
-            self.origin == "system_generated"
-            and self.scientific_record_source == "experiment_graph"
-        )
-
-
     def start(self, *, started_at: datetime | None = None) -> "ObjectiveAnalysis":
         return self._transition(
             "running",

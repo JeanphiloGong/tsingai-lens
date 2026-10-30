@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping
 
 from application.core.document_profiles.service import DocumentProfileService
 from application.core.objectives.analysis.analysis_record_source import (
+    is_experiment_backed_analysis,
     should_read_experiment_projection,
 )
 from application.core.objectives.analysis.diagnostics import (
@@ -1619,7 +1620,7 @@ class ObjectiveAnalysisService:
         warnings: list[str] = []
         if published is not None:
             if (
-                published.uses_experiment_records
+                is_experiment_backed_analysis(published)
                 and self.experiment_compatibility_projection is not None
             ):
                 paper_contributions = (

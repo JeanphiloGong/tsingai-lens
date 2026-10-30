@@ -187,7 +187,9 @@ but have separate owners.
 Repository-specific result types stay beside the concrete repository that returns them.
 `PipelineRunService` creates and advances execution records; the repository stores
 and reads them without rerunning node graph validation. Statistics remain direct
-operations on the execution values.
+operations on the execution values. `ObjectiveRepository` retains locked analysis
+claims and publication transitions; the application selects the scientific
+record read path from the returned analysis fields.
 
 Experiment repositories obtain current reference and ownership facts inside the
 publication transaction, then call the existing Finding and ComparisonGroup

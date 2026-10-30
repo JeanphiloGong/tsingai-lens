@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from repositories.objective_repository import ObjectiveAnalysis
 
-def is_experiment_backed_analysis(analysis: Any) -> bool:
+
+def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
     """Return whether an analysis publishes through PaperExperiment records."""
 
-    return bool(
+    return (
         analysis is not None
-        and getattr(analysis, "uses_experiment_records", False)
+        and analysis.origin == "system_generated"
+        and analysis.scientific_record_source == "experiment_graph"
     )
 
 

@@ -188,7 +188,8 @@ Repository-specific result types stay beside the concrete repository that return
 Experiment repositories obtain current reference and ownership facts inside the
 publication transaction, then call the existing Finding and ComparisonGroup
 objects for independent-experiment rules. Invalid support rolls back the entire
-graph.
+graph. Feedback review similarly retains digest and state conflicts under a row
+lock while content acceptance belongs to its domain object and service.
 
 `StoredCollection` contains the existing `Collection`, record timestamps, and
 the current `StoredDocument` members. Each `StoredDocument` contains a `Document`

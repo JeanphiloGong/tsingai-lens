@@ -896,15 +896,6 @@ class FeedbackCaseRepository:
             )
             if annotation is None:
                 raise ValueError("feedback_case_annotation_required")
-            if decision.decision == "accept":
-                uses = set(annotation.dataset_uses or ())
-                if not uses:
-                    raise ValueError("review_dataset_use_missing")
-                if uses & {"sft", "preference"}:
-                    if not annotation.target:
-                        raise ValueError("review_target_missing")
-                    if not (annotation.support_source_refs or ()):
-                        raise ValueError("review_support_source_missing")
             if decision.decision == "withdraw":
                 if case.status != "accepted":
                     raise ValueError("feedback_case_not_withdrawable")

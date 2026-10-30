@@ -251,11 +251,6 @@ class FeedbackCaseService:
         uses = set(annotation.dataset_uses)
         if not uses:
             raise ValueError("review_dataset_use_missing")
-        needs_target = bool(uses & {"sft", "preference"})
-        if needs_target and not annotation.target:
-            raise ValueError("review_target_missing")
-        if needs_target and not annotation.support_source_refs:
-            raise ValueError("review_support_source_missing")
         if "preference" not in uses:
             return
         messages = await self.chat_repository.read_messages(case.session_id)

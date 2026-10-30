@@ -30,7 +30,9 @@ call `Finding.validate_experiment_support()` or
 owns independent-experiment rules; repositories retain reference, scope, version
 and concurrency checks. Rejection rolls back the whole publication.
 
-Model configuration errors belong to
+Feedback review locks, annotation digests, request identities and sequence numbers
+remain transactional checks. Annotation content rules belong to the existing
+domain object and review service. Model configuration errors belong to
 `application/model_connections/errors.py`; database failures propagate through
 the persistence path.
 

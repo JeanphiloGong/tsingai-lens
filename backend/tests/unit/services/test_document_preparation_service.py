@@ -455,7 +455,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
         raise RuntimeError("reference parser unavailable")
 
     monkeypatch.setattr(
-        source_reference_extraction_service, "extract", fail_reference_extraction
+        source_reference_extraction_service, "extract_source_references", fail_reference_extraction
     )
     document_preparation_service.collection_service = CollectionService()
     document_preparation_service.pipeline_run_service = pipeline_run_service

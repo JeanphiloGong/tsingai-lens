@@ -143,7 +143,7 @@ async def build_collection_references(
     collection_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    result = await reference_workflow_service.build_collection_references(
+    result = await reference_workflow_service.get_collection_references(
         collection_id,
         user_id=user_id,
     )

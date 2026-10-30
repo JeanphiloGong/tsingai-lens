@@ -23,7 +23,7 @@ class SourceReferenceWorkflowResult:
         }
 
 
-async def build_collection_references(
+async def get_collection_references(
     collection_id: str,
     *,
     user_id: str,

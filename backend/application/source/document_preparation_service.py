@@ -289,7 +289,7 @@ class DocumentPreparationService:
                         source_document,
                     )
                     try:
-                        references = source_reference_extraction_service.extract(
+                        references = source_reference_extraction_service.extract_source_references(
                             (source_document,)
                         )
                         await SourceArtifactRepo.replace_document_references(

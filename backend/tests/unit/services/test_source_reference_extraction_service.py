@@ -74,7 +74,7 @@ def test_source_reference_extraction_builds_entries_mentions_and_candidates():
         ),
     )
 
-    references = source_reference_extraction_service.extract(artifacts)
+    references = source_reference_extraction_service.extract_source_references(artifacts)
 
     assert [entry.reference_id for entry in references.entries] == [
         "ref-doc-1-0001",
@@ -151,7 +151,7 @@ def test_source_reference_extraction_ignores_reference_section_citation_markers(
         ),
     )
 
-    references = source_reference_extraction_service.extract(artifacts)
+    references = source_reference_extraction_service.extract_source_references(artifacts)
 
     assert len(references.entries) == 3
     assert [

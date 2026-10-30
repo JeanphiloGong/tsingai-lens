@@ -101,7 +101,7 @@ async def test_source_reference_routes_build_and_read_refs(
     )
     await repository.replace_document_references(
         "doc-1",
-        source_reference_extraction_service.extract(artifacts),
+        source_reference_extraction_service.extract_source_references(artifacts),
     )
     summary = references_controller.SourceReferenceSummaryResponse.model_validate(
         json.loads(

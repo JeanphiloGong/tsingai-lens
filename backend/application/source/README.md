@@ -89,7 +89,9 @@ classification. A completed but scientifically uncertain Profile is reusable.
 - `artifact_input_service.py`: current Source loading for downstream consumers.
 - `document_markdown_service.py`: display Markdown from the current Source tree.
 - `reference_extraction_service.py`: deterministic references from one prepared
-  Document.
+  Document through `extract_source_references()`. The reference workflow's
+  `get_collection_references()` reads the saved references after checking that
+  Sources are ready; it does not re-extract or write them.
 
 The parser implementation lives in [`../../infra/source/README.md`](../../infra/source/README.md).
 Scientific Objective analysis lives in [`../core/objectives/README.md`](../core/objectives/README.md).

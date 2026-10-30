@@ -27,7 +27,7 @@ _CITATION_PATTERN = re.compile(r"\[(?P<body>\d+(?:\s*(?:,\s*|\s*-\s*)\d+)*)\]")
 _SPACE_PATTERN = re.compile(r"\s+")
 
 
-def extract(documents: tuple[SourceDocument, ...]) -> SourceReferenceSet:
+def extract_source_references(documents: tuple[SourceDocument, ...]) -> SourceReferenceSet:
     blocks = tuple(block for document in documents for block in document.blocks)
     entries = _extract_entries(blocks)
     mentions = _extract_mentions(blocks, entries)

@@ -411,3 +411,18 @@ async def test_partial_measurement_keeps_missing_context_in_read_view(monkeypatc
     assert item["evidence_status_reason"] == "The selected measurement has incomplete binding context."
     assert item["reported_result"]["value"] == 72
     assert item["source_ref"] == "table-2"
+
+    from application.core.objectives import objective_authoring_service
+    monkeypatch.setattr(objective_authoring_service, "experiment_projection", projection)
+    monkeypatch.setattr(objective_authoring_service, "should_read_experiment_projection", AsyncMock(return_value=True))
+    basis = await objective_authoring_service._canonicalize_derived_objective_basis(
+        collection_id="collection-1", parent_objective_id="objective-1",
+        parent_analysis_version=1,
+        derivation_basis=[{
+            "kind": "evidence_gap", "reference_id": records[0].evidence_id,
+            "rationale": "Identify the variant and test conditions before comparing this outcome.",
+        }],
+    )
+    assert basis[0]["snapshot"]["evidence_status"] == "needs_context"
+    assert basis[0]["snapshot"]["reason"] == item["evidence_status_reason"]
+    assert basis[0]["snapshot"]["source_ref"] == "table-2"

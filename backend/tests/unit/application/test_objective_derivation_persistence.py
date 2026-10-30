@@ -18,11 +18,13 @@ from domain.core import ResearchObjective
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
+    ObjectiveEvidence,
     PreparedDocumentInput,
     ResearchObjective,
     build_research_objective_id,
     normalize_objective_terms,
 )
+from domain.core.scientific_fact import ScientificContext, ScientificResult
 from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
@@ -225,7 +227,22 @@ class _ParentObjectiveRepository:
 class _ParentExperimentProjection:
     def __init__(self, repository: _ParentObjectiveRepository) -> None:
         self.finding = repository.finding
-        self.evidence = repository.evidence
+        source = repository.evidence
+        self.evidence = ObjectiveEvidence(
+            collection_id="col-1", objective_id="objective-parent", analysis_version=3,
+            evidence_id=source.evidence_id, document_id=source.document_id,
+            source_kind=source.source_kind, source_ref=source.source_ref,
+            source_excerpt="The paper reports elongation without binding it to an intermediate preheat level.",
+            page_numbers=(), related_source_refs=(), evidence_role="direct_result",
+            selection_status="extracted", selection_reason=None,
+            changed_variables=(), comparison=None,
+            reported_result=ScientificResult(
+                outcome="elongation", value=None, unit="%", direction="unknown",
+                result_text="Elongation was reported without the intermediate preheat condition.",
+            ),
+            attribution_scope="descriptive_only", scientific_context=ScientificContext(),
+            resolution_status="partial", failure_reason=None, confidence=0.8,
+        )
         self.contribution = repository.contribution
 
     async def read_analysis_finding(
@@ -648,6 +665,9 @@ async def test_derived_objective_reads_parent_basis_from_experiment_projection()
     assert created.derivation_basis[0]["snapshot"]["statement"].startswith(
         "Canonical Finding"
     )
+    assert created.derivation_basis[1]["snapshot"]["evidence_status"] == "needs_context"
+    assert created.derivation_basis[1]["snapshot"]["reason"] == "The selected measurement has incomplete binding context."
+
 
 
 @pytest.mark.parametrize(

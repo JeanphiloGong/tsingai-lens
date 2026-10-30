@@ -5,12 +5,15 @@ from dataclasses import replace
 from typing import Any
 
 from application.core.objectives.analysis import experiment_projection
+from application.core.objectives.analysis.experiment_projection import experiment_evidence_disposition
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
 from application.source import collection_service
 from domain.core import ResearchObjective, is_question_shaped_objective
 from domain.core.research_objective import (
+    ObjectiveEvidence,
+    PaperContribution,
     build_research_objective_id,
 )
 from repositories.objective_repository import ObjectiveRepo
@@ -149,6 +152,10 @@ async def _canonicalize_derived_objective_basis(
 ) -> list[dict[str, Any]]:
     """Rebuild derived-Objective lineage from the published parent."""
 
+    experiment_backed = await should_read_experiment_projection(
+        collection_id=collection_id, objective_id=parent_objective_id,
+        analysis_version=parent_analysis_version,
+    )
     canonical: list[dict[str, Any]] = []
     for item in derivation_basis:
         if not isinstance(item, Mapping):
@@ -162,11 +169,7 @@ async def _canonicalize_derived_objective_basis(
             )
 
         if kind == "finding":
-            if await should_read_experiment_projection(
-                collection_id=collection_id,
-                objective_id=parent_objective_id,
-                analysis_version=parent_analysis_version,
-            ):
+            if experiment_backed:
                 record = await experiment_projection.read_analysis_finding(
                     collection_id,
                     parent_objective_id,
@@ -191,13 +194,17 @@ async def _canonicalize_derived_objective_basis(
                 parent_objective_id,
                 parent_analysis_version,
                 reference_id,
+                experiment_backed=experiment_backed,
             )
             if record is None:
                 raise ValueError(
                     "Evidence gap is not part of the published parent analysis"
                 )
             selection_status = record.selection_status
-            evidence_status = record.evidence_status
+            evidence_status, reason = (
+                experiment_evidence_disposition(record) if experiment_backed
+                else (record.evidence_status, record.evidence_status_reason)
+            )
             if selection_status == "failed" or evidence_status == "extraction_failed":
                 raise ValueError(
                     "technical extraction failure cannot derive an Objective"
@@ -207,7 +214,7 @@ async def _canonicalize_derived_objective_basis(
             snapshot = {
                 "evidence_status": evidence_status,
                 "reason": (
-                    record.evidence_status_reason
+                    reason
                     or record.selection_reason
                     or ""
                 )[:1_000],
@@ -221,6 +228,7 @@ async def _canonicalize_derived_objective_basis(
                 parent_objective_id,
                 parent_analysis_version,
                 reference_id,
+                experiment_backed=experiment_backed,
             )
             if record is None:
                 raise ValueError(
@@ -260,14 +268,12 @@ async def _published_evidence_by_id(
     objective_id: str,
     analysis_version: int,
     evidence_id: str,
-) -> Any | None:
+    *,
+    experiment_backed: bool,
+) -> ObjectiveEvidence | None:
     offset = 0
     while True:
-        if await should_read_experiment_projection(
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-        ):
+        if experiment_backed:
             records, total = await experiment_projection.list_analysis_evidence(
                 collection_id,
                 objective_id,
@@ -296,12 +302,10 @@ async def _published_paper_contribution_by_id(
     objective_id: str,
     analysis_version: int,
     document_id: str,
-) -> Any | None:
-    if await should_read_experiment_projection(
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=analysis_version,
-    ):
+    *,
+    experiment_backed: bool,
+) -> PaperContribution | None:
+    if experiment_backed:
         records = await experiment_projection.list_analysis_contributions(
             collection_id,
             objective_id,

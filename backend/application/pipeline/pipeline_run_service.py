@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -16,6 +16,7 @@ from repositories.pipeline_run_repository import (
     PipelineNodeRun,
     PipelineNodeStatus,
     PipelineRun,
+    PipelineRunSummary,
     PipelineRunStatus,
 )
 
@@ -56,7 +57,7 @@ async def create_run(
     mode: str = "standard",
     input_fingerprint: str | None = None,
     context: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> PipelineRun:
     run = _new_run(
         collection_id=collection_id,
         pipeline_name=pipeline_name,
@@ -67,7 +68,7 @@ async def create_run(
         context=context,
     )
     run = await PipelineRunRepo.add_run(run)
-    return pipeline_run_response(run)
+    return run
 
 
 async def get_or_create_document_run(
@@ -79,7 +80,7 @@ async def get_or_create_document_run(
     mode: str = "standard",
     context: Mapping[str, Any] | None = None,
     reuse_completed: bool = True,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[PipelineRun, bool]:
     if not document_id or not input_fingerprint:
         raise ValueError("document run requires document and input fingerprint")
     run, created = await PipelineRunRepo.get_or_create_document_run(
@@ -94,10 +95,7 @@ async def get_or_create_document_run(
         ),
         reuse_completed=reuse_completed,
     )
-    return (
-        pipeline_run_response(run),
-        created,
-    )
+    return run, created
 
 
 async def get_or_create_collection_run(
@@ -107,7 +105,7 @@ async def get_or_create_collection_run(
     input_fingerprint: str,
     mode: str = "standard",
     context: Mapping[str, Any] | None = None,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[PipelineRun, bool]:
     if not input_fingerprint:
         raise ValueError("collection run requires an input fingerprint")
     run, created = await PipelineRunRepo.get_or_create_collection_run(
@@ -121,13 +119,10 @@ async def get_or_create_collection_run(
             context=context,
         )
     )
-    return (
-        pipeline_run_response(run),
-        created,
-    )
+    return run, created
 
 
-async def get_run(run_id: str, *, user_id: str) -> dict[str, Any]:
+async def get_run(run_id: str, *, user_id: str) -> PipelineRun:
     run = await PipelineRunRepo.read_run(run_id)
     if run is None:
         raise ResourceNotFoundException(
@@ -139,7 +134,7 @@ async def get_run(run_id: str, *, user_id: str) -> dict[str, Any]:
             "Pipeline run not found.",
             data={"code": "pipeline_run_not_found", "run_id": run_id},
         )
-    return pipeline_run_response(run)
+    return run
 
 
 async def list_runs(
@@ -149,27 +144,21 @@ async def list_runs(
     offset: int = 0,
     *,
     user_id: str,
-) -> list[dict[str, Any]]:
+) -> list[PipelineRunSummary]:
     if not await CollectionRepo.collection_belongs_to_user(collection_id, user_id):
         raise ResourceNotFoundException(
             "Collection not found.",
             data={"code": "collection_not_found", "collection_id": collection_id},
         )
-    return [
-        pipeline_run_response(run)
-        for run in await PipelineRunRepo.list_runs(
-            collection_id=collection_id,
-            status=status,
-            limit=limit,
-            offset=offset,
-        )
-    ]
+    return await PipelineRunRepo.list_runs(
+        collection_id=collection_id, status=status, limit=limit, offset=offset,
+    )
 
 
-async def list_interrupted_runs() -> list[dict[str, Any]]:
+async def list_interrupted_runs() -> list[PipelineRunSummary]:
     """Read durable queued/running work before startup recovery admits requests."""
     return [
-        pipeline_run_response(run)
+        run
         for status in ("queued", "running")
         for run in await PipelineRunRepo.list_runs(status=status)
     ]
@@ -184,7 +173,7 @@ async def update_run(
     progress_detail: Mapping[str, Any] | None = None,
     errors: Iterable[str] | None = None,
     warnings: Iterable[str] | None = None,
-) -> dict[str, Any]:
+) -> PipelineRun:
     if progress_percent is not None and not 0 <= progress_percent <= 100:
         raise ValueError("progress_percent must be between zero and 100")
     stored = await PipelineRunRepo.read_run(run_id)
@@ -242,7 +231,7 @@ async def update_run(
             "Pipeline run not found.",
             data={"code": "pipeline_run_not_found", "run_id": run_id},
         )
-    return pipeline_run_response(updated)
+    return updated
 
 
 async def finish_run(
@@ -254,7 +243,7 @@ async def finish_run(
     progress_detail: Mapping[str, Any] | None = None,
     errors: Iterable[str] | None = None,
     warnings: Iterable[str] | None = None,
-) -> dict[str, Any]:
+) -> PipelineRun:
     resolved = PipelineRunStatus(status)
     if not resolved.is_terminal:
         raise ValueError("finished pipeline run requires a terminal status")
@@ -269,7 +258,7 @@ async def finish_run(
     )
 
 
-async def append_error(run_id: str, error: str) -> dict[str, Any]:
+async def append_error(run_id: str, error: str) -> PipelineRun:
     stored = await PipelineRunRepo.read_run(run_id)
     if stored is None:
         raise ResourceNotFoundException(
@@ -439,76 +428,6 @@ def _semantic_node(run: PipelineRun, phase: str | None) -> str | None:
     return None
 
 
-def pipeline_run_response(run: PipelineRun) -> dict[str, Any]:
-    """Build the existing HTTP/SSE run shape from one domain run."""
-
-    if not hasattr(run, "nodes"):
-        return _sanitize_preparation_errors(asdict(run))
-
-    return _sanitize_preparation_errors(
-        {
-            **{key: value for key, value in asdict(run).items() if key != "timestamps"},
-            "status": run.status.value,
-            "nodes": {
-                node.name: {
-                    **asdict(node),
-                    "dependencies": list(node.dependencies),
-                    "status": node.status.value,
-                    "errors": list(node.errors),
-                    "warnings": list(node.warnings),
-                    "stats": {
-                        "duration_ms": node.stats.duration_ms,
-                        "token_usage": (
-                            asdict(node.stats.token_usage)
-                            if node.stats.token_usage is not None
-                            else None
-                        ),
-                        "model_usage": [asdict(item) for item in node.stats.model_usage],
-                        "unreported_request_count": node.stats.unreported_request_count,
-                        "prompt_versions": dict(node.stats.prompt_versions),
-                    },
-                    "timestamps": {
-                        key: value
-                        for key, value in asdict(node.timestamps).items()
-                        if value is not None or key in ("started_at", "finished_at")
-                    },
-                }
-                for node in run.nodes
-            },
-            "errors": list(run.errors),
-            "warnings": list(run.warnings),
-            "stats": {
-                "duration_ms": run.stats.duration_ms,
-                "token_usage": (
-                    asdict(run.stats.token_usage)
-                    if run.stats.token_usage is not None
-                    else None
-                ),
-                "model_usage": [asdict(item) for item in run.stats.model_usage],
-                "unreported_request_count": run.stats.unreported_request_count,
-                "prompt_versions": dict(run.stats.prompt_versions),
-            },
-            "created_at": run.timestamps.created_at,
-            "updated_at": run.timestamps.updated_at,
-            "started_at": run.timestamps.started_at,
-            "finished_at": run.timestamps.finished_at,
-        }
-    )
-
-
-def _sanitize_preparation_errors(payload: dict[str, Any]) -> dict[str, Any]:
-    if payload["pipeline_name"] != "document_preparation":
-        return payload
-    if payload["errors"]:
-        payload["errors"] = [
-            document_preparation_error_message(payload["current_node"])
-        ]
-    for name, node in payload.get("nodes", {}).items():
-        if node["errors"]:
-            node["errors"] = [document_preparation_error_message(name)]
-    return payload
-
-
 __all__ = [
     "create_run",
     "get_or_create_document_run",
@@ -518,5 +437,4 @@ __all__ = [
     "update_run",
     "finish_run",
     "append_error",
-    "pipeline_run_response",
 ]

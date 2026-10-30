@@ -9,6 +9,13 @@ retry lineage, and restart recovery for those executions. It constructs executio
 records directly from the fixed node graphs defined in the service. Tests check
 the preparation and discovery dependencies; creating a run does not revalidate
 these internal definitions.
+
+Operations return the existing `PipelineRun` values; list and recovery reads
+return `PipelineRunSummary` values. Preparation and discovery consume their
+fields directly. HTTP output is constructed in
+`controllers/schemas/source/pipeline_run.py`, while Agent capabilities construct
+their existing tool observations. Both output boundaries replace private
+preparation errors with safe stage messages without rewriting stored diagnostics.
 `PipelineRun` and
 `PipelineNodeRun` live beside their contract in
 [`../../repositories/pipeline_run_repository.py`](../../repositories/pipeline_run_repository.py)

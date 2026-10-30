@@ -173,7 +173,7 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
         input_fingerprint="restart-input",
     )
     assert created is True
-    await pipeline_run_service.update_run(run["run_id"], status="running")
+    await pipeline_run_service.update_run(run.run_id, status="running")
     document_preparation_service.collection_service = collection_service
     document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
@@ -184,12 +184,14 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
     recovered = await service.recover_interrupted_runs()
 
     recovered_run = await pipeline_run_service.get_run(
-        run["run_id"], user_id="user_source"
+        run.run_id, user_id="user_source"
     )
     assert recovered == 1
-    assert recovered_run["status"] == "failed"
-    assert recovered_run["current_node"] == "interrupted"
-    assert PipelineRunResponse(**recovered_run).status == "failed"
+    assert recovered_run.status == "failed"
+    assert recovered_run.current_node == "interrupted"
+    from controllers.schemas.source.pipeline_run import pipeline_run_response
+
+    assert PipelineRunResponse(**pipeline_run_response(recovered_run)).status == "failed"
     assert (
         await collection_service.get_document(COLLECTION_ID, "doc_a")
     ).document.status == ("stored")
@@ -201,4 +203,4 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
         input_fingerprint="restart-input",
     )
     assert retry_created is True
-    assert retry["run_id"] != run["run_id"]
+    assert retry.run_id != run.run_id

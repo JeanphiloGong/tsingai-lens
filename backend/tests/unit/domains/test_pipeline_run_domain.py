@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 from application.pipeline import pipeline_run_service
 from application.pipeline import pipeline_run_service as module
+from controllers.schemas.source.pipeline_run import pipeline_run_response
 from repositories.pipeline_run_repository import (
     ExecutionStats,
     ExecutionTimestamps,
@@ -52,25 +53,26 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
     run_id = runs.run.run_id
     await service.update_run(run_id, status="running", current_node="source_parsing")
     running = await service.update_run(run_id, current_node="source_parsing")
-    assert running["nodes"]["source_parsing"]["status"] == "running"
+    assert running.nodes[0].status == "running"
     profiling = await service.update_run(
         run_id,
         current_node="document_profile",
         progress_percent=50,
         progress_detail={"unit": "document", "message": "Profiling."},
     )
-    assert profiling["nodes"]["source_parsing"]["status"] == "succeeded"
-    assert profiling["nodes"]["document_profile"]["status"] == "running"
-    assert profiling["progress_percent"] == 50
+    assert profiling.nodes[0].status == "succeeded"
+    assert profiling.nodes[1].status == "running"
+    assert profiling.progress_percent == 50
     result = await service.finish_run(
         run_id,
         status="failed",
         current_node="document_profile",
         errors=["private provider text"],
     )
-    assert result["nodes"]["source_parsing"]["status"] == "succeeded"
-    assert result["nodes"]["document_profile"]["status"] == "failed"
-    assert "private provider text" not in str(result)
+    assert result.nodes[0].status == "succeeded"
+    assert result.nodes[1].status == "failed"
+    assert result.errors == ("private provider text",)
+    assert "private provider text" not in str(pipeline_run_response(result))
     assert runs.run.nodes[0].stats.duration_ms == 2000
     assert runs.run.nodes[1].stats.duration_ms == 1000
     assert runs.run.stats.duration_ms == 3000
@@ -96,7 +98,7 @@ async def test_progress_without_a_node_keeps_reported_errors():
     runs.run = replace(runs.run, errors=("dispatch failure",))
     result = await service.update_run(runs.run.run_id, progress_percent=10)
     assert runs.run.errors == ("dispatch failure",)
-    assert result["progress_percent"] == 10
+    assert result.progress_percent == 10
 
 
 @pytest.mark.anyio
@@ -121,9 +123,9 @@ async def test_partial_success_skips_unstarted_nodes():
         runs.run.run_id, status="running", current_node="paper_map"
     )
     result = await service.finish_run(runs.run.run_id, status="partial_success")
-    assert result["nodes"]["paper_map"]["status"] == "succeeded"
-    assert result["nodes"]["objective_candidates"]["status"] == "skipped"
-    assert result["nodes"]["objective_candidates"]["timestamps"]["started_at"] is None
+    assert result.nodes[0].status == "succeeded"
+    assert result.nodes[1].status == "skipped"
+    assert result.nodes[1].timestamps.started_at is None
 
 
 @pytest.mark.anyio

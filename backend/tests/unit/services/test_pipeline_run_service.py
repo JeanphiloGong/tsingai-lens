@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from application.pipeline import pipeline_run_service
 from application.pipeline.pipeline_run_service import document_preparation_error_message
+from controllers.schemas.source.pipeline_run import pipeline_run_response
 from repositories.pipeline_run_repository import PipelineRunRepository
 from tests.support.postgres import seed_collection
 
@@ -40,9 +41,9 @@ async def test_pipeline_run_service_lists_scope_status_and_progress(
         scope_id="doc_b",
         input_fingerprint="fingerprint-b",
     )
-    await service.finish_run(run_a["run_id"], status="completed")
+    await service.finish_run(run_a.run_id, status="completed")
     await service.finish_run(
-        run_b["run_id"],
+        run_b.run_id,
         status="failed",
         current_node="source_parsing",
         progress_percent=35,
@@ -50,15 +51,15 @@ async def test_pipeline_run_service_lists_scope_status_and_progress(
     )
 
     runs = await service.list_runs(collection_id="col_a", user_id="user-1")
-    assert [item["run_id"] for item in runs] == [
-        run_b["run_id"],
-        run_a["run_id"],
+    assert [item.run_id for item in runs] == [
+        run_b.run_id,
+        run_a.run_id,
     ]
-    assert [item["scope_id"] for item in runs] == ["doc_b", "doc_a"]
+    assert [item.scope_id for item in runs] == ["doc_b", "doc_a"]
     completed = await service.list_runs(
         collection_id="col_a", status="completed", user_id="user-1"
     )
-    assert [item["run_id"] for item in completed] == [run_a["run_id"]]
+    assert [item.run_id for item in completed] == [run_a.run_id]
 
 
 async def test_pipeline_run_service_persists_node_and_terminal_failure(
@@ -74,25 +75,28 @@ async def test_pipeline_run_service_persists_node_and_terminal_failure(
     )
 
     running = await service.update_run(
-        run["run_id"],
+        run.run_id,
         status="running",
         current_node="source_parsing",
         progress_percent=25,
         progress_detail={"phase": "source_parsing", "unit": "document"},
     )
-    assert running["nodes"]["source_parsing"]["status"] == "running"
+    assert running.nodes[0].status == "running"
 
     failed = await service.finish_run(
-        run["run_id"],
+        run.run_id,
         status="failed",
         current_node="source_parsing",
         errors=["invalid PDF"],
     )
-    assert failed["status"] == "failed"
-    assert failed["errors"] == [document_preparation_error_message("source_parsing")]
-    assert failed["nodes"]["source_parsing"]["status"] == "failed"
-    assert failed["finished_at"] is not None
-    assert failed["updated_at"] == failed["finished_at"]
+    assert failed.status == "failed"
+    assert failed.errors == ("invalid PDF",)
+    assert pipeline_run_response(failed)["errors"] == [
+        document_preparation_error_message("source_parsing")
+    ]
+    assert failed.nodes[0].status == "failed"
+    assert failed.timestamps.finished_at is not None
+    assert failed.timestamps.updated_at == failed.timestamps.finished_at
 
 
 async def test_document_run_reuses_active_and_matching_completed_work(
@@ -114,9 +118,9 @@ async def test_document_run_reuses_active_and_matching_completed_work(
     )
     assert created is True
     assert active_created is False
-    assert active["run_id"] == first["run_id"]
+    assert active.run_id == first.run_id
 
-    await service.finish_run(first["run_id"], status="completed")
+    await service.finish_run(first.run_id, status="completed")
     completed, completed_created = await service.get_or_create_document_run(
         collection_id="col_a",
         document_id="doc_a",
@@ -130,9 +134,9 @@ async def test_document_run_reuses_active_and_matching_completed_work(
         input_fingerprint="fingerprint-b",
     )
     assert completed_created is False
-    assert completed["run_id"] == first["run_id"]
+    assert completed.run_id == first.run_id
     assert changed_created is True
-    assert changed["run_id"] != first["run_id"]
+    assert changed.run_id != first.run_id
 
 
 async def test_collection_run_reuses_only_active_work_and_preserves_context(
@@ -154,10 +158,10 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context(
     )
     assert created is True
     assert active_created is False
-    assert active["run_id"] == first["run_id"]
-    assert active["context"] == {"document_ids": ["doc_a"]}
+    assert active.run_id == first.run_id
+    assert active.context == {"document_ids": ["doc_a"]}
 
-    await service.finish_run(first["run_id"], status="failed")
+    await service.finish_run(first.run_id, status="failed")
     retry, retry_created = await service.get_or_create_collection_run(
         collection_id="col_a",
         pipeline_name="objective_discovery",
@@ -165,7 +169,7 @@ async def test_collection_run_reuses_only_active_work_and_preserves_context(
         context={"document_ids": ["doc_b"]},
     )
     assert retry_created is True
-    assert retry["run_id"] != first["run_id"]
+    assert retry.run_id != first.run_id
 
 
 async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
@@ -182,18 +186,21 @@ async def test_historical_preparation_errors_are_safe_without_rewriting_storage(
     )
     raw_error = "provider failed at /private/provider/config"
     await service.finish_run(
-        run["run_id"],
+        run.run_id,
         status="failed",
         current_node="document_profile",
         errors=[raw_error],
     )
-    detail = await service.get_run(run["run_id"], user_id="user-1")
+    detail = await service.get_run(run.run_id, user_id="user-1")
     listing = await service.list_runs(collection_id="col_a", user_id="user-1")
+    assert detail.errors == (raw_error,)
+    detail = pipeline_run_response(detail)
+    listing = [pipeline_run_response(item) for item in listing]
     assert raw_error not in str(detail)
     assert raw_error not in str(listing)
     assert "classification" in detail["errors"][0].lower()
     assert detail["nodes"]["document_profile"]["errors"] == detail["errors"]
-    stored = await repository.read_run(run["run_id"])
+    stored = await repository.read_run(run.run_id)
     assert raw_error in stored.errors
 
 

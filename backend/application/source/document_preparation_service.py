@@ -85,6 +85,7 @@ def profile_fingerprint(
 
 
 from repositories.source_artifact_repository import SourceArtifactRepo
+from repositories.pipeline_run_repository import PipelineRun
 
 class DocumentPreparationService:
     """Own one application's preparation resources, tasks, and concurrency."""
@@ -106,7 +107,7 @@ class DocumentPreparationService:
                 str(_DEFAULT_PREPARATION_CONCURRENCY),
             ))
         )
-        self._active_workers: set[AsyncTask[dict[str, Any]]] = set()
+        self._active_workers: set[AsyncTask[PipelineRun]] = set()
 
     async def close(self) -> None:
         workers = tuple(self._active_workers)
@@ -120,31 +121,31 @@ class DocumentPreparationService:
         active_runs = await pipeline_run_service.list_interrupted_runs()
         interrupted_count = 0
         for run in active_runs:
-            if run.get("pipeline_name") != "document_preparation":
+            if run.pipeline_name != "document_preparation":
                 continue
-            if run.get("scope_type") != "document":
+            if run.scope_type != "document":
                 continue
-            document_id = str(run["scope_id"])
+            document_id = str(run.scope_id)
             try:
                 document = await collection_service.get_document(
-                    run["collection_id"],
+                    run.collection_id,
                     document_id,
                 )
             except ResourceNotFoundException:
                 document = None
             if document is not None and document.document.status == "processing":
                 await collection_service.update_document_preparation(
-                    run["collection_id"],
+                    run.collection_id,
                     document_id,
                     status="stored",
                 )
             await pipeline_run_service.finish_run(
-                run["run_id"],
+                run.run_id,
                 status="failed",
                 current_node="interrupted",
-                progress_percent=run.get("progress_percent", 0),
+                progress_percent=run.progress_percent,
                 errors=[
-                    *run.get("errors", ()),
+                    *run.errors,
                     "Document preparation was interrupted by a backend restart.",
                 ],
             )
@@ -162,7 +163,7 @@ class DocumentPreparationService:
         document_id: str,
         *,
         user_id: str,
-    ) -> dict[str, Any]:
+    ) -> PipelineRun:
         """Queue or reuse preparation of one collection document."""
 
         await collection_service.get_collection_for_user(collection_id, user_id)
@@ -181,7 +182,7 @@ class DocumentPreparationService:
         )
         if created:
             coroutine = self.run_document_preparation(
-                run["run_id"],
+                run.run_id,
                 collection_id,
                 document_id,
             )
@@ -190,16 +191,16 @@ class DocumentPreparationService:
             except Exception as exc:
                 coroutine.close()
                 logger.exception(
-                    "Document preparation dispatch failed run_id=%s", run["run_id"]
+                    "Document preparation dispatch failed run_id=%s", run.run_id
                 )
                 await self._fail_preparation(
-                    run["run_id"], collection_id, document_id, "dispatch_failed"
+                    run.run_id, collection_id, document_id, "dispatch_failed"
                 )
                 raise ServiceUnavailableException(
                     document_preparation_error_message("dispatch_failed"),
                     data={
                         "code": "document_preparation_dispatch_failed",
-                        "run_id": run["run_id"],
+                        "run_id": run.run_id,
                         "collection_id": collection_id,
                         "document_id": document_id,
                     },
@@ -238,7 +239,7 @@ class DocumentPreparationService:
         run_id: str,
         collection_id: str,
         document_id: str,
-    ) -> dict[str, Any]:
+    ) -> PipelineRun:
         async with self._semaphore:
             stage = "source_parsing"
             preparation_warnings: list[str] = []
@@ -534,7 +535,7 @@ def fingerprints_for(document: Document) -> tuple[str, str]:
     return source_identity, profile_identity
 
 
-def _log_unexpected_failure(worker: AsyncTask[dict[str, Any]]) -> None:
+def _log_unexpected_failure(worker: AsyncTask[PipelineRun]) -> None:
     try:
         worker.result()
     except CancelledError:

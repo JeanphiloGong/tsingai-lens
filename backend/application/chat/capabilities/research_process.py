@@ -10,6 +10,10 @@ from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
     ToolSpec,
 )
+from application.source import collection_service
+from application.pipeline import pipeline_run_service
+from application.pipeline.pipeline_run_service import document_preparation_error_message
+from repositories.pipeline_run_repository import PipelineRunSummary
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from pydantic import BaseModel, ConfigDict
 
@@ -34,30 +38,26 @@ class InspectResearchProcessCapability:
         input_model=InspectResearchProcessToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, pipeline_run_service: Any) -> None:
-        self.collection_service = collection_service
-        self.pipeline_run_service = pipeline_run_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         _arguments: InspectResearchProcessToolRequest,
     ) -> ChatToolResult:
-        collection = await self.collection_service.get_collection_for_user(
+        collection = await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        runs = await self.pipeline_run_service.list_runs(
+        runs = await pipeline_run_service.list_runs(
             user_id=context.user_id,
             collection_id=context.collection_id,
             limit=200,
             offset=0,
         )
-        latest_by_document: dict[str, Mapping[str, Any]] = {}
+        latest_by_document: dict[str, PipelineRunSummary] = {}
         for run in runs:
-            if run.get("scope_type") != "document":
+            if run.scope_type != "document":
                 continue
-            document_id = str(run.get("scope_id") or "").strip()
+            document_id = run.scope_id
             if document_id and document_id not in latest_by_document:
                 latest_by_document[document_id] = run
 
@@ -71,7 +71,7 @@ class InspectResearchProcessCapability:
             (
                 warning
                 for run in latest_by_document.values()
-                for warning in run.get("warnings") or ()
+                for warning in run.warnings
             ),
             limit=_VISIBLE_WARNING_LIMIT,
         )
@@ -79,8 +79,12 @@ class InspectResearchProcessCapability:
             (
                 error
                 for run in latest_by_document.values()
-                if str(run.get("current_node") or "") != "interrupted"
-                for error in run.get("errors") or ()
+                if run.current_node != "interrupted"
+                for error in (
+                    [document_preparation_error_message(run.current_node)]
+                    if run.pipeline_name == "document_preparation" and run.errors
+                    else run.errors
+                )
             ),
             limit=_VISIBLE_FAILURE_LIMIT,
         )
@@ -115,15 +119,15 @@ class InspectResearchProcessCapability:
     @staticmethod
     def _document_record(
         document: Mapping[str, Any],
-        latest_by_document: Mapping[str, Mapping[str, Any]],
+        latest_by_document: Mapping[str, PipelineRunSummary],
     ) -> dict[str, Any]:
         document_id = str(document.get("document_id") or "")
         run = latest_by_document.get(document_id)
         document_status = str(document.get("status") or "stored")
-        run_status = str(run.get("status") or "") if run is not None else ""
+        run_status = run.status if run is not None else ""
         interrupted = (
             run_status == "failed"
-            and str(run.get("current_node") or "") == "interrupted"
+            and run.current_node == "interrupted"
         )
         status = (
             document_status
@@ -140,10 +144,10 @@ class InspectResearchProcessCapability:
             "document_id": document_id,
             "filename": str(document.get("original_filename") or "")[:300],
             "status": status,
-            "run_id": str(run.get("run_id") or "") or None if run else None,
-            "stage": str(run.get("current_node") or "") or None if run else None,
+            "run_id": run.run_id if run is not None else None,
+            "stage": run.current_node if run is not None else None,
             "progress_percent": (
-                max(0, min(100, int(run.get("progress_percent") or 0))) if run else 0
+                run.progress_percent if run else 0
             ),
         }
 

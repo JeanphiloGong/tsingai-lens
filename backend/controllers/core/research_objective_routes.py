@@ -21,7 +21,7 @@ from controllers.core.research_objective_schemas import (
 )
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.core.research_objectives import analysis_state_response
-from controllers.schemas.source.pipeline_run import PipelineRunResponse
+from controllers.schemas.source.pipeline_run import PipelineRunResponse, pipeline_run_response
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,7 +58,7 @@ async def discover_collection_objectives(
     run = await request.app.state.runtime.objective_discovery_service.start_objective_discovery(
         collection_id, tuple(payload.document_ids), user_id=user_id
     )
-    return make_api_response(data=PipelineRunResponse(**run))
+    return make_api_response(data=PipelineRunResponse(**pipeline_run_response(run)))
 
 
 @research_objective_router.get(

@@ -115,7 +115,7 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
         await request_finished.wait()
         observed_request_ids.append(get_request_id())
         observed_request_ids.append(await asyncio.to_thread(get_request_id))
-        return {"run_id": run_id, "status": "completed"}
+        return await pipeline_run_service.finish_run(run_id, status="completed")
 
     monkeypatch.setattr(service, "run_document_preparation", run_preparation)
     token = bind_request_id("req_preparation_trace")
@@ -129,7 +129,7 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
         request_finished.set()
 
     await asyncio.gather(*workers)
-    assert run["status"] == "queued"
+    assert run.status == "queued"
     assert observed_request_ids == ["req_preparation_trace", "req_preparation_trace"]
 
 
@@ -188,7 +188,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
         input_fingerprint="old-preparation-input",
     )
     assert created is True
-    await pipeline_run_service.update_run(task["run_id"], status="running")
+    await pipeline_run_service.update_run(task.run_id, status="running")
     collection_service = CollectionService()
     document_preparation_service.collection_service = collection_service
     document_preparation_service.pipeline_run_service = pipeline_run_service
@@ -200,11 +200,11 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
 
     recovered = await service.recover_interrupted_runs()
 
-    interrupted = await pipeline_run_service.get_run(task["run_id"], user_id="user-1")
+    interrupted = await pipeline_run_service.get_run(task.run_id, user_id="user-1")
     assert recovered == 1
-    assert interrupted["status"] == "failed"
-    assert interrupted["current_node"] == "interrupted"
-    assert interrupted["finished_at"] is not None
+    assert interrupted.status == "failed"
+    assert interrupted.current_node == "interrupted"
+    assert interrupted.timestamps.finished_at is not None
     assert collection_service.document == replace(
         original, document=replace(original.document, status="stored")
     )
@@ -218,7 +218,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
         )
     )
     assert replacement_created is True
-    assert replacement["run_id"] != task["run_id"]
+    assert replacement.run_id != task.run_id
 
 
 async def test_restart_keeps_preparation_active_when_document_reset_fails(
@@ -262,7 +262,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(
         pipeline_name="document_preparation",
         input_fingerprint="preparation-input",
     )
-    await pipeline_run_service.update_run(task["run_id"], status="running")
+    await pipeline_run_service.update_run(task.run_id, status="running")
     collection_service = CollectionService()
     document_preparation_service.collection_service = collection_service
     document_preparation_service.pipeline_run_service = pipeline_run_service
@@ -275,9 +275,9 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(
     with pytest.raises(OSError, match="temporarily unavailable"):
         await service.recover_interrupted_runs()
 
-    still_active = await pipeline_run_service.get_run(task["run_id"], user_id="user-1")
-    assert still_active["status"] == "running"
-    assert still_active["finished_at"] is None
+    still_active = await pipeline_run_service.get_run(task.run_id, user_id="user-1")
+    assert still_active.status == "running"
+    assert still_active.timestamps.finished_at is None
 
 
 async def test_profile_preparation_reuses_current_source_and_profile(
@@ -331,12 +331,6 @@ async def test_profile_preparation_reuses_current_source_and_profile(
             )
             return self.document
 
-    class PipelineRunService:
-        async def update_run(self, run_id: str, **fields):
-            return {"run_id": run_id, **fields}
-
-        async def finish_run(self, run_id: str, **fields):
-            return {"run_id": run_id, **fields}
 
     profile = DocumentProfile(
         document_id=document_id,
@@ -372,7 +366,7 @@ async def test_profile_preparation_reuses_current_source_and_profile(
     )
     collection_service = CollectionService()
     document_preparation_service.collection_service = collection_service
-    document_preparation_service.pipeline_run_service = PipelineRunService()
+    document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = sources
     profile_service = ProfileService()
     document_preparation_service.document_profile_service = profile_service
@@ -382,13 +376,16 @@ async def test_profile_preparation_reuses_current_source_and_profile(
     service = document_preparation_runtime
     service._document_profile_extractor = object()
 
+    run = await pipeline_run_service.create_run(
+        collection_id, "document_preparation", scope_type="document", scope_id=document_id,
+    )
     result = await service.run_document_preparation(
-        "task_test",
+        run.run_id,
         collection_id,
         document_id,
     )
 
-    assert result["status"] == "completed"
+    assert result.status == "completed"
     assert collection_service.document.document.status == "ready"
 
 
@@ -432,12 +429,6 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
             )
             return self.document
 
-    class RunService:
-        async def update_run(self, run_id: str, **fields):
-            return {"run_id": run_id, **fields}
-
-        async def finish_run(self, run_id: str, **fields):
-            return {"run_id": run_id, **fields}
 
     class ProfileService:
         async def read(self, *_args):
@@ -467,7 +458,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
         source_reference_extraction_service, "extract", fail_reference_extraction
     )
     document_preparation_service.collection_service = CollectionService()
-    document_preparation_service.pipeline_run_service = RunService()
+    document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
     profile_service = ProfileService()
     document_preparation_service.document_profile_service = profile_service
@@ -478,16 +469,19 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
     service._document_profile_extractor = object()
     monkeypatch.setattr(service, "_parse_document", parse_document)
 
+    run = await pipeline_run_service.create_run(
+        collection_id, "document_preparation", scope_type="document", scope_id=document_id,
+    )
     result = await service.run_document_preparation(
-        "run_reference_warning",
+        run.run_id,
         collection_id,
         document_id,
     )
 
-    assert result["status"] == "completed"
-    assert result["warnings"] == [
-        "Source reference extraction failed; Source remains available."
-    ]
+    assert result.status == "completed"
+    assert result.warnings == (
+        "Source reference extraction failed; Source remains available.",
+    )
 
 
 async def test_document_preparation_does_not_build_paper_map_before_objective_selection(
@@ -537,12 +531,6 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
             )
             return self.document
 
-    class PipelineRunService:
-        async def update_run(self, run_id: str, **fields):
-            return {"run_id": run_id, **fields}
-
-        async def finish_run(self, run_id: str, **fields):
-            return {"run_id": run_id, **fields}
 
     class ProfileService:
         async def read(self, owner: str, selected: str):
@@ -572,7 +560,7 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
         ),
     )
     document_preparation_service.collection_service = collection_service
-    document_preparation_service.pipeline_run_service = PipelineRunService()
+    document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = source_repository
     profile_service = ProfileService()
     document_preparation_service.document_profile_service = profile_service
@@ -581,11 +569,14 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
     service = document_preparation_runtime
     service._document_profile_extractor = object()
 
+    run = await pipeline_run_service.create_run(
+        collection_id, "document_preparation", scope_type="document", scope_id=document_id,
+    )
     result = await service.run_document_preparation(
-        "task_lazy_map",
+        run.run_id,
         collection_id,
         document_id,
     )
 
-    assert result["status"] == "completed"
+    assert result.status == "completed"
     assert collection_service.document.document.status == "ready"

@@ -10,7 +10,7 @@ from domain.core import DocumentProfile
 from domain.source import SourceDocument
 from fastapi.testclient import TestClient
 from repositories.document_profile_repository import DocumentProfileRepository
-from repositories.pipeline_run_repository import PipelineRunRepository
+from repositories.pipeline_run_repository import PipelineRun, PipelineRunRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
 
 API_V1_PREFIX = "/api/v1"
@@ -32,7 +32,7 @@ class _ImmediateDocumentPreparationService:
         document_id: str,
         *,
         user_id: str,
-    ) -> dict:
+    ) -> PipelineRun:
         await self.collection_service.get_collection_for_user(collection_id, user_id)
         document = await self.collection_service.get_document(
             collection_id,
@@ -84,7 +84,7 @@ class _ImmediateDocumentPreparationService:
             document_analysis_version="test-analysis",
         )
         return await self.pipeline_run_service.finish_run(
-            run["run_id"],
+            run.run_id,
             status="completed",
             current_node="ready",
             progress_percent=100,

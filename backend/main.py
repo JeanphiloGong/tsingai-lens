@@ -242,12 +242,8 @@ async def build_application_runtime() -> ApplicationRuntime:
                         collection_service=collection_service,
                         source_artifact_repository=SourceArtifactRepo,
                     ),
-                    InspectResearchProcessCapability(
-                        collection_service=collection_service,
-                        pipeline_run_service=pipeline_run_service,
-                    ),
+                    InspectResearchProcessCapability(),
                     StartResearchProcessCapability(
-                        collection_service=collection_service,
                         document_preparation_service=preparation,
                     ),
                     QueryPublishedFindingsCapability(

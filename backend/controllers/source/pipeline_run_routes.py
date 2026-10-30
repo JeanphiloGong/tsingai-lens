@@ -5,6 +5,7 @@ from typing import Annotated
 from application.pipeline import pipeline_run_service
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.source.pipeline_run import (
+    pipeline_run_response,
     PipelineRunListResponse,
     PipelineRunResponse,
     PipelineRunSummaryResponse,
@@ -30,7 +31,7 @@ async def prepare_collection_document(
     run = await request.app.state.runtime.document_preparation_service.queue_document_preparation(
         collection_id, document_id, user_id=user_id
     )
-    return make_api_response(data=PipelineRunResponse(**run))
+    return make_api_response(data=PipelineRunResponse(**pipeline_run_response(run)))
 
 
 @pipeline_run_router.get(
@@ -47,7 +48,7 @@ async def list_collection_pipeline_runs(
 ) -> Response:
 
     items = [
-        PipelineRunSummaryResponse(**record)
+        PipelineRunSummaryResponse(**pipeline_run_response(record))
         for record in await pipeline_run_service.list_runs(
             collection_id=collection_id,
             status=status,
@@ -74,4 +75,4 @@ async def get_pipeline_run(
     run_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
 ) -> Response:
     record = await pipeline_run_service.get_run(run_id, user_id=user_id)
-    return make_api_response(data=PipelineRunResponse(**record))
+    return make_api_response(data=PipelineRunResponse(**pipeline_run_response(record)))

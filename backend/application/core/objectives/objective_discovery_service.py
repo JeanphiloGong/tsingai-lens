@@ -44,13 +44,14 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 from repositories.objective_repository import ObjectiveRepo
+from repositories.pipeline_run_repository import PipelineRun
 
 
 class ObjectiveDiscoveryService:
     """Own the discovery tasks admitted by one application."""
 
     def __init__(self) -> None:
-        self._workers: set[AsyncTask[dict[str, Any]]] = set()
+        self._workers: set[AsyncTask[PipelineRun]] = set()
         self._response_client: StructuredResponseClient | None = None
         self._paper_map_extractor: PaperResearchMapExtractor | None = None
         self._axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None
@@ -87,15 +88,15 @@ class ObjectiveDiscoveryService:
         active_runs = await run_service.list_interrupted_runs()
         interrupted_count = 0
         for run in active_runs:
-            if run.get("pipeline_name") != "objective_discovery":
+            if run.pipeline_name != "objective_discovery":
                 continue
             await run_service.finish_run(
-                run["run_id"],
+                run.run_id,
                 status="failed",
                 current_node="interrupted",
-                progress_percent=run.get("progress_percent", 0),
+                progress_percent=run.progress_percent,
                 errors=[
-                    *run.get("errors", ()),
+                    *run.errors,
                     "Research question formation was interrupted by a backend restart.",
                 ],
                 progress_detail={
@@ -118,7 +119,7 @@ class ObjectiveDiscoveryService:
         document_ids: tuple[str, ...],
         *,
         user_id: str,
-    ) -> dict[str, Any]:
+    ) -> PipelineRun:
         """Queue or reuse one collection-level Objective Discovery run."""
         await collection_service.get_collection_for_user(collection_id, user_id)
 
@@ -137,7 +138,7 @@ class ObjectiveDiscoveryService:
             return run
 
         coroutine = self.run_objective_discovery(
-            run["run_id"],
+            run.run_id,
             collection_id,
             tuple(item.document_id for item in document_inputs),
         )
@@ -146,7 +147,7 @@ class ObjectiveDiscoveryService:
         except Exception as exc:  # noqa: BLE001
             coroutine.close()
             await run_service.finish_run(
-                run["run_id"],
+                run.run_id,
                 status="failed",
                 current_node="dispatch_failed",
                 progress_percent=0,
@@ -156,7 +157,7 @@ class ObjectiveDiscoveryService:
                 "Research question formation could not be scheduled. Retry it.",
                 data={
                     "code": "objective_discovery_dispatch_failed",
-                    "run_id": run["run_id"],
+                    "run_id": run.run_id,
                     "collection_id": collection_id,
                 },
             ) from exc
@@ -170,7 +171,7 @@ class ObjectiveDiscoveryService:
         run_id: str,
         collection_id: str,
         document_ids: tuple[str, ...],
-    ) -> dict[str, Any]:
+    ) -> PipelineRun:
         """Execute one admitted discovery run and persist its state."""
 
         run_service = pipeline_run_service
@@ -352,7 +353,7 @@ def _safe_progress_int(value: Any) -> int | None:
         return None
 
 
-def _log_unexpected_failure(worker: AsyncTask[dict[str, Any]]) -> None:
+def _log_unexpected_failure(worker: AsyncTask[PipelineRun]) -> None:
     try:
         worker.result()
     except CancelledError:

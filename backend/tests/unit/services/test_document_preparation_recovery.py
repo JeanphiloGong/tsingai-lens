@@ -115,13 +115,13 @@ async def test_worker_failure_is_terminal_and_retryable(
             patch.setattr(ctx.service, "_parse_document", fail)
         with pytest.raises(OSError) as raised:
             await ctx.service.run_document_preparation(
-                run["run_id"], ctx.collection_id, "doc_a"
+                run.run_id, ctx.collection_id, "doc_a"
             )
         assert raised.value is failure
 
-    failed = await ctx.runs.get_run(run["run_id"], user_id="local-user")
-    assert failed["status"] == "failed"
-    assert failed["finished_at"] is not None
+    failed = await ctx.runs.get_run(run.run_id, user_id="local-user")
+    assert failed.status == "failed"
+    assert failed.timestamps.finished_at is not None
     assert "/private/provider" not in str(failed)
     assert "/private/provider" in caplog.text
     _, created = await ctx.runs.get_or_create_document_run(
@@ -150,8 +150,8 @@ async def test_dispatch_failure_does_not_leave_queued_work(preparation, monkeypa
         collection_id=ctx.collection_id, user_id="local-user"
     )
     assert len(runs) == 1
-    assert runs[0]["status"] == "failed"
-    assert runs[0]["current_node"] == "dispatch_failed"
+    assert runs[0].status == "failed"
+    assert runs[0].current_node == "dispatch_failed"
     assert not ctx.service._active_workers
 
 
@@ -248,17 +248,17 @@ async def test_classification_retry_reuses_source_not_failed_profile(
         ctx.collection_id, "doc_a", user_id="local-user"
     )
     await asyncio.gather(*tuple(ctx.service._active_workers))
-    partial = await ctx.runs.get_run(first["run_id"], user_id="local-user")
-    assert partial["status"] == "partial_success"
-    assert partial["warnings"]
-    assert partial["nodes"]["document_profile"]["status"] == "failed"
+    partial = await ctx.runs.get_run(first.run_id, user_id="local-user")
+    assert partial.status == "partial_success"
+    assert partial.warnings
+    assert partial.nodes[1].status == "failed"
     assert (
         await ctx.collections.get_document(ctx.collection_id, "doc_a")
     ).document.status == "stored"
     source = await ctx.sources.read_document(ctx.collection_id, "doc_a")
     assert source is not None
     if historical_status:
-        await ctx.runs.finish_run(first["run_id"], status=historical_status)
+        await ctx.runs.finish_run(first.run_id, status=historical_status)
         source_id, profile_id = document_preparation_service.fingerprints_for(ctx.document.document)
         await ctx.collections.update_document_preparation(
             ctx.collection_id,
@@ -272,12 +272,12 @@ async def test_classification_retry_reuses_source_not_failed_profile(
     retry = await ctx.service.queue_document_preparation(
         ctx.collection_id, "doc_a", user_id="local-user"
     )
-    assert retry["run_id"] != first["run_id"]
+    assert retry.run_id != first.run_id
     await asyncio.gather(*tuple(ctx.service._active_workers))
-    completed = await ctx.runs.get_run(retry["run_id"], user_id="local-user")
-    assert completed["status"] == "completed"
-    assert completed["warnings"] == []
-    assert completed["nodes"]["document_profile"]["status"] == "succeeded"
+    completed = await ctx.runs.get_run(retry.run_id, user_id="local-user")
+    assert completed.status == "completed"
+    assert completed.warnings == ()
+    assert completed.nodes[1].status == "succeeded"
     assert (
         await ctx.collections.get_document(ctx.collection_id, "doc_a")
     ).document.status == "ready"
@@ -287,7 +287,7 @@ async def test_classification_retry_reuses_source_not_failed_profile(
     reused = await ctx.service.queue_document_preparation(
         ctx.collection_id, "doc_a", user_id="local-user"
     )
-    assert reused["run_id"] == retry["run_id"]
+    assert reused.run_id == retry.run_id
     assert not ctx.service._active_workers
 
 
@@ -311,5 +311,5 @@ async def test_completed_uncertain_classification_is_reusable(preparation, monke
         await ctx.service.queue_document_preparation(
             ctx.collection_id, "doc_a", user_id="local-user"
         )
-    )["run_id"] == first["run_id"]
+    ).run_id == first.run_id
     assert not ctx.service._active_workers

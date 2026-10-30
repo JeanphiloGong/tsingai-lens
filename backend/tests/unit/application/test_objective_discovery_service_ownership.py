@@ -59,7 +59,7 @@ def _service(pipeline_run_service: ModuleType) -> objective_discovery_service.Ob
 async def _wait_for_run(pipeline_run_service: ModuleType, run_id: str) -> None:
     for _ in range(100):
         run = await pipeline_run_service.get_run(run_id, user_id="user-1")
-        if run["status"] in {"completed", "failed", "partial_success"}:
+        if run.status in {"completed", "failed", "partial_success"}:
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"run did not finish: {run_id}")
@@ -150,14 +150,14 @@ async def test_objective_discovery_reuses_one_active_run_and_executes_once(
         "col_a", ("doc_a", "doc_b"), user_id="user-1"
     )
 
-    assert first["run_id"] == duplicate["run_id"]
-    assert first["status"] == "queued"
-    await _wait_for_run(pipeline_run_service, first["run_id"])
+    assert first.run_id == duplicate.run_id
+    assert first.status == "queued"
+    await _wait_for_run(pipeline_run_service, first.run_id)
 
-    completed = await pipeline_run_service.get_run(first["run_id"], user_id="user-1")
+    completed = await pipeline_run_service.get_run(first.run_id, user_id="user-1")
     assert calls == 1
-    assert completed["status"] == "completed"
-    assert completed["current_node"] == "objectives_ready"
+    assert completed.status == "completed"
+    assert completed.current_node == "objectives_ready"
 
 
 async def test_objective_discovery_records_failure_and_allows_retry(
@@ -187,17 +187,17 @@ async def test_objective_discovery_records_failure_and_allows_retry(
     first = await service.start_objective_discovery(
         "col_a", ("doc_a",), user_id="user-1"
     )
-    await _wait_for_run(pipeline_run_service, first["run_id"])
-    failed = await pipeline_run_service.get_run(first["run_id"], user_id="user-1")
+    await _wait_for_run(pipeline_run_service, first.run_id)
+    failed = await pipeline_run_service.get_run(first.run_id, user_id="user-1")
 
-    assert failed["status"] == "failed"
-    assert failed["errors"] == ["model unavailable"]
+    assert failed.status == "failed"
+    assert failed.errors == ("model unavailable",)
 
     retry = await service.start_objective_discovery(
         "col_a", ("doc_a",), user_id="user-1"
     )
-    assert retry["run_id"] != first["run_id"]
-    await _wait_for_run(pipeline_run_service, retry["run_id"])
+    assert retry.run_id != first.run_id
+    await _wait_for_run(pipeline_run_service, retry.run_id)
 
 
 async def test_objective_discovery_progress_does_not_move_backwards(
@@ -214,7 +214,7 @@ async def test_objective_discovery_progress_does_not_move_backwards(
     )
     pending_updates = []
     report = objective_discovery_service._build_discovery_progress_callback(
-        run["run_id"],
+        run.run_id,
         pending_updates,
     )
 
@@ -227,7 +227,7 @@ async def test_objective_discovery_progress_does_not_move_backwards(
         }
     )
     await asyncio.wrap_future(pending_updates[-1])
-    mapped = await pipeline_run_service.get_run(run["run_id"], user_id="user-1")
+    mapped = await pipeline_run_service.get_run(run.run_id, user_id="user-1")
 
     report(
         {
@@ -238,9 +238,9 @@ async def test_objective_discovery_progress_does_not_move_backwards(
         }
     )
     await asyncio.wrap_future(pending_updates[-1])
-    aggregating = await pipeline_run_service.get_run(run["run_id"], user_id="user-1")
+    aggregating = await pipeline_run_service.get_run(run.run_id, user_id="user-1")
 
-    assert aggregating["progress_percent"] >= mapped["progress_percent"]
+    assert aggregating.progress_percent >= mapped.progress_percent
 
 
 async def test_objective_discovery_restart_recovery_allows_retry(
@@ -254,10 +254,10 @@ async def test_objective_discovery_restart_recovery_allows_retry(
         input_fingerprint="scope-a",
         context={"document_ids": ["doc_a"]},
     )
-    await pipeline_run_service.update_run(active["run_id"], status="running")
+    await pipeline_run_service.update_run(active.run_id, status="running")
 
     recovered = await service.recover_interrupted_discoveries()
-    interrupted = await pipeline_run_service.get_run(active["run_id"], user_id="user-1")
+    interrupted = await pipeline_run_service.get_run(active.run_id, user_id="user-1")
     retry, retry_created = await pipeline_run_service.get_or_create_collection_run(
         collection_id="col_a",
         pipeline_name="objective_discovery",
@@ -266,7 +266,7 @@ async def test_objective_discovery_restart_recovery_allows_retry(
     )
 
     assert recovered == 1
-    assert interrupted["status"] == "failed"
-    assert interrupted["current_node"] == "interrupted"
+    assert interrupted.status == "failed"
+    assert interrupted.current_node == "interrupted"
     assert retry_created is True
-    assert retry["run_id"] != active["run_id"]
+    assert retry.run_id != active.run_id

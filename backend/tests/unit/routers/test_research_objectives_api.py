@@ -69,7 +69,10 @@ from repositories.objective_repository import (
 )
 from repositories.pipeline_run_repository import (
     ExecutionStats,
+    ExecutionTimestamps,
     ModelUsage,
+    PipelineRun,
+    PipelineRunStatus,
     TokenUsage,
 )
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -279,30 +282,31 @@ class _DiscoveryService:
 
     async def start_objective_discovery(self, collection_id, document_ids, *, user_id):
         self.discovery_calls.append((collection_id, document_ids))
-        return {
-            "run_id": "run-discovery-1",
-            "collection_id": collection_id,
-            "pipeline_name": "objective_discovery",
-            "scope_type": "collection",
-            "scope_id": collection_id,
-            "mode": "standard",
-            "input_fingerprint": "scope-fingerprint",
-            "status": "queued",
-            "current_node": "queued",
-            "progress_percent": 0,
-            "progress_detail": {
+        return PipelineRun(
+            run_id="run-discovery-1",
+            collection_id=collection_id,
+            pipeline_name="objective_discovery",
+            scope_type="collection",
+            scope_id=collection_id,
+            mode="standard",
+            input_fingerprint="scope-fingerprint",
+            status=PipelineRunStatus.QUEUED,
+            current_node="queued",
+            nodes=(),
+            stats=ExecutionStats(),
+            progress_detail={
                 "phase": "queued",
                 "unit": "documents",
                 "total": len(document_ids),
                 "message": "Research question formation is queued.",
             },
-            "errors": [],
-            "warnings": [],
-            "created_at": "2026-08-31T00:00:00+00:00",
-            "updated_at": "2026-08-31T00:00:00+00:00",
-            "started_at": None,
-            "finished_at": None,
-        }
+            errors=(),
+            warnings=(),
+            timestamps=ExecutionTimestamps(
+                created_at="2026-08-31T00:00:00+00:00",
+                updated_at="2026-08-31T00:00:00+00:00",
+            ),
+        )
 
     async def preview_objective_scope(self, collection_id, objective_id, *, user_id):
         self.scope_calls.append((collection_id, objective_id))

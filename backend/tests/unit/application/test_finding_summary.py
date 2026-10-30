@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis import analysis_record_source
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -323,9 +325,12 @@ async def test_service_rechecks_published_version_after_generation(monkeypatch):
 
     finding, evidence = review_input()
     objective_analysis_service.ObjectiveRepo = SimpleNamespace(
-        list_evidence=AsyncMock(return_value=(tuple(evidence), 2))
+        read_analysis=AsyncMock(return_value=SimpleNamespace(
+            status="succeeded", origin="human_authored", scientific_record_source="authored_snapshot",
+        )),
+        list_evidence=AsyncMock(return_value=(tuple(evidence), 2)),
     )
-    objective_analysis_service.experiment_compatibility_projection = None
+    analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
     objective_analysis_service.experiment_analysis_service = None
     objective_analysis_service.objective_input_service = None
     objective_analysis_service.document_profile_service = None

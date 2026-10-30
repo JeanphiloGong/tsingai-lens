@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from types import ModuleType, SimpleNamespace
 
 import pytest
-from application.core.objectives.analysis import experiment_compatibility_projection
+from application.core.objectives.analysis import experiment_projection
 from controllers.schemas.core.research_objectives import (
     FindingResponse,
     ObjectiveEvidenceResponse,
@@ -208,32 +208,32 @@ class _ObjectiveRepository:
 
 
 def _service() -> ModuleType:
-    experiment_compatibility_projection.ObjectiveRepo = _ObjectiveRepository()
-    experiment_compatibility_projection.experiment_query_service.ObjectiveRepo = (
+    experiment_projection.ObjectiveRepo = _ObjectiveRepository()
+    experiment_projection.experiment_query_service.ObjectiveRepo = (
         _ObjectiveRepository()
     )
-    experiment_compatibility_projection.experiment_query_service.PaperExperimentRepo = (
+    experiment_projection.experiment_query_service.PaperExperimentRepo = (
         _Experiments()
     )
-    experiment_compatibility_projection.experiment_query_service.ObjectiveExperimentSelectionRepo = (
+    experiment_projection.experiment_query_service.ObjectiveExperimentSelectionRepo = (
         _Selections()
     )
-    experiment_compatibility_projection.experiment_query_service.ComparisonGroupRepo = (
+    experiment_projection.experiment_query_service.ComparisonGroupRepo = (
         _Groups()
     )
-    experiment_compatibility_projection.experiment_query_service.ExperimentFindingRepo = (
+    experiment_projection.experiment_query_service.ExperimentFindingRepo = (
         _Findings()
     )
-    return experiment_compatibility_projection
+    return experiment_projection
 
 
 async def test_projection_preserves_existing_finding_and_evidence_shapes() -> None:
     service = _service()
 
-    findings, total = await service.list_findings(
+    findings, total = await service.list_analysis_findings(
         "collection-1", "objective-1", 1, offset=0, limit=50
     )
-    evidence, evidence_total = await service.list_evidence(
+    evidence, evidence_total = await service.list_analysis_evidence(
         "collection-1", "objective-1", 1, finding_id="finding-1", offset=0, limit=50
     )
 
@@ -252,7 +252,7 @@ async def test_projection_preserves_existing_finding_and_evidence_shapes() -> No
 async def test_projection_returns_no_legacy_evidence_for_unknown_finding() -> None:
     service = _service()
 
-    evidence, total = await service.list_evidence(
+    evidence, total = await service.list_analysis_evidence(
         "collection-1", "objective-1", 1, finding_id="missing", offset=0, limit=50
     )
 
@@ -261,26 +261,26 @@ async def test_projection_returns_no_legacy_evidence_for_unknown_finding() -> No
 
 
 async def test_projection_rejects_unknown_analysis_snapshot() -> None:
-    experiment_compatibility_projection.experiment_query_service.PaperExperimentRepo = (
+    experiment_projection.experiment_query_service.PaperExperimentRepo = (
         _Experiments()
     )
-    experiment_compatibility_projection.experiment_query_service.ObjectiveExperimentSelectionRepo = (
+    experiment_projection.experiment_query_service.ObjectiveExperimentSelectionRepo = (
         _Selections()
     )
-    experiment_compatibility_projection.experiment_query_service.ComparisonGroupRepo = (
+    experiment_projection.experiment_query_service.ComparisonGroupRepo = (
         _Groups()
     )
-    experiment_compatibility_projection.experiment_query_service.ExperimentFindingRepo = (
+    experiment_projection.experiment_query_service.ExperimentFindingRepo = (
         _Findings()
     )
-    experiment_compatibility_projection.ObjectiveRepo = _ObjectiveRepository()
-    experiment_compatibility_projection.experiment_query_service.ObjectiveRepo = (
+    experiment_projection.ObjectiveRepo = _ObjectiveRepository()
+    experiment_projection.experiment_query_service.ObjectiveRepo = (
         _ObjectiveRepository()
     )
-    service = experiment_compatibility_projection
+    service = experiment_projection
 
     with pytest.raises(ResourceNotFoundException, match="Analysis snapshot not found"):
-        await service.list_findings(
+        await service.list_analysis_findings(
             "collection-1", "objective-1", 99, offset=0, limit=50
         )
 
@@ -320,9 +320,9 @@ async def test_projection_keeps_captured_response_and_typed_review_values() -> N
     service = _service()
     identity = ("collection-1", "objective-1", 1)
     payload = {
-        "findings": (await service.list_findings(*identity))[0],
-        "evidence": (await service.list_evidence(*identity))[0],
-        "contributions": await service.list_contributions(*identity),
+        "findings": (await service.list_analysis_findings(*identity))[0],
+        "evidence": (await service.list_analysis_evidence(*identity))[0],
+        "contributions": await service.list_analysis_contributions(*identity),
     }
     baseline = json.loads(
         (

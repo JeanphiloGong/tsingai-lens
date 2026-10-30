@@ -58,7 +58,7 @@ class _ProjectionState:
 from repositories.objective_repository import ObjectiveRepo
 
 
-async def list_findings(
+async def list_analysis_findings(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
@@ -84,7 +84,7 @@ async def list_findings(
     return records[start : start + page_size], len(records)
 
 
-async def read_finding(
+async def read_analysis_finding(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
@@ -98,7 +98,7 @@ async def read_finding(
     return _project_finding(finding, state)[1] if finding is not None else None
 
 
-async def list_evidence(
+async def list_analysis_evidence(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
@@ -131,7 +131,7 @@ async def list_evidence(
     return records[start : start + page_size], len(records)
 
 
-async def list_contributions(
+async def list_analysis_contributions(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
@@ -1390,10 +1390,10 @@ def _edge(
 
 
 __all__ = [
-    "list_findings",
-    "read_finding",
-    "list_evidence",
-    "list_contributions",
+    "list_analysis_findings",
+    "read_analysis_finding",
+    "list_analysis_evidence",
+    "list_analysis_contributions",
     "read_analysis_records",
     "build_evidence_map",
 ]

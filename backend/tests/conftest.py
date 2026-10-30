@@ -197,9 +197,10 @@ def collection_service(postgres_session_factory):
 def _isolate_application_module_dependencies(monkeypatch):
     """Restore directly patched singleton dependencies and per-test task state."""
     import application.chat.session_service as _test_chat_session_service
+    import application.core.objectives.analysis.analysis_record_source as _test_analysis_record_source
     import application.core.document_profiles.service as _test_document_profile_service
     import application.core.objectives.analysis.experiment_analysis_writer as _test_experiment_analysis_writer
-    import application.core.objectives.analysis.experiment_compatibility_projection as _test_experiment_compatibility_projection
+    import application.core.objectives.analysis.experiment_projection as _test_experiment_projection
     import application.core.objectives.analysis.experiment_finding_synthesis as _test_experiment_finding_synthesis_service
     import application.core.objectives.analysis.experiment_query_service as _test_experiment_query_service
     import application.core.objectives.analysis_service as _test_objective_analysis_service
@@ -242,6 +243,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     )
 
     dependencies = (
+        (_test_analysis_record_source, ["ObjectiveRepo"]),
         (
             _test_chat_session_service,
             [
@@ -269,7 +271,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             ],
         ),
         (
-            _test_experiment_compatibility_projection,
+            _test_experiment_projection,
             ["ObjectiveRepo", "experiment_query_service"],
         ),
         (_test_experiment_finding_synthesis_service, []),
@@ -292,7 +294,7 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "document_profile_service",
                 "experiment_analysis_service",
                 "experiment_analysis_writer",
-                "experiment_compatibility_projection",
+                "experiment_projection",
                 "objective_input_service",
             ],
         ),
@@ -320,7 +322,7 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "ObjectiveRepo",
                 "collection_service",
-                "experiment_compatibility_projection",
+                "experiment_projection",
             ],
         ),
         (_test_objective_candidate_service, []),
@@ -354,7 +356,7 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "collection_service",
                 "FindingReviewRepo",
                 "ObjectiveRepo",
-                "experiment_compatibility_projection",
+                "experiment_projection",
             ],
         ),
         (

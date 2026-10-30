@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis import analysis_record_source
+
 import asyncio
 import json
 from copy import deepcopy
@@ -175,6 +177,7 @@ def test_candidate_request_preserves_paper_id_case_through_actual_authoring():
         get_collection_for_user=AsyncMock(), get_document=AsyncMock()
     )
     objective_authoring_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
     capability = CreateObjectiveCandidateCapability(
         objective_authoring_service=objective_authoring_service,
     )

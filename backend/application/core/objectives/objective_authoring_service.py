@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any
 
-from application.core.objectives.analysis import experiment_compatibility_projection
+from application.core.objectives.analysis import experiment_projection
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
@@ -163,13 +163,11 @@ async def _canonicalize_derived_objective_basis(
 
         if kind == "finding":
             if await should_read_experiment_projection(
-                objective_repository=ObjectiveRepo,
-                experiment_projection=experiment_compatibility_projection,
                 collection_id=collection_id,
                 objective_id=parent_objective_id,
                 analysis_version=parent_analysis_version,
             ):
-                record = await experiment_compatibility_projection.read_finding(
+                record = await experiment_projection.read_analysis_finding(
                     collection_id,
                     parent_objective_id,
                     parent_analysis_version,
@@ -266,13 +264,11 @@ async def _published_evidence_by_id(
     offset = 0
     while True:
         if await should_read_experiment_projection(
-            objective_repository=ObjectiveRepo,
-            experiment_projection=experiment_compatibility_projection,
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
         ):
-            records, total = await experiment_compatibility_projection.list_evidence(
+            records, total = await experiment_projection.list_analysis_evidence(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -302,13 +298,11 @@ async def _published_paper_contribution_by_id(
     document_id: str,
 ) -> Any | None:
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
-        records = await experiment_compatibility_projection.list_contributions(
+        records = await experiment_projection.list_analysis_contributions(
             collection_id,
             objective_id,
             analysis_version,

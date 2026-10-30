@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis import analysis_record_source
+
 from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
@@ -441,7 +443,7 @@ class _RecordedExperimentProjection:
         )
         return (self.finding_value,), (self.evidence_value,), (self.contribution_value,)
 
-    async def list_findings(
+    async def list_analysis_findings(
         self, collection_id, objective_id, analysis_version, *, offset=0, limit=50
     ):
         assert (collection_id, objective_id, analysis_version) == (
@@ -452,7 +454,7 @@ class _RecordedExperimentProjection:
         records = (self.finding,)
         return records[offset : offset + limit], len(records)
 
-    async def read_finding(
+    async def read_analysis_finding(
         self, collection_id, objective_id, analysis_version, finding_id
     ):
         assert (collection_id, objective_id, analysis_version, finding_id) == (
@@ -463,7 +465,7 @@ class _RecordedExperimentProjection:
         )
         return self.finding
 
-    async def list_evidence(
+    async def list_analysis_evidence(
         self,
         collection_id,
         objective_id,
@@ -482,7 +484,7 @@ class _RecordedExperimentProjection:
         records = (self.evidence,)
         return records[offset : offset + limit], len(records)
 
-    async def list_contributions(self, collection_id, objective_id, analysis_version):
+    async def list_analysis_contributions(self, collection_id, objective_id, analysis_version):
         assert (collection_id, objective_id, analysis_version) == (
             "col-gold",
             "obj-1",
@@ -776,6 +778,7 @@ async def _finding_feedback_service(*, postgres_session_factory) -> ModuleType:
     finding_feedback_service.ObjectiveRepo = await _published_objective_repository(
         postgres_session_factory=postgres_session_factory
     )
+    analysis_record_source.ObjectiveRepo = finding_feedback_service.ObjectiveRepo
     return finding_feedback_service
 
 
@@ -785,6 +788,7 @@ def _prediction_snapshot_service(
     evaluation_repository = EvaluationRepository()
     prediction_snapshot_service.collection_service = FakeCollectionService()
     prediction_snapshot_service.ObjectiveRepo = objective_repository
+    analysis_record_source.ObjectiveRepo = prediction_snapshot_service.ObjectiveRepo
     prediction_snapshot_service.EvaluationRepo = evaluation_repository
     return (
         prediction_snapshot_service,
@@ -880,12 +884,14 @@ async def test_experiment_projection_drives_snapshot_and_feedback_reads(
     evaluation_repository = EvaluationRepository()
     prediction_snapshot_service.collection_service = FakeCollectionService()
     prediction_snapshot_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = prediction_snapshot_service.ObjectiveRepo
     prediction_snapshot_service.EvaluationRepo = evaluation_repository
     prediction_snapshot_service.experiment_projection = projection
     snapshot_service = prediction_snapshot_service
     finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
     finding_feedback_service.ObjectiveRepo = repository
-    finding_feedback_service.experiment_compatibility_projection = projection
+    analysis_record_source.ObjectiveRepo = finding_feedback_service.ObjectiveRepo
+    finding_feedback_service.experiment_projection = projection
     feedback_service = finding_feedback_service
 
     snapshot = await snapshot_service.create_core_snapshot(
@@ -939,23 +945,24 @@ async def test_authored_analysis_uses_its_snapshot_even_when_projection_is_avail
     )
 
     class RejectingProjection:
-        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_findings(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_evidence(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def read_finding(self, *args, **kwargs):  # noqa: ARG002
+        async def read_analysis_finding(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def list_contributions(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_contributions(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
     snapshot_service, _ = _prediction_snapshot_service(repository)
     snapshot_service.experiment_projection = RejectingProjection()
     finding_feedback_service.FindingReviewRepo = FindingReviewRepository()
     finding_feedback_service.ObjectiveRepo = repository
-    finding_feedback_service.experiment_compatibility_projection = RejectingProjection()
+    analysis_record_source.ObjectiveRepo = finding_feedback_service.ObjectiveRepo
+    finding_feedback_service.experiment_projection = RejectingProjection()
     feedback_service = finding_feedback_service
 
     snapshot = await snapshot_service.create_core_snapshot(

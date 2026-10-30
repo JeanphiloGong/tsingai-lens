@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis import analysis_record_source
+
 from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 
@@ -224,7 +226,7 @@ class _ParentExperimentProjection:
         self.evidence = repository.evidence
         self.contribution = repository.contribution
 
-    async def read_finding(
+    async def read_analysis_finding(
         self, collection_id, objective_id, analysis_version, finding_id
     ):
         assert (collection_id, objective_id, analysis_version, finding_id) == (
@@ -235,7 +237,7 @@ class _ParentExperimentProjection:
         )
         return self.finding
 
-    async def list_evidence(
+    async def list_analysis_evidence(
         self,
         collection_id,
         objective_id,
@@ -254,7 +256,7 @@ class _ParentExperimentProjection:
         )
         return records[offset : offset + limit], len(records)
 
-    async def list_contributions(self, collection_id, objective_id, analysis_version):
+    async def list_analysis_contributions(self, collection_id, objective_id, analysis_version):
         if (collection_id, objective_id, analysis_version) == (
             "col-1",
             "objective-parent",
@@ -476,6 +478,7 @@ async def test_authored_candidate_retry_with_same_lineage_remains_idempotent(
 def _service(*, repository: ObjectiveRepository) -> ModuleType:
     objective_authoring_service.collection_service = _CollectionService()
     objective_authoring_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
     return objective_authoring_service
 
 
@@ -619,7 +622,8 @@ async def test_derived_objective_reads_parent_basis_from_experiment_projection()
     repository.list_contributions = reject_legacy_read
     objective_authoring_service.collection_service = _CollectionService()
     objective_authoring_service.ObjectiveRepo = repository
-    objective_authoring_service.experiment_compatibility_projection = projection
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
+    objective_authoring_service.experiment_projection = projection
     service = objective_authoring_service
 
     created = await service.create_chat_assisted_candidate(
@@ -768,6 +772,7 @@ async def test_derived_candidate_requires_the_current_published_parent_version()
     repository = _ParentObjectiveRepository(published_version=3)
     objective_authoring_service.collection_service = _CollectionService()
     objective_authoring_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
     service = objective_authoring_service
     kwargs = {
         "collection_id": "col-1",

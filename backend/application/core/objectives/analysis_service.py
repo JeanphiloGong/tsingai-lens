@@ -25,7 +25,7 @@ from application.core.objectives import (
 )
 from application.core.objectives.analysis import (
     experiment_analysis_writer,
-    experiment_compatibility_projection,
+    experiment_projection,
 )
 from application.core.objectives.analysis.experiment_analysis_writer import (
     ExperimentAnalysisWriteResult,
@@ -578,13 +578,11 @@ async def list_findings(
         analysis_version,
     )
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=version,
     ):
-        findings, total = await experiment_compatibility_projection.list_findings(
+        findings, total = await experiment_projection.list_analysis_findings(
             collection_id,
             objective_id,
             version,
@@ -793,13 +791,11 @@ async def get_finding(
         analysis_version,
     )
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=version,
     ):
-        finding = await experiment_compatibility_projection.read_finding(
+        finding = await experiment_projection.read_analysis_finding(
             collection_id,
             objective_id,
             version,
@@ -1002,7 +998,12 @@ async def _finding_evidence_reviews(
 ) -> dict[str, Any]:
     if not findings:
         return {}
-    evidence = await _all_published_evidence(collection_id, objective_id, version)
+    evidence = await _all_published_evidence(
+        collection_id, objective_id, version,
+        experiment_backed=await should_read_experiment_projection(
+            collection_id=collection_id, objective_id=objective_id, analysis_version=version,
+        ),
+    )
     evidence_by_id = {
         str(_record_value(item, "evidence_id") or ""): item for item in evidence
     }
@@ -1044,13 +1045,11 @@ async def summarize_finding(
             data={"code": "summary_stale_analysis"},
         ) from exc
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
-        records, total = await experiment_compatibility_projection.list_evidence(
+        records, total = await experiment_projection.list_analysis_evidence(
             collection_id,
             objective_id,
             analysis_version,
@@ -1276,13 +1275,11 @@ async def list_evidence(
         analysis_version,
     )
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=version,
     ):
-        evidence, total = await experiment_compatibility_projection.list_evidence(
+        evidence, total = await experiment_projection.list_analysis_evidence(
             collection_id,
             objective_id,
             version,
@@ -1521,24 +1518,20 @@ async def get_evidence_map(
         collection_id,
         objective_id,
         version,
+        experiment_backed=is_experiment_backed_analysis(analysis),
     )
     evidence_records = await _all_published_evidence(
         collection_id,
         objective_id,
         version,
+        experiment_backed=is_experiment_backed_analysis(analysis),
     )
     profiles = await document_profile_service.read_document_profiles(
         collection_id,
         tuple(item.document_id for item in analysis.document_inputs),
     )
-    if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=version,
-    ):
-        return await experiment_compatibility_projection.build_evidence_map(
+    if is_experiment_backed_analysis(analysis):
+        return await experiment_projection.build_evidence_map(
             objective=objective,
             analysis=analysis,
             profiles=profiles,
@@ -1561,15 +1554,11 @@ async def _all_published_findings(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
+    *,
+    experiment_backed: bool,
 ) -> tuple[Any, ...]:
-    if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=analysis_version,
-    ):
-        findings, _ = await experiment_compatibility_projection.list_findings(
+    if experiment_backed:
+        findings, _ = await experiment_projection.list_analysis_findings(
             collection_id,
             objective_id,
             analysis_version,
@@ -1597,15 +1586,11 @@ async def _all_published_evidence(
     collection_id: str,
     objective_id: str,
     analysis_version: int,
+    *,
+    experiment_backed: bool,
 ) -> tuple[Any, ...]:
-    if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=analysis_version,
-    ):
-        evidence, _ = await experiment_compatibility_projection.list_evidence(
+    if experiment_backed:
+        evidence, _ = await experiment_projection.list_analysis_evidence(
             collection_id,
             objective_id,
             analysis_version,
@@ -1696,19 +1681,16 @@ async def _result(
     evidence_records = ()
     warnings: list[str] = []
     if published is not None:
-        if (
-            is_experiment_backed_analysis(published)
-            and experiment_compatibility_projection is not None
-        ):
+        if is_experiment_backed_analysis(published):
             paper_contributions = (
-                await experiment_compatibility_projection.list_contributions(
+                await experiment_projection.list_analysis_contributions(
                     collection_id,
                     objective.objective_id,
                     published.analysis_version,
                 )
             )
             findings, finding_total = (
-                await experiment_compatibility_projection.list_findings(
+                await experiment_projection.list_analysis_findings(
                     collection_id,
                     objective.objective_id,
                     published.analysis_version,
@@ -1720,6 +1702,7 @@ async def _result(
                 collection_id,
                 objective.objective_id,
                 published.analysis_version,
+                experiment_backed=True,
             )
         else:
             contributions = await ObjectiveRepo.list_contributions(
@@ -1745,6 +1728,7 @@ async def _result(
                 collection_id,
                 objective.objective_id,
                 published.analysis_version,
+                experiment_backed=False,
             )
         seen_warnings: set[str] = set()
         for contribution in paper_contributions:

@@ -42,7 +42,7 @@ Only a ready, source-grounded selection can enter Finding synthesis.
 | Bind | `bind_model_output` | Reconciled Draft -> formal Source references and `PaperExperimentRevision` | None | None |
 | Write/select | `experiment_analysis_writer.write_experiment_analysis` | Revisions -> immutable revisions and Objective selections | None | Revisions and selections |
 | Synthesize | `experiment_finding_synthesis` | Ready selections -> optional groups and Findings | Optional assertion annotation | Groups/Findings |
-| Project | `ExperimentCompatibilityProjection` | Fixed experiment graph -> existing Objective/Evidence/Finding response shapes | None | None |
+| Project | `experiment_projection` functions | Fixed experiment graph -> existing Objective/Evidence/Finding read values | None | None |
 
 `source_extraction.py` supplies Source payload and context helpers used by
 screening, routing, and experiment bundle construction. Its legacy
@@ -58,6 +58,13 @@ cleaning identifiers, dropping records, or changing numeric values. Domain
 objects retain scientific relationships and version rules. Source-local
 response validation uses those same domain rules inside the existing model
 repair loop, so an invalid attribution is rejected before persistence.
+
+Scientific reads choose their owner from the saved completed analysis version.
+Automatic `experiment_graph` analyses use the experiment projection; authored and
+historical snapshots retain their saved scientific records. A missing or unfinished
+analysis is rejected before record selection. Projection module availability is
+not a storage-source flag, and a view that already loaded its analysis reuses
+that source decision rather than rereading the same metadata.
 
 ## Candidate Contract and Scientific Gates
 
@@ -152,7 +159,7 @@ for the end-to-end scenario and commands. Focused regression tests are:
 - `tests/unit/application/test_paper_experiment_extraction.py`
 - `tests/unit/application/test_paper_experiment_authoring_contract.py`
 - `tests/unit/application/test_experiment_analysis_writer.py`
-- `tests/unit/application/test_experiment_compatibility_projection.py`
+- `tests/unit/application/test_experiment_projection.py`
 - `tests/unit/application/test_objective_analysis_service.py`
 
 The live benchmark is evidence about a particular model, prompt, Source bundle,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis import analysis_record_source
+
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -1077,6 +1079,7 @@ def _client(
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
     actual_analysis_service.ObjectiveRepo = repository or _Repository()
+    analysis_record_source.ObjectiveRepo = actual_analysis_service.ObjectiveRepo
     actual_analysis_service.collection_service = SimpleNamespace(
         get_collection_for_user=AsyncMock(
             return_value={"owner_user_id": "user-researcher"}

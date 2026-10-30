@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.core.objectives.analysis import analysis_record_source
+
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
@@ -170,6 +172,7 @@ def _analysis(
         analysis_version=version,
         document_inputs=document_inputs,
         pipeline_version="test.v1",
+        scientific_record_source="legacy_snapshot",
         model_name="test-model",
         prompt_versions={},
         total_document_count=total_document_count,
@@ -938,7 +941,7 @@ def _service(
     repository=None,
     analyzer=None,
     experiment_analysis_writer=None,
-    experiment_compatibility_projection=None,
+    experiment_projection=None,
 ):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeObjectiveExperimentAnalysisService()
@@ -949,14 +952,15 @@ def _service(
         repository.native_findings = experiment_analysis_writer.findings
     inputs = FakeObjectiveInputService()
     objective_analysis_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
     objective_analysis_service.experiment_analysis_service = analyzer
     objective_analysis_service.objective_input_service = inputs
     objective_analysis_service.document_profile_service = (
         inputs.document_profile_service
     )
     objective_analysis_service.experiment_analysis_writer = experiment_analysis_writer
-    objective_analysis_service.experiment_compatibility_projection = (
-        experiment_compatibility_projection
+    objective_analysis_service.experiment_projection = (
+        experiment_projection
     )
     objective_analysis_service.collection_service = SimpleNamespace(
         get_collection_for_user=_owned_collection
@@ -1020,17 +1024,17 @@ async def test_analysis_shutdown_and_concurrency_are_owned_by_each_app(monkeypat
         await second.close()
 
 
-class RecordingExperimentCompatibilityProjection:
-    async def list_findings(self, *args, **kwargs):
+class RecordingExperimentProjection:
+    async def list_analysis_findings(self, *args, **kwargs):
         return (
             ({"finding_id": "projected-finding", "paper_contributions": []},),
             1,
         )
 
-    async def read_finding(self, *args, **kwargs):
+    async def read_analysis_finding(self, *args, **kwargs):
         return {"finding_id": "projected-finding", "paper_contributions": []}
 
-    async def list_evidence(self, *args, **kwargs):
+    async def list_analysis_evidence(self, *args, **kwargs):
         return (
             (
                 {
@@ -1046,10 +1050,14 @@ class RecordingExperimentCompatibilityProjection:
 async def test_analysis_queries_use_experiment_projection_without_changing_arguments() -> (
     None
 ):
-    projection = RecordingExperimentCompatibilityProjection()
+    projection = RecordingExperimentProjection()
+    repository = FakeObjectiveRepository(published=True)
+    repository.analyses[1] = replace(
+        repository.analyses[1], scientific_record_source="experiment_graph",
+    )
     service, _repository, _analyzer = _service(
-        repository=FakeObjectiveRepository(published=True),
-        experiment_compatibility_projection=projection,
+        repository=repository,
+        experiment_projection=projection,
     )
 
     findings = await service.list_findings(
@@ -1088,15 +1096,15 @@ async def test_authored_analysis_keeps_authored_snapshot_when_projection_is_avai
     repository.analyses[1] = authored
 
     class RejectingProjection:
-        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_findings(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
-        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_evidence(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail("authored analysis must not read the experiment projection")
 
     service, _, _ = _service(
         repository=repository,
-        experiment_compatibility_projection=RejectingProjection(),
+        experiment_projection=RejectingProjection(),
     )
 
     findings = await service.list_findings(
@@ -1120,19 +1128,19 @@ async def test_legacy_automatic_analysis_keeps_snapshot_when_projection_is_avail
     )
 
     class RejectingProjection:
-        async def list_findings(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_findings(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail(
                 "legacy automatic analysis must not read the experiment projection"
             )
 
-        async def list_evidence(self, *args, **kwargs):  # noqa: ARG002
+        async def list_analysis_evidence(self, *args, **kwargs):  # noqa: ARG002
             pytest.fail(
                 "legacy automatic analysis must not read the experiment projection"
             )
 
     service, _, _ = _service(
         repository=repository,
-        experiment_compatibility_projection=RejectingProjection(),
+        experiment_projection=RejectingProjection(),
     )
 
     findings = await service.list_findings(
@@ -1151,10 +1159,10 @@ async def test_experiment_abstention_still_reads_experiment_projection() -> None
         abstention_note="No source-grounded selection was recovered.",
     )
     repository.findings[1] = ()
-    projection = RecordingExperimentCompatibilityProjection()
+    projection = RecordingExperimentProjection()
     service, _, _ = _service(
         repository=repository,
-        experiment_compatibility_projection=projection,
+        experiment_projection=projection,
     )
 
     findings = await service.list_findings(
@@ -1438,6 +1446,7 @@ async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start(
 
     inputs = FakeObjectiveInputService()
     objective_analysis_service.ObjectiveRepo = repository
+    analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
     objective_analysis_service.experiment_analysis_service = analyzer
     objective_analysis_service.objective_input_service = inputs
     objective_analysis_service.document_profile_service = (
@@ -1465,6 +1474,7 @@ async def test_start_analysis_enforces_the_service_concurrency_limit(objective_a
 ) -> None:
     inputs = FakeObjectiveInputService()
     objective_analysis_service.ObjectiveRepo = FakeObjectiveRepository()
+    analysis_record_source.ObjectiveRepo = objective_analysis_service.ObjectiveRepo
     objective_analysis_service.experiment_analysis_service = (
         FakeObjectiveExperimentAnalysisService()
     )

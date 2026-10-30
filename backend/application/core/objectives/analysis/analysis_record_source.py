@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from types import ModuleType
-
-from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
+from exceptions import ResourceConflictException, ResourceNotFoundException
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepo
 
 
 def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
@@ -19,24 +18,38 @@ def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
 
 async def should_read_experiment_projection(
     *,
-    objective_repository: ObjectiveRepository,
-    experiment_projection: ModuleType | None,
     collection_id: str,
     objective_id: str,
     analysis_version: int,
 ) -> bool:
     """Select the projection only for automatic experiment-backed versions.
 
-    Authored and hybrid versions retain their immutable authored snapshots, even
-    when the runtime has a PaperExperiment projection available.
+    Authored and hybrid versions retain their immutable authored snapshots.
+    Selection follows the completed saved version, independent of runtime wiring.
     """
 
-    if experiment_projection is None:
-        return False
-    analysis = await objective_repository.read_analysis(
+    analysis = await ObjectiveRepo.read_analysis(
         collection_id, objective_id, analysis_version
     )
-    return analysis is None or is_experiment_backed_analysis(analysis)
+    if analysis is None:
+        raise ResourceNotFoundException(
+            "Analysis snapshot not found.",
+            data={
+                "code": "analysis_snapshot_not_found",
+                "collection_id": collection_id,
+                "objective_id": objective_id,
+                "analysis_version": analysis_version,
+            },
+        )
+    if analysis.status != "succeeded":
+        raise ResourceConflictException(
+            "Analysis snapshot is not completed.",
+            data={
+                "code": "analysis_snapshot_not_completed",
+                "analysis_version": analysis_version,
+            },
+        )
+    return is_experiment_backed_analysis(analysis)
 
 
 __all__ = [

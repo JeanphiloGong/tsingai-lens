@@ -26,7 +26,7 @@ class CoreArtifactsNotReadyForEvaluationError(RuntimeError):
 from repositories.evaluation_repository import EvaluationRepo
 from repositories.objective_repository import ObjectiveRepo
 from application.source import collection_service
-from application.core.objectives.analysis import experiment_compatibility_projection as experiment_projection
+from application.core.objectives.analysis import experiment_projection
 
 
 async def create_core_snapshot(
@@ -528,13 +528,11 @@ async def _list_findings(
     limit: int,
 ) -> tuple[tuple[Any, ...], int]:
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
-        return await experiment_projection.list_findings(
+        return await experiment_projection.list_analysis_findings(
             collection_id,
             objective_id,
             analysis_version,
@@ -560,13 +558,11 @@ async def _list_evidence(
     limit: int,
 ) -> tuple[tuple[Any, ...], int]:
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
-        return await experiment_projection.list_evidence(
+        return await experiment_projection.list_analysis_evidence(
             collection_id,
             objective_id,
             analysis_version,

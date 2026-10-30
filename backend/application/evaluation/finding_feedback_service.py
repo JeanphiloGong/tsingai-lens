@@ -9,7 +9,7 @@ from typing import (
     Mapping,
 )
 
-from application.core.objectives.analysis import experiment_compatibility_projection
+from application.core.objectives.analysis import experiment_projection
 from application.core.objectives.analysis.analysis_record_source import (
     should_read_experiment_projection,
 )
@@ -919,14 +919,12 @@ async def _all_findings(
     analysis_version: int,
 ) -> tuple[Finding, ...]:
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
         findings, _, _ = (
-            await experiment_compatibility_projection.read_analysis_records(
+            await experiment_projection.read_analysis_records(
                 collection_id, objective_id, analysis_version
             )
         )
@@ -951,14 +949,12 @@ async def _all_findings(
 
 async def _finding_evidence(finding: Finding) -> tuple[ObjectiveEvidence, ...]:
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=finding.collection_id,
         objective_id=finding.objective_id,
         analysis_version=finding.analysis_version,
     ):
         _, evidence, _ = (
-            await experiment_compatibility_projection.read_analysis_records(
+            await experiment_projection.read_analysis_records(
                 finding.collection_id, finding.objective_id, finding.analysis_version
             )
         )
@@ -1005,14 +1001,12 @@ async def _require_published_finding(
             },
         )
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
         findings, _, _ = (
-            await experiment_compatibility_projection.read_analysis_records(
+            await experiment_projection.read_analysis_records(
                 collection_id, objective_id, analysis_version
             )
         )
@@ -1040,14 +1034,12 @@ async def _list_contributions(
     analysis_version: int,
 ) -> tuple[PaperContribution, ...]:
     if await should_read_experiment_projection(
-        objective_repository=ObjectiveRepo,
-        experiment_projection=experiment_compatibility_projection,
         collection_id=collection_id,
         objective_id=objective_id,
         analysis_version=analysis_version,
     ):
         _, _, contributions = (
-            await experiment_compatibility_projection.read_analysis_records(
+            await experiment_projection.read_analysis_records(
                 collection_id, objective_id, analysis_version
             )
         )

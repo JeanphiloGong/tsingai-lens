@@ -30,8 +30,56 @@ import infra.persistence.postgres.models  # noqa: F401
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20261020_0088"
+HEAD_REVISION = "20261025_0089"
 POSTGRES_IDENTIFIER_LIMIT = 63
+
+
+def test_model_connection_migration_creates_schema_and_protects_history(
+    postgres_sync_engine,
+) -> None:
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    with postgres_sync_engine.begin() as connection:
+        config.attributes["connection"] = connection
+        # The bootstrap migration imports current ORM metadata. Remove the new,
+        # empty table to exercise upgrading an actual pre-registry database.
+        command.downgrade(config, "20261020_0088")
+        assert not inspect(connection).has_table("model_connections")
+        command.upgrade(config, "head")
+
+        inspector = inspect(connection)
+        assert inspector.get_pk_constraint("model_connections")["constrained_columns"] == [
+            "connection_id", "revision"
+        ]
+        assert {
+            item["name"] for item in inspector.get_check_constraints("model_connections")
+        } == {"ck_model_connections_model_connection_revision_positive"}
+        indexes = {
+            item["name"]: item for item in inspector.get_indexes("model_connections")
+        }
+        assert "ix_model_connections_enabled" in indexes
+        enabled_index = indexes["uq_model_connections_enabled_id"]
+        assert enabled_index["unique"] is True
+        assert enabled_index["column_names"] == ["connection_id"]
+        assert enabled_index["dialect_options"]["postgresql_where"] == "enabled"
+
+        connections = Base.metadata.tables["model_connections"]
+        now = datetime.now(timezone.utc)
+        connection.execute(connections.insert().values(
+            connection_id="lab-a", revision=1, display_name="Lab A",
+            base_url="https://model.example.invalid/v1", model="lab-chat-a",
+            created_at=now, updated_at=now,
+        ))
+        with pytest.raises(RuntimeError, match="history must be exported"):
+            command.downgrade(config, "20261020_0088")
+
+        row = connection.execute(select(connections)).mappings().one()
+        assert (row["connection_id"], row["revision"]) == ("lab-a", 1)
+        assert row["enabled"] is False
+        assert row["api_key_ref"] is None
+        assert row["context_window_tokens"] is None
+        assert row["max_output_tokens"] is None
+        assert row["request_timeout_seconds"] is None
+        assert MigrationContext.configure(connection).get_current_revision() == HEAD_REVISION
 
 
 def test_migration_and_orm_names_fit_postgres_identifier_limit() -> None:

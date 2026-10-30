@@ -50,6 +50,7 @@ the persistence path.
 | [comparison_group_repository.py](comparison_group_repository.py) | Cross-paper comparison groups |
 | [experiment_finding_repository.py](experiment_finding_repository.py) | Findings referencing fixed experiment selections |
 | [experiment_analysis_repository.py](experiment_analysis_repository.py) | Atomic experiment graph publication |
+| [model_connection_repository.py](model_connection_repository.py) | Read-only operator-managed model connection revisions |
 | [chat_repository.py](chat_repository.py) | Sessions, messages, approvals, response snapshots and model-call audit |
 | [auth_repository.py](auth_repository.py) | Users and browser sessions |
 | [pipeline_run_repository.py](pipeline_run_repository.py) | Pipeline execution records, nodes, telemetry and history projections |

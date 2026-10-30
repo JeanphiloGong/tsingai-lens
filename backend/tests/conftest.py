@@ -63,6 +63,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
         monkeypatch.setattr("repositories.feedback_dataset_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.objective_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.chat_repository.AsyncSessionLocal", factory)
+        monkeypatch.setattr("repositories.model_connection_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.analysis_job_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.feedback_dataset_export_repository.AsyncSessionLocal", factory)
         monkeypatch.setattr("repositories.feedback_dataset_sample_repository.AsyncSessionLocal", factory)

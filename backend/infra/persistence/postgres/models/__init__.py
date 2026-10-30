@@ -1,5 +1,6 @@
 """PostgreSQL ORM model registry."""
 
+from infra.persistence.postgres.models.model_connection import ModelConnectionRow
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
 from infra.persistence.postgres.models.pipeline_run import PipelineRunRow
 from infra.persistence.postgres.models.chat import (
@@ -69,6 +70,7 @@ from infra.persistence.postgres.models.experiment_finding import (
     FindingSelectionRow,
 )
 __all__ = [
+    "ModelConnectionRow",
     "AuthSession",
     "AuthUser",
     "AnalysisJobRow",

@@ -98,9 +98,9 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
             try:
                 await asyncio.wait_for(task, 10)
                 await asyncio.wait_for(
-                    asyncio.gather(*chat_session_service._active_stream_tasks), 10,
+                    asyncio.gather(*chat_session_service.runner.active_stream_tasks), 10,
                 )
-                active_tasks.value = len(chat_session_service._active_stream_tasks)
+                active_tasks.value = len(chat_session_service.runner.active_stream_tasks)
             finally:
                 await engine.dispose()
                 ready.close()

@@ -676,7 +676,7 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
     finally:
         model.continue_response.set()
         model.finish_response.set()
-        await asyncio.gather(*service._active_stream_tasks, return_exceptions=True)
+        await asyncio.gather(*service.runner.active_stream_tasks, return_exceptions=True)
 
 
 async def test_interrupted_response_keeps_partial_text_without_claiming_it_completed(
@@ -695,7 +695,7 @@ async def test_interrupted_response_keeps_partial_text_without_claiming_it_compl
         if event["type"] == "text_delta":
             break
     await original.aclose()
-    tasks = tuple(service._active_stream_tasks)
+    tasks = tuple(service.runner.active_stream_tasks)
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -765,7 +765,7 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(
     try:
         async with asyncio.timeout(5):
             await started.wait()
-        active = tuple(service._active_stream_tasks)
+        active = tuple(service.runner.active_stream_tasks)
         assert active
         for task in active:
             task.cancel()

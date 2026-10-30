@@ -850,7 +850,7 @@ async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
     finally:
         release.set()
         await asyncio.wait_for(
-            asyncio.gather(*app.service._active_stream_tasks), timeout=5
+            asyncio.gather(*app.service.runner.active_stream_tasks), timeout=5
         )
     saved = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()[
         "data"

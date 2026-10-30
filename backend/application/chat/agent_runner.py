@@ -654,6 +654,7 @@ class ResearchAgentRunner:
         self.capabilities = capabilities
         self.context_builder = context_builder or ChatContextBuilder()
         self.limits = limits or AgentRunLimits()
+        self.active_stream_tasks: set[Any] = set()
 
     async def run_turn(
         self,

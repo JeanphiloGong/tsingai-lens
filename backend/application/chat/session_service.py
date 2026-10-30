@@ -239,7 +239,6 @@ from repositories.source_artifact_repository import SourceArtifactRepo
 
 runner: ResearchAgentRunner
 model_call_observer = None
-_active_stream_tasks: set[asyncio.Task[None]] = set()
 
 
 async def create_session(*, collection_id: str, user_id: str) -> ChatSession:
@@ -1102,8 +1101,8 @@ async def send_message_stream(
                     await queue.put(None)
 
             task = asyncio.create_task(run_turn())
-            _active_stream_tasks.add(task)
-            task.add_done_callback(_active_stream_tasks.discard)
+            runner.active_stream_tasks.add(task)
+            task.add_done_callback(runner.active_stream_tasks.discard)
             try:
                 while (event := await queue.get()) is not None:
                     yield event

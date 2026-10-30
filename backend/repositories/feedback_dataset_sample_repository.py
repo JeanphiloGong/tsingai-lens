@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 
 from domain.feedback.sample_revision import (
     SftRevisionContent, PreferenceRevisionContent, EvaluationRevisionContent,
@@ -26,7 +27,7 @@ from domain.feedback.dataset_sample import (
     _is_sha256,
     ensure_action_allowed,
 )
-from domain.feedback.sample_revision import SampleRevision
+from domain.feedback.sample_revision import SampleRevision, content_digest_for
 from domain.feedback.feedback_case import FeedbackCase
 from infra.persistence.postgres.models.collection import Collection
 from infra.persistence.postgres.models.feedback import AnalysisJobRow, FeedbackCaseRow
@@ -452,6 +453,8 @@ class FeedbackDatasetSampleRepository:
     ) -> DatasetSample:
         if revision.author_kind != "human" or revision.sample_id != sample_id:
             raise ValueError("human revision identity is invalid")
+        if revision.content_digest != content_digest_for(revision.content):
+            raise ValueError("revision content digest does not match content")
         timestamp = _datetime(updated_at)
         async with AsyncSessionLocal() as db, db.begin():
             row, case = await _lock_sample_source(db, sample_id)
@@ -508,7 +511,7 @@ class FeedbackDatasetSampleRepository:
                     content_digest=revision.content_digest,
                     input_digest=revision.input_digest,
                     construction_spec_version=revision.construction_spec_version,
-                    provenance=revision.provenance,
+                    provenance=deepcopy(revision.provenance),
                     created_by=revision.created_by,
                     job_id=revision.job_id,
                     created_at=_datetime(revision.created_at),
@@ -888,6 +891,8 @@ class FeedbackDatasetSampleRepository:
                 assert revision is not None
                 if revision.sample_id != sample_id:
                     raise ValueError("revision does not belong to sample")
+                if revision.content_digest != content_digest_for(revision.content):
+                    raise ValueError("revision content digest does not match content")
                 if revision.input_digest != row.source_digest:
                     raise DatasetSampleRevisionConflict("sample_source_stale")
                 content_value = revision.content
@@ -931,7 +936,7 @@ class FeedbackDatasetSampleRepository:
                         content_digest=revision.content_digest,
                         input_digest=revision.input_digest,
                         construction_spec_version=revision.construction_spec_version,
-                        provenance=revision.provenance,
+                        provenance=deepcopy(revision.provenance),
                         created_by=revision.created_by,
                         job_id=revision.job_id,
                         created_at=_datetime(revision.created_at),

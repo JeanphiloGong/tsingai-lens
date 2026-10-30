@@ -125,20 +125,6 @@ class SampleRevision:
     created_by: str | None = None
     job_id: str | None = None
 
-    def __post_init__(self) -> None:
-        if not self.revision_id or not self.sample_id:
-            raise ValueError("revision identity is required")
-        if self.revision_no < 1:
-            raise ValueError("revision number must be positive")
-        if self.construction_spec_version < 1:
-            raise ValueError("construction spec version must be positive")
-        if not _is_sha256(self.content_digest) or not _is_sha256(self.input_digest):
-            raise ValueError("revision digests must be sha256")
-        if self.content_digest != content_digest_for(self.content):
-            raise ValueError("revision content digest does not match content")
-        object.__setattr__(self, "content", deepcopy(self.content))
-        object.__setattr__(self, "provenance", deepcopy(self.provenance))
-
     @classmethod
     def build_worker(
         cls,
@@ -153,6 +139,8 @@ class SampleRevision:
         created_at: str,
         job_id: str,
     ) -> "SampleRevision":
+        content = deepcopy(content)
+        provenance = deepcopy(provenance)
         return cls(
             revision_id=revision_id,
             sample_id=sample_id,
@@ -207,10 +195,6 @@ def content_digest_for(content: RevisionContent) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return sha256(encoded).hexdigest()
-
-
-def _is_sha256(value: str) -> bool:
-    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
 
 
 __all__ = [

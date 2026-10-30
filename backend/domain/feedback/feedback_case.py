@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -33,8 +32,3 @@ class FeedbackCase:
     annotation_digest: str | None = None
     signal_analysis_result_ids: tuple[str, ...] = ()
     tool_failure_analysis_result_ids: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not self.case_id or not self.collection_id or not self.session_id:
-            raise ValueError("feedback case identity is required")
-        object.__setattr__(self, "context_snapshot", deepcopy(self.context_snapshot))

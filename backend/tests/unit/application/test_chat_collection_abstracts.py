@@ -1,3 +1,4 @@
+from application.chat.capabilities import collection_context
 from infra.persistence import database
 from copy import deepcopy
 from tests.support.source_artifacts import build_source_documents
@@ -82,18 +83,17 @@ def test_unprepared_source_remains_unprepared():
     ("No explicitly labelled abstract is available.", "not_found"),
 ])
 def test_browse_prepared_paper_reports_only_real_screening_limitations(text, expected_status):
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
             "documents": [{"document_id": "paper-1", "original_filename": "Preheating.pdf", "status": "ready"}],
-        })),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[
+        }))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", title="Preheating", doc_type="experimental", confidence=0.9),
-        ])),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[
+        ]))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[
             SimpleNamespace(document_id="paper-1", map_status="sufficient", studies=(), map_limitations=()),
-        ])),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document(text))),
-    )
+        ]))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(text)))
+    capability = BrowseCollectionPapersCapability()
     result = asyncio.run(capability.execute(
         CapabilityExecutionContext(session_id="session-1", user_id="user-1", collection_id="collection-1", tool_call_id="call-1"),
         BrowseCollectionPapersToolRequest(),
@@ -105,7 +105,7 @@ def test_browse_prepared_paper_reports_only_real_screening_limitations(text, exp
     assert bool(paper["screening_limitations"]) == (expected_status == "not_found")
     assert paper["support_is_evidence"] is False
     assert any(ref.resource_id == "paper-1" for ref in result.resource_refs)
-    capability.source_artifact_repository.read_document.assert_awaited_once_with("collection-1", "paper-1")
+    collection_context.SourceArtifactRepo.read_document.assert_awaited_once_with("collection-1", "paper-1")
 
 
 @pytest.mark.parametrize("missing,document_status", [
@@ -122,20 +122,19 @@ def test_optional_screening_information_does_not_require_researcher_intervention
     if missing == "insufficient_map":
         paper_map.map_status = "insufficient_map"
         paper_map.map_limitations = ("Process scope is not mapped.",)
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
             "documents": [{"document_id": "paper-1", "original_filename": "LPBF preheating.pdf", "status": document_status}],
-        })),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(
+        }))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(
             return_value=[] if missing == "profile" else [profile]
-        )),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(
+        ))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(
             return_value=[] if missing == "map" else [paper_map]
-        )),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document(
+        ))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document(
             "Preheating temperature was varied." if missing == "abstract" else "Abstract: LPBF preheating study."
-        ))),
-    )
+        )))
+    capability = BrowseCollectionPapersCapability()
     result = asyncio.run(capability.execute(
         CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t"),
         BrowseCollectionPapersToolRequest(),
@@ -162,12 +161,11 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
             raise OSError("private-storage-detail")
         return document("Abstract: LPBF study.") if document_id == "paper-1" else None
 
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={"documents": records})),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(side_effect=read_source)),
-    )
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={"documents": records}))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(side_effect=read_source))
+    capability = BrowseCollectionPapersCapability()
     context = CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t")
     result = asyncio.run(capability.execute(context, BrowseCollectionPapersToolRequest(limit=6)))
     assert [paper["source_status"] for paper in result.data["papers"]] == [
@@ -201,14 +199,13 @@ def test_browse_keeps_progress_and_real_source_failures_separate(caplog):
 
 
 def test_normal_pagination_is_not_a_warning():
-    capability = BrowseCollectionPapersCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
+    collection_context.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock(return_value={
             "documents": [{"document_id": f"paper-{i}", "status": "ready"} for i in range(10)],
-        })),
-        document_profile_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        paper_map_repository=SimpleNamespace(list_collection=AsyncMock(return_value=[])),
-        source_artifact_repository=SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text."))),
-    )
+        }))
+    collection_context.DocumentProfileRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.PaperMapRepo = SimpleNamespace(list_collection=AsyncMock(return_value=[]))
+    collection_context.SourceArtifactRepo = SimpleNamespace(read_document=AsyncMock(return_value=document("Methods text.")))
+    capability = BrowseCollectionPapersCapability()
     result = asyncio.run(capability.execute(
         CapabilityExecutionContext(session_id="s", user_id="u", collection_id="c", tool_call_id="t"),
         BrowseCollectionPapersToolRequest(limit=8),
@@ -248,12 +245,11 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
         get_document=AsyncMock(return_value=records[1]),
     )
     sources = SourceArtifactRepository()
-    browse = BrowseCollectionPapersCapability(
-        collection_service=collection_service,
-        document_profile_repository=DocumentProfileRepository(),
-        paper_map_repository=PaperMapRepository(),
-        source_artifact_repository=sources,
-    )
+    collection_context.collection_service = collection_service
+    collection_context.DocumentProfileRepo = DocumentProfileRepository()
+    collection_context.PaperMapRepo = PaperMapRepository()
+    collection_context.SourceArtifactRepo = sources
+    browse = BrowseCollectionPapersCapability()
     inspect = InspectDocumentSourcesCapability(
         collection_service=collection_service,
         source_artifact_repository=sources,

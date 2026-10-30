@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
+from application.source import collection_service
+from repositories.paper_map_repository import PaperMapRepo
 
-from typing import Any
+from domain.chat import ToolResultStatus
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -41,20 +42,16 @@ class PreviewResearchScopeCapability:
         input_model=PreviewResearchScopeToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, paper_map_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.paper_map_repository = paper_map_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: PreviewResearchScopeToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        paper_maps = await self.paper_map_repository.list_collection(
+        paper_maps = await PaperMapRepo.list_collection(
             context.collection_id
         )
         if not paper_maps:

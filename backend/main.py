@@ -216,16 +216,8 @@ async def build_application_runtime() -> ApplicationRuntime:
             limits=_parse_agent_run_limits(),
             capabilities=CapabilityRegistry(
                 (
-                    GetCollectionContextCapability(
-                        collection_service=collection_service,
-                        objective_repository=ObjectiveRepo,
-                    ),
-                    BrowseCollectionPapersCapability(
-                        collection_service=collection_service,
-                        document_profile_repository=DocumentProfileRepo,
-                        paper_map_repository=PaperMapRepo,
-                        source_artifact_repository=SourceArtifactRepo,
-                    ),
+                    GetCollectionContextCapability(),
+                    BrowseCollectionPapersCapability(),
                     InspectDocumentSourcesCapability(
                         collection_service=collection_service,
                         source_artifact_repository=SourceArtifactRepo,
@@ -283,10 +275,7 @@ async def build_application_runtime() -> ApplicationRuntime:
                         objective_repository=ObjectiveRepo,
                         paper_map_repository=PaperMapRepo,
                     ),
-                    PreviewResearchScopeCapability(
-                        collection_service=collection_service,
-                        paper_map_repository=PaperMapRepo,
-                    ),
+                    PreviewResearchScopeCapability(),
                     CreateObjectiveCandidateCapability(
                         objective_authoring_service=objective_authoring_service,
                     ),

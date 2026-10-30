@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from repositories.paper_map_repository import PaperMapRepo
+from repositories.objective_repository import ObjectiveRepo
+from repositories.document_profile_repository import DocumentProfileRepo
+from repositories.source_artifact_repository import SourceArtifactRepo
+
 from domain.chat import ToolResultStatus
 
 import logging
@@ -39,20 +45,16 @@ class GetCollectionContextCapability:
         input_model=GetCollectionContextToolRequest,
     )
 
-    def __init__(self, *, collection_service: Any, objective_repository: Any) -> None:
-        self.collection_service = collection_service
-        self.objective_repository = objective_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         _arguments: GetCollectionContextToolRequest,
     ) -> ChatToolResult:
-        collection = await self.collection_service.get_collection_for_user(
+        collection = await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        objectives = await self.objective_repository.list_objectives(
+        objectives = await ObjectiveRepo.list_objectives(
             context.collection_id
         )
         visible = objectives[:_OBJECTIVE_LIMIT]
@@ -161,25 +163,12 @@ class BrowseCollectionPapersCapability:
         input_model=BrowseCollectionPapersToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        document_profile_repository: Any,
-        paper_map_repository: Any,
-        source_artifact_repository: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.document_profile_repository = document_profile_repository
-        self.paper_map_repository = paper_map_repository
-        self.source_artifact_repository = source_artifact_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: BrowseCollectionPapersToolRequest,
     ) -> ChatToolResult:
-        collection = await self.collection_service.get_collection_for_user(
+        collection = await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
@@ -189,11 +178,11 @@ class BrowseCollectionPapersCapability:
             for item in document_records
             if isinstance(item, dict) and str(item.get("document_id") or "").strip()
         )
-        profiles = await self.document_profile_repository.list_collection(
+        profiles = await DocumentProfileRepo.list_collection(
             context.collection_id,
             document_ids=document_ids or None,
         )
-        paper_maps = await self.paper_map_repository.list_collection(
+        paper_maps = await PaperMapRepo.list_collection(
             context.collection_id,
             document_ids=document_ids or None,
         )
@@ -220,7 +209,7 @@ class BrowseCollectionPapersCapability:
             paper_map = maps_by_id.get(document_id)
             source_document = None
             try:
-                source_document = await self.source_artifact_repository.read_document(
+                source_document = await SourceArtifactRepo.read_document(
                     context.collection_id,
                     document_id,
                 )

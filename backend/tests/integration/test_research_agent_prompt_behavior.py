@@ -7,6 +7,8 @@ explicit operator-supplied endpoint. No environment file is loaded here.
 
 from __future__ import annotations
 
+from application.chat.capabilities import collection_context
+
 import json
 import os
 from copy import deepcopy
@@ -118,17 +120,14 @@ def _runner(
     profiles = DocumentProfileRepository()
     maps = PaperMapRepository()
     objective_repository = _EmptyObjectiveRepository()
+    collection_context.collection_service = collection_service
+    collection_context.ObjectiveRepo = objective_repository
+    collection_context.DocumentProfileRepo = profiles
+    collection_context.PaperMapRepo = maps
+    collection_context.SourceArtifactRepo = sources
     handlers = (
-        GetCollectionContextCapability(
-            collection_service=collection_service,
-            objective_repository=objective_repository,
-        ),
-        BrowseCollectionPapersCapability(
-            collection_service=collection_service,
-            document_profile_repository=profiles,
-            paper_map_repository=maps,
-            source_artifact_repository=sources,
-        ),
+        GetCollectionContextCapability(),
+        BrowseCollectionPapersCapability(),
         InspectDocumentSourcesCapability(
             collection_service=collection_service,
             source_artifact_repository=sources,

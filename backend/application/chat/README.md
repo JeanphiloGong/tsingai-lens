@@ -609,6 +609,10 @@ Evidence, permission, or a Finding.
   for collection and Source inspection, Objective work, Finding and Evidence
   authoring, analysis review, and research-plan drafts or writes.
 
+Collection context, paper browsing, and research-scope preview handlers import
+their owning business modules and concrete repositories directly. Their classes
+implement the tool protocol and need no dependency-only constructors.
+
 ## Boundaries
 
 - `application/source/` owns Collection membership, Document preparation, and

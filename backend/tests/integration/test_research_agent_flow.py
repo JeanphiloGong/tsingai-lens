@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import collection_context
+
 import pytest
 from application.chat import (
     CapabilityExecutionContext,
@@ -132,6 +134,8 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     app = create_app()
 
     with TestClient(app) as client:
+        collection_context.collection_service = collection_service
+        collection_context.ObjectiveRepo = objective_repository
         monkeypatch.setattr(
             client.app.state.runtime.chat_session_service,
             "runner",
@@ -139,10 +143,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
                 model=model,
                 capabilities=CapabilityRegistry(
                     (
-                        GetCollectionContextCapability(
-                            collection_service=collection_service,
-                            objective_repository=objective_repository,
-                        ),
+                        GetCollectionContextCapability(),
                         candidate_capability,
                     )
                 ),

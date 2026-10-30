@@ -5,9 +5,6 @@ from infra.persistence import database
 from dataclasses import replace
 
 import pytest
-from application.core.objectives.analysis.experiment_finding_publisher import (
-    ExperimentFindingPublisher,
-)
 from domain.core.comparison_group import ComparisonGroup, ComparisonGroupMember
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,
@@ -205,6 +202,48 @@ async def test_experiment_graph_publication_does_not_require_paper_contributions
     ) == ()
 
 
+async def test_single_study_finding_persists_without_a_comparison_group(
+    objective_repository,
+) -> None:
+    _, analysis = await _queue_and_claim(objective_repository)
+    experiments = PaperExperimentRepository()
+    selections = ObjectiveExperimentSelectionRepository()
+    findings = ExperimentFindingRepository()
+    revision = _revision()
+    selection = _selection(analysis.analysis_version)
+    finding = Finding(
+        collection_id=COLLECTION_ID,
+        objective_id=OBJECTIVE_ID,
+        analysis_version=analysis.analysis_version,
+        finding_id="finding-single-study",
+        statement="The selected experiment reports 900 MPa tensile strength.",
+        factors=("process condition",),
+        outcome="tensile strength",
+        direction="unknown",
+        assertion_strength="descriptive",
+        attribution_scope="descriptive_only",
+        synthesis_status="single_study",
+        certainty=0.4,
+        display_rank=0,
+        mechanisms=(),
+        scientific_context=ScientificContext(),
+        limitations=(),
+        paper_contributions=(),
+        selection_ids=(selection.selection_id,),
+    )
+    async with database.AsyncSessionLocal() as db, db.begin():
+        stored = await experiments.add_revision(db, revision, created_by="test-agent")
+        await selections.add_selection(
+            db, COLLECTION_ID, selection, revision_id=stored.revision_id
+        )
+        assert await findings.add_finding(db, finding) == finding
+
+    async with database.AsyncSessionLocal() as db:
+        restored = await findings.read_finding(db, COLLECTION_ID, finding.finding_id)
+        assert restored == finding
+        assert restored.comparison_group_ids == ()
+
+
 async def test_finding_failure_rolls_back_revisions_selections_groups_and_finding(
     objective_repository,
 ) -> None:
@@ -213,7 +252,6 @@ async def test_finding_failure_rolls_back_revisions_selections_groups_and_findin
     selections = ObjectiveExperimentSelectionRepository()
     groups = ComparisonGroupRepository()
     findings = _FailingAfterWriteFindingRepository()
-    publisher = ExperimentFindingPublisher(selections, groups, findings)
 
     revision_a = _revision()
     revision_b = replace(
@@ -239,7 +277,7 @@ async def test_finding_failure_rolls_back_revisions_selections_groups_and_findin
             await selections.add_selection(db, COLLECTION_ID, selection_a, revision_id=stored_a.revision_id)
             await selections.add_selection(db, COLLECTION_ID, selection_b, revision_id=stored_b.revision_id)
             await groups.add_group(db, COLLECTION_ID, group)
-            await publisher.publish(finding, db=db)
+            await findings.add_finding(db, finding)
 
     async with database.AsyncSessionLocal() as db, db.begin():
         assert await experiments.read_latest_revision(db, revision_a.experiment_id) is None

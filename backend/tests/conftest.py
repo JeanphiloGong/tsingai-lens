@@ -276,8 +276,6 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "collection_service",
                 "ObjectiveRepo",
                 "_analysis_semaphore",
-                "_analysis_tasks",
-                "_task_factory",
                 "document_profile_service",
                 "experiment_analysis_service",
                 "experiment_analysis_writer",

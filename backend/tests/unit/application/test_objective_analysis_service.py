@@ -915,6 +915,18 @@ def _service(
     return service, repository, analyzer
 
 
+async def _wait_for_analysis(service: ModuleType, objective_id: str) -> None:
+    for _ in range(100):
+        state = await service.get_analysis_state(
+            "collection-1", objective_id, user_id="user-1"
+        )
+        analysis = state.get("analysis")
+        if analysis is not None and analysis.status in {"succeeded", "failed"}:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"analysis did not finish: {objective_id}")
+
+
 class RecordingExperimentCompatibilityProjection:
     async def list_findings(self, *args, **kwargs):
         return (
@@ -1304,7 +1316,7 @@ async def test_start_analysis_queues_and_dispatches_the_canonical_worker() -> No
 
     assert queued["analysis"].status == "queued"
     assert queued["objective"].objective.active_analysis_version == 1
-    await asyncio.gather(*tuple(service._analysis_tasks))
+    await _wait_for_analysis(service, "objective-1")
     completed = await service.get_analysis_state(
         "collection-1", "objective-1", user_id="user-1"
     )
@@ -1314,9 +1326,9 @@ async def test_start_analysis_queues_and_dispatches_the_canonical_worker() -> No
     assert repository.published_calls == 0
 
 
-async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start() -> (
-    None
-):
+async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repository = FakeObjectiveRepository()
     analyzer = FakeObjectiveExperimentAnalysisService()
 
@@ -1330,7 +1342,7 @@ async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start(
     objective_analysis_service.document_profile_service = (
         inputs.document_profile_service
     )
-    objective_analysis_service._task_factory = unavailable_task_factory
+    monkeypatch.setattr(objective_analysis_service, "create_task", unavailable_task_factory)
     service = objective_analysis_service
 
     with pytest.raises(ObjectiveAnalysisDispatchError) as error:
@@ -1407,7 +1419,7 @@ async def test_start_analysis_enforces_the_service_concurrency_limit(
     assert maximum_active_count == 1
 
     release_first.set()
-    await asyncio.gather(*tuple(service._analysis_tasks))
+    await asyncio.wait_for(second_started.wait(), timeout=1)
 
     assert second_started.is_set()
     assert maximum_active_count == 1

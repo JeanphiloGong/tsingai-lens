@@ -218,8 +218,6 @@ class ObjectiveAnalysisDispatchError(ServiceUnavailableException):
 from repositories.objective_repository import ObjectiveRepo, StoredObjective
 
 _analysis_semaphore = Semaphore(_ANALYSIS_MAX_CONCURRENCY)
-_task_factory = create_task
-_analysis_tasks: set[Any] = set()
 
 
 async def recover_interrupted_analyses() -> int:
@@ -257,7 +255,7 @@ async def start_analysis(
         analysis.analysis_version,
     )
     try:
-        task = _task_factory(coroutine)
+        task = create_task(coroutine)
     except Exception as exc:  # noqa: BLE001
         coroutine.close()
         logger.exception(
@@ -277,8 +275,6 @@ async def start_analysis(
             objective_id,
             analysis.analysis_version,
         ) from exc
-    _analysis_tasks.add(task)
-    task.add_done_callback(_analysis_tasks.discard)
     task.add_done_callback(_log_unexpected_analysis_failure)
     return payload
 

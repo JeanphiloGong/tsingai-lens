@@ -83,10 +83,53 @@ def anyio_backend() -> str:
 
 
 @pytest.fixture
-async def objective_analysis_runtime():
+async def objective_analysis_runtime(monkeypatch):
+    from application.core.objectives.llm.structured_response import StructuredResponseClient
+
+    monkeypatch.setattr(
+        objective_analysis_service,
+        "build_default_structured_response_client",
+        lambda: StructuredResponseClient(
+            client=SimpleNamespace(close=lambda: None), model="test-model"
+        ),
+    )
     runtime = objective_analysis_service.ObjectiveAnalysisService()
     yield runtime
     await runtime.close()
+
+
+async def test_analysis_clients_are_lazy_and_owned_by_their_runtime(monkeypatch):
+    from unittest.mock import Mock
+
+    from application.core.objectives.llm.structured_response import StructuredResponseClient
+
+    clients = []
+
+    def build_client():
+        client = StructuredResponseClient(
+            client=SimpleNamespace(close=Mock()), model="test-model"
+        )
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(
+        objective_analysis_service, "build_default_structured_response_client", build_client
+    )
+    first = objective_analysis_service.ObjectiveAnalysisService()
+    second = objective_analysis_service.ObjectiveAnalysisService()
+    assert clients == []
+    try:
+        first_screener = first._get_source_screener()
+        first_extractor = first._get_paper_experiment_extractor()
+        second_screener = second._get_source_screener()
+        assert len(clients) == 2
+        assert first_screener.response_client is first_extractor.response_client
+        assert second_screener.response_client is not first_screener.response_client
+        await first.close()
+        clients[0].client.close.assert_called_once()
+        clients[1].client.close.assert_not_called()
+    finally:
+        await second.close()
 
 
 def _objective(
@@ -747,7 +790,7 @@ class FakeObjectiveExperimentAnalysisService:
         self.calls = 0
 
     async def generate_experiment_analysis_artifacts(
-        self, collection_id, analysis, progress_callback=None
+        self, collection_id, analysis, progress_callback=None, **model_components
     ):
         self.calls += 1
         if self.error is not None:
@@ -770,7 +813,7 @@ class UsageRecordingObjectiveExperimentAnalysisService(
     FakeObjectiveExperimentAnalysisService
 ):
     async def generate_experiment_analysis_artifacts(
-        self, collection_id, analysis, progress_callback=None
+        self, collection_id, analysis, progress_callback=None, **model_components
     ):
         record_llm_prompt_version("paper_framing", "paper_framing.v1")
         record_llm_completion(
@@ -795,7 +838,7 @@ class DiagnosticsRecordingObjectiveExperimentAnalysisService(
     FakeObjectiveExperimentAnalysisService
 ):
     async def generate_experiment_analysis_artifacts(
-        self, collection_id, analysis, progress_callback=None
+        self, collection_id, analysis, progress_callback=None, **model_components
     ):
         record_analysis_diagnostic(
             {

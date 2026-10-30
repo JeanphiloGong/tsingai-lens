@@ -54,6 +54,10 @@ version's publication. Both HTTP and Agent callers use these owners.
 and concurrency limit. Shutdown cancels and awaits its work before disposing the
 database engine. Read operations remain module functions and do not require a
 running analysis component.
+The instance also creates its structured-response client, Source screener, and
+PaperExperiment extractor only when execution needs them. Scientific operations
+receive those concrete components explicitly. Shutdown closes the owned client
+after cancelling and awaiting the admitted tasks.
 
 The analysis module imports `objective_input_service` and
 `document_profiles.service` directly. It does not reach through the scientific

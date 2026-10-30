@@ -27,6 +27,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     screen_sources,
 )
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_input_service import (
     ObjectiveSourceInputs,
     ResearchObjectivesNotReadyError,
@@ -455,6 +456,10 @@ async def generate_experiment_analysis_artifacts(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     progress_callback: ProgressCallback | None = None,
+    *,
+    response_client: StructuredResponseClient,
+    source_screener: ObjectiveSourceScreener,
+    paper_experiment_extractor: PaperExperimentExtractor,
 ) -> ObjectiveExperimentAnalysisArtifacts:
     if analysis.collection_id != collection_id:
         raise ValueError("analysis belongs to another collection")
@@ -469,14 +474,7 @@ async def generate_experiment_analysis_artifacts(
         collection_id,
         document_inputs=analysis.document_inputs,
     )
-    response_client = objective_input_service.get_response_client()
-    source_screener = ObjectiveSourceScreener(response_client)
-    paper_experiment_extractor = PaperExperimentExtractor(response_client)
-    model_name = str(
-        getattr(response_client, "model", None) or analysis.model_name or ""
-    ).strip()
-    if not model_name:
-        raise ValueError("Objective document Evidence requires model identity")
+    model_name = response_client.model
 
     extraction_limit = Semaphore(_OBJECTIVE_DOCUMENT_MAX_CONCURRENCY)
     document_count = len(analysis.document_inputs)

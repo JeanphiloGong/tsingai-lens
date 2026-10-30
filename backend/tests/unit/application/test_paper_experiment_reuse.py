@@ -102,9 +102,6 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     experiment_analysis_service.collection_service = object()
     experiment_analysis_service.PaperMapRepo = object()
     experiment_analysis_service.ObjectiveRepo = objective_repository
-    experiment_analysis_service.objective_input_service = SimpleNamespace(
-        get_response_client=lambda: SimpleNamespace(model="test-model")
-    )
     experiment_analysis_service.PaperExperimentRepo = repository
     service = experiment_analysis_service
     inputs = {
@@ -122,7 +119,9 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
             )
         },
     }
-    service._build_objective_analysis_inputs = AsyncMock(return_value=inputs)
+    monkeypatch.setattr(
+        service, "_build_objective_analysis_inputs", AsyncMock(return_value=inputs)
+    )
 
     def screen(**kwargs):
         return tuple(
@@ -159,7 +158,14 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
         lambda **kwargs: bundles[kwargs["document_id"]],
     )
     artifacts = await service.generate_experiment_analysis_artifacts(
-        "collection-1", analysis
+        "collection-1", analysis,
+        response_client=SimpleNamespace(model="test-model"),
+        source_screener=service_module.ObjectiveSourceScreener(
+            SimpleNamespace(model="test-model")
+        ),
+        paper_experiment_extractor=service_module.PaperExperimentExtractor(
+            SimpleNamespace(model="test-model")
+        ),
     )
     assert artifacts.experiment_outputs == ()
     assert len(artifacts.reused_revisions) == 3

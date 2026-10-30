@@ -24,6 +24,12 @@ record codecs and object-to-dictionary round trips are not repository interfaces
 Saved canonical fields are read directly; external formats are parsed at their
 actual input boundary. Domain objects retain ownership, revision and state rules.
 
+Experiment repositories load referenced selections in the write transaction and
+call `Finding.validate_experiment_support()` or
+`ComparisonGroup.validate_experiment_members()` with those facts. The domain
+owns independent-experiment rules; repositories retain reference, scope, version
+and concurrency checks. Rejection rolls back the whole publication.
+
 Model configuration errors belong to
 `application/model_connections/errors.py`; database failures propagate through
 the persistence path.

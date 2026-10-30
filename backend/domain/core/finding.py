@@ -229,6 +229,16 @@ class Finding:
         if self.parent_finding_id == self.finding_id:
             raise ValueError("Finding cannot derive from itself")
 
+    def validate_experiment_support(self, experiment_ids: frozenset[str]) -> None:
+        if len(experiment_ids) > 1 and not self.comparison_group_ids:
+            raise ValueError("cross-paper Finding requires a comparison group")
+        if len(experiment_ids) == 1 and self.synthesis_status == "agreement":
+            raise ValueError("agreement Finding requires independent experiment selections")
+        if len(experiment_ids) == 1 and self.synthesis_status != "single_study":
+            raise ValueError("one experiment selection must be marked single_study")
+        if len(experiment_ids) > 1 and self.synthesis_status == "single_study":
+            raise ValueError("multiple experiment selections cannot be single_study")
+
     @property
     def key(self) -> tuple[str, str, int, str]:
         return (

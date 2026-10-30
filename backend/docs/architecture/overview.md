@@ -185,6 +185,11 @@ but have separate owners.
 | Pipeline | No scientific objects; a successful technical run is not scientific proof | `repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
 
 Repository-specific result types stay beside the concrete repository that returns them.
+Experiment repositories obtain current reference and ownership facts inside the
+publication transaction, then call the existing Finding and ComparisonGroup
+objects for independent-experiment rules. Invalid support rolls back the entire
+graph.
+
 `StoredCollection` contains the existing `Collection`, record timestamps, and
 the current `StoredDocument` members. Each `StoredDocument` contains a `Document`
 plus its storage key, stored filename, and record timestamps. Content hashes,

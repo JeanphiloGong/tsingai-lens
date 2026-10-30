@@ -40,6 +40,19 @@ class ComparisonGroup:
         ):
             raise ValueError("comparable group requires comparable included members")
 
+    def validate_experiment_members(
+        self, experiment_ids_by_selection: Mapping[str, str],
+    ) -> None:
+        if len(self.members) < 2:
+            raise ValueError("cross-paper comparison group requires at least two selections")
+        included_experiments = {
+            experiment_ids_by_selection[item.selection_id]
+            for item in self.members
+            if item.role == "included"
+        }
+        if len(included_experiments) < 2:
+            raise ValueError("comparison group requires included selections from multiple experiments")
+
 
 __all__ = [
     "ComparisonGroup",

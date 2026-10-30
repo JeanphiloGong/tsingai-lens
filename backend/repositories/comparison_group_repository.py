@@ -115,8 +115,6 @@ async def _validate_group_context(
     )
     if analysis is None:
         raise ValueError("comparison group analysis snapshot was not found")
-    if len(group.members) < 2:
-        raise ValueError("cross-paper comparison group requires at least two selections")
     selection_rows = tuple(
         await db.scalars(
             select(ObjectiveExperimentSelectionRow).where(
@@ -137,13 +135,9 @@ async def _validate_group_context(
         for row in selection_rows
     ):
         raise ValueError("comparison group members do not share analysis and outcome")
-    included = [
-        by_id[item.selection_id]
-        for item in group.members
-        if item.role == "included"
-    ]
-    if len(included) < 2 or len({row.experiment_id for row in included}) < 2:
-        raise ValueError("comparison group requires included selections from multiple experiments")
+    group.validate_experiment_members(
+        {selection_id: row.experiment_id for selection_id, row in by_id.items()}
+    )
 
 
 async def load_comparison_group(

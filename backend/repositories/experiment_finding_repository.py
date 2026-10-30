@@ -276,15 +276,9 @@ async def _validate_context(
         ):
             raise ValueError("finding groups do not share analysis and outcome")
 
-    experiment_ids = {row.experiment_id for row in selection_rows}
-    if len(experiment_ids) > 1 and not finding.comparison_group_ids:
-        raise ValueError("cross-paper Finding requires a comparison group")
-    if len(experiment_ids) == 1 and finding.synthesis_status == "agreement":
-        raise ValueError("agreement Finding requires independent experiment selections")
-    if len(experiment_ids) == 1 and finding.synthesis_status != "single_study":
-        raise ValueError("one experiment selection must be marked single_study")
-    if len(experiment_ids) > 1 and finding.synthesis_status == "single_study":
-        raise ValueError("multiple experiment selections cannot be single_study")
+    finding.validate_experiment_support(
+        frozenset(row.experiment_id for row in selection_rows)
+    )
 
     if group_rows:
         group_members = tuple(

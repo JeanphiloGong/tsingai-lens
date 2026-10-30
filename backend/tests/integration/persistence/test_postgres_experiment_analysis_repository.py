@@ -345,3 +345,42 @@ async def test_caller_transaction_rolls_back_the_complete_analysis_graph(
             OBJECTIVE_ID,
             analysis.analysis_version,
         ) == ()
+
+
+@pytest.mark.parametrize("with_group, message", [
+    (False, "independent experiment"),
+    (True, "included selections from multiple experiments"),
+])
+async def test_same_experiment_selections_cannot_publish_independent_support(
+    objective_repository, with_group, message,
+):
+    _, analysis = await _queue_and_claim(objective_repository)
+    revision = _revision(
+        experiment_id="experiment-a", document_id="doc_a",
+        measurement_key="strength-a", value=900,
+    )
+    first = _selection(
+        selection_id="selection-a", experiment_id="experiment-a",
+        measurement_key="strength-a", analysis_version=analysis.analysis_version,
+    )
+    graph = ExperimentAnalysisWrite(
+        collection_id=COLLECTION_ID, objective_id=OBJECTIVE_ID,
+        analysis_version=analysis.analysis_version, revisions=(revision,),
+        selections=(first, replace(first, selection_id="selection-b")),
+        groups=(_group(analysis_version=analysis.analysis_version),) if with_group else (),
+        findings=(_finding(analysis_version=analysis.analysis_version, with_group=with_group),),
+    )
+    with pytest.raises(ValueError, match=message):
+        async with database.AsyncSessionLocal() as db, db.begin():
+            await ExperimentAnalysisRepository().write_graph(db, graph)
+    async with database.AsyncSessionLocal() as db:
+        assert await PaperExperimentRepository().read_latest_revision(db, "experiment-a") is None
+        assert await ObjectiveExperimentSelectionRepository().list_selections(
+            db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version,
+        ) == ()
+        assert await ComparisonGroupRepository().list_groups(
+            db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version,
+        ) == ()
+        assert await ExperimentFindingRepository().list_findings(
+            db, COLLECTION_ID, OBJECTIVE_ID, analysis.analysis_version,
+        ) == ()

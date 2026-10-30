@@ -17,7 +17,7 @@ from application.chat.session_service import (
     ChatSourceContextError,
 )
 from application.pipeline import PipelineRunService
-from controllers.chat import sessions as sessions_controller
+from controllers.chat import chat_session_routes as sessions_controller
 from controllers.chat.schemas import (
     ChatSessionCreateRequest,
     ChatSessionListResponse,

@@ -57,7 +57,7 @@ from repositories.feedback_dataset_export_repository import (
 )
 from repositories.feedback_dataset_repository import StoredDataset
 
-router = APIRouter(prefix="/feedback-datasets", tags=["feedback-workbench"])
+feedback_dataset_router = APIRouter(prefix="/feedback-datasets", tags=["feedback-workbench"])
 
 
 def _service(request: Request) -> FeedbackDatasetService:
@@ -191,7 +191,7 @@ def _dataset_response(record: StoredDataset) -> TaskDatasetResponse:
     )
 
 
-@router.post("", response_model=TaskDatasetResponse, status_code=status.HTTP_201_CREATED)
+@feedback_dataset_router.post("", response_model=TaskDatasetResponse, status_code=status.HTTP_201_CREATED)
 async def create_feedback_dataset(
     payload: TaskDatasetCreateRequest,
     request: Request,
@@ -219,7 +219,7 @@ async def create_feedback_dataset(
     return _dataset_response(record)
 
 
-@router.get("", response_model=TaskDatasetListResponse)
+@feedback_dataset_router.get("", response_model=TaskDatasetListResponse)
 async def list_feedback_datasets(
     request: Request,
     collection_id: str = Query(min_length=1, max_length=64),
@@ -247,7 +247,7 @@ async def list_feedback_datasets(
     )
 
 
-@router.get("/{dataset_id}", response_model=TaskDatasetResponse)
+@feedback_dataset_router.get("/{dataset_id}", response_model=TaskDatasetResponse)
 async def get_feedback_dataset(
     dataset_id: str,
     request: Request,
@@ -262,7 +262,7 @@ async def get_feedback_dataset(
     return _dataset_response(record)
 
 
-@router.post(
+@feedback_dataset_router.post(
     "/{dataset_id}/export-previews",
     response_model=DatasetExportPreviewResponse,
 )
@@ -292,7 +292,7 @@ async def preview_feedback_dataset_export(
     return _preview_response(preview)
 
 
-@router.post(
+@feedback_dataset_router.post(
     "/{dataset_id}/exports",
     response_model=DatasetExportSummaryResponse,
     status_code=status.HTTP_201_CREATED,
@@ -336,7 +336,7 @@ async def publish_feedback_dataset_export(
     )
 
 
-@router.get("/{dataset_id}/exports", response_model=DatasetExportListResponse)
+@feedback_dataset_router.get("/{dataset_id}/exports", response_model=DatasetExportListResponse)
 async def list_feedback_dataset_exports(
     dataset_id: str,
     request: Request,
@@ -364,7 +364,7 @@ async def list_feedback_dataset_exports(
     )
 
 
-@router.get("/{dataset_id}/exports/{export_id}/download")
+@feedback_dataset_router.get("/{dataset_id}/exports/{export_id}/download")
 async def download_feedback_dataset_export(
     dataset_id: str,
     export_id: str,
@@ -397,7 +397,7 @@ async def download_feedback_dataset_export(
     )
 
 
-@router.get("/{dataset_id}/samples", response_model=DatasetSampleListResponse)
+@feedback_dataset_router.get("/{dataset_id}/samples", response_model=DatasetSampleListResponse)
 async def list_dataset_samples(
     dataset_id: str,
     request: Request,
@@ -428,7 +428,7 @@ async def list_dataset_samples(
     )
 
 
-@router.get(
+@feedback_dataset_router.get(
     "/{dataset_id}/samples/{sample_id}",
     response_model=DatasetSampleDetailResponse,
 )
@@ -453,7 +453,7 @@ async def get_dataset_sample(
     return _detail_response(result)
 
 
-@router.patch(
+@feedback_dataset_router.patch(
     "/{dataset_id}/samples/{sample_id}",
     response_model=DatasetSampleSummaryResponse,
 )
@@ -538,7 +538,7 @@ async def update_dataset_sample(
     return _sample_response(result)
 
 
-@router.post(
+@feedback_dataset_router.post(
     "/{dataset_id}/samples/{sample_id}/confirm",
     response_model=DatasetSampleSummaryResponse,
 )
@@ -570,7 +570,7 @@ async def confirm_dataset_sample(
     return _sample_response(result)
 
 
-@router.post(
+@feedback_dataset_router.post(
     "/{dataset_id}/samples/{sample_id}/actions",
     response_model=DatasetSampleSummaryResponse,
 )
@@ -606,7 +606,7 @@ async def act_on_dataset_sample(
     return _sample_response(result)
 
 
-@router.post(
+@feedback_dataset_router.post(
     "/{dataset_id}/collections",
     response_model=DatasetCollectionResponse,
     status_code=status.HTTP_202_ACCEPTED,
@@ -647,4 +647,4 @@ async def collect_feedback_cases(
     )
 
 
-__all__ = ["router"]
+__all__ = ['feedback_dataset_router']

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from controllers import feedback_cases
+from controllers import feedback_case_routes as feedback_cases
 from application.feedback.feedback_case_service import FeedbackCaseSummary
 
 

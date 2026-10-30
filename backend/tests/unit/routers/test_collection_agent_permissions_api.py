@@ -5,11 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from controllers.source.collections import (
-    CollectionAgentPermissionRequest,
-    get_collection_agent_permission,
-    set_collection_agent_permission,
-)
+from controllers.source.collection_routes import CollectionAgentPermissionRequest, get_collection_agent_permission, set_collection_agent_permission
 
 
 def _request(service, user_id: str = "owner") -> SimpleNamespace:

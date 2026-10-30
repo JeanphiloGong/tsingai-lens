@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from application.core.objectives.finding_summary import FindingSummaryUnavailable
-from controllers.core.research_objectives import router
+from controllers.core.research_objective_routes import research_objective_router as router
 
 
 @pytest.fixture

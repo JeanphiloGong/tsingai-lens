@@ -125,11 +125,11 @@ class SourceReferenceSetResponse(SourceReferenceSummaryResponse):
     )
 
 
-router = APIRouter(
+reference_router = APIRouter(
     prefix="/collections/{collection_id}/references",
     tags=["source-references"],
 )
-@router.post(
+@reference_router.post(
     "/build",
     response_model=SourceReferenceSummaryResponse,
     summary="Build the collection reference candidate pool",
@@ -148,7 +148,7 @@ async def build_collection_references(
     return SourceReferenceSummaryResponse(**result.to_summary())
 
 
-@router.get(
+@reference_router.get(
     "",
     response_model=SourceReferenceSetResponse,
     summary="Read the collection reference candidate pool",

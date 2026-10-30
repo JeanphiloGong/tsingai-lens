@@ -110,7 +110,7 @@ class DocumentMarkdownResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-router = APIRouter(prefix="/collections", tags=["documents"])
+document_router = APIRouter(prefix="/collections", tags=["documents"])
 
 
 def _document_profiles_not_ready_detail(collection_id: str) -> dict[str, str]:
@@ -193,7 +193,7 @@ def _figure_image_unavailable_detail(
     }
 
 
-@router.get(
+@document_router.get(
     "/{collection_id}/documents/profiles",
     response_model=DocumentProfileListResponse,
     summary="List document profiles in a collection",
@@ -238,7 +238,7 @@ async def list_collection_document_profiles(
     return DocumentProfileListResponse(**payload)
 
 
-@router.get(
+@document_router.get(
     "/{collection_id}/documents/{document_id}/profile",
     response_model=DocumentProfileItemResponse,
     summary="Read a document profile from a collection",
@@ -273,7 +273,7 @@ async def get_collection_document_profile(
     return DocumentProfileItemResponse(**payload)
 
 
-@router.get(
+@document_router.get(
     "/{collection_id}/documents/{document_id}/content",
     response_model=DocumentContentResponse,
     summary="Read document viewer content from a collection",
@@ -308,7 +308,7 @@ async def get_collection_document_content(
     return DocumentContentResponse(**payload)
 
 
-@router.get(
+@document_router.get(
     "/{collection_id}/documents/{document_id}/markdown",
     response_model=DocumentMarkdownResponse,
     summary="Read a document Markdown projection from a collection",
@@ -343,7 +343,7 @@ async def get_collection_document_markdown(
     return DocumentMarkdownResponse(**payload)
 
 
-@router.get(
+@document_router.get(
     "/{collection_id}/documents/{document_id}/source",
     summary="Stream the original source file for one document",
 )
@@ -387,7 +387,7 @@ async def get_collection_document_source(
         headers={"content-disposition": content_disposition},
     )
 
-@router.get(
+@document_router.get(
     "/{collection_id}/documents/{document_id}/figures/{figure_id}/image",
     summary="Stream an extracted figure image for one parsed document",
 )

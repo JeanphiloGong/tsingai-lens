@@ -8,11 +8,8 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from application.goal.experiment_plan_service import ExperimentPlanService
-from controllers.goal import experiment_plans as experiment_plans_controller
-from controllers.goal.experiment_plans import (
-    ExperimentPlanCreateRequest,
-    ExperimentPlanUpdateRequest,
-)
+from controllers.goal import experiment_plan_routes as experiment_plans_controller
+from controllers.goal.experiment_plan_routes import ExperimentPlanCreateRequest, ExperimentPlanUpdateRequest
 from repositories.experiment_plan_repository import ExperimentPlanRepository
 
 

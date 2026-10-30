@@ -10,8 +10,8 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.goal.brief_service import GoalService
-from controllers.goal import intake as goals_controller
-from controllers.goal.intake import GoalIntakeRequest
+from controllers.goal import goal_routes as goals_controller
+from controllers.goal.goal_routes import GoalIntakeRequest
 from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio

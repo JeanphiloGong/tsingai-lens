@@ -132,7 +132,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(source_reposit
         FindingAuthoringService,
     )
     from application.source.collection_service import CollectionService
-    from controllers.core.finding_review import router
+    from controllers.core.finding_review_routes import finding_review_router as router
     from domain.core import PaperContribution
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient

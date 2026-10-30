@@ -31,7 +31,7 @@ from application.chat import (
 )
 from application.chat.session_service import ChatSessionService
 from application.source.collection_service import CollectionService
-from controllers.chat.sessions import router
+from controllers.chat.chat_session_routes import chat_session_router as router
 from domain.chat import (
     ChatMessage,
     ChatResourceRef,

@@ -111,18 +111,13 @@ from application.source.reference_workflow_service import SourceReferenceWorkflo
 from application.source.source_archive_service import SourceArchiveService
 from application.source.source_import_service import SourceImportService
 from config import DATA_DIR
-from controllers import auth, feedback_cases
-from controllers.chat import sessions as chat_sessions
-from controllers.core import (
-    documents,
-    finding_review,
-    paper_experiments,
-    research_objectives,
-)
-from controllers.feedback import task_datasets
-from controllers.goal import experiment_plans
-from controllers.goal import intake as goals
-from controllers.source import collections, pipeline_runs, references
+from controllers import auth_routes as auth, feedback_case_routes as feedback_cases
+from controllers.chat import chat_session_routes as chat_sessions
+from controllers.core import document_routes as documents, finding_review_routes as finding_review, paper_experiment_routes as paper_experiments, research_objective_routes as research_objectives
+from controllers.feedback import feedback_dataset_routes as task_datasets
+from controllers.goal import experiment_plan_routes as experiment_plans
+from controllers.goal import goal_routes as goals
+from controllers.source import collection_routes as collections, pipeline_run_routes as pipeline_runs, reference_routes as references
 from infra.llm.chat_model import OpenAIChatModel
 from infra.llm.correction_signal_analysis import OpenAICorrectionSignalAnalysisEngine
 from infra.llm.feedback_sample_generator import OpenAIFeedbackSampleGenerator
@@ -1036,19 +1031,19 @@ def register_routes(app: FastAPI) -> None:
     """Register the public Lens API routers."""
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    app.include_router(auth.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(references.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(chat_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(feedback_cases.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(task_datasets.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(pipeline_runs.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(finding_review.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(paper_experiments.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(auth.auth_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(collections.collection_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(references.reference_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(goals.goal_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(experiment_plans.experiment_plan_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(chat_sessions.chat_session_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(feedback_cases.feedback_case_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(task_datasets.feedback_dataset_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(pipeline_runs.pipeline_run_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(documents.document_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(research_objectives.research_objective_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(finding_review.finding_review_router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(paper_experiments.paper_experiment_router, prefix=PUBLIC_API_V1_PREFIX)
 
 
 def create_app(

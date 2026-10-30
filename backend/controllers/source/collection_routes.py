@@ -164,7 +164,7 @@ class CollectionSourceArchiveRequest(BaseModel):
         return normalized
 
 
-router = APIRouter(prefix="/collections", tags=["collections"])
+collection_router = APIRouter(prefix="/collections", tags=["collections"])
 logger = logging.getLogger(__name__)
 
 _MAX_UPLOAD_BYTES = 256 * 1024 * 1024
@@ -205,7 +205,7 @@ def _source_archive_error_detail(
     return detail
 
 
-@router.post("", response_model=CollectionResponse, summary="create the paper collection")
+@collection_router.post("", response_model=CollectionResponse, summary="create the paper collection")
 async def create_collection(
     payload: CollectionCreateRequest,
     request: Request,
@@ -219,7 +219,7 @@ async def create_collection(
     return CollectionResponse(**record)
 
 
-@router.get("", response_model=CollectionListResponse, summary="List paper collections")
+@collection_router.get("", response_model=CollectionListResponse, summary="List paper collections")
 async def list_collections(request: Request) -> CollectionListResponse:
     items = [
         CollectionSummaryResponse(
@@ -233,7 +233,7 @@ async def list_collections(request: Request) -> CollectionListResponse:
     return CollectionListResponse(items=items)
 
 
-@router.get("/{collection_id}", response_model=CollectionResponse, summary="Get collection details")
+@collection_router.get("/{collection_id}", response_model=CollectionResponse, summary="Get collection details")
 async def get_collection(collection_id: str, request: Request) -> CollectionResponse:
     try:
         record = await request.app.state.collection_service.get_collection_for_user(
@@ -245,7 +245,7 @@ async def get_collection(collection_id: str, request: Request) -> CollectionResp
     return CollectionResponse(**record)
 
 
-@router.get(
+@collection_router.get(
     "/{collection_id}/agent-permissions",
     response_model=CollectionAgentPermissionResponse,
     summary="Read the default Research Agent permission for a collection",
@@ -263,7 +263,7 @@ async def get_collection_agent_permission(
     return CollectionAgentPermissionResponse(**permission)
 
 
-@router.put(
+@collection_router.put(
     "/{collection_id}/agent-permissions",
     response_model=CollectionAgentPermissionResponse,
     summary="Set the default Research Agent permission for a collection",
@@ -286,7 +286,7 @@ async def set_collection_agent_permission(
     return CollectionAgentPermissionResponse(**permission)
 
 
-@router.delete(
+@collection_router.delete(
     "/{collection_id}",
     response_model=CollectionDeleteResponse,
     summary="Delete a paper collection",
@@ -304,7 +304,7 @@ async def delete_collection(collection_id: str, request: Request) -> CollectionD
     return CollectionDeleteResponse(**result)
 
 
-@router.post(
+@collection_router.post(
     "/{collection_id}/documents",
     response_model=CollectionDocumentResponse,
     summary="Upload a paper to a collection",
@@ -340,7 +340,7 @@ async def upload_collection_document(
     return CollectionDocumentResponse(**record)
 
 
-@router.get(
+@collection_router.get(
     "/{collection_id}/documents",
     response_model=CollectionDocumentListResponse,
     summary="List collection documents",
@@ -364,7 +364,7 @@ async def list_collection_documents(
     return CollectionDocumentListResponse(items=items)
 
 
-@router.post(
+@collection_router.post(
     "/{collection_id}/source-archives",
     summary="Download selected original collection files for reproduction",
 )

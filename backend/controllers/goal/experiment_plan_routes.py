@@ -77,10 +77,10 @@ class ExperimentPlanListResponse(BaseModel):
     items: list[ExperimentPlanResponse] = Field(default_factory=list)
 
 
-router = APIRouter(prefix="/collections", tags=["experiment-plans"])
+experiment_plan_router = APIRouter(prefix="/collections", tags=["experiment-plans"])
 
 
-@router.post(
+@experiment_plan_router.post(
     "/{collection_id}/objectives/{objective_id}/experiment-plans",
     response_model=ExperimentPlanResponse,
     summary="Save an Objective-scoped experiment plan draft",
@@ -113,7 +113,7 @@ async def create_experiment_plan(
     return _plan_response(plan)
 
 
-@router.get(
+@experiment_plan_router.get(
     "/{collection_id}/objectives/{objective_id}/experiment-plans",
     response_model=ExperimentPlanListResponse,
     summary="List Objective-scoped experiment plan drafts",
@@ -141,7 +141,7 @@ async def list_experiment_plans(
     )
 
 
-@router.get(
+@experiment_plan_router.get(
     "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
     response_model=ExperimentPlanResponse,
     summary="Read one experiment plan revision",
@@ -167,7 +167,7 @@ async def read_experiment_plan(
     return _plan_response(plan)
 
 
-@router.patch(
+@experiment_plan_router.patch(
     "/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}",
     response_model=ExperimentPlanResponse,
     summary="Edit an Objective-scoped experiment plan draft",

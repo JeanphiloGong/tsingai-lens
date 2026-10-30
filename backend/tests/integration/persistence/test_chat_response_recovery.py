@@ -18,7 +18,7 @@ from sqlalchemy import inspect, text
 from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
 from application.chat import CapabilityRegistry, ResearchAgentRunner
 from application.chat.session_service import ChatSessionService
-from controllers.chat.sessions import router
+from controllers.chat.chat_session_routes import chat_session_router as router
 from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from tests.integration.persistence.test_chat_branches import branch_app  # noqa: F401

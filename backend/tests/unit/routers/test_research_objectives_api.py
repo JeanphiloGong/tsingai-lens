@@ -15,7 +15,7 @@ from application.core.objectives.scope_screening import (
     ObjectiveScopeDecision,
     ObjectiveScopePreview,
 )
-from controllers.core.research_objectives import router
+from controllers.core.research_objective_routes import research_objective_router as router
 from controllers.schemas.core.research_objectives import (
     ObjectiveEvidenceAttributeResponse,
 )

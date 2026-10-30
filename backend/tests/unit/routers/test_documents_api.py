@@ -24,7 +24,7 @@ from application.core.document_profiles.service import (
 )
 from application.source.document_markdown_service import DocumentMarkdownService
 from application.source.source_archive_service import SourceArchiveService
-from controllers.core import documents as documents_controller
+from controllers.core import document_routes as documents_controller
 from domain.core import DocumentProfile
 from domain.source import (
     Document,

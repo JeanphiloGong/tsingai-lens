@@ -25,7 +25,7 @@ from sqlalchemy import delete, func, inspect, select, update
 from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
 from application.chat.session_service import ChatSessionService
 from application.source.collection_service import CollectionService
-from controllers.chat.sessions import router
+from controllers.chat.chat_session_routes import chat_session_router as router
 from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult, ToolRisk
 from domain.source import Collection
 from infra.persistence.file.collection_workspace import FileCollectionWorkspace

@@ -117,10 +117,10 @@ class GoalIntakeResponse(BaseModel):
     )
 
 
-router = APIRouter(prefix="/goals", tags=["goals"])
+goal_router = APIRouter(prefix="/goals", tags=["goals"])
 
 
-@router.post(
+@goal_router.post(
     "/intake",
     response_model=GoalIntakeResponse,
     summary="Create a Goal Brief / Intake entry",

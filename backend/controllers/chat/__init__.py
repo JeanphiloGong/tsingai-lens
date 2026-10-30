@@ -1,5 +1,5 @@
 """Research Agent Chat HTTP controllers."""
 
-from controllers.chat import sessions
+from controllers.chat import chat_session_routes
 
-__all__ = ["sessions"]
+__all__ = ["chat_session_routes"]

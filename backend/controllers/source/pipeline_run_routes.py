@@ -10,10 +10,10 @@ from controllers.schemas.source.pipeline_run import (
 )
 
 
-router = APIRouter(tags=["pipeline-runs"])
+pipeline_run_router = APIRouter(tags=["pipeline-runs"])
 
 
-@router.post(
+@pipeline_run_router.post(
     "/collections/{collection_id}/documents/{document_id}/preparation",
     response_model=PipelineRunResponse,
     summary="Prepare one collection document",
@@ -39,7 +39,7 @@ async def prepare_collection_document(
     return PipelineRunResponse(**run)
 
 
-@router.get(
+@pipeline_run_router.get(
     "/collections/{collection_id}/pipeline-runs",
     response_model=PipelineRunListResponse,
     summary="List collection pipeline run history",
@@ -75,7 +75,7 @@ async def list_collection_pipeline_runs(
     )
 
 
-@router.get(
+@pipeline_run_router.get(
     "/pipeline-runs/{run_id}",
     response_model=PipelineRunResponse,
     summary="Get pipeline run status",

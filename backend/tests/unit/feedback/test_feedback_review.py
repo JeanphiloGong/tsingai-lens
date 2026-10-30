@@ -269,7 +269,7 @@ async def test_idempotency_key_replays_one_review_and_rejects_payload_reuse() ->
 
 
 def test_review_digest_must_be_hex_sha256() -> None:
-    from controllers.feedback_cases import FeedbackReviewRequest
+    from controllers.feedback_case_routes import FeedbackReviewRequest
 
     with pytest.raises(ValueError):
         FeedbackReviewRequest(

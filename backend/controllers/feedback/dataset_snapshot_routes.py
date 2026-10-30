@@ -67,7 +67,7 @@ class DatasetSnapshotListResponse(BaseModel):
     offset: int
 
 
-router = APIRouter(prefix="/dataset-snapshots", tags=["feedback-workbench"])
+dataset_snapshot_router = APIRouter(prefix="/dataset-snapshots", tags=["feedback-workbench"])
 
 
 def _service(request: Request) -> DatasetSnapshotService:
@@ -87,7 +87,7 @@ def _response(snapshot: object) -> DatasetSnapshotResponse:
     return DatasetSnapshotResponse.model_validate(snapshot, from_attributes=True)  # type: ignore[attr-defined]
 
 
-@router.post("", response_model=DatasetSnapshotResponse, status_code=status.HTTP_201_CREATED)
+@dataset_snapshot_router.post("", response_model=DatasetSnapshotResponse, status_code=status.HTTP_201_CREATED)
 async def create_dataset_snapshot(
     payload: DatasetSnapshotCreateRequest,
     request: Request,
@@ -113,7 +113,7 @@ async def create_dataset_snapshot(
     return _response(snapshot)
 
 
-@router.get("", response_model=DatasetSnapshotListResponse)
+@dataset_snapshot_router.get("", response_model=DatasetSnapshotListResponse)
 async def list_dataset_snapshots(
     request: Request,
     collection_id: str | None = Query(default=None, min_length=1, max_length=64),
@@ -159,7 +159,7 @@ async def list_dataset_snapshots(
     )
 
 
-@router.get("/{dataset_id}/jsonl")
+@dataset_snapshot_router.get("/{dataset_id}/jsonl")
 async def download_dataset_snapshot(
     dataset_id: str,
     request: Request,
@@ -186,7 +186,7 @@ async def download_dataset_snapshot(
     )
 
 
-@router.get("/{dataset_id}", response_model=DatasetSnapshotResponse)
+@dataset_snapshot_router.get("/{dataset_id}", response_model=DatasetSnapshotResponse)
 async def get_dataset_snapshot(
     dataset_id: str,
     request: Request,
@@ -205,4 +205,4 @@ async def get_dataset_snapshot(
     return _response(snapshot)
 
 
-__all__ = ["router"]
+__all__ = ['dataset_snapshot_router']

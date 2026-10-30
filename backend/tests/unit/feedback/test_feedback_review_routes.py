@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from controllers import feedback_cases
-from controllers.feedback_cases import FeedbackReviewRequest
+from controllers import feedback_case_routes as feedback_cases
+from controllers.feedback_case_routes import FeedbackReviewRequest
 from domain.feedback import ReviewDecision
 
 

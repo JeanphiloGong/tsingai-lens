@@ -158,7 +158,7 @@ async def test_permission_controller_enforces_owner_and_revision(*, postgres_ses
     from fastapi import HTTPException
 
     from controllers.chat.schemas import ChatPermissionRequest
-    from controllers.chat.sessions import get_chat_permission, set_chat_permission
+    from controllers.chat.chat_session_routes import get_chat_permission, set_chat_permission
     from tests.unit.routers.test_chat_sessions_api import _request
     repository = ChatRepository()
     service = ChatSessionService(repository=repository, collection_service=_CollectionService(),

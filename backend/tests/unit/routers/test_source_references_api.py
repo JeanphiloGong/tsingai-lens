@@ -18,7 +18,7 @@ from application.source.reference_extraction_service import (
 from application.source.reference_workflow_service import (
     SourceReferenceWorkflowService,
 )
-from controllers.source import references as references_controller
+from controllers.source import reference_routes as references_controller
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from tests.support.collection_service import build_test_collection_service
 from repositories.source_artifact_repository import SourceArtifactRepository

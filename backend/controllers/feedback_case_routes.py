@@ -131,7 +131,7 @@ class FeedbackReviewDecisionListResponse(BaseModel):
     items: list[FeedbackReviewDecisionResponse]
 
 
-router = APIRouter(prefix="/feedback-cases", tags=["feedback-workbench"])
+feedback_case_router = APIRouter(prefix="/feedback-cases", tags=["feedback-workbench"])
 
 
 def _service(request: Request) -> FeedbackCaseService:
@@ -147,7 +147,7 @@ def _service(request: Request) -> FeedbackCaseService:
     return service
 
 
-@router.get("", response_model=FeedbackCaseListResponse)
+@feedback_case_router.get("", response_model=FeedbackCaseListResponse)
 async def list_feedback_cases(
     request: Request,
     collection_id: str | None = Query(default=None, min_length=1, max_length=64),
@@ -181,7 +181,7 @@ async def list_feedback_cases(
     )
 
 
-@router.get("/{case_id}", response_model=FeedbackCaseDetailResponse)
+@feedback_case_router.get("/{case_id}", response_model=FeedbackCaseDetailResponse)
 async def get_feedback_case(
     case_id: str,
     request: Request,
@@ -195,7 +195,7 @@ async def get_feedback_case(
     return FeedbackCaseDetailResponse.model_validate(detail)
 
 
-@router.patch("/{case_id}/annotation", response_model=FeedbackAnnotationResponse)
+@feedback_case_router.patch("/{case_id}/annotation", response_model=FeedbackAnnotationResponse)
 async def save_feedback_annotation(
     case_id: str,
     payload: FeedbackAnnotationRequest,
@@ -225,7 +225,7 @@ async def save_feedback_annotation(
     return FeedbackAnnotationResponse.model_validate(annotation, from_attributes=True)
 
 
-@router.post("/{case_id}/review", response_model=FeedbackReviewDecisionResponse)
+@feedback_case_router.post("/{case_id}/review", response_model=FeedbackReviewDecisionResponse)
 async def submit_feedback_review(
     case_id: str,
     payload: FeedbackReviewRequest,
@@ -260,7 +260,7 @@ async def submit_feedback_review(
     return FeedbackReviewDecisionResponse.model_validate(decision, from_attributes=True)
 
 
-@router.get(
+@feedback_case_router.get(
     "/{case_id}/review-decisions",
     response_model=FeedbackReviewDecisionListResponse,
 )
@@ -283,4 +283,4 @@ async def list_feedback_reviews(
     )
 
 
-__all__ = ["router"]
+__all__ = ['feedback_case_router']

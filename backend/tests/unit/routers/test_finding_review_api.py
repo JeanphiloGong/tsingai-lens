@@ -5,7 +5,7 @@ from typing import Mapping
 
 
 from application.evaluation.finding_feedback_service import parse_curated_finding
-from controllers.core.finding_review import router
+from controllers.core.finding_review_routes import finding_review_router as router
 from domain.core import Finding, ObjectiveEvidence
 from domain.core.finding import (
     EVIDENCE_ATTRIBUTION_SCOPES,

@@ -41,10 +41,10 @@ class AuthLogoutResponse(BaseModel):
     ok: bool = True
 
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/login", response_model=AuthSessionResponse, summary="Log in")
+@auth_router.post("/login", response_model=AuthSessionResponse, summary="Log in")
 async def login(
     payload: AuthLoginRequest,
     request: Request,
@@ -77,7 +77,7 @@ async def login(
     return AuthSessionResponse(user=session["user"])
 
 
-@router.post("/logout", response_model=AuthLogoutResponse, summary="Log out")
+@auth_router.post("/logout", response_model=AuthLogoutResponse, summary="Log out")
 async def logout(request: Request, response: Response) -> AuthLogoutResponse:
     await request.app.state.auth_session_service.logout(
         request.cookies.get(SESSION_COOKIE_NAME)
@@ -86,7 +86,7 @@ async def logout(request: Request, response: Response) -> AuthLogoutResponse:
     return AuthLogoutResponse(ok=True)
 
 
-@router.get("/me", response_model=AuthSessionResponse, summary="Read current user")
+@auth_router.get("/me", response_model=AuthSessionResponse, summary="Read current user")
 async def me(request: Request) -> AuthSessionResponse:
     return AuthSessionResponse(user=await require_current_user(request))
 

@@ -189,10 +189,10 @@ class FindingGoldDraftResponse(BaseModel):
     items: list[dict[str, Any]] = Field(default_factory=list)
 
 
-router = APIRouter(prefix="/collections", tags=["finding-review"])
+finding_review_router = APIRouter(prefix="/collections", tags=["finding-review"])
 
 
-@router.post(
+@finding_review_router.post(
     "/{collection_id}/objectives/{objective_id}/findings",
     response_model=FindingAuthoringResponse,
     status_code=201,
@@ -450,7 +450,7 @@ async def create_finding_version(
     )
 
 
-@router.post(
+@finding_review_router.post(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
     response_model=FindingFeedbackResponse,
     summary="Record Finding feedback",
@@ -482,7 +482,7 @@ async def record_finding_feedback(
     return FindingFeedbackResponse.model_validate(feedback, from_attributes=True)
 
 
-@router.get(
+@finding_review_router.get(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback",
     response_model=FindingFeedbackListResponse,
     summary="List Finding feedback",
@@ -517,7 +517,7 @@ async def list_finding_feedback(
     )
 
 
-@router.put(
+@finding_review_router.put(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation",
     response_model=FindingCurationResponse,
     summary="Curate a Finding",
@@ -607,7 +607,7 @@ async def record_finding_curation(
     return FindingCurationResponse.model_validate(curation, from_attributes=True)
 
 
-@router.get(
+@finding_review_router.get(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/curation",
     response_model=FindingCurationListResponse,
     summary="List Finding curations",
@@ -642,7 +642,7 @@ async def list_finding_curations(
     )
 
 
-@router.get(
+@finding_review_router.get(
     "/{collection_id}/objectives/{objective_id}/finding-dataset",
     summary="Export one Objective Finding dataset",
 )
@@ -671,7 +671,7 @@ async def export_objective_finding_dataset(
     return _dataset_response(payload, format)
 
 
-@router.get(
+@finding_review_router.get(
     "/{collection_id}/finding-dataset",
     summary="Export the collection Finding dataset",
 )
@@ -693,7 +693,7 @@ async def export_collection_finding_dataset(
     return _dataset_response(payload, format)
 
 
-@router.get(
+@finding_review_router.get(
     "/{collection_id}/finding-gold-draft",
     response_model=FindingGoldDraftResponse,
     summary="Export expert-confirmed Finding gold draft",

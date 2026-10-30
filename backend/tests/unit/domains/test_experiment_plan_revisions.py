@@ -121,7 +121,7 @@ def test_next_revision_is_direct_validated_and_copies_structured_content(monkeyp
 
 @pytest.mark.parametrize("status", ["", "DRAFT", " ready_for_review ", "invalid"])
 def test_plan_status_is_rejected_at_the_http_boundary(status) -> None:
-    from controllers.goal.experiment_plans import ExperimentPlanUpdateRequest
+    from controllers.goal.experiment_plan_routes import ExperimentPlanUpdateRequest
 
     with pytest.raises(ValueError):
         ExperimentPlanUpdateRequest(status=status)
@@ -129,7 +129,7 @@ def test_plan_status_is_rejected_at_the_http_boundary(status) -> None:
 
 @pytest.mark.parametrize("field", ["title", "content"])
 def test_plan_rejects_blank_required_text_at_the_http_boundary(field) -> None:
-    from controllers.goal.experiment_plans import ExperimentPlanCreateRequest
+    from controllers.goal.experiment_plan_routes import ExperimentPlanCreateRequest
 
     with pytest.raises(ValueError):
         ExperimentPlanCreateRequest(**{**{"title": "Reviewed", "content": "Approved"}, field: "  "})

@@ -1060,9 +1060,7 @@ async def test_finding_feedback_rejects_inconsistent_review_decisions(*, postgre
 
 def test_review_input_rejects_unknown_status_values() -> None:
     from pydantic import ValidationError
-    from controllers.core.finding_review import (
-        FindingFeedbackCreateRequest, FindingCurationCreateRequest,
-    )
+    from controllers.core.finding_review_routes import FindingFeedbackCreateRequest, FindingCurationCreateRequest
     with pytest.raises(ValidationError, match="review_status"):
         FindingFeedbackCreateRequest(analysis_version=1, review_status="bogus")
     with pytest.raises(ValidationError, match="curated_status"):

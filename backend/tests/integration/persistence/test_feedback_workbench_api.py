@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from application.auth.session_service import SESSION_COOKIE_NAME, AuthSessionService
-from controllers import feedback_cases
+from controllers import feedback_case_routes as feedback_cases
 from main import configure_middleware
 from repositories.auth_repository import AuthSessionRecord, AuthUserRecord
 from tests.integration.persistence.test_feedback_workbench import feedback_chain
@@ -81,7 +81,7 @@ async def feedback_api(feedback_chain):
 
     app = FastAPI()
     configure_middleware(app)
-    app.include_router(feedback_cases.router, prefix="/api/v1")
+    app.include_router(feedback_cases.feedback_case_router, prefix="/api/v1")
     app.state.auth_session_service = AuthSessionService(auth_repository)
     app.state.collection_service = chain.collection_service
     app.state.feedback_case_service = chain.case_service

@@ -48,7 +48,7 @@ from repositories.chat_repository import (
     ChatSessionHasBranchesError,
 )
 
-router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
+chat_session_router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
 
 
 def _model_call_summary(call: Any) -> ChatModelCallSummaryResponse:
@@ -70,7 +70,7 @@ def _model_call_detail(call: Any) -> ChatModelCallResponse:
     })
 
 
-@router.get("/{session_id}/permissions", response_model=ChatPermissionResponse)
+@chat_session_router.get("/{session_id}/permissions", response_model=ChatPermissionResponse)
 async def get_chat_permission(session_id: str, request: Request):
     service = request.app.state.chat_session_service
     user_id = await current_user_id(request)
@@ -81,7 +81,7 @@ async def get_chat_permission(session_id: str, request: Request):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.put("/{session_id}/permissions", response_model=ChatPermissionResponse)
+@chat_session_router.put("/{session_id}/permissions", response_model=ChatPermissionResponse)
 async def set_chat_permission(session_id: str, payload: ChatPermissionRequest, request: Request):
     service = request.app.state.chat_session_service
     user_id = await current_user_id(request)
@@ -102,7 +102,7 @@ def _session_not_found(exc: ChatSessionNotFoundError) -> dict[str, str]:
     }
 
 
-@router.get("", response_model=ChatSessionListResponse, summary="List owned Chat sessions")
+@chat_session_router.get("", response_model=ChatSessionListResponse, summary="List owned Chat sessions")
 async def list_chat_sessions(
     request: Request,
     collection_id: str = Query(min_length=1, max_length=64),
@@ -130,7 +130,7 @@ async def list_chat_sessions(
     )
 
 
-@router.post(
+@chat_session_router.post(
     "",
     response_model=ChatSessionResponse,
     status_code=status.HTTP_201_CREATED,
@@ -150,7 +150,7 @@ async def create_chat_session(
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
-@router.get(
+@chat_session_router.get(
     "/{session_id}",
     response_model=ChatSessionResponse,
     summary="Read one owned Research Agent Chat session",
@@ -169,7 +169,7 @@ async def get_chat_session(
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
-@router.put(
+@chat_session_router.put(
     "/{session_id}/pin",
     response_model=ChatSessionResponse,
     summary="Pin or unpin one owned Chat session",
@@ -186,7 +186,7 @@ async def set_chat_session_pin(
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
-@router.put(
+@chat_session_router.put(
     "/{session_id}/title",
     response_model=ChatSessionResponse,
     summary="Rename one owned Chat session",
@@ -205,7 +205,7 @@ async def set_chat_session_title(
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
-@router.delete(
+@chat_session_router.delete(
     "/{session_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete one owned Research Agent Chat session",
@@ -234,7 +234,7 @@ async def delete_chat_session(session_id: str, request: Request) -> None:
         ) from exc
 
 
-@router.post("/{session_id}/branches", response_model=ChatSessionResponse, status_code=201)
+@chat_session_router.post("/{session_id}/branches", response_model=ChatSessionResponse, status_code=201)
 async def branch_chat_message(
     session_id: str, payload: ChatBranchRequest, request: Request,
 ) -> ChatSessionResponse:
@@ -253,7 +253,7 @@ async def branch_chat_message(
     return ChatSessionResponse.model_validate(session, from_attributes=True)
 
 
-@router.get("/{session_id}/tree", response_model=ChatTreeResponse)
+@chat_session_router.get("/{session_id}/tree", response_model=ChatTreeResponse)
 async def get_chat_tree(session_id: str, request: Request) -> ChatTreeResponse:
     try:
         tree = await request.app.state.chat_session_service.get_tree_for_user(
@@ -268,7 +268,7 @@ async def get_chat_tree(session_id: str, request: Request) -> ChatTreeResponse:
     )
 
 
-@router.get(
+@chat_session_router.get(
     "/{session_id}/messages",
     response_model=ChatMessageListResponse,
     summary="List one owned Chat trajectory",
@@ -287,7 +287,7 @@ async def list_chat_messages(
     return _trajectory_response(trajectory)
 
 
-@router.get(
+@chat_session_router.get(
     "/{session_id}/model-calls",
     response_model=dict,
     summary="List exact provider calls for an owned Chat session",
@@ -313,7 +313,7 @@ async def list_chat_model_calls(
     }
 
 
-@router.get(
+@chat_session_router.get(
     "/{session_id}/model-calls/{call_id}",
     response_model=ChatModelCallResponse,
     summary="Read one exact provider call for an owned Chat session",
@@ -334,7 +334,7 @@ async def get_chat_model_call(
     return _model_call_detail(call)
 
 
-@router.get("/{session_id}/events", summary="Resume updates for one owned Research Agent response")
+@chat_session_router.get("/{session_id}/events", summary="Resume updates for one owned Research Agent response")
 async def stream_chat_updates(
     session_id: str, request: Request, response_id: str = Query(min_length=1, max_length=128),
 ) -> StreamingResponse:
@@ -380,7 +380,7 @@ def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListRespon
     )
 
 
-@router.put(
+@chat_session_router.put(
     "/{session_id}/messages/{message_id}/feedback",
     response_model=ChatMessageFeedbackResponse | None,
     summary="Set or withdraw usefulness feedback on an owned assistant answer",
@@ -417,7 +417,7 @@ async def set_chat_message_feedback(
     return ChatMessageFeedbackResponse.model_validate(feedback) if feedback else None
 
 
-@router.post(
+@chat_session_router.post(
     "/{session_id}/messages",
     response_model=ChatTurnResponse,
     summary="Run one Research Agent turn",
@@ -541,7 +541,7 @@ async def _chat_event_stream(
         yield f"event: {event_type}\ndata: {payload}\n\n"
 
 
-@router.post(
+@chat_session_router.post(
     "/{session_id}/tool-calls/{tool_call_id}/decision",
     response_model=ChatTurnResponse,
     summary="Approve or reject one exact Research Agent write call",
@@ -608,4 +608,4 @@ def _message_response(message: Any) -> ChatMessageResponse:
     return ChatMessageResponse.model_validate(message, from_attributes=True)
 
 
-__all__ = ["router"]
+__all__ = ['chat_session_router']

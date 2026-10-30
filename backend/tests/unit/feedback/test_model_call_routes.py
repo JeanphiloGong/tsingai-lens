@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from application.chat.session_service import ChatSessionNotFoundError
-from controllers.chat.sessions import get_chat_model_call, list_chat_model_calls
+from controllers.chat.chat_session_routes import get_chat_model_call, list_chat_model_calls
 from repositories.chat_repository import ChatModelCall
 
 pytestmark = pytest.mark.anyio

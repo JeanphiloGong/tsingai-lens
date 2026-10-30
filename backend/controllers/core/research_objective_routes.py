@@ -38,10 +38,10 @@ class FindingSummaryRequest(BaseModel):
     language: Literal["en", "zh"] = "en"
 
 
-router = APIRouter(prefix="/collections", tags=["research-objectives"])
+research_objective_router = APIRouter(prefix="/collections", tags=["research-objectives"])
 
 
-@router.post(
+@research_objective_router.post(
     "/{collection_id}/objective-discovery",
     response_model=PipelineRunResponse,
     summary="Queue research question formation from selected ready documents",
@@ -63,7 +63,7 @@ async def discover_collection_objectives(
     return PipelineRunResponse(**run)
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives",
     response_model=PaginatedObjectiveListResponse,
     summary="List collection research objectives",
@@ -104,7 +104,7 @@ async def list_collection_objectives(
     )
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives/{objective_id}/scope",
     response_model=ObjectiveScopeResponse,
     summary="Preview the collection paper scope for one research objective",
@@ -143,7 +143,7 @@ async def preview_collection_objective_scope(
     )
 
 
-@router.post(
+@research_objective_router.post(
     "/{collection_id}/objectives/{objective_id}/analysis",
     response_model=ObjectiveAnalysisResponse,
     summary="Confirm a research objective and start analysis",
@@ -369,7 +369,7 @@ async def start_collection_objective_analysis(
     )
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives/{objective_id}/analysis/status",
     response_model=ObjectiveAnalysisStatusResponse,
     summary="Read lightweight research objective analysis progress",
@@ -389,7 +389,7 @@ async def get_collection_objective_analysis_status(
     return ObjectiveAnalysisStatusResponse(**payload)
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives/{objective_id}/analysis",
     response_model=ObjectiveAnalysisResponse,
     summary="Read research objective analysis state",
@@ -599,7 +599,7 @@ async def get_collection_objective_analysis_state(
     )
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives/{objective_id}/findings",
     response_model=FindingListResponse,
     summary="List published findings",
@@ -627,7 +627,7 @@ async def list_objective_findings(
     return FindingListResponse(**payload)
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}",
     response_model=FindingDetailResponse,
     summary="Read one published finding",
@@ -653,7 +653,7 @@ async def get_objective_finding(
     return FindingDetailResponse(**payload)
 
 
-@router.post(
+@research_objective_router.post(
     "/{collection_id}/objectives/{objective_id}/findings/{finding_id}/summary",
     response_model=FindingSummaryResponse,
     summary="Generate a cited reading summary of a published Finding",
@@ -696,7 +696,7 @@ async def summarize_objective_finding(
     return FindingSummaryResponse(**payload)
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives/{objective_id}/evidence",
     response_model=ObjectiveEvidenceListResponse,
     summary="List published objective evidence",
@@ -726,7 +726,7 @@ async def list_objective_evidence(
     return ObjectiveEvidenceListResponse(**payload)
 
 
-@router.get(
+@research_objective_router.get(
     "/{collection_id}/objectives/{objective_id}/evidence-map",
     response_model=ObjectiveEvidenceMapResponse,
     summary="Read the published Objective evidence map",

@@ -6,10 +6,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
 
-router = APIRouter(prefix="/collections", tags=["paper-experiments"])
+paper_experiment_router = APIRouter(prefix="/collections", tags=["paper-experiments"])
 
 
-@router.get(
+@paper_experiment_router.get(
     "/{collection_id}/objectives/{objective_id}/experiment-analysis",
     summary="Read experiment-backed analysis records",
 )
@@ -28,7 +28,7 @@ async def read_experiment_analysis(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.get(
+@paper_experiment_router.get(
     "/{collection_id}/objectives/{objective_id}/experiment-analysis/export",
     summary="Export fixed experiment-backed analysis data",
 )
@@ -74,4 +74,4 @@ def _service(request: Request):
     return service
 
 
-__all__ = ["router"]
+__all__ = ['paper_experiment_router']

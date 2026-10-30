@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from application.feedback.dataset_export_service import DatasetExportError
-from controllers.feedback import task_datasets
+from controllers.feedback import feedback_dataset_routes as task_datasets
 from controllers.feedback.task_dataset_schemas import (
     SampleConfirmRequest,
     SampleRevisionUpdateRequest,
@@ -357,7 +357,7 @@ def test_sample_update_rejects_missing_message_content_before_write(
 ) -> None:
     service = SimpleNamespace(update_sample=AsyncMock(return_value=_sample()))
     app = FastAPI()
-    app.include_router(task_datasets.router, prefix="/api/v1")
+    app.include_router(task_datasets.feedback_dataset_router, prefix="/api/v1")
     app.state.feedback_dataset_service = service
     monkeypatch.setattr(
         task_datasets, "current_user_id", AsyncMock(return_value="user-1")
@@ -409,7 +409,7 @@ def test_sample_revision_rejects_missing_message_content_before_writing(variant)
         request.state.current_user = {"user_id": "user-1"}
         return await call_next(request)
 
-    app.include_router(task_datasets.router, prefix="/api/v1")
+    app.include_router(task_datasets.feedback_dataset_router, prefix="/api/v1")
     excerpt = {"document_title": "Ti-6Al-4V LPBF", "text": "原文测量条件"}
     content = {
         **variant,

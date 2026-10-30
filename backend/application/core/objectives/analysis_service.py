@@ -1898,7 +1898,6 @@ __all__ = [
     "list_objectives",
     "list_findings",
     "get_finding",
-    "summarize_finding",
     "list_evidence",
     "get_evidence_map",
 ]

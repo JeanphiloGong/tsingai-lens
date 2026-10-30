@@ -77,7 +77,7 @@ def test_upload_classification_retry_content_and_research_readiness(app_client):
     assert content.status_code == 200
     assert "2.0%" in content.json()["content_text"]
     source_output_dir = (
-        state.collection_service.get_paths(collection_id).output_dir
+        state.collection_service.workspace.get_paths(collection_id).output_dir
         / "documents"
         / document_id
     )

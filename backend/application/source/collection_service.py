@@ -9,7 +9,6 @@ from uuid import uuid4
 from domain.chat.permissions import change_permission
 from domain.source import Collection
 from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.file.collection_workspace import CollectionPaths
 from infra.persistence.file.object_store import FileObjectStore
 from repositories.collection_repository import (
     CollectionRepository,
@@ -57,9 +56,6 @@ class CollectionService:
         self.workspace = workspace
         self.root_dir = self.workspace.root_dir
         self.object_store = object_store or FileObjectStore(self.root_dir)
-
-    def get_paths(self, collection_id: str) -> CollectionPaths:
-        return self.workspace.get_paths(collection_id)
 
     def write_figure_asset(
         self,
@@ -300,7 +296,7 @@ class CollectionService:
         return await self.get_collection(collection_id)
 
     async def delete_collection(self, collection_id: str) -> dict:
-        paths = self.get_paths(collection_id)
+        paths = self.workspace.get_paths(collection_id)
         target_dir = paths.collection_dir
         collection = await self.repository.read_collection(collection_id)
         if collection is None:

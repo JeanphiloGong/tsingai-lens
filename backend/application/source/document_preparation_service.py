@@ -496,7 +496,7 @@ class DocumentPreparationService:
         collection_id: str,
         document_id: str,
     ) -> SourceParserConfig:
-        paths = self.collection_service.get_paths(collection_id)
+        paths = self.collection_service.workspace.get_paths(collection_id)
         working_dir = paths.output_dir / "documents" / document_id
         return SourceParserConfig(
             root_dir=str(paths.collection_dir),

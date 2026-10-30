@@ -254,7 +254,7 @@ async def test_document_markdown_service_projects_figure_images(tmp_path, *, pos
     )
     collection_id = collection["collection_id"]
     scratch_asset = (
-        collection_service.get_paths(collection_id).output_dir
+        collection_service.workspace.get_paths(collection_id).output_dir
         / "image_assets"
         / "fig-1.png"
     )

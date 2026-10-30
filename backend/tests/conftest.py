@@ -318,8 +318,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "collection_service",
                 "ObjectiveRepo",
-                "_worker_factory",
-                "_workers",
                 "objective_candidate_service",
                 "objective_input_service",
                 "pipeline_run_service",

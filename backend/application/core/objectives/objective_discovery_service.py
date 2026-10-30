@@ -40,8 +40,6 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 from repositories.objective_repository import ObjectiveRepo
 
-_worker_factory = create_task
-_workers: set[Any] = set()
 
 
 async def recover_interrupted_discoveries() -> int:
@@ -106,7 +104,7 @@ async def start_objective_discovery(
         tuple(item.document_id for item in document_inputs),
     )
     try:
-        background = _worker_factory(coroutine)
+        background = create_task(coroutine)
     except Exception as exc:  # noqa: BLE001
         coroutine.close()
         await run_service.finish_run(
@@ -124,8 +122,6 @@ async def start_objective_discovery(
                 "collection_id": collection_id,
             },
         ) from exc
-    _workers.add(background)
-    background.add_done_callback(_workers.discard)
     background.add_done_callback(_log_unexpected_failure)
     return run
 

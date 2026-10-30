@@ -56,6 +56,15 @@ def _service(pipeline_run_service: ModuleType) -> ModuleType:
     return objective_discovery_service
 
 
+async def _wait_for_run(pipeline_run_service: ModuleType, run_id: str) -> None:
+    for _ in range(100):
+        run = await pipeline_run_service.get_run(run_id, user_id="user-1")
+        if run["status"] in {"completed", "failed", "partial_success"}:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"run did not finish: {run_id}")
+
+
 async def test_objective_discovery_reuses_one_active_run_and_executes_once(
     monkeypatch: pytest.MonkeyPatch, *, postgres_session_factory
 ) -> None:
@@ -101,7 +110,7 @@ async def test_objective_discovery_reuses_one_active_run_and_executes_once(
 
     assert first["run_id"] == duplicate["run_id"]
     assert first["status"] == "queued"
-    await asyncio.gather(*tuple(service._workers))
+    await _wait_for_run(pipeline_run_service, first["run_id"])
 
     completed = await pipeline_run_service.get_run(first["run_id"], user_id="user-1")
     assert calls == 1
@@ -136,7 +145,7 @@ async def test_objective_discovery_records_failure_and_allows_retry(
     first = await service.start_objective_discovery(
         "col_a", ("doc_a",), user_id="user-1"
     )
-    await asyncio.gather(*tuple(service._workers), return_exceptions=True)
+    await _wait_for_run(pipeline_run_service, first["run_id"])
     failed = await pipeline_run_service.get_run(first["run_id"], user_id="user-1")
 
     assert failed["status"] == "failed"
@@ -146,7 +155,7 @@ async def test_objective_discovery_records_failure_and_allows_retry(
         "col_a", ("doc_a",), user_id="user-1"
     )
     assert retry["run_id"] != first["run_id"]
-    await asyncio.gather(*tuple(service._workers), return_exceptions=True)
+    await _wait_for_run(pipeline_run_service, retry["run_id"])
 
 
 async def test_objective_discovery_progress_does_not_move_backwards(

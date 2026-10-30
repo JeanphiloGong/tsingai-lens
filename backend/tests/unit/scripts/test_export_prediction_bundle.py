@@ -3,7 +3,7 @@ from __future__ import annotations
 from infra.persistence import database
 from tests.support.postgres import seed_collection
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 import importlib.util
 import json
@@ -122,7 +122,7 @@ class _PublishedObjectiveRepository:
 async def test_export_prediction_bundle_uses_current_published_results(tmp_path, monkeypatch, *, postgres_session_factory):
     exporter = _load_exporter_module()
     source_repository = SourceArtifactRepository()
-    source_document = source_documents_from_records(
+    source_document = build_source_documents(
         documents=[
             {
                 "id": "paper-1",

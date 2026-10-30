@@ -7,7 +7,7 @@ from domain.core.research_objective import (
     build_paper_research_signal,
 )
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 
 import json
@@ -191,7 +191,7 @@ def _artifacts_for_scenario(
         )
         order += 1
 
-    artifacts = source_documents_from_records(
+    artifacts = build_source_documents(
         documents=[
             {
                 "id": "tc4-baseline-paper",

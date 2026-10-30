@@ -5,8 +5,8 @@ from infra.source.artifact_bundle import (
     source_table_cell_payload,
     source_table_payload,
     source_table_row_payload,
-    source_documents_from_records,
 )
+from tests.support.source_artifacts import build_source_documents
 
 import pytest
 
@@ -245,7 +245,7 @@ def test_source_table_cell_record_preserves_logical_topology():
         row_section=True,
     )
 
-    restored = source_documents_from_records(
+    restored = build_source_documents(
         documents=[{"id": cell.document_id}],
         table_cells=[source_table_cell_payload(cell)],
     )[0].table_cells[0]

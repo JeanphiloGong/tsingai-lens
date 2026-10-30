@@ -3,7 +3,7 @@ from __future__ import annotations
 from infra.persistence import database
 from tests.support.postgres import seed_collection
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 from hashlib import sha256
 from io import BytesIO
@@ -52,7 +52,7 @@ async def test_document_markdown_service_projects_source_blocks_and_tables(tmp_p
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -242,7 +242,7 @@ async def test_document_markdown_service_projects_figure_images(tmp_path, *, pos
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -292,7 +292,7 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_file_is
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -330,7 +330,7 @@ async def test_document_markdown_service_keeps_caption_when_figure_image_is_miss
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -362,7 +362,7 @@ async def test_document_markdown_service_falls_back_to_document_text(tmp_path, *
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -388,7 +388,7 @@ async def test_document_markdown_service_filters_pdf_glyph_garbage(tmp_path, *, 
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -455,7 +455,7 @@ async def test_document_markdown_service_keeps_readable_block_with_replacement_g
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -518,7 +518,7 @@ async def test_document_markdown_service_uses_original_filename_for_display(tmp_
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": uploaded["document_id"],
@@ -575,7 +575,7 @@ async def test_document_markdown_service_reports_missing_document(tmp_path, *, p
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-2", "title": "Other Paper", "text": "Text"}]
         ),
     )

@@ -3,7 +3,7 @@ from __future__ import annotations
 from infra.persistence import database
 from tests.support.postgres import seed_collection
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 import pandas as pd
 import pytest
@@ -50,7 +50,7 @@ async def _write_source_artifacts(
     text_units: pd.DataFrame | None = None,
 ) -> None:
     blocks = build_plain_text_blocks(documents, text_units)
-    source_documents = source_documents_from_records(
+    source_documents = build_source_documents(
             documents=documents.to_dict(orient="records"),
             text_units=(
                 [] if text_units is None else text_units.to_dict(orient="records")

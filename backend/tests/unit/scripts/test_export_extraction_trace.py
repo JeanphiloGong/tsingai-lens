@@ -3,7 +3,7 @@ from __future__ import annotations
 from infra.persistence import database
 from tests.support.postgres import seed_collection
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 import importlib.util
 import json
@@ -108,7 +108,7 @@ class _ObjectiveRepository:
 async def test_export_trace_writes_current_source_and_objective_views(tmp_path, monkeypatch, *, postgres_session_factory):
     trace = _load_trace_module()
     source_repository = SourceArtifactRepository()
-    source_document = source_documents_from_records(
+    source_document = build_source_documents(
         documents=[
             {
                 "id": "paper-1",

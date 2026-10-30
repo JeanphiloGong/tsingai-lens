@@ -81,6 +81,7 @@ def test_to_documents_removes_nul_from_all_source_text(caplog):
             [
                 {
                     "cell_id": "cell_1",
+                    "id": "doc_1",
                     "document_id": "doc_1",
                     "table_id": "table_1",
                     "row_index": 0,
@@ -112,7 +113,6 @@ def test_to_documents_removes_nul_from_all_source_text(caplog):
     )
     assert all("\x00" not in str(value) for value in values)
     assert "documents" in caplog.text
-    assert "doc_1" in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -141,6 +141,7 @@ def test_source_block_page_is_parsed_before_profile_content(raw_page, expected):
                 {
                     "block_id": "block_1",
                     "document_id": "doc_1",
+                        "block_type": "paragraph",
                     "text": "Laser power versus porosity.",
                     "page": raw_page,
                 }

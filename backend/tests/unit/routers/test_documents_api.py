@@ -3,7 +3,7 @@ from __future__ import annotations
 from infra.persistence import database
 from tests.support.postgres import seed_collection
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 from hashlib import sha256
 from io import BytesIO
@@ -292,7 +292,7 @@ async def test_document_content_route_uses_stable_block_locator(
     await _store_source_documents(
         document_profile_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -363,7 +363,7 @@ async def test_document_markdown_route_returns_markdown_projection(document_serv
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {
                     "id": "paper-1",
@@ -601,7 +601,7 @@ async def test_document_figure_image_route_streams_extracted_asset(document_serv
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -646,7 +646,7 @@ async def test_document_figure_image_route_rejects_figure_from_other_document(
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[
                 {"id": "paper-1", "title": "Paper 1", "text": ""},
                 {"id": "paper-2", "title": "Paper 2", "text": ""},
@@ -696,7 +696,7 @@ async def test_document_figure_image_route_rejects_path_outside_collection(
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -746,7 +746,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         first["collection_id"],
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -804,7 +804,7 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
     await _store_source_documents(
         markdown_service.source_artifact_repository,
         collection_id,
-        source_documents_from_records(
+        build_source_documents(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {

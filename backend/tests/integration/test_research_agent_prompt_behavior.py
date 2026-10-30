@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 import json
 import os
@@ -96,7 +96,7 @@ async def _fixture_collection(collection_service, *, postgres_session_factory):
     sources = SourceArtifactRepository()
     await sources.replace_document(
         collection["collection_id"],
-        source_documents_from_records(
+        build_source_documents(
             documents=[record],
             text_units=record.get("text_units", ()),
             blocks=record.get("blocks", ()),

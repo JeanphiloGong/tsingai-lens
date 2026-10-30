@@ -1,6 +1,6 @@
 from infra.persistence import database
 from copy import deepcopy
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 from tests.support.postgres import seed_collection
 import asyncio
 import json
@@ -221,7 +221,8 @@ def test_normal_pagination_is_not_a_warning():
 def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*, postgres_session_factory):
     fixture = Path(__file__).resolve().parents[2] / "fixtures" / "agent_p002" / "source_document.json"
     record = json.loads(fixture.read_text(encoding="utf-8"))
-    source_document = source_documents_from_records(
+    record["id"] = record["document_id"]
+    source_document = build_source_documents(
         documents=[record],
         text_units=record.get("text_units", ()),
         blocks=record.get("blocks", ()),

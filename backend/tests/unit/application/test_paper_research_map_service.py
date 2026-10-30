@@ -8,7 +8,7 @@ from domain.core.research_objective import (
     build_paper_research_relationship,
 )
 
-from infra.source.artifact_bundle import source_documents_from_records
+from tests.support.source_artifacts import build_source_documents
 
 
 import json
@@ -233,7 +233,7 @@ def _artifacts(
     table_rows: list[dict[str, Any]] | None = None,
     figures: list[dict[str, Any]] | None = None,
 ) -> tuple[tuple[SourceDocument, ...], Any]:
-    artifacts = source_documents_from_records(
+    artifacts = build_source_documents(
         documents=[
             {
                 "id": document_id,

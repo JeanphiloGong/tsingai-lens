@@ -76,10 +76,6 @@ export const collections = writable<Collection[]>([]);
 
 export async function fetchCollections() {
 	const data = await requestJson('/collections', { method: 'GET' }) as { items: Collection[] };
-	if (!Array.isArray(data?.items) || data.items.some((item) =>
-		!item || typeof item.collection_id !== 'string' || !item.collection_id || !Array.isArray(item.documents))) {
-		throw new Error('Collection list response is missing items or collection_id.');
-	}
 	const items = data.items;
 	collections.set(items);
 	return items;
@@ -90,8 +86,7 @@ export async function fetchCollection(collectionId: string) {
 		method: 'GET'
 	}) as Collection;
 	const collection = data;
-
-	if (!collection || typeof collection.collection_id !== 'string' || collection.collection_id !== collectionId || !Array.isArray(collection.documents)) {
+	if (collection.collection_id !== collectionId) {
 		throw new Error('Collection response is missing collection_id.');
 	}
 
@@ -120,10 +115,6 @@ export async function createCollection(payload: { name: string; description?: st
 
 	const collection = data;
 
-	if (!collection || typeof collection.collection_id !== 'string' || !collection.collection_id || !Array.isArray(collection.documents)) {
-		throw new Error('Collection response is missing collection_id.');
-	}
-
 	collections.update((items) => [collection, ...items.filter((item) => item.collection_id !== collection.collection_id)]);
 
 	return collection;
@@ -135,7 +126,7 @@ export async function deleteCollection(collectionId: string) {
 	});
 
 	const record = data as { collection_id: string; deleted_at: string };
-	if (!record || record.collection_id !== collectionId || typeof record.deleted_at !== 'string') {
+	if (record.collection_id !== collectionId) {
 		throw new Error('Collection deletion response does not match collection_id.');
 	}
 	collections.update((items) => items.filter((item) => item.collection_id !== record.collection_id));

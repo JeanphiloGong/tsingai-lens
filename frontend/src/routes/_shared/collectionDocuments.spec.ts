@@ -88,11 +88,10 @@ describe('collection document API', () => {
 		expect(result.failures).toEqual([{ file: damaged, message: 'Upload failed.' }]);
 	});
 
-	it('rejects a malformed list response instead of treating it as an empty collection', async () => {
-		request.mockResolvedValue({ status: 'temporarily_unavailable' });
+	it('returns the declared list response without client-side shape repair', async () => {
+		const payload = { count: 0, items: [] };
+		request.mockResolvedValue(payload);
 
-		await expect(listCollectionDocuments('col_1')).rejects.toThrow(
-			'Collection documents response is missing items.'
-		);
+		await expect(listCollectionDocuments('col_1')).resolves.toBe(payload);
 	});
 });

@@ -140,8 +140,6 @@ export type DocumentWorkbenchModel = {
 	source_anchors_by_span_id: Record<string, SourceAnchor>;
 };
 
-const DOCUMENT_TYPES = new Set<DocumentType>(['experimental', 'review', 'mixed', 'uncertain']);
-
 function sourceSpan(documentId: string, block: DocumentContentBlock): WorkbenchSourceSpan {
 	const page = block.page && block.page > 0 ? Math.trunc(block.page) : 1;
 	const section = block.heading_path || block.block_type || 'Document text';
@@ -255,15 +253,8 @@ export async function fetchDocumentProfiles(
 		`/collections/${encodeURIComponent(collectionId)}/documents/profiles${queryString ? `?${queryString}` : ''}`,
 		{ method: 'GET' }
 	)) as DocumentProfilesResponse;
-	if (!data || data.collection_id !== collectionId || !Array.isArray(data.items) ||
-		typeof data.total !== 'number' || !Number.isFinite(data.total) || data.total < 0 ||
-		typeof data.count !== 'number' || !Number.isFinite(data.count) || data.count < 0 ||
-		!data.summary || typeof data.summary.total_documents !== 'number' ||
-		!data.summary.by_doc_type || typeof data.summary.technical_failure_count !== 'number' ||
-		data.items.some((item) => !item || typeof item.document_id !== 'string' || !item.document_id ||
-			!DOCUMENT_TYPES.has(item.doc_type) || !['completed', 'extraction_failed'].includes(item.profile_status) ||
-			(item.confidence !== null && (typeof item.confidence !== 'number' || !Number.isFinite(item.confidence))))) {
-		throw new Error('Document profiles response is invalid.');
+	if (data.collection_id !== collectionId) {
+		throw new Error('Document profiles response does not match collection_id.');
 	}
 	return data;
 }
@@ -276,10 +267,8 @@ export async function fetchDocumentContent(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/content`,
 		{ method: 'GET' }
 	) as DocumentContentResponse;
-	if (!data || data.collection_id !== collectionId || data.document_id !== documentId ||
-		typeof data.content_text !== 'string' || !Array.isArray(data.blocks) ||
-		data.blocks.some((block) => !block || typeof block.block_id !== 'string' || !block.block_id)) {
-		throw new Error('Document content response is invalid.');
+	if (data.collection_id !== collectionId || data.document_id !== documentId) {
+		throw new Error('Document content response does not match the requested document.');
 	}
 	return data;
 }
@@ -292,11 +281,8 @@ export async function fetchDocumentMarkdown(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/markdown`,
 		{ method: 'GET' }
 	) as DocumentMarkdownResponse;
-	if (!data || data.collection_id !== collectionId || data.document_id !== documentId ||
-		typeof data.markdown !== 'string' || !Array.isArray(data.source_map) ||
-		data.source_map.some((item) => !item || typeof item.markdown_anchor !== 'string' || !item.markdown_anchor ||
-			typeof item.artifact_id !== 'string' || !item.artifact_id)) {
-		throw new Error('Document Markdown response is invalid.');
+	if (data.collection_id !== collectionId || data.document_id !== documentId) {
+		throw new Error('Document Markdown response does not match the requested document.');
 	}
 	return data;
 }
@@ -309,10 +295,8 @@ export async function fetchDocumentProfile(
 		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/profile`,
 		{ method: 'GET' }
 	) as DocumentProfile;
-	if (!data || data.document_id !== documentId || !DOCUMENT_TYPES.has(data.doc_type) ||
-		!['completed', 'extraction_failed'].includes(data.profile_status) ||
-		typeof data.confidence !== 'number' || !Number.isFinite(data.confidence)) {
-		throw new Error('Document profile response is invalid.');
+	if (data.document_id !== documentId) {
+		throw new Error('Document profile response does not match the requested document.');
 	}
 	return data;
 }

@@ -35,23 +35,9 @@ export type CollectionDocumentUploadResponse = CollectionDocumentsResponse & {
 export async function listCollectionDocuments(
 	collectionId: string
 ): Promise<CollectionDocumentsResponse> {
-	const data = await requestJson(`/collections/${encodeURIComponent(collectionId)}/documents`, {
+	return requestJson(`/collections/${encodeURIComponent(collectionId)}/documents`, {
 		method: 'GET'
-	});
-
-	if (
-		!data ||
-		typeof data !== 'object' ||
-		!Array.isArray((data as Record<string, unknown>).items)
-	) {
-		throw new Error('Collection documents response is missing items.');
-	}
-
-	const items = (data as CollectionDocumentsResponse).items;
-	if (items.some((item) => !item || typeof item.document_id !== 'string' || !item.document_id)) {
-		throw new Error('Collection documents response is missing document_id.');
-	}
-	return data as CollectionDocumentsResponse;
+	}) as Promise<CollectionDocumentsResponse>;
 }
 
 export async function uploadCollectionDocument(
@@ -70,11 +56,7 @@ export async function uploadCollectionDocument(
 		}
 	);
 
-	const uploaded = data as CollectionDocument;
-	if (!uploaded || typeof uploaded.document_id !== 'string' || !uploaded.document_id) {
-		throw new Error('Document upload response is missing document_id.');
-	}
-	return uploaded;
+	return data as CollectionDocument;
 }
 
 export function isDuplicateCollectionDocumentError(error: unknown) {

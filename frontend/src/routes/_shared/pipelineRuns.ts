@@ -64,13 +64,6 @@ export async function prepareCollectionDocument(collectionId: string, documentId
 	);
 
 	const run = data as PipelineRun;
-	if (!run || typeof run.run_id !== 'string' || !run.run_id ||
-		!['queued', 'running', 'completed', 'partial_success', 'failed'].includes(run.status) ||
-		typeof run.progress_percent !== 'number' || !Number.isFinite(run.progress_percent) ||
-		run.progress_percent < 0 || run.progress_percent > 100 ||
-		!Array.isArray(run.errors) || !Array.isArray(run.warnings)) {
-		throw new Error('PipelineRun response is missing run_id.');
-	}
 	if (run.collection_id !== collectionId || run.scope_id !== documentId) {
 		throw new Error('PipelineRun response does not match the requested document.');
 	}
@@ -87,13 +80,6 @@ export async function formCollectionResearchQuestions(collectionId: string, docu
 	);
 
 	const run = data as PipelineRun;
-	if (!run || typeof run.run_id !== 'string' || !run.run_id ||
-		!['queued', 'running', 'completed', 'partial_success', 'failed'].includes(run.status) ||
-		typeof run.progress_percent !== 'number' || !Number.isFinite(run.progress_percent) ||
-		run.progress_percent < 0 || run.progress_percent > 100 ||
-		!Array.isArray(run.errors) || !Array.isArray(run.warnings)) {
-		throw new Error('PipelineRun response is missing run_id.');
-	}
 	if (run.collection_id !== collectionId) {
 		throw new Error('PipelineRun response does not match collection_id.');
 	}
@@ -103,13 +89,6 @@ export async function formCollectionResearchQuestions(collectionId: string, docu
 export async function getPipelineRun(runId: string) {
 	const data = await requestJson(`/pipeline-runs/${encodeURIComponent(runId)}`, { method: 'GET' });
 	const run = data as PipelineRun;
-	if (!run || typeof run.run_id !== 'string' || !run.run_id ||
-		!['queued', 'running', 'completed', 'partial_success', 'failed'].includes(run.status) ||
-		typeof run.progress_percent !== 'number' || !Number.isFinite(run.progress_percent) ||
-		run.progress_percent < 0 || run.progress_percent > 100 ||
-		!Array.isArray(run.errors) || !Array.isArray(run.warnings)) {
-		throw new Error('PipelineRun response is missing run_id.');
-	}
 	if (run.run_id !== runId) {
 		throw new Error('PipelineRun response does not match run_id.');
 	}
@@ -131,13 +110,8 @@ export async function listCollectionPipelineRuns(
 	);
 
 	const record = data as PipelineRunListResponse;
-	if (!record || record.collection_id !== collectionId || !Array.isArray(record.items) ||
-		typeof record.count !== 'number' || !Number.isFinite(record.count) || record.count < 0 ||
-		record.items.some((run) => !run || typeof run.run_id !== 'string' || !run.run_id ||
-			!['queued', 'running', 'completed', 'partial_success', 'failed'].includes(run.status) ||
-			typeof run.progress_percent !== 'number' || !Number.isFinite(run.progress_percent) ||
-			run.progress_percent < 0 || run.progress_percent > 100)) {
-		throw new Error('PipelineRun list response is invalid.');
+	if (record.collection_id !== collectionId) {
+		throw new Error('PipelineRun list response does not match collection_id.');
 	}
 	return record;
 }

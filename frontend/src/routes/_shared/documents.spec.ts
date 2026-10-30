@@ -105,12 +105,13 @@ describe('documents shared helpers', () => {
 		});
 	});
 
-	it('rejects a missing Source anchor instead of dropping the invalid mapping', async () => {
+	it('rejects Markdown from a different document', async () => {
 		requestJson.mockResolvedValue({
-			collection_id: 'col_123', document_id: 'doc_1', markdown: '# Paper',
-			source_map: [{ markdown_anchor: '', artifact_type: 'block', artifact_id: 'invalid' }]
+			collection_id: 'col_123', document_id: 'doc_2', markdown: '# Paper', source_map: []
 		});
-		await expect(fetchDocumentMarkdown('col_123', 'doc_1')).rejects.toThrow('Document Markdown response');
+		await expect(fetchDocumentMarkdown('col_123', 'doc_1')).rejects.toThrow(
+			'Document Markdown response does not match'
+		);
 	});
 
 	it('builds source navigation only from parsed Source blocks', () => {

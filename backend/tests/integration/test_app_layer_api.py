@@ -116,15 +116,15 @@ def app_client(
         "main.build_database_engine",
         lambda _settings: postgres_session_factory.kw["bind"],
     )
-    from controllers.source import pipeline_run_routes
-
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
-    monkeypatch.setattr(
-        pipeline_run_routes,
-        "document_preparation_service",
-        _ImmediateDocumentPreparationService(collection_service, pipeline_run_service),
-    )
     with TestClient(create_app()) as client:
+        monkeypatch.setattr(
+            client.app.state.runtime.document_preparation_service,
+            "queue_document_preparation",
+            _ImmediateDocumentPreparationService(
+                collection_service, pipeline_run_service,
+            ).queue_document_preparation,
+        )
         login = client.post(
             f"{API_V1_PREFIX}/auth/login",
             json={"email": "admin@example.com", "password": "admin-password"},

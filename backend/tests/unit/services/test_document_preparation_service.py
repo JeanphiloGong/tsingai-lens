@@ -71,6 +71,7 @@ def test_document_preparation_version_covers_only_profile_triage() -> None:
 
 
 async def test_queued_preparation_inherits_request_trace_without_argument_forwarding(
+    document_preparation_runtime,
     monkeypatch, *, postgres_session_factory
 ) -> None:
     await seed_collection(
@@ -103,9 +104,10 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
     document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
     document_preparation_service.document_profile_service = object()
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
-    service = document_preparation_service
+    service = document_preparation_runtime
+    service._document_profile_extractor = object()
     request_finished = asyncio.Event()
     observed_request_ids = []
 
@@ -132,6 +134,7 @@ async def test_queued_preparation_inherits_request_trace_without_argument_forwar
 
 
 async def test_restart_interrupts_orphaned_preparation_without_discarding_artifacts(
+    document_preparation_runtime,
     *, postgres_session_factory
 ) -> None:
     collection_id = "col_restart"
@@ -191,8 +194,9 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
     document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
     document_preparation_service.document_profile_service = object()
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_service
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_runtime
+    service._document_profile_extractor = object()
 
     recovered = await service.recover_interrupted_runs()
 
@@ -218,6 +222,7 @@ async def test_restart_interrupts_orphaned_preparation_without_discarding_artifa
 
 
 async def test_restart_keeps_preparation_active_when_document_reset_fails(
+    document_preparation_runtime,
     *, postgres_session_factory
 ) -> None:
     collection_id = "col_restart_retry"
@@ -263,8 +268,9 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(
     document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
     document_preparation_service.document_profile_service = object()
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_service
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_runtime
+    service._document_profile_extractor = object()
 
     with pytest.raises(OSError, match="temporarily unavailable"):
         await service.recover_interrupted_runs()
@@ -275,6 +281,7 @@ async def test_restart_keeps_preparation_active_when_document_reset_fails(
 
 
 async def test_profile_preparation_reuses_current_source_and_profile(
+    document_preparation_runtime,
     *, postgres_session_factory
 ) -> None:
     collection_id = "col_test"
@@ -370,9 +377,10 @@ async def test_profile_preparation_reuses_current_source_and_profile(
     profile_service = ProfileService()
     document_preparation_service.document_profile_service = profile_service
     document_preparation_service.DocumentProfileRepo = profile_service
-    document_preparation_service._source_artifact_builder = fail_if_parsed
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_service
+    document_preparation_runtime._source_artifact_builder = fail_if_parsed
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_runtime
+    service._document_profile_extractor = object()
 
     result = await service.run_document_preparation(
         "task_test",
@@ -385,6 +393,7 @@ async def test_profile_preparation_reuses_current_source_and_profile(
 
 
 async def test_reference_failure_keeps_source_preparation_ready_with_warning(
+    document_preparation_runtime,
     monkeypatch, *, postgres_session_factory
 ) -> None:
     collection_id = "col_reference_warning"
@@ -463,9 +472,10 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
     profile_service = ProfileService()
     document_preparation_service.document_profile_service = profile_service
     document_preparation_service.DocumentProfileRepo = profile_service
-    document_preparation_service._source_artifact_builder = None
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_service
+    document_preparation_runtime._source_artifact_builder = None
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_runtime
+    service._document_profile_extractor = object()
     monkeypatch.setattr(service, "_parse_document", parse_document)
 
     result = await service.run_document_preparation(
@@ -481,6 +491,7 @@ async def test_reference_failure_keeps_source_preparation_ready_with_warning(
 
 
 async def test_document_preparation_does_not_build_paper_map_before_objective_selection(
+    document_preparation_runtime,
     *, postgres_session_factory
 ) -> None:
     collection_id = "col_lazy_map"
@@ -566,8 +577,9 @@ async def test_document_preparation_does_not_build_paper_map_before_objective_se
     profile_service = ProfileService()
     document_preparation_service.document_profile_service = profile_service
     document_preparation_service.DocumentProfileRepo = profile_service
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_service
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_runtime
+    service._document_profile_extractor = object()
 
     result = await service.run_document_preparation(
         "task_lazy_map",

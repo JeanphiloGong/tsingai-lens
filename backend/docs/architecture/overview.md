@@ -40,8 +40,9 @@ routes, middleware, and the startup lifecycle. On startup,
 Chat runner and model-call observer, and constructs background worker resources.
 Repositories expose concrete singletons beside their implementations. Controllers
 import stateless application operations directly. Components that own live tasks
-belong to the current app's `ApplicationRuntime`: Discovery admission uses its
-runtime instance and shutdown cancels and awaits that instance's tasks before
+belong to the current app's `ApplicationRuntime`: Discovery and document
+preparation admission use their runtime instances, and shutdown cancels and
+awaits those instances' tasks before
 disposing the engine. The runtime also constructs file resources and background
 workers. Startup recovers interrupted preparation, discovery, and analysis.
 The four legacy snapshot handlers remain unmounted.

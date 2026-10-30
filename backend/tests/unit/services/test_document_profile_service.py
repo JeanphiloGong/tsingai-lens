@@ -77,6 +77,7 @@ async def _build_profiles(
                 document.document_id,
                 source_fingerprint=f"source-{document.document_id}",
                 profile_fingerprint=f"profile-{document.document_id}",
+                extractor=profile_service.build_default_document_profile_extractor(),
             )
             for document in documents
         ]

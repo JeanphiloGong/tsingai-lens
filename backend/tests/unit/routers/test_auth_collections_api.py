@@ -148,7 +148,6 @@ def test_app_lifespan_uses_shared_module_dependencies(
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
     with TestClient(create_app()) as client:
         collection_consumers = (
-            document_preparation_service,
             document_markdown_service,
             document_profile_service,
             brief_service,
@@ -211,7 +210,7 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
     preparation_recovery = AsyncMock(return_value=0)
     analysis_recovery = AsyncMock(return_value=0)
     monkeypatch.setattr(
-        document_preparation_service,
+        document_preparation_service.DocumentPreparationService,
         "recover_interrupted_runs",
         preparation_recovery,
     )

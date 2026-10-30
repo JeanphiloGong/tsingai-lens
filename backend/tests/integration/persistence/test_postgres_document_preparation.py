@@ -156,6 +156,7 @@ async def test_paper_map_requires_a_profile_in_the_shared_row(
 
 
 async def test_postgres_restart_recovery_is_retryable_and_api_readable(
+    document_preparation_runtime,
     source_repository, tmp_path, *, postgres_session_factory
 ) -> None:
     collection_service.CollectionRepo = CollectionRepository()
@@ -180,8 +181,8 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
     document_preparation_service.pipeline_run_service = pipeline_run_service
     document_preparation_service.SourceArtifactRepo = SourceArtifactRepository()
     document_preparation_service.document_profile_service = object()
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_service
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_runtime
 
     recovered = await service.recover_interrupted_runs()
 

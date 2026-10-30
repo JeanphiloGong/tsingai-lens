@@ -281,6 +281,7 @@ async def test_document_markdown_service_projects_figure_images(
         "image_assets/fig-1.png",
         b"fake-png",
         asset_sha256,
+        object_store=collection_service.object_store,
     )
     scratch_asset.unlink()
     await _store_source_documents(

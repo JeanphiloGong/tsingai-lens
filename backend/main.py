@@ -60,7 +60,8 @@ from application.feedback import (
 )
 from application.goal import experiment_plan_service
 from application.pipeline import pipeline_run_service
-from application.source import collection_service, document_preparation_service
+from application.source import collection_service
+from application.source.document_preparation_service import DocumentPreparationService
 from config import DATA_DIR
 from controllers import auth_routes as auth
 from controllers import feedback_case_routes as feedback_cases
@@ -181,6 +182,7 @@ class ApplicationRuntime:
     collection_workspace: FileCollectionWorkspace
     object_store: FileObjectStore
     objective_discovery_service: ObjectiveDiscoveryService
+    document_preparation_service: DocumentPreparationService
     feedback_analysis_worker: FeedbackAnalysisWorker
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker
     tool_failure_analysis_worker: ToolFailureAnalysisWorker
@@ -188,6 +190,7 @@ class ApplicationRuntime:
 
     async def close(self) -> None:
         await self.objective_discovery_service.close()
+        await self.document_preparation_service.close()
         await self.database_engine.dispose()
 
 
@@ -196,6 +199,9 @@ async def build_application_runtime() -> ApplicationRuntime:
     AsyncSessionLocal.configure(bind=database_engine)
     collection_workspace = FileCollectionWorkspace(DATA_DIR / "collections")
     object_store = FileObjectStore(collection_workspace.root_dir)
+    preparation = DocumentPreparationService(
+        workspace=collection_workspace, object_store=object_store,
+    )
     collection_service.configure_file_resources(collection_workspace.root_dir)
     try:
         await auth_session_service.ensure_bootstrap_user()
@@ -238,7 +244,7 @@ async def build_application_runtime() -> ApplicationRuntime:
                     ),
                     StartResearchProcessCapability(
                         collection_service=collection_service,
-                        document_preparation_service=(document_preparation_service),
+                        document_preparation_service=preparation,
                     ),
                     QueryPublishedFindingsCapability(
                         collection_service=collection_service,
@@ -332,6 +338,7 @@ async def build_application_runtime() -> ApplicationRuntime:
             collection_workspace=collection_workspace,
             object_store=object_store,
             objective_discovery_service=ObjectiveDiscoveryService(),
+            document_preparation_service=preparation,
             feedback_analysis_worker=FeedbackAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,
@@ -373,7 +380,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     runtime = await build_application_runtime()
     application.state.runtime = runtime
     try:
-        await document_preparation_service.recover_interrupted_runs()
+        await runtime.document_preparation_service.recover_interrupted_runs()
         await runtime.objective_discovery_service.recover_interrupted_discoveries()
         await objective_analysis_service.recover_interrupted_analyses()
         yield

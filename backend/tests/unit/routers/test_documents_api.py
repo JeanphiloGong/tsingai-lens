@@ -662,6 +662,7 @@ async def test_document_figure_image_route_streams_extracted_asset(document_serv
         "image_assets/fig-1.png",
         content,
         asset_sha256,
+        object_store=collection_service.object_store,
     )
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
@@ -807,6 +808,7 @@ async def test_document_figure_image_route_rejects_another_collections_object_ke
         "image_assets/figure.png",
         content,
         digest,
+        object_store=collection_service.object_store,
     )
     await _store_source_documents(
         markdown_service.SourceArtifactRepo,
@@ -861,6 +863,7 @@ async def test_document_figure_image_route_reports_unavailable_object_bytes(
         "image_assets/figure.png",
         content,
         digest,
+        object_store=collection_service.object_store,
     )
     if failure == "missing":
         collection_service.object_store.delete(storage_key)

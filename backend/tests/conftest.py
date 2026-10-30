@@ -165,6 +165,19 @@ def auth_session_service(postgres_session_factory):
 
 
 @pytest.fixture
+def document_preparation_runtime(tmp_path):
+    from application.source.document_preparation_service import DocumentPreparationService
+    from infra.persistence.file import FileCollectionWorkspace
+
+    workspace = FileCollectionWorkspace(tmp_path / "collections")
+    return DocumentPreparationService(
+        workspace=workspace,
+        object_store=FileObjectStore(workspace.root_dir),
+        max_concurrency=1,
+    )
+
+
+@pytest.fixture
 def collection_service(tmp_path, postgres_session_factory):
     from application.source import collection_service
     from infra.persistence.file import FileCollectionWorkspace
@@ -390,9 +403,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "DocumentProfileRepo",
                 "SourceArtifactRepo",
-                "_active_workers",
-                "_semaphore",
-                "_source_artifact_builder",
                 "collection_service",
                 "document_profile_service",
                 "pipeline_run_service",
@@ -442,7 +452,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             [
                 "collection_service",
                 "pipeline_run_service",
-                "document_preparation_service",
             ],
         ),
         (reference_routes, ["reference_workflow_service"]),

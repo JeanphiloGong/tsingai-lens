@@ -28,7 +28,7 @@ def anyio_backend():
 
 
 @pytest.fixture
-async def preparation(tmp_path, *, postgres_session_factory):
+async def preparation(document_preparation_runtime, tmp_path, *, postgres_session_factory):
     collections = build_test_collection_service(tmp_path / "collections")
     collection = await collections.create_collection("LPBF porosity research")
     collection_id = collection["collection_id"]
@@ -62,8 +62,8 @@ async def preparation(tmp_path, *, postgres_session_factory):
     document_preparation_service.SourceArtifactRepo = sources
     document_preparation_service.DocumentProfileRepo = profiles.DocumentProfileRepo
     document_preparation_service.document_profile_service = profiles
-    document_preparation_service._semaphore = asyncio.Semaphore(1)
-    service = document_preparation_service
+    document_preparation_runtime._semaphore = asyncio.Semaphore(1)
+    service = document_preparation_runtime
     return SimpleNamespace(
         service=service,
         collections=collections,
@@ -149,6 +149,55 @@ async def test_dispatch_failure_does_not_leave_queued_work(preparation, monkeypa
     assert not ctx.service._active_workers
 
 
+async def test_preparation_shutdown_only_cancels_its_own_tasks(preparation, monkeypatch):
+    from dataclasses import replace
+    from application.source.document_preparation_service import DocumentPreparationService
+
+    ctx = preparation
+    collection = await ctx.collections.create_collection("Second preparation owner")
+    second_collection_id = collection["collection_id"]
+    second_document = replace(
+        ctx.document,
+        document=replace(ctx.document.document, document_id="doc_b", sha256="b" * 64),
+        storage_key=f"{second_collection_id}/input/paper.pdf",
+        created_at=collection["created_at"],
+    )
+    await ctx.collections.CollectionRepo.add_documents(
+        second_collection_id, (second_document,), updated_at=second_document.created_at,
+    )
+    second = DocumentPreparationService(
+        workspace=ctx.service.workspace, object_store=ctx.service.object_store,
+        max_concurrency=1,
+    )
+    first_started, second_started, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def first_run(*args):
+        first_started.set()
+        await release.wait()
+        return {}
+
+    async def second_run(*args):
+        second_started.set()
+        await release.wait()
+        return {}
+
+    monkeypatch.setattr(ctx.service, "run_document_preparation", first_run)
+    monkeypatch.setattr(second, "run_document_preparation", second_run)
+    try:
+        await ctx.service.queue_document_preparation(ctx.collection_id, "doc_a", user_id="local-user")
+        await second.queue_document_preparation(second_collection_id, "doc_b", user_id="local-user")
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        await asyncio.wait_for(second_started.wait(), timeout=1)
+        second_tasks = tuple(second._active_workers)
+        await ctx.service.close()
+        assert not ctx.service._active_workers
+        assert second_tasks and all(not task.done() for task in second_tasks)
+    finally:
+        release.set()
+        await ctx.service.close()
+        await second.close()
+
+
 @pytest.mark.parametrize("historical_status", [None, "completed", "partial_success"])
 async def test_classification_retry_reuses_source_not_failed_profile(
     preparation, monkeypatch, historical_status
@@ -198,7 +247,7 @@ async def test_classification_retry_reuses_source_not_failed_profile(
     assert source is not None
     if historical_status:
         await ctx.runs.finish_run(first["run_id"], status=historical_status)
-        source_id, profile_id = ctx.service.fingerprints_for(ctx.document.document)
+        source_id, profile_id = document_preparation_service.fingerprints_for(ctx.document.document)
         await ctx.collections.update_document_preparation(
             ctx.collection_id,
             "doc_a",

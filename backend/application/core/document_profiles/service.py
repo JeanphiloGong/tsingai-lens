@@ -260,6 +260,7 @@ async def build_document_profile(
     *,
     source_fingerprint: str,
     profile_fingerprint: str,
+    extractor: DocumentProfileExtractor,
 ) -> DocumentProfile:
     collection = await collection_service.get_collection(collection_id)
     document = await SourceArtifactRepo.read_document(
@@ -283,6 +284,7 @@ async def build_document_profile(
         collection_id=collection_id,
         document=document,
         file_lookup=file_lookup,
+        extractor=extractor,
     )
     profile = replace(
         profile,
@@ -314,6 +316,7 @@ def _profile_document(
     collection_id: str,
     document: SourceDocument,
     file_lookup: dict[str, Any],
+    extractor: DocumentProfileExtractor,
 ) -> DocumentProfile:
     document_id = document.document_id
     source_filename = _resolve_source_filename(document, file_lookup)
@@ -338,7 +341,6 @@ def _profile_document(
             profile_status=PROFILE_STATUS_COMPLETED,
         )
 
-    extractor = build_default_document_profile_extractor()
     try:
         extracted = extractor.extract_document_profile(profile_payload)
     except DocumentProfileExtractionError:

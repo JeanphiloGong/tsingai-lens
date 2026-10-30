@@ -7,8 +7,8 @@ one-Document preparation orchestration.
 
 - HTTP upload: `controllers/source/collection_routes.py:upload_collection_document`
 - Import implementation: `source_import_service.add_document()`
-- Queue preparation: `document_preparation_service.queue_document_preparation()`
-- Execute preparation: `document_preparation_service.run_document_preparation()`
+- Queue preparation: `DocumentPreparationService.queue_document_preparation()`
+- Execute preparation: `DocumentPreparationService.run_document_preparation()`
 - Read prepared Source: `artifact_input_service` module functions
 
 The preparation input is one stored Document. The output is the current
@@ -54,6 +54,13 @@ successfully parsed Source. PaperMap construction is owned by the Objective core
 and is lazy: discovery or analysis builds it only for the explicitly selected
 ready Documents, then reuses it while its document and PaperMap policy
 fingerprint still match.
+
+The app runtime constructs `DocumentPreparationService` with the actual file
+workspace and object store. Each instance owns its concurrency semaphore, active
+tasks, lazy Source builder, and lazy Profile extractor. HTTP and Agent admission
+use that instance; shutdown cancels and awaits its tasks. Business operations
+and repository instances are imported directly rather than injected as services.
+The Profile build function receives the actual extractor explicitly.
 
 A technical Profile classification failure keeps the parsed Source readable,
 leaves the Document `stored`, and finishes its run as `partial_success` with a

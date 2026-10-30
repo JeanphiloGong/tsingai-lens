@@ -17,6 +17,7 @@ from repositories.collection_repository import (
     StoredCollection,
     StoredDocument,
 )
+from repositories.object_store import ObjectStore
 
 
 def _now_iso() -> str:
@@ -65,6 +66,8 @@ def write_figure_asset(
     asset_path: str,
     payload: bytes,
     expected_sha256: str,
+    *,
+    object_store: ObjectStore,
 ) -> str:
     suffix = PurePosixPath(str(asset_path)).suffix.lower()
     storage_key = _figure_storage_key(

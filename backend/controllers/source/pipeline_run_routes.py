@@ -3,14 +3,13 @@ from __future__ import annotations
 from typing import Annotated
 
 from application.pipeline import pipeline_run_service
-from application.source import document_preparation_service
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.source.pipeline_run import (
     PipelineRunListResponse,
     PipelineRunResponse,
     PipelineRunSummaryResponse,
 )
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from utils.response import ApiResponse, make_api_response
 
@@ -23,11 +22,12 @@ pipeline_run_router = APIRouter(tags=["pipeline-runs"])
     summary="Prepare one collection document",
 )
 async def prepare_collection_document(
+    request: Request,
     collection_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    run = await document_preparation_service.queue_document_preparation(
+    run = await request.app.state.runtime.document_preparation_service.queue_document_preparation(
         collection_id, document_id, user_id=user_id
     )
     return make_api_response(data=PipelineRunResponse(**run))

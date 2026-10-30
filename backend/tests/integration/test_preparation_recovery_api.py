@@ -12,12 +12,11 @@ from application.core.objectives import objective_input_service
 from application.core.objectives.objective_input_service import (
     ResearchObjectivesNotReadyError,
 )
-from application.source import collection_service, document_preparation_service
+from application.source import collection_service
 from application.source.document_preparation_service import (
     DOCUMENT_ANALYSIS_VERSION,
     SOURCE_PARSER_VERSION,
 )
-from controllers.source import pipeline_run_routes
 from infra.source.build_source_artifacts import build_source_artifacts
 from tests.integration.test_app_layer_api import _create_collection, _upload
 
@@ -56,13 +55,13 @@ def test_upload_classification_retry_content_and_research_readiness(
         "build_default_document_profile_extractor",
         lambda: classifier,
     )
-    document_preparation_service._source_artifact_builder = parse_sources
+    preparation = app_client.app.state.runtime.document_preparation_service
+    preparation._source_artifact_builder = parse_sources
     monkeypatch.setattr(
-        pipeline_run_routes,
-        "document_preparation_service",
-        document_preparation_service,
+        preparation,
+        "queue_document_preparation",
+        preparation.__class__.queue_document_preparation.__get__(preparation),
     )
-    preparation = document_preparation_service
     collection_id = _create_collection(app_client, "LPBF classification recovery")
     text = b"Laser power and Ti-6Al-4V porosity\n\nMethods\nLaser power was varied from 100 W to 150 W.\n\nResults\nPorosity decreased from 2.0% to 0.5%."
     uploaded = _upload(app_client, collection_id, "laser-porosity.txt", text)

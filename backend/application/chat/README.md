@@ -618,6 +618,9 @@ same direct calls. Starting an analysis retains the current app's actual
 Finding review, Finding authoring, and paper-experiment authoring also call their
 owning modules directly. Draft validation always checks the canonical selections;
 experiment writes read their approved draft and digest from the actual Chat store.
+Published-Finding reads and research-plan proposals, writes and revisions use the
+same direct calls. Plan writes recheck the current source snapshot against the
+approved draft before persisting an immutable revision.
 
 ## Boundaries
 

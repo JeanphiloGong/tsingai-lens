@@ -1,3 +1,4 @@
+from application.chat.capabilities import published_findings
 import json
 from copy import deepcopy
 from dataclasses import replace
@@ -58,16 +59,15 @@ async def test_child_empty_feedback_does_not_erase_parent_review():
             else []
         )
 
-    capability = InspectPublishedFindingCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock()),
-        objective_analysis_service=SimpleNamespace(
+    published_findings.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
+    published_findings.objective_analysis_service = SimpleNamespace(
             get_finding=detail,
             list_evidence=AsyncMock(return_value={"items": [], "total": 0}),
-        ),
-        finding_feedback_service=SimpleNamespace(
+        )
+    published_findings.finding_feedback_service = SimpleNamespace(
             list_feedback=feedback, list_curations=AsyncMock(return_value=[])
-        ),
-    )
+        )
+    capability = InspectPublishedFindingCapability()
     child = await capability.execute(
         _context(),
         capability.spec.input_model(
@@ -112,19 +112,18 @@ async def test_large_finding_evidence_is_paged_without_losing_complete_records()
         return {"items": items[offset : offset + limit], "total": len(items)}
 
     finding = {"finding_id": "finding-1", "selection_ids": ["selection-1"]}
-    capability = InspectPublishedFindingCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock()),
-        objective_analysis_service=SimpleNamespace(
+    published_findings.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
+    published_findings.objective_analysis_service = SimpleNamespace(
             get_finding=AsyncMock(
                 return_value={"analysis_version": 1, "finding": finding}
             ),
             list_evidence=evidence,
-        ),
-        finding_feedback_service=SimpleNamespace(
+        )
+    published_findings.finding_feedback_service = SimpleNamespace(
             list_feedback=AsyncMock(return_value=[]),
             list_curations=AsyncMock(return_value=[]),
-        ),
-    )
+        )
+    capability = InspectPublishedFindingCapability()
     collected = []
     offset = 0
     while offset is not None:

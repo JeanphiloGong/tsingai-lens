@@ -38,14 +38,7 @@ from application.chat.capabilities import (
 )
 from application.chat.session_service import ChatSessionService
 from application.core.objectives.objective_discovery_service import ObjectiveDiscoveryService
-from application.core.objectives import analysis_service as objective_analysis_service
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
-from application.core.objectives import (
-    finding_authoring_service,
-    objective_authoring_service,
-    paper_experiment_authoring_service,
-)
-from application.evaluation import finding_feedback_service
 from application.feedback import (
     CorrectionSignalAnalysisHandler,
     CorrectionSignalAnalysisWorker,
@@ -58,9 +51,6 @@ from application.feedback import (
     ToolFailureAnalysisHandler,
     ToolFailureAnalysisWorker,
 )
-from application.goal import experiment_plan_service
-from application.pipeline import pipeline_run_service
-from application.source import collection_service
 from application.source.document_preparation_service import DocumentPreparationService
 from config import DATA_DIR
 from controllers import auth_routes as auth
@@ -165,13 +155,9 @@ def _parse_agent_run_limits() -> AgentRunLimits:
 
 from repositories.analysis_job_repository import AnalysisJobRepo
 from repositories.chat_repository import ChatRepo
-from repositories.document_profile_repository import DocumentProfileRepo
 from repositories.feedback_case_repository import FeedbackCaseRepo
 from repositories.feedback_dataset_repository import FeedbackDatasetRepo
 from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampleRepo
-from repositories.objective_repository import ObjectiveRepo
-from repositories.paper_map_repository import PaperMapRepo
-from repositories.source_artifact_repository import SourceArtifactRepo
 
 
 @dataclass(frozen=True)
@@ -226,16 +212,8 @@ async def build_application_runtime() -> ApplicationRuntime:
                     StartResearchProcessCapability(
                         document_preparation_service=preparation,
                     ),
-                    QueryPublishedFindingsCapability(
-                        collection_service=collection_service,
-                        objective_repository=ObjectiveRepo,
-                        objective_analysis_service=objective_analysis_service,
-                    ),
-                    InspectPublishedFindingCapability(
-                        collection_service=collection_service,
-                        objective_analysis_service=objective_analysis_service,
-                        finding_feedback_service=finding_feedback_service,
-                    ),
+                    QueryPublishedFindingsCapability(),
+                    InspectPublishedFindingCapability(),
                     RecordFindingFeedbackCapability(),
                     CurateFindingCapability(),
                     CreateFindingDraftCapability(),
@@ -250,24 +228,10 @@ async def build_application_runtime() -> ApplicationRuntime:
                     InspectObjectiveAnalysisCapability(),
                     AssessObjectiveQualityCapability(),
                     DeriveObjectiveCapability(),
-                    ProposeResearchPlanCapability(
-                        collection_service=collection_service,
-                        finding_feedback_service=finding_feedback_service,
-                    ),
-                    CreateResearchPlanCapability(
-                        collection_service=collection_service,
-                        finding_feedback_service=finding_feedback_service,
-                        experiment_plan_service=experiment_plan_service,
-                    ),
-                    InspectResearchPlansCapability(
-                        collection_service=collection_service,
-                        experiment_plan_service=experiment_plan_service,
-                    ),
-                    ReviseResearchPlanCapability(
-                        collection_service=collection_service,
-                        finding_feedback_service=finding_feedback_service,
-                        experiment_plan_service=experiment_plan_service,
-                    ),
+                    ProposeResearchPlanCapability(),
+                    CreateResearchPlanCapability(),
+                    InspectResearchPlansCapability(),
+                    ReviseResearchPlanCapability(),
                 )
             ),
         )

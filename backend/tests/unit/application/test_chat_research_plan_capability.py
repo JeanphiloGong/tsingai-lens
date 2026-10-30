@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import research_planning
+
 import pytest
 from application.chat import (
     AgentContext,
@@ -335,10 +337,9 @@ def test_plan_variable_rejects_blank_planned_value() -> None:
 
 async def test_research_plan_draft_is_structured_traceable_and_transient() -> None:
     feedback_service = _FindingFeedbackService()
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = feedback_service
+    capability = ProposeResearchPlanCapability()
 
     result = await capability.execute(
         _context("call-plan-draft"),
@@ -378,10 +379,9 @@ async def test_research_plan_draft_is_structured_traceable_and_transient() -> No
 
 
 async def test_research_plan_draft_marks_unreviewed_findings_for_review() -> None:
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(label_status="unreviewed"),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = _FindingFeedbackService(label_status="unreviewed")
+    capability = ProposeResearchPlanCapability()
 
     result = await capability.execute(
         _context("call-plan-unreviewed"),
@@ -394,10 +394,9 @@ async def test_research_plan_draft_marks_unreviewed_findings_for_review() -> Non
 
 
 async def test_research_plan_draft_rejects_evidence_outside_selected_findings() -> None:
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = _FindingFeedbackService()
+    capability = ProposeResearchPlanCapability()
     payload = _plan_arguments()
     payload["evidence_ids"] = [
         "evidence-result",
@@ -417,10 +416,9 @@ async def test_research_plan_draft_rejects_evidence_outside_selected_findings() 
 
 
 def test_research_plan_contract_requires_a_complete_real_experiment() -> None:
-    capability = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = _FindingFeedbackService()
+    capability = ProposeResearchPlanCapability()
     payload = _plan_arguments()
     payload["controls"] = ["   "]
 
@@ -431,15 +429,11 @@ def test_research_plan_contract_requires_a_complete_real_experiment() -> None:
 async def test_research_plan_write_waits_for_exact_approval_after_draft() -> None:
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    proposal = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-    )
-    writer = CreateResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = feedback_service
+    proposal = ProposeResearchPlanCapability()
+    research_planning.experiment_plan_service = plan_service
+    writer = CreateResearchPlanCapability()
     plan_arguments = _plan_arguments()
     write_arguments = {
         **plan_arguments,
@@ -532,11 +526,10 @@ async def test_research_plan_write_rejects_changed_source_snapshot_without_persi
 ):
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    capability = CreateResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = feedback_service
+    research_planning.experiment_plan_service = plan_service
+    capability = CreateResearchPlanCapability()
     stale_snapshots = _source_snapshots()
     stale_snapshots[0]["finding_fingerprint"] = "finding.v2:old"
 
@@ -558,11 +551,10 @@ async def test_research_plan_write_preserves_stale_error_from_persistence_bounda
 ):
     feedback_service = _FindingFeedbackService()
     plan_service = _StaleExperimentPlanService()
-    capability = CreateResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = feedback_service
+    research_planning.experiment_plan_service = plan_service
+    capability = CreateResearchPlanCapability()
 
     result = await capability.execute(
         _context("call-plan-race"),
@@ -581,10 +573,9 @@ async def test_research_plan_write_preserves_stale_error_from_persistence_bounda
 
 async def test_agent_can_inspect_current_or_named_research_plan_revision() -> None:
     plan_service = _ExperimentPlanService()
-    capability = InspectResearchPlansCapability(
-        collection_service=_CollectionService(),
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.experiment_plan_service = plan_service
+    capability = InspectResearchPlansCapability()
 
     listed = await capability.execute(
         _context("call-plan-list"),
@@ -609,10 +600,9 @@ async def test_agent_can_inspect_current_or_named_research_plan_revision() -> No
 async def test_checked_unsaved_plan_returns_existing_render_after_model_answer(
     label_status,
 ) -> None:
-    proposal = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=_FindingFeedbackService(label_status=label_status),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = _FindingFeedbackService(label_status=label_status)
+    proposal = ProposeResearchPlanCapability()
     model = _DiscoveryModel(
         ModelTurn(
             tool_calls=(ModelToolCall("propose_research_plan", _plan_arguments()),)
@@ -656,11 +646,10 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
 ):
     feedback_service = _FindingFeedbackService()
     plan_service = _ExperimentPlanService()
-    capability = ReviseResearchPlanCapability(
-        collection_service=_CollectionService(),
-        finding_feedback_service=feedback_service,
-        experiment_plan_service=plan_service,
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = feedback_service
+    research_planning.experiment_plan_service = plan_service
+    capability = ReviseResearchPlanCapability()
     arguments = {
         **_plan_arguments(),
         "parent_plan_id": "exp-agent-1",
@@ -711,10 +700,7 @@ async def test_agent_plan_revision_waits_for_approval_then_uses_shared_service()
         capabilities=CapabilityRegistry(
             (
                 capability,
-                InspectResearchPlansCapability(
-                    collection_service=_CollectionService(),
-                    experiment_plan_service=plan_service,
-                ),
+                InspectResearchPlansCapability(),
             )
         ),
     )

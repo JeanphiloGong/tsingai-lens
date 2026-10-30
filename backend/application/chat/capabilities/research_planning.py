@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from application.evaluation import finding_feedback_service
+from application.goal import experiment_plan_service
+
 import json
 from collections.abc import Mapping
 from hashlib import sha256
@@ -125,23 +129,17 @@ class InspectResearchPlansCapability:
         input_model=InspectResearchPlansToolRequest,
     )
 
-    def __init__(
-        self, *, collection_service: Any, experiment_plan_service: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.experiment_plan_service = experiment_plan_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectResearchPlansToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
         if arguments.plan_id is None:
-            plans = await self.experiment_plan_service.list_plans(
+            plans = await experiment_plan_service.list_plans(
                 context.collection_id,
                 arguments.objective_id,
                 user_id=context.user_id,
@@ -182,7 +180,7 @@ class InspectResearchPlansCapability:
                 ),
             )
         try:
-            plan = await self.experiment_plan_service.read_plan(
+            plan = await experiment_plan_service.read_plan(
                 context.collection_id,
                 arguments.objective_id,
                 arguments.plan_id,
@@ -254,26 +252,17 @@ class ProposeResearchPlanCapability:
         input_model=ProposeResearchPlanToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        finding_feedback_service: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ProposeResearchPlanToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
         try:
-            dataset = await self.finding_feedback_service.export_dataset(
+            dataset = await finding_feedback_service.export_dataset(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 user_id=context.user_id,
@@ -502,26 +491,12 @@ class CreateResearchPlanCapability:
         input_model=CreateResearchPlanToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        finding_feedback_service: Any,
-        experiment_plan_service: Any,
-    ) -> None:
-        self.experiment_plan_service = experiment_plan_service
-        self._draft_capability = ProposeResearchPlanCapability(
-            collection_service=collection_service,
-            finding_feedback_service=finding_feedback_service,
-        )
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateResearchPlanToolRequest,
     ) -> ChatToolResult:
         current, current_snapshots, error = await _approved_plan_draft(
-            self._draft_capability,
             context,
             arguments,
         )
@@ -529,7 +504,7 @@ class CreateResearchPlanCapability:
             return error
 
         try:
-            plan = await self.experiment_plan_service.create_agent_plan(
+            plan = await experiment_plan_service.create_agent_plan(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 title=arguments.title,
@@ -572,33 +547,19 @@ class ReviseResearchPlanCapability:
         input_model=ReviseResearchPlanToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        finding_feedback_service: Any,
-        experiment_plan_service: Any,
-    ) -> None:
-        self.experiment_plan_service = experiment_plan_service
-        self._draft_capability = ProposeResearchPlanCapability(
-            collection_service=collection_service,
-            finding_feedback_service=finding_feedback_service,
-        )
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ReviseResearchPlanToolRequest,
     ) -> ChatToolResult:
         current, current_snapshots, error = await _approved_plan_draft(
-            self._draft_capability,
             context,
             arguments,
         )
         if error is not None:
             return error
         try:
-            plan = await self.experiment_plan_service.update_plan(
+            plan = await experiment_plan_service.update_plan(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 plan_id=arguments.parent_plan_id,
@@ -642,14 +603,13 @@ class ReviseResearchPlanCapability:
 
 
 async def _approved_plan_draft(
-    draft_capability: ProposeResearchPlanCapability,
     context: CapabilityExecutionContext,
     arguments: CreateResearchPlanToolRequest | ReviseResearchPlanToolRequest,
 ) -> tuple[ChatToolResult, list[dict[str, Any]], ChatToolResult | None]:
     # Create/Revise arguments inherit the complete proposal contract. Pass the
     # already validated subtype through directly instead of serializing and
     # validating the same fields a second time.
-    current = await draft_capability.execute(context, arguments)
+    current = await ProposeResearchPlanCapability().execute(context, arguments)
     current_snapshots = list(current.data.get("source_snapshots") or ())
     if current.data.get("draft_status") == "abstained":
         return (

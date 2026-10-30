@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from application.core.objectives import analysis_service as objective_analysis_service
+from application.evaluation import finding_feedback_service
+from repositories.objective_repository import ObjectiveRepo
+
 import json
 from dataclasses import replace
 from typing import Annotated, Any, Mapping
@@ -63,27 +68,16 @@ class QueryPublishedFindingsCapability:
         input_model=QueryPublishedFindingsToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_repository: Any,
-        objective_analysis_service: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_repository = objective_repository
-        self.objective_analysis_service = objective_analysis_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: QueryPublishedFindingsToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        objectives = await self.objective_repository.list_objectives(
+        objectives = await ObjectiveRepo.list_objectives(
             context.collection_id
         )
         objectives_by_id = {item.objective_id: item for item in objectives}
@@ -105,7 +99,7 @@ class QueryPublishedFindingsCapability:
             if version is None:
                 unpublished_count += 1
                 continue
-            findings = await self.objective_analysis_service.list_findings(
+            findings = await objective_analysis_service.list_findings(
                 context.collection_id,
                 objective.objective_id,
                 analysis_version=version,
@@ -113,7 +107,7 @@ class QueryPublishedFindingsCapability:
                 limit=arguments.finding_limit_per_objective,
                 user_id=context.user_id,
             )
-            evidence = await self.objective_analysis_service.list_evidence(
+            evidence = await objective_analysis_service.list_evidence(
                 context.collection_id,
                 objective.objective_id,
                 analysis_version=version,
@@ -284,27 +278,16 @@ class InspectPublishedFindingCapability:
         input_model=InspectPublishedFindingToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_analysis_service: Any,
-        finding_feedback_service: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_analysis_service = objective_analysis_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectPublishedFindingToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        detail = await self.objective_analysis_service.get_finding(
+        detail = await objective_analysis_service.get_finding(
             context.collection_id,
             arguments.objective_id,
             arguments.finding_id,
@@ -318,13 +301,13 @@ class InspectPublishedFindingCapability:
             analysis_version=version,
             finding_id=arguments.finding_id,
         )
-        feedback = await self.finding_feedback_service.list_feedback(
+        feedback = await finding_feedback_service.list_feedback(
             **review_key, user_id=context.user_id
         )
-        curations = await self.finding_feedback_service.list_curations(
+        curations = await finding_feedback_service.list_curations(
             **review_key, user_id=context.user_id
         )
-        evidence = await self.objective_analysis_service.list_evidence(
+        evidence = await objective_analysis_service.list_evidence(
             context.collection_id,
             arguments.objective_id,
             analysis_version=version,
@@ -345,7 +328,7 @@ class InspectPublishedFindingCapability:
         replacement_evidence = []
         offset = 0
         while pending_ids:
-            candidates = await self.objective_analysis_service.list_evidence(
+            candidates = await objective_analysis_service.list_evidence(
                 context.collection_id,
                 arguments.objective_id,
                 analysis_version=version,

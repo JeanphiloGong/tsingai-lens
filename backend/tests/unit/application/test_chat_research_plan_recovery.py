@@ -1,3 +1,4 @@
+from application.chat.capabilities import research_planning
 import pytest
 
 from application.chat import AgentContext, CapabilityRegistry, ModelToolCall, ModelTurn, ResearchAgentRunner
@@ -17,9 +18,9 @@ def anyio_backend():
 @pytest.mark.parametrize("initial_schema_error", [False, True])
 @pytest.mark.parametrize("invented_finding", [False, True])
 async def test_plan_can_correct_unlinked_evidence_before_returning_a_draft(missing_control, initial_schema_error, invented_finding):
-    proposal = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(), finding_feedback_service=_FindingFeedbackService()
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = _FindingFeedbackService()
+    proposal = ProposeResearchPlanCapability()
     invalid = _plan_arguments()
     invalid["evidence_ids"].append("evidence-from-another-finding")
     if invented_finding:
@@ -56,9 +57,9 @@ async def test_unresolved_plan_citations_do_not_expose_saving_or_claim_completio
     from domain.chat import ToolRisk
     from tests.unit.application.test_research_agent_runner import _Capability, _Model as Model
 
-    proposal = ProposeResearchPlanCapability(
-        collection_service=_CollectionService(), finding_feedback_service=_FindingFeedbackService(),
-    )
+    research_planning.collection_service = _CollectionService()
+    research_planning.finding_feedback_service = _FindingFeedbackService()
+    proposal = ProposeResearchPlanCapability()
     invalid = _plan_arguments()
     invalid["evidence_ids"].append("unlinked-evidence")
     writer = _Capability("create_research_plan", ToolRisk.WRITE)

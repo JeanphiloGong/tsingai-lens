@@ -47,6 +47,8 @@ fingerprints in `DocumentPreparationService`. Parsing has no cache.
 - `table_cells`: cell coordinates, header paths, units, spans, and stable IDs.
 
 Complete normalized Markdown is preferred for model and reader context. An
+explicit `header_row_count: 0` preserves every matrix row as data under the
+parser's column headers; only a missing count defaults to one header row. An
 oversized table may be divided only into continuous row slices with its caption
 and complete flattened header repeated. This analysis-local repair never
 overwrites the current Source table.

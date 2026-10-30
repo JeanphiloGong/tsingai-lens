@@ -86,7 +86,11 @@ class SourceArtifactBundle:
                 heading_path=normalize_optional_text(item.get("heading_path")),
                 column_headers=tuple(item.get("column_headers") or ()),
                 table_matrix=tuple(tuple(row) for row in item.get("table_matrix") or ()),
-                header_row_count=safe_int(item.get("header_row_count")) or 1,
+                header_row_count=(
+                    header_count
+                    if (header_count := safe_int(item.get("header_row_count"))) is not None
+                    else 1
+                ),
                 metadata=item.get("metadata") or {},
             )
             for item in _records(self.tables, "tables")

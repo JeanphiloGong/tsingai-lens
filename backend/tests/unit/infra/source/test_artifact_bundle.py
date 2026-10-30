@@ -5,7 +5,45 @@ import logging
 import pandas as pd
 import pytest
 
-from infra.source.artifact_bundle import SourceArtifactBundle
+from infra.source.artifact_bundle import SourceArtifactBundle, source_table_payload
+
+
+@pytest.mark.parametrize(
+    ("header_fields", "header_rows", "expected_header_count"),
+    [
+        ({"header_row_count": 0}, [], 0),
+        ({"header_row_count": 1}, [["Power", "Density"]], 1),
+        ({"header_row_count": 2}, [["Process", "Result"], ["Power", "Density"]], 2),
+        ({}, [["Power", "Density"]], 1),
+        ({"header_row_count": None}, [["Power", "Density"]], 1),
+    ],
+)
+def test_table_header_count_preserves_all_measurement_rows(
+    header_fields, header_rows, expected_header_count
+):
+    bundle = SourceArtifactBundle(
+        documents=pd.DataFrame([{"id": "doc_1"}]),
+        text_units=pd.DataFrame(),
+        blocks=pd.DataFrame(),
+        figures=pd.DataFrame(),
+        tables=pd.DataFrame([{
+            "table_id": "table_1",
+            "document_id": "doc_1",
+            "column_headers": ["Power", "Density"],
+            "table_matrix": [*header_rows, ["200 W", "99.5%"], ["250 W", "99.9%"]],
+            **header_fields,
+        }]),
+        table_rows=pd.DataFrame(),
+        table_cells=pd.DataFrame(),
+        figure_assets={},
+    )
+
+    table = bundle.to_documents()[0].tables[0]
+    assert table.header_row_count == expected_header_count
+    assert source_table_payload(table)["table_markdown"] == (
+        "| Power | Density |\n| --- | --- |\n"
+        "| 200 W | 99.5% |\n| 250 W | 99.9% |"
+    )
 
 
 def test_to_documents_removes_nul_from_all_source_text(caplog):

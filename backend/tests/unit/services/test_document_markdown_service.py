@@ -217,6 +217,36 @@ async def test_document_markdown_service_projects_source_blocks_and_tables(tmp_p
     assert source_map["tbl-1"]["table_id"] == "tbl-1"
 
 
+async def test_document_markdown_preserves_headerless_table_measurements(
+    tmp_path, postgres_session_factory
+):
+    collection_service, markdown_service = _build_markdown_service(
+        tmp_path, postgres_session_factory=postgres_session_factory
+    )
+    collection = await collection_service.create_collection("Headerless measurements")
+    collection_id = collection["collection_id"]
+    await _store_source_documents(
+        markdown_service.source_artifact_repository,
+        collection_id,
+        build_source_documents(
+            documents=[{"id": "paper-1", "title": "Densification measurements"}],
+            tables=[{
+                "table_id": "table-1",
+                "document_id": "paper-1",
+                "column_headers": ["column_1", "column_2"],
+                "table_matrix": [["200 W", "99.5%"], ["250 W", "99.9%"]],
+                "header_row_count": 0,
+            }],
+        ),
+    )
+
+    payload = await markdown_service.get_document_markdown(collection_id, "paper-1")
+
+    assert "| column_1 | column_2 |" in payload["markdown"]
+    assert "| 200 W | 99.5% |" in payload["markdown"]
+    assert "| 250 W | 99.9% |" in payload["markdown"]
+
+
 async def test_document_markdown_service_projects_figure_images(tmp_path, *, postgres_session_factory):
     collection_service, markdown_service = _build_markdown_service(tmp_path, postgres_session_factory=postgres_session_factory)
     collection = await collection_service.create_collection(

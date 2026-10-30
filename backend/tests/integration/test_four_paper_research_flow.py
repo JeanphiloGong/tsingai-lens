@@ -474,11 +474,10 @@ def _wait_for_analysis(
 
 
 def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
-    postgres_sync_engine,
+    postgres_session_factory,
     monkeypatch,
     tmp_path,
 ) -> None:
-    del postgres_sync_engine
     test_database_url = os.environ["LENS_TEST_DATABASE_URL"]
     monkeypatch.setenv("LENS_DATABASE_URL", test_database_url)
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "four-paper@example.com")
@@ -489,20 +488,26 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
 
     from main import create_app
 
+    monkeypatch.setattr("main.DATA_DIR", tmp_path)
+    monkeypatch.setattr("main.AsyncSessionLocal", postgres_session_factory)
+    monkeypatch.setattr(
+        "main.build_database_engine",
+        lambda _settings: postgres_session_factory.kw["bind"],
+    )
+
     model = _FourPaperResearchModel()
     from application.core.document_profiles import service as document_profile_service
-    from application.core.objectives import objective_input_service
+    from application.core.objectives import analysis_service, objective_discovery_service
 
     monkeypatch.setattr(
         document_profile_service,
         "build_default_document_profile_extractor",
         lambda: model,
     )
-    monkeypatch.setattr(
-        objective_input_service,
-        "build_default_structured_response_client",
-        lambda: model,
-    )
+    for owner in (analysis_service, objective_discovery_service):
+        monkeypatch.setattr(
+            owner, "build_default_structured_response_client", lambda: model
+        )
     with TestClient(create_app()) as client:
         login = client.post(
             f"{API_PREFIX}/auth/login",

@@ -160,6 +160,9 @@ async def test_saved_paper_facts_feed_multiple_objectives_and_cross_paper_compar
     artifacts = await service.generate_experiment_analysis_artifacts(
         "collection-1", analysis,
         response_client=SimpleNamespace(model="test-model"),
+        paper_map_extractor=service_module.PaperResearchMapExtractor(
+            SimpleNamespace(model="test-model")
+        ),
         source_screener=service_module.ObjectiveSourceScreener(
             SimpleNamespace(model="test-model")
         ),

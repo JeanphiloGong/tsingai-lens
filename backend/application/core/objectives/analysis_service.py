@@ -45,6 +45,7 @@ from application.core.objectives.finding_summary import (
     FindingSummaryUnavailable,
     summarize_finding_evidence,
 )
+from application.core.objectives.discovery.paper_understanding.workflow import PaperResearchMapExtractor
 from application.core.objectives.analysis.paper_experiment_extraction import PaperExperimentExtractor
 from application.core.objectives.analysis.source_screening import ObjectiveSourceScreener
 from application.core.objectives.llm.structured_response import (
@@ -234,6 +235,7 @@ class ObjectiveAnalysisService:
         self._response_client: StructuredResponseClient | None = None
         self._source_screener: ObjectiveSourceScreener | None = None
         self._paper_experiment_extractor: PaperExperimentExtractor | None = None
+        self._paper_map_extractor: PaperResearchMapExtractor | None = None
 
     async def close(self) -> None:
         tasks = tuple(self._analysis_tasks)
@@ -252,6 +254,11 @@ class ObjectiveAnalysisService:
         if self._source_screener is None:
             self._source_screener = ObjectiveSourceScreener(self._get_response_client())
         return self._source_screener
+
+    def _get_paper_map_extractor(self) -> PaperResearchMapExtractor:
+        if self._paper_map_extractor is None:
+            self._paper_map_extractor = PaperResearchMapExtractor(self._get_response_client())
+        return self._paper_map_extractor
 
     def _get_paper_experiment_extractor(self) -> PaperExperimentExtractor:
         if self._paper_experiment_extractor is None:
@@ -349,6 +356,7 @@ class ObjectiveAnalysisService:
                         progress_callback=progress_callback,
                         response_client=self._get_response_client(),
                         source_screener=self._get_source_screener(),
+                        paper_map_extractor=self._get_paper_map_extractor(),
                         paper_experiment_extractor=self._get_paper_experiment_extractor(),
                     )
                     _validate_artifacts(artifacts)

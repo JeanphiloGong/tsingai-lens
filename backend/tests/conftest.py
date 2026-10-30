@@ -141,7 +141,7 @@ def postgres_session_factory(postgres_sync_engine, monkeypatch):
 @pytest.fixture(autouse=True)
 def _patch_domain_model_extractors(monkeypatch):
     from application.core.document_profiles import service as document_profile_service
-    from application.core.objectives import objective_input_service
+    from application.core.objectives import analysis_service, objective_discovery_service
     from tests.support.fake_domain_model_extractor import FakeDomainModelExtractor
 
     fake = FakeDomainModelExtractor()
@@ -150,11 +150,10 @@ def _patch_domain_model_extractors(monkeypatch):
         "build_default_document_profile_extractor",
         lambda: fake,
     )
-    monkeypatch.setattr(
-        objective_input_service,
-        "build_default_structured_response_client",
-        lambda: fake,
-    )
+    for owner in (analysis_service, objective_discovery_service):
+        monkeypatch.setattr(
+            owner, "build_default_structured_response_client", lambda: fake
+        )
 
 
 @pytest.fixture

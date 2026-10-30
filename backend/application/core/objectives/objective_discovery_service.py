@@ -25,6 +25,11 @@ from application.core.objectives import (
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
+from application.core.objectives.discovery.paper_understanding.workflow import PaperResearchMapExtractor
+from application.core.objectives.llm.structured_response import (
+    StructuredResponseClient,
+    build_default_structured_response_client,
+)
 from application.core.objectives.objective_input_service import (
     PAPER_RESEARCH_MAP_POLICY_VERSION,
 )
@@ -46,12 +51,34 @@ class ObjectiveDiscoveryService:
 
     def __init__(self) -> None:
         self._workers: set[AsyncTask[dict[str, Any]]] = set()
+        self._response_client: StructuredResponseClient | None = None
+        self._paper_map_extractor: PaperResearchMapExtractor | None = None
+        self._axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None
 
     async def close(self) -> None:
         workers = tuple(self._workers)
         for worker in workers:
             worker.cancel()
         await gather(*workers, return_exceptions=True)
+        if self._response_client is not None:
+            self._response_client.client.close()
+
+    def _get_response_client(self) -> StructuredResponseClient:
+        if self._response_client is None:
+            self._response_client = build_default_structured_response_client()
+        return self._response_client
+
+    def _get_paper_map_extractor(self) -> PaperResearchMapExtractor:
+        if self._paper_map_extractor is None:
+            self._paper_map_extractor = PaperResearchMapExtractor(self._get_response_client())
+        return self._paper_map_extractor
+
+    def _get_axis_equivalence_classifier(self) -> ResearchAxisEquivalenceClassifier:
+        if self._axis_equivalence_classifier is None:
+            self._axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
+                self._get_response_client()
+            )
+        return self._axis_equivalence_classifier
 
     async def recover_interrupted_discoveries(self) -> int:
         """Make persisted discovery runs retryable after a backend restart."""
@@ -227,17 +254,15 @@ class ObjectiveDiscoveryService:
             collection_id,
             document_inputs=document_inputs,
             source_inputs=source_inputs,
+            paper_map_extractor=self._get_paper_map_extractor(),
             progress_callback=progress_callback,
-        )
-        axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
-            objective_input_service.get_response_client()
         )
         candidate_facts = await to_thread(
             objective_candidate_service.discover_candidate_facts,
             collection_id,
             paper_maps=paper_maps,
             document_inputs=document_inputs,
-            axis_equivalence_classifier=axis_equivalence_classifier,
+            axis_equivalence_classifier=self._get_axis_equivalence_classifier(),
             progress_callback=progress_callback,
         )
         await ObjectiveRepo.replace(collection_id, candidate_facts)

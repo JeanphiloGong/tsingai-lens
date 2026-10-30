@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Callable
 from typing import Any
+from types import SimpleNamespace
 
 from application.core.document_profiles.extraction import DocumentProfileModelOutput
 from application.core.objectives.analysis.source_extraction import (
@@ -110,6 +111,11 @@ def _source_extraction_payload(user_prompt: str) -> dict[str, Any]:
 
 class FakeDomainModelExtractor:
     """Deterministic test double for document triage and Objective analysis."""
+
+    model = "deterministic-domain-test-model"
+
+    def __init__(self) -> None:
+        self.client = SimpleNamespace(close=lambda: None)
 
     def estimate_prompt_tokens(
         self,

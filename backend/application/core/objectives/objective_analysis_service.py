@@ -27,6 +27,7 @@ from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     screen_sources,
 )
+from application.core.objectives.discovery.paper_understanding.workflow import PaperResearchMapExtractor
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.objectives.objective_input_service import (
     ObjectiveSourceInputs,
@@ -460,6 +461,7 @@ async def generate_experiment_analysis_artifacts(
     response_client: StructuredResponseClient,
     source_screener: ObjectiveSourceScreener,
     paper_experiment_extractor: PaperExperimentExtractor,
+    paper_map_extractor: PaperResearchMapExtractor,
 ) -> ObjectiveExperimentAnalysisArtifacts:
     if analysis.collection_id != collection_id:
         raise ValueError("analysis belongs to another collection")
@@ -473,6 +475,7 @@ async def generate_experiment_analysis_artifacts(
     objective_inputs = await _build_objective_analysis_inputs(
         collection_id,
         document_inputs=analysis.document_inputs,
+        paper_map_extractor=paper_map_extractor,
     )
     model_name = response_client.model
 
@@ -779,6 +782,7 @@ async def _build_objective_analysis_inputs(
     collection_id: str,
     *,
     document_inputs: tuple[PreparedDocumentInput, ...],
+    paper_map_extractor: PaperResearchMapExtractor,
 ) -> ObjectiveAnalysisInputs:
     source_inputs = await objective_input_service.load_source_inputs(
         collection_id,
@@ -788,6 +792,7 @@ async def _build_objective_analysis_inputs(
         collection_id,
         document_inputs=document_inputs,
         source_inputs=source_inputs,
+        paper_map_extractor=paper_map_extractor,
     )
     return {
         **source_inputs,

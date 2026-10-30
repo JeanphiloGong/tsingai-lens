@@ -44,7 +44,8 @@ helper does not authorize changing Source order, recovery budgets, or map
 status semantics.
 
 `objective_input_service.load_or_build_paper_maps()` may call the model and store
-a refreshed map. Its other input reads do not create Objectives or experiments.
+a refreshed map using the actual extractor passed by the runtime owner. Its
+other input reads do not create Objectives or experiments.
 Discovery stores candidate Objectives; authoring stores only the explicitly
 requested creation or confirmation. Scientific analysis returns experiment
 records; `experiment_analysis_writer` stores revisions, selections, optional
@@ -54,10 +55,15 @@ version's publication. Both HTTP and Agent callers use these owners.
 and concurrency limit. Shutdown cancels and awaits its work before disposing the
 database engine. Read operations remain module functions and do not require a
 running analysis component.
-The instance also creates its structured-response client, Source screener, and
-PaperExperiment extractor only when execution needs them. Scientific operations
+The instance also creates its structured-response client, Source screener,
+Paper Map extractor, and PaperExperiment extractor only when execution needs
+them. Scientific operations
 receive those concrete components explicitly. Shutdown closes the owned client
 after cancelling and awaiting the admitted tasks.
+
+`ObjectiveDiscoveryService` similarly owns its lazy response client, Paper Map
+extractor, and axis-equivalence classifier. It passes them directly into map and
+candidate operations, then closes the client after its discovery tasks stop.
 
 The analysis module imports `objective_input_service` and
 `document_profiles.service` directly. It does not reach through the scientific

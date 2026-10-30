@@ -16,10 +16,6 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
     PAPER_RESEARCH_MAP_PROMPT_VERSION,
     PaperResearchMapExtractor,
 )
-from application.core.objectives.llm.structured_response import (
-    StructuredResponseClient,
-    build_default_structured_response_client,
-)
 from application.source import collection_service
 from domain.core import PaperResearchMap, PreparedDocumentInput
 from domain.core.document_profile import DocumentProfile
@@ -200,6 +196,7 @@ async def load_or_build_paper_maps(
     *,
     document_inputs: tuple[PreparedDocumentInput, ...],
     source_inputs: ObjectiveSourceInputs,
+    paper_map_extractor: PaperResearchMapExtractor,
     progress_callback: Any | None = None,
 ) -> tuple[PaperResearchMap, ...]:
     document_ids = tuple(item.document_id for item in document_inputs)
@@ -254,7 +251,7 @@ async def load_or_build_paper_maps(
                 document_tree=source_inputs["document_trees_by_document_id"][
                     document_id
                 ],
-                paper_map_extractor=PaperResearchMapExtractor(get_response_client()),
+                paper_map_extractor=paper_map_extractor,
                 progress_callback=report_document_progress,
             )
         paper_map = replace(
@@ -280,10 +277,6 @@ async def load_or_build_paper_maps(
 
     await gather(*(build_map(document_id) for document_id in stale_document_ids))
     return tuple(maps_by_document_id[document_id] for document_id in document_ids)
-
-
-def get_response_client() -> StructuredResponseClient:
-    return build_default_structured_response_client()
 
 
 async def _load_source_documents(
@@ -333,5 +326,4 @@ __all__ = [
     "resolve_prepared_document_inputs",
     "load_source_inputs",
     "load_or_build_paper_maps",
-    "get_response_client",
 ]

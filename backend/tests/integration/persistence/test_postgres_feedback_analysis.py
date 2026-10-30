@@ -87,6 +87,14 @@ async def test_failed_feedback_analysis_job_can_be_requeued_and_claimed(
     assert requeued.result_id is None
     assert requeued.error_code is None
     assert requeued.available_at == "2026-09-24T00:00:03+00:00"
+    assert requeued.updated_at == requeued.available_at
+    assert requeued.created_at == claimed.created_at
+    assert requeued.payload == claimed.payload
+    assert requeued.idempotency_key == claimed.idempotency_key
+    assert requeued.worker_id is None
+    assert requeued.lease_expires_at is None
+    assert requeued.heartbeat_at is None
+    assert requeued.lease_version == claimed.lease_version
 
     claimed_again = await repository.claim_next_feedback_analysis_job(
         (BASE_TIME + timedelta(seconds=4)).isoformat()
@@ -94,6 +102,7 @@ async def test_failed_feedback_analysis_job_can_be_requeued_and_claimed(
     assert claimed_again is not None
     assert claimed_again.job_id == claimed.job_id
     assert claimed_again.status == "running"
+    assert claimed_again.lease_version == claimed.lease_version + 1
 
 
 async def test_expired_running_job_is_recovered_and_claimed_again(
@@ -232,6 +241,7 @@ async def test_old_worker_cannot_finish_reclaimed_job(
 @pytest.mark.parametrize(
     ("job_type", "status", "result_id"),
     [
+        ("feedback_analysis", "pending", None),
         ("feedback_analysis", "running", None),
         ("feedback_analysis", "succeeded", "result-1"),
         ("feedback_analysis", "cancelled", None),

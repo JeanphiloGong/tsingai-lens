@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Any, Literal
@@ -114,26 +114,6 @@ class AnalysisJob:
     @property
     def feedback_id(self) -> str | None:
         return self.payload.get("feedback_id")
-
-    def requeue_failed_feedback_analysis(self, available_at: str) -> "AnalysisJob":
-        if self.job_type != "feedback_analysis":
-            raise ValueError("only feedback analysis jobs can be requeued")
-        if self.status != "failed":
-            raise ValueError(f"cannot requeue analysis job in status {self.status}")
-        if self.result_id is not None:
-            raise ValueError("failed analysis job with a result cannot be requeued")
-        if not available_at:
-            raise ValueError("available_at is required")
-        return replace(
-            self,
-            status="pending",
-            available_at=available_at,
-            started_at=None,
-            finished_at=None,
-            result_id=None,
-            error_code=None,
-            updated_at=available_at,
-        )
 
 
 class AnalysisJobRepository:
@@ -851,7 +831,6 @@ class AnalysisJobRepository:
         if not job_id.strip():
             raise ValueError("job_id is required")
         timestamp = _datetime(now)
-        available_at = _iso(timestamp)
         async with AsyncSessionLocal() as db, db.begin():
             row = await db.get(AnalysisJobRow, job_id, with_for_update=True)
             if row is None:
@@ -863,26 +842,7 @@ class AnalysisJobRepository:
             if row.result_id is not None:
                 raise ValueError("failed analysis job with a result cannot be requeued")
 
-            requeued = AnalysisJob(
-                job_id=row.job_id,
-                job_type=row.job_type,
-                payload_version=row.payload_version,
-                payload=row.payload,
-                status=row.status,
-                idempotency_key=row.idempotency_key,
-                available_at=_iso(row.available_at),
-                created_at=_iso(row.created_at),
-                updated_at=_iso(row.updated_at),
-                started_at=_optional_iso(row.started_at),
-                finished_at=_optional_iso(row.finished_at),
-                result_id=row.result_id,
-                error_code=row.error_code,
-                worker_id=row.worker_id,
-                lease_expires_at=_optional_iso(row.lease_expires_at),
-                heartbeat_at=_optional_iso(row.heartbeat_at),
-                lease_version=row.lease_version,
-            ).requeue_failed_feedback_analysis(available_at)
-            row.status = requeued.status
+            row.status = "pending"
             row.available_at = timestamp
             row.started_at = None
             row.finished_at = None

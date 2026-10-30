@@ -6,7 +6,9 @@ owned by `application/core/objectives/analysis_service.py`.
 
 `PipelineRunService` owns admission, node transitions, progress, terminal failure,
 retry lineage, and restart recovery for those executions. It constructs execution
-records directly and checks the configured node graph when creating a run.
+records directly from the fixed node graphs defined in the service. Tests check
+the preparation and discovery dependencies; creating a run does not revalidate
+these internal definitions.
 `PipelineRun` and
 `PipelineNodeRun` live beside their contract in
 [`../../repositories/pipeline_run_repository.py`](../../repositories/pipeline_run_repository.py)

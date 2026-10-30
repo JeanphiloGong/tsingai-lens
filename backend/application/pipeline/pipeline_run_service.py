@@ -540,26 +540,6 @@ class PipelineRunService:
         dependencies = _PIPELINE_NODES.get(pipeline_name, {})
         if not all((pipeline_name, mode, collection_id, scope_type, scope_id)):
             raise ValueError("pipeline run identity is required")
-        for name, parents in dependencies.items():
-            if name in parents:
-                raise ValueError(f"pipeline node cannot depend on itself: {name}")
-            if len(set(parents)) != len(parents):
-                raise ValueError(f"pipeline node dependencies must be unique: {name}")
-            unknown = set(parents) - dependencies.keys()
-            if unknown:
-                raise ValueError(
-                    "pipeline node dependencies are not part of the run: "
-                    + ", ".join(sorted(unknown))
-                )
-        remaining = {name: set(parents) for name, parents in dependencies.items()}
-        while remaining:
-            ready = {name for name, parents in remaining.items() if not parents}
-            if not ready:
-                raise ValueError("pipeline node dependencies contain a cycle")
-            remaining = {
-                name: parents - ready for name, parents in remaining.items()
-                if name not in ready
-            }
         return PipelineRun(
             pipeline_name=pipeline_name,
             mode=mode,

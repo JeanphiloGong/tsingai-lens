@@ -185,8 +185,8 @@ but have separate owners.
 | Pipeline | No scientific objects; a successful technical run is not scientific proof | `repositories/pipeline_run_repository.py` owns execution records, nodes, timestamps and token usage |
 
 Repository-specific result types stay beside the concrete repository that returns them.
-`PipelineRunService` creates and advances execution records; the repository stores
-and reads them without rerunning node graph validation. Statistics remain direct
+`PipelineRunService` creates execution records from fixed node definitions and
+advances them; the repository stores and reads those records. Statistics remain direct
 operations on the execution values. `ObjectiveRepository` retains locked analysis
 claims and publication transitions; the application selects the scientific
 record read path from the returned analysis fields.

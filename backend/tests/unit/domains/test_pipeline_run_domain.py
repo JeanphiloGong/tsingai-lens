@@ -37,6 +37,10 @@ async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
         scope_type="document", scope_id="doc_1", mode="standard",
         input_fingerprint="fingerprint", context={"requested_by": "upload"},
     )
+    assert [(node.name, node.dependencies) for node in runs.run.nodes] == [
+        ("source_parsing", ()),
+        ("document_profile", ("source_parsing",)),
+    ]
     run_id = runs.run.run_id
     await service.update_run(run_id, status="running", current_node="source_parsing")
     running = await service.update_run(run_id, current_node="source_parsing")
@@ -87,6 +91,10 @@ async def test_partial_success_skips_unstarted_nodes():
         scope_type="collection", scope_id="col_1", mode="standard",
         input_fingerprint=None, context=None,
     )
+    assert [(node.name, node.dependencies) for node in runs.run.nodes] == [
+        ("paper_map", ()),
+        ("objective_candidates", ("paper_map",)),
+    ]
     await service.update_run(runs.run.run_id, status="running", current_node="paper_map")
     result = await service.finish_run(runs.run.run_id, status="partial_success")
     assert result["nodes"]["paper_map"]["status"] == "succeeded"
@@ -99,21 +107,6 @@ async def test_invalid_progress_is_rejected_before_loading():
     service = PipelineRunService(_Runs())
     with pytest.raises(ValueError, match="progress_percent"):
         await service.update_run("run-1", progress_percent=101)
-
-
-@pytest.mark.parametrize("dependencies, message", [
-    ({"first": ("missing",)}, "dependencies are not part"),
-    ({"first": ("second",), "second": ("first",)}, "contain a cycle"),
-])
-def test_invalid_dependencies_are_rejected_at_creation(monkeypatch, dependencies, message):
-    monkeypatch.setitem(module._PIPELINE_NODES, "document_preparation", dependencies)
-    service = PipelineRunService(_Runs())
-    with pytest.raises(ValueError, match=message):
-        service._new_run(
-            collection_id="col_1", pipeline_name="document_preparation",
-            scope_type="document", scope_id="doc_1", mode="standard",
-            input_fingerprint=None, context=None,
-        )
 
 
 def test_execution_stats_aggregate_usage_by_model() -> None:

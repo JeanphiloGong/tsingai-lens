@@ -593,3 +593,6 @@ class PaperMapRepository:
                 )
                 paper_maps.append(paper_map)
             return tuple(paper_maps)
+
+
+PaperMapRepo = PaperMapRepository()

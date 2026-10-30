@@ -618,3 +618,6 @@ def _iso(value: datetime) -> str:
 
 
 __all__ = ['DatasetExportConflict', 'DatasetExportDraft', 'DatasetExportIdempotencyConflict', 'DatasetExportSummary', 'FeedbackDatasetExportRepository']
+
+
+FeedbackDatasetExportRepo = FeedbackDatasetExportRepository()

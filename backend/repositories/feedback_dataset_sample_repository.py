@@ -1291,3 +1291,6 @@ def _iso(value: datetime) -> str:
 
 
 __all__ = ['BuildCompletionKind', 'CollectedDatasetSample', 'ConfirmedDatasetMember', 'DatasetSampleRevisionConflict', 'DatasetSampleActionConflict', 'FeedbackDatasetSampleRepository']
+
+
+FeedbackDatasetSampleRepo = FeedbackDatasetSampleRepository()

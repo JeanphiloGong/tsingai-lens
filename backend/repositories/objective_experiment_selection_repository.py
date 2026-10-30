@@ -221,3 +221,6 @@ async def load_experiment_selection(
 
 
 __all__ = ['ObjectiveExperimentSelectionRepository']
+
+
+ObjectiveExperimentSelectionRepo = ObjectiveExperimentSelectionRepository()

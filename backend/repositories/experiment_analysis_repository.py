@@ -160,3 +160,6 @@ class ExperimentAnalysisRepository:
 
 
 __all__ = ['ExperimentAnalysisRepository', 'ExperimentAnalysisWrite', 'StoredExperimentAnalysis']
+
+
+ExperimentAnalysisRepo = ExperimentAnalysisRepository()

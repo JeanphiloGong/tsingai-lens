@@ -803,3 +803,6 @@ def _constraint_name(exc: IntegrityError) -> str | None:
 
 
 __all__ = ['PaperExperimentRepository', 'PaperExperimentRevisionConflictError', 'StoredPaperExperimentRevision']
+
+
+PaperExperimentRepo = PaperExperimentRepository()

@@ -390,3 +390,6 @@ def _finding_creation_time(value: Any) -> datetime | None:
         return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError("invalid Finding creation time") from exc
+
+
+FindingReviewRepo = FindingReviewRepository()

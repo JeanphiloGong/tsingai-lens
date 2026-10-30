@@ -395,3 +395,6 @@ async def load_experiment_finding(
 
 
 __all__ = ['ExperimentFindingRepository']
+
+
+ExperimentFindingRepo = ExperimentFindingRepository()

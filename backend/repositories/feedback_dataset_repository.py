@@ -191,3 +191,6 @@ def _datetime(value: Any) -> datetime:
 
 
 __all__ = ['FeedbackDatasetRepository', 'StoredDataset']
+
+
+FeedbackDatasetRepo = FeedbackDatasetRepository()

@@ -130,3 +130,6 @@ class DocumentProfileRepository:
 
 
 __all__ = ["DocumentProfileRepository"]
+
+
+DocumentProfileRepo = DocumentProfileRepository()

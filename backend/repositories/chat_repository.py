@@ -1400,3 +1400,6 @@ def _optional_iso(value: datetime | None) -> str | None:
 
 
 __all__ = ['ChatRepository']
+
+
+ChatRepo = ChatRepository()

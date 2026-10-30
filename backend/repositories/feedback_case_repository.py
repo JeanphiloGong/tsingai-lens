@@ -1225,3 +1225,6 @@ def _iso(value: datetime) -> str:
 
 
 __all__ = ['FeedbackCaseRepository']
+
+
+FeedbackCaseRepo = FeedbackCaseRepository()

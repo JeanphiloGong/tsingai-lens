@@ -165,3 +165,6 @@ async def load_comparison_group(
 
 
 __all__ = ['ComparisonGroupRepository']
+
+
+ComparisonGroupRepo = ComparisonGroupRepository()

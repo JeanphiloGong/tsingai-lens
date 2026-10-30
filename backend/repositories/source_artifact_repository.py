@@ -757,3 +757,6 @@ def _canonical_json(value: Any) -> str:
 
 
 __all__ = ["SourceArtifactRepository"]
+
+
+SourceArtifactRepo = SourceArtifactRepository()

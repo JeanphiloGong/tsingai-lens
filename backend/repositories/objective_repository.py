@@ -3817,3 +3817,6 @@ def _sorted_finding_records(values: list[dict[str, Any]]) -> list[dict[str, Any]
 
 
 __all__ = ['ObjectiveRepository']
+
+
+ObjectiveRepo = ObjectiveRepository()

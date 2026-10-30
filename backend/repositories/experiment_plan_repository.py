@@ -305,3 +305,6 @@ def _isoformat(value: datetime) -> str:
 
 
 __all__ = ['ExperimentPlanRepository']
+
+
+ExperimentPlanRepo = ExperimentPlanRepository()

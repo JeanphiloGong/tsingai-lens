@@ -394,3 +394,6 @@ def _iso(value: datetime) -> str:
 
 
 __all__ = ['CollectionRepository']
+
+
+CollectionRepo = CollectionRepository()

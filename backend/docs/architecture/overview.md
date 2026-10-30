@@ -44,7 +44,11 @@ belong to the current app's `ApplicationRuntime`: discovery, document preparatio
 Objective analysis, and Chat use their runtime instances. Shutdown cancels
 and awaits those instances' tasks before
 disposing the engine. The runtime also constructs file resources and background
-workers. Startup recovers interrupted preparation, discovery, and analysis.
+workers. Feedback handlers and workers import concrete repositories directly
+and retain only actual engines, builders, handlers and execution limits. The
+Analysis runtime also owns its optional, lazily created Finding summary client;
+its request options remain separate from analysis execution. Startup recovers
+interrupted preparation, discovery, and analysis.
 The four legacy snapshot handlers remain unmounted.
 
 `controllers/exception_router.py` owns the four centralized exception handlers;
@@ -170,8 +174,9 @@ analysis of an explicitly selected ready subset.
   it references rather than duplicates scientific records.
 - `domain/` owns business objects, evidence, invariants, and business transitions.
 - [`repositories/`](../../repositories/README.md) owns concrete PostgreSQL
-  repositories, their query results, and storage mappings. Services receive
-  these repositories directly; domain objects do not depend on them.
+  repositories, their query results, and storage mappings. Application operations
+  import concrete repository instances directly; domain objects do not depend
+  on them.
 - `infra/` owns database connections, ORM tables, shared transactions, object
   storage, model providers, and parsing.
 

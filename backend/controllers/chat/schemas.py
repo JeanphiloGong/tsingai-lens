@@ -26,7 +26,7 @@ class ChatSessionPinRequest(BaseModel):
 class ChatSessionTitleRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    title: str = Field(min_length=1, max_length=160)
+    title: str
 
 
 class ChatPermissionRequest(BaseModel):

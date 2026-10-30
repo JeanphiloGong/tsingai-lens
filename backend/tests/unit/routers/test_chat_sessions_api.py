@@ -513,8 +513,11 @@ def test_title_route_validates_input_and_hides_unowned_sessions(collection_servi
     with TestClient(app) as client:
         assert client.put(path, json={"title": "New title"}).status_code == 401
         client.cookies.set("lens_session", "browser-session")
-        for title in ("", "   ", "x" * 161, "line\nbreak", "nul\x00title"):
+        for title in ("", "   ", "x" * 161, "line\nbreak", "\nTitle", "Title\r", "nul\x00title"):
             assert client.put(path, json={"title": title}).status_code == 422
+        bounded = client.put(path, json={"title": " " + "x" * 160 + " "})
+        assert bounded.status_code == 200
+        assert bounded.json()["title"] == "x" * 160
         renamed = client.put(path, json={"title": "  IN718 comparison  "})
         assert renamed.status_code == 200
         assert renamed.json()["title"] == "IN718 comparison"

@@ -210,8 +210,9 @@ list item also includes `title`: the saved custom title, otherwise the trimmed f
 history without loading every trajectory or relying on a local title cache.
 
 `PUT .../{session_id}/title` accepts `{"title": "IN718 comparison"}` and
-returns the saved session. Titles are trimmed and must contain 1–160 characters
-on one line, without NUL; invalid requests return 422. Both session and collection
+returns the saved session. The application service trims titles and then checks
+the 1–160 character limit. NUL, CR and LF are rejected in the original input,
+including at its edges; invalid requests return 422. Both session and collection
 ownership are required; missing or unowned sessions return 404. Renaming changes
 only the custom title, preserving messages, progress, pin state and activity time.
 Individual session reads expose the custom title or null. Later generation

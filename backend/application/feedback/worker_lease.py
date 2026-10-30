@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import logging
 from typing import Awaitable, Callable, TypeVar
 
-from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepository
+from repositories.analysis_job_repository import AnalysisJob, AnalysisJobRepo
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,6 @@ class LeaseLostError(RuntimeError):
 
 
 async def run_with_lease_heartbeat(
-    job_repository: AnalysisJobRepository,
     job: AnalysisJob,
     operation: Callable[[], Awaitable[T]],
     *,
@@ -44,7 +43,7 @@ async def run_with_lease_heartbeat(
             except asyncio.TimeoutError:
                 pass
             try:
-                renewed = await job_repository.renew_lease(
+                renewed = await AnalysisJobRepo.renew_lease(
                     job_id=job.job_id,
                     worker_id=job.worker_id,
                     lease_version=job.lease_version,

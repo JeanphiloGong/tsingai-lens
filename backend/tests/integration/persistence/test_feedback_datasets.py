@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from application.feedback import analysis_worker, sample_build_worker, worker_lease
+
 from application.feedback import analysis_handler
 
 import asyncio
@@ -91,11 +93,10 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
     analysis_handler.ChatRepo = chain.chat
-    worker = FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    )
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    worker = FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler())
 
     terminal = await worker.run_once()
     assert terminal is not None and terminal.status == "succeeded"
@@ -125,11 +126,10 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         comment="Check preheating.",
     )
     analysis_handler.ChatRepo = chain.chat
-    await FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()
@@ -167,13 +167,12 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,)
     )
     sample_id = collected.items[0].sample.sample_id
-    build_worker = DatasetSampleBuildWorker(
-        job_repository=chain.jobs,
-        dataset_repository=datasets,
-        sample_repository=samples,
-        case_repository=chain.cases,
-        builder=SftSampleBuilder(),
-    )
+    sample_build_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = datasets
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = chain.cases
+    build_worker = DatasetSampleBuildWorker(builder=SftSampleBuilder())
     # The automatic Collection workbenches may have queued their own samples
     # first. Drain the queue until this explicitly created dataset is built.
     for _ in range(4):
@@ -375,11 +374,10 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         comment="Paper B's figure caption records preheating at 200 C.",
     )
     analysis_handler.ChatRepo = chain.chat
-    await FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     await chain.case_service.save_annotation_for_user(
         case_id=case.case_id,
@@ -414,13 +412,12 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,)
     )
     sample_id = collected.items[0].sample.sample_id
-    worker = DatasetSampleBuildWorker(
-        job_repository=chain.jobs,
-        dataset_repository=datasets,
-        sample_repository=samples,
-        case_repository=chain.cases,
-        builder=SftSampleBuilder(),
-    )
+    sample_build_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = datasets
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = chain.cases
+    worker = DatasetSampleBuildWorker(builder=SftSampleBuilder())
     # Drain automatic and superseded jobs before checking the explicitly collected sample.
     while await worker.run_once() is not None:
         pass
@@ -687,11 +684,10 @@ async def test_reclaimed_build_rejects_old_lease_completion(
         reason="incorrect",
     )
     analysis_handler.ChatRepo = chain.chat
-    await FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
     case = (await chain.cases.list_cases(collection_id=COLLECTION_ID))[0]
     datasets = FeedbackDatasetRepository()
     samples = FeedbackDatasetSampleRepository()

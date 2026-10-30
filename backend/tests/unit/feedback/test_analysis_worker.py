@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import analysis_worker, worker_lease
+
 from application.feedback import analysis_handler
 
 from dataclasses import replace
@@ -146,11 +148,10 @@ async def test_worker_creates_candidate_result_and_case_without_mutating_chat() 
     cases = _Cases()
     before = (chat.question, chat.answer)
     analysis_handler.ChatRepo = chat
-    result = await FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    result = await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
     assert result.status == "succeeded"
     assert jobs.finished and jobs.finished[0] == "succeeded"
     assert len(cases.results) == 1
@@ -177,11 +178,10 @@ async def test_worker_cancels_withdrawn_feedback_without_case() -> None:
     jobs = _Jobs(_job("feedback-withdrawn"))
     cases = _Cases()
     analysis_handler.ChatRepo = _Chat(feedback=None)
-    worker = FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(),
-    )
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    worker = FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler())
     result = await worker.run_once()
     assert result.status == "cancelled"
     assert jobs.finished == ("cancelled", "feedback_withdrawn")
@@ -205,11 +205,10 @@ async def test_worker_cancels_a_superseded_feedback_version() -> None:
     cases = _Cases()
 
     analysis_handler.ChatRepo = chat
-    result = await FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    result = await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
 
     assert result.status == "cancelled"
     assert jobs.finished == ("cancelled", "feedback_version_superseded")
@@ -232,11 +231,10 @@ async def test_worker_marks_persistence_failure_as_failed() -> None:
     cases = _Cases(fail_on_save=True)
 
     analysis_handler.ChatRepo = chat
-    result = await FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    result = await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
 
     assert result.status == "failed"
     assert jobs.finished == ("failed", "feedback_analysis_persistence_failed")
@@ -246,11 +244,10 @@ async def test_worker_rejects_unknown_payload_and_keeps_no_result() -> None:
     jobs = _Jobs(replace(_job("feedback-1"), payload_version=2))
     cases = _Cases()
     analysis_handler.ChatRepo = _Chat(feedback=None)
-    worker = FeedbackAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=FeedbackAnalysisHandler(),
-    )
+    analysis_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = cases
+    worker = FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler())
     result = await worker.run_once()
     assert result.status == "failed"
     assert jobs.finished == ("failed", "unsupported_feedback_analysis_job")

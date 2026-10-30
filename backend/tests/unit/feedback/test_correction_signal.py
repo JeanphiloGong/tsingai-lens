@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import correction_signal_worker, worker_lease
+
 from application.feedback import analysis_handler, correction_signal_handler
 
 from dataclasses import replace
@@ -477,11 +479,10 @@ async def test_worker_persists_case_only_after_valid_signal_analysis():
     cases = _Cases()
     correction_signal_handler.ChatRepo = _Chat(messages)
     analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
-    outcome = await CorrectionSignalAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=CorrectionSignalAnalysisHandler(),
-    ).run_once()
+    correction_signal_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = correction_signal_worker.AnalysisJobRepo
+    correction_signal_worker.FeedbackCaseRepo = cases
+    outcome = await CorrectionSignalAnalysisWorker(handler=CorrectionSignalAnalysisHandler()).run_once()
 
     assert outcome.status == "succeeded"
     assert jobs.finished and jobs.finished[0] == "succeeded"
@@ -500,11 +501,10 @@ async def test_worker_cancels_when_trigger_disappears_instead_of_creating_case()
     chat = _Chat(messages[:-1])
     correction_signal_handler.ChatRepo = chat
     analysis_handler.ChatRepo = correction_signal_handler.ChatRepo
-    outcome = await CorrectionSignalAnalysisWorker(
-        job_repository=jobs,
-        case_repository=cases,
-        handler=CorrectionSignalAnalysisHandler(),
-    ).run_once()
+    correction_signal_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = correction_signal_worker.AnalysisJobRepo
+    correction_signal_worker.FeedbackCaseRepo = cases
+    outcome = await CorrectionSignalAnalysisWorker(handler=CorrectionSignalAnalysisHandler()).run_once()
 
     assert outcome.status == "cancelled"
     assert jobs.finished == ("cancelled", "correction_signal_withdrawn")

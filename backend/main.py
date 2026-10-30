@@ -151,15 +151,6 @@ def _parse_agent_run_limits() -> AgentRunLimits:
             value = default
         values[field_name] = value
     return AgentRunLimits(**values)
-
-
-from repositories.analysis_job_repository import AnalysisJobRepo
-from repositories.chat_repository import ChatRepo
-from repositories.feedback_case_repository import FeedbackCaseRepo
-from repositories.feedback_dataset_repository import FeedbackDatasetRepo
-from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampleRepo
-
-
 @dataclass(frozen=True)
 class ApplicationRuntime:
     """Database and worker resources owned by one running process."""
@@ -246,25 +237,18 @@ async def build_application_runtime() -> ApplicationRuntime:
             objective_analysis_service=analysis,
             chat_session_service=ChatSessionService(runner=runner),
             feedback_analysis_worker=FeedbackAnalysisWorker(
-                job_repository=AnalysisJobRepo,
-                case_repository=FeedbackCaseRepo,
                 handler=FeedbackAnalysisHandler(),
             ),
             correction_signal_analysis_worker=CorrectionSignalAnalysisWorker(
-                job_repository=AnalysisJobRepo,
-                case_repository=FeedbackCaseRepo,
-                handler=CorrectionSignalAnalysisHandler(engine=correction_engine, model_name=correction_engine.model_name),
+                handler=CorrectionSignalAnalysisHandler(
+                    engine=correction_engine,
+                    model_name=correction_engine.model_name,
+                ),
             ),
             tool_failure_analysis_worker=ToolFailureAnalysisWorker(
-                job_repository=AnalysisJobRepo,
-                case_repository=FeedbackCaseRepo,
                 handler=ToolFailureAnalysisHandler(),
             ),
             dataset_sample_build_worker=DatasetSampleBuildWorker(
-                job_repository=AnalysisJobRepo,
-                dataset_repository=FeedbackDatasetRepo,
-                sample_repository=FeedbackDatasetSampleRepo,
-                case_repository=FeedbackCaseRepo,
                 builders={
                     "sft": SftSampleBuilder(generator=sample_generator),
                     "preference": PreferenceSampleBuilder(generator=sample_generator),

@@ -251,7 +251,14 @@ def _isolate_application_module_dependencies(monkeypatch):
 
     from application.feedback import analysis_handler, correction_signal_handler, tool_failure_handler
 
+    from application.feedback import analysis_worker, correction_signal_worker, tool_failure_worker, sample_build_worker, worker_lease
+
     dependencies = (
+        (analysis_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
+        (correction_signal_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
+        (tool_failure_worker, ["AnalysisJobRepo", "FeedbackCaseRepo"]),
+        (sample_build_worker, ["AnalysisJobRepo", "FeedbackCaseRepo", "FeedbackDatasetRepo", "FeedbackDatasetSampleRepo"]),
+        (worker_lease, ["AnalysisJobRepo"]),
         (analysis_handler, ["ChatRepo"]),
         (correction_signal_handler, ["ChatRepo"]),
         (tool_failure_handler, ["ChatRepo"]),

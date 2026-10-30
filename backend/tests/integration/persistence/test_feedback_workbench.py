@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import analysis_worker, tool_failure_worker, worker_lease
+
 from application.feedback import analysis_handler, tool_failure_handler
 
 import json
@@ -229,11 +231,10 @@ async def test_feedback_workbench_persists_the_complete_reviewed_export_chain(
     assert job.idempotency_key == feedback.analysis_version_key
 
     analysis_handler.ChatRepo = chain.chat
-    worker = FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    )
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    worker = FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler())
     terminal_job = await worker.run_once()
     assert terminal_job is not None
     assert terminal_job.status == "succeeded"
@@ -419,11 +420,10 @@ async def test_withdrawn_feedback_cancels_pending_job_without_creating_a_case(
     assert await chain.cases.list_cases(collection_id=COLLECTION_ID) == ()
 
     analysis_handler.ChatRepo = chain.chat
-    worker = FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    )
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    worker = FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler())
     assert await worker.run_once() is None
 
 
@@ -539,11 +539,10 @@ async def test_tool_failure_worker_persists_an_independent_case_projection(
     assert first_job.job_type == TOOL_FAILURE_JOB_TYPE
 
     tool_failure_handler.ChatRepo = chain.chat
-    worker = ToolFailureAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=ToolFailureAnalysisHandler(),
-    )
+    tool_failure_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = tool_failure_worker.AnalysisJobRepo
+    tool_failure_worker.FeedbackCaseRepo = chain.cases
+    worker = ToolFailureAnalysisWorker(handler=ToolFailureAnalysisHandler())
     terminal_job = await worker.run_once()
     assert terminal_job is not None
     assert terminal_job.status == "succeeded"

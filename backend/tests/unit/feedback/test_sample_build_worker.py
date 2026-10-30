@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import sample_build_worker, worker_lease
+
 from application.feedback.sample_builder_support import EvaluationSampleModelOutput, PreferenceSampleModelOutput, SftSampleModelOutput
 
 from domain.feedback.sample_revision import PreferenceRevisionContent
@@ -178,13 +180,12 @@ def _job() -> AnalysisJob:
 async def test_worker_publishes_candidate_as_needs_confirmation() -> None:
     jobs = _Jobs(_job())
     samples = _Samples(_sample(), jobs)
-    result = await DatasetSampleBuildWorker(
-        job_repository=jobs,
-        dataset_repository=_Datasets(),
-        sample_repository=samples,
-        case_repository=_Cases(),
-        builder=SftSampleBuilder(),
-    ).run_once()
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets()
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = _Cases()
+    result = await DatasetSampleBuildWorker(builder=SftSampleBuilder()).run_once()
 
     assert result.status == "succeeded"
     assert samples.completed["outcome"] == "candidate"
@@ -253,13 +254,12 @@ async def test_generated_content_is_saved_as_an_unconfirmed_worker_revision(task
     generator = Generator()
     builder = {"sft": SftSampleBuilder, "preference": PreferenceSampleBuilder,
         "evaluation": EvaluationSampleBuilder}[task_type](generator=generator)
-    result = await DatasetSampleBuildWorker(
-        job_repository=jobs,
-        dataset_repository=_Datasets(replace(_dataset(), task_type=task_type)),
-        sample_repository=samples,
-        case_repository=Cases(),
-        builders={task_type: builder},
-    ).run_once()
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets(replace(_dataset(), task_type=task_type))
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = Cases()
+    result = await DatasetSampleBuildWorker(builders={task_type: builder}).run_once()
 
     assert result.status == "succeeded"
     assert samples.sample.status == "needs_confirmation"
@@ -279,13 +279,12 @@ async def test_worker_leaves_missing_material_as_needs_input() -> None:
     samples = _Samples(replace(_sample(), source_digest="b" * 64), jobs)
     cases = _Cases()
     cases.read_case = lambda case_id: _missing_case(case_id)
-    result = await DatasetSampleBuildWorker(
-        job_repository=jobs,
-        dataset_repository=_Datasets(),
-        sample_repository=samples,
-        case_repository=cases,
-        builder=SftSampleBuilder(),
-    ).run_once()
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets()
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = cases
+    result = await DatasetSampleBuildWorker(builder=SftSampleBuilder()).run_once()
 
     assert result.status == "succeeded"
     assert samples.completed["outcome"] == "needs_input"
@@ -298,13 +297,12 @@ async def test_worker_rejects_source_changed_after_collect() -> None:
     cases = _Cases()
     cases.read_case = lambda case_id: _missing_case(case_id)
 
-    result = await DatasetSampleBuildWorker(
-        job_repository=jobs,
-        dataset_repository=_Datasets(),
-        sample_repository=samples,
-        case_repository=cases,
-        builder=SftSampleBuilder(),
-    ).run_once()
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets()
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = cases
+    result = await DatasetSampleBuildWorker(builder=SftSampleBuilder()).run_once()
 
     assert result.status == "succeeded"
     assert samples.completed["outcome"] == "needs_input"
@@ -347,13 +345,12 @@ async def test_worker_dispatches_preference_builder_by_dataset_task_type() -> No
             assert inputs["review_note"] is None
             return PreferenceSampleModelOutput.model_validate({"suggested_preference": "b", "rationale": "回答 B 保留图注的条件。"})
 
-    worker = DatasetSampleBuildWorker(
-        job_repository=jobs,
-        dataset_repository=_Datasets(dataset),
-        sample_repository=samples,
-        case_repository=Cases(),
-        builders={"preference": PreferenceSampleBuilder(generator=Generator())},
-    )
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets(dataset)
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = Cases()
+    worker = DatasetSampleBuildWorker(builders={"preference": PreferenceSampleBuilder(generator=Generator())})
     result = await worker.run_once()
 
     assert result.status == "succeeded"
@@ -410,10 +407,12 @@ async def test_worker_reports_persisted_state_when_completion_loses_its_lease():
 
     jobs = ReclaimedJobs(_job())
     samples = LostLeaseSamples(replace(_sample(), status="building"), jobs)
-    result = await DatasetSampleBuildWorker(
-        job_repository=jobs, dataset_repository=_Datasets(),
-        sample_repository=samples, case_repository=_Cases(), builder=SftSampleBuilder(),
-    ).run_once()
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets()
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = _Cases()
+    result = await DatasetSampleBuildWorker(builder=SftSampleBuilder()).run_once()
     assert result == replacement
     assert samples.sample.status == "building"
     assert samples.sample.current_revision_id is None
@@ -426,11 +425,12 @@ async def test_worker_times_out_a_build_before_its_lease_expires():
 
     jobs = _Jobs(_job())
     samples = _Samples(_sample(), jobs)
-    worker = DatasetSampleBuildWorker(
-        job_repository=jobs, dataset_repository=_Datasets(),
-        sample_repository=samples, case_repository=_Cases(),
-        builders={"sft": HangingBuilder()}, build_timeout_seconds=0.01,
-    )
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets()
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = _Cases()
+    worker = DatasetSampleBuildWorker(builders={"sft": HangingBuilder()}, build_timeout_seconds=0.01)
     result = await worker.run_once()
     assert result.status == "failed"
     assert samples.sample.status == "build_failed"
@@ -448,10 +448,12 @@ async def test_withdrawn_case_never_invokes_a_builder():
 
     jobs = _Jobs(_job())
     samples = _Samples(_sample(), jobs)
-    result = await DatasetSampleBuildWorker(
-        job_repository=jobs, dataset_repository=_Datasets(), sample_repository=samples,
-        case_repository=WithdrawnCases(), builders={"sft": UnusedBuilder()},
-    ).run_once()
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets()
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = WithdrawnCases()
+    result = await DatasetSampleBuildWorker(builders={"sft": UnusedBuilder()}).run_once()
     assert result.status == "succeeded"
     assert samples.sample.status == "needs_input"
 
@@ -468,10 +470,12 @@ async def test_disappeared_job_cannot_be_reported_as_success():
 
     jobs = MissingJobs(_job())
     samples = DeletedJobSamples(_sample(), jobs)
-    worker = DatasetSampleBuildWorker(
-        job_repository=jobs, dataset_repository=_Datasets(), sample_repository=samples,
-        case_repository=_Cases(), builder=SftSampleBuilder(),
-    )
+    sample_build_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = _Datasets()
+    sample_build_worker.FeedbackDatasetSampleRepo = samples
+    sample_build_worker.FeedbackCaseRepo = _Cases()
+    worker = DatasetSampleBuildWorker(builder=SftSampleBuilder())
     with pytest.raises(RuntimeError, match="sample build job disappeared: job-1"):
         await worker.run_once()
     assert samples.revision is None

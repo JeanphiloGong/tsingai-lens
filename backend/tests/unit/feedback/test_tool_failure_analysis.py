@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.feedback import tool_failure_worker, worker_lease
+
 from application.feedback import tool_failure_handler
 
 from domain.chat import ChatMessageRole
@@ -255,10 +257,10 @@ async def test_worker_cancels_when_result_is_no_longer_a_failure():
     jobs = _Jobs(changed_job)
     cases = _Cases()
     tool_failure_handler.ChatRepo = _Chat(changed_messages, call, session)
-    outcome = await ToolFailureAnalysisWorker(
-        job_repository=jobs, case_repository=cases,
-        handler=ToolFailureAnalysisHandler(),
-    ).run_once()
+    tool_failure_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = tool_failure_worker.AnalysisJobRepo
+    tool_failure_worker.FeedbackCaseRepo = cases
+    outcome = await ToolFailureAnalysisWorker(handler=ToolFailureAnalysisHandler()).run_once()
 
     assert outcome.status == "cancelled"
     assert jobs.job.status == "cancelled"
@@ -270,11 +272,10 @@ async def test_worker_marks_persistence_failure_without_claiming_success():
     session, messages, call, job = _fixture()
     jobs = _Jobs(job)
     tool_failure_handler.ChatRepo = _Chat(messages, call, session)
-    outcome = await ToolFailureAnalysisWorker(
-        job_repository=jobs,
-        case_repository=_FailingCases(),
-        handler=ToolFailureAnalysisHandler(),
-    ).run_once()
+    tool_failure_worker.AnalysisJobRepo = jobs
+    worker_lease.AnalysisJobRepo = tool_failure_worker.AnalysisJobRepo
+    tool_failure_worker.FeedbackCaseRepo = _FailingCases()
+    outcome = await ToolFailureAnalysisWorker(handler=ToolFailureAnalysisHandler()).run_once()
 
     assert outcome.status == "failed"
     assert jobs.finished == ("failed", "tool_failure_persistence_failed")

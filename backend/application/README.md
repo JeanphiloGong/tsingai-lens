@@ -66,7 +66,10 @@ their own app's runtime. `ObjectiveDiscoveryService`,
 `DocumentPreparationService`, `ObjectiveAnalysisService`, and `ChatSessionService`
 retain their own admitted tasks and cancel and await them on shutdown. Chat keeps
 its existing session operations on the runtime owner alongside its runner and
-model-call observer. Workers retain their actual execution state and lifecycle.
+model-call observer. Feedback handlers and workers call concrete repository
+instances directly; their constructors retain actual engines, handlers, builders
+and execution limits. Lease renewal and terminal writes use the claimed job
+worker identity and lease version.
 
 External formats are parsed at their input boundary. An expected missing
 resource, invalid decision, stale version, or write conflict is reported by its

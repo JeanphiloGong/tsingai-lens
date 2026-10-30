@@ -1,6 +1,9 @@
+"""Feedback ingestion, source changes, and selected publication against PostgreSQL."""
+
+
+from application.feedback import analysis_worker, sample_build_worker, worker_lease
 
 from application.feedback import analysis_handler
-"""Feedback ingestion, source changes, and selected publication against PostgreSQL."""
 
 import asyncio
 from dataclasses import replace
@@ -69,11 +72,10 @@ async def _analyze(chain, answer=None):
         comment="The figure caption records the missing preheating condition.",
     )
     analysis_handler.ChatRepo = chain.chat
-    terminal = await FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    terminal = await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
     assert terminal.status == "succeeded"
     cases = await chain.cases.list_cases(collection_id=COLLECTION_ID)
     return next(case for case in cases if case.anchor_message_id == answer.message_id)
@@ -126,13 +128,12 @@ async def _confirm_all_sft(chain, service):
     dataset = next(
         record.dataset for record in records if record.dataset.task_type == "sft"
     )
-    worker = DatasetSampleBuildWorker(
-        job_repository=chain.jobs,
-        dataset_repository=service.FeedbackDatasetRepo,
-        sample_repository=service.FeedbackDatasetSampleRepo,
-        case_repository=chain.cases,
-        builder=SftSampleBuilder(),
-    )
+    sample_build_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = service.FeedbackDatasetRepo
+    sample_build_worker.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
+    sample_build_worker.FeedbackCaseRepo = chain.cases
+    worker = DatasetSampleBuildWorker(builder=SftSampleBuilder())
     while await worker.run_once() is not None:
         pass
     samples = await service.FeedbackDatasetSampleRepo.list_samples(
@@ -249,11 +250,10 @@ async def test_case_and_all_sample_jobs_roll_back_together(
         comment="Check the caption.",
     )
     analysis_handler.ChatRepo = chain.chat
-    failed = await FeedbackAnalysisWorker(
-        job_repository=chain.jobs,
-        case_repository=chain.cases,
-        handler=FeedbackAnalysisHandler(),
-    ).run_once()
+    analysis_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = analysis_worker.AnalysisJobRepo
+    analysis_worker.FeedbackCaseRepo = chain.cases
+    failed = await FeedbackAnalysisWorker(handler=FeedbackAnalysisHandler()).run_once()
     assert failed.status == "failed"
     async with postgres_session_factory() as session:
         for model in (
@@ -522,13 +522,12 @@ async def test_source_change_requeues_confirmed_worker_candidate(
                 target="Paper B records 200 C preheating in the supplied caption."
             )
 
-    worker = DatasetSampleBuildWorker(
-        job_repository=chain.jobs,
-        dataset_repository=service.FeedbackDatasetRepo,
-        sample_repository=service.FeedbackDatasetSampleRepo,
-        case_repository=chain.cases,
-        builder=SftSampleBuilder(generator=Generator()),
-    )
+    sample_build_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = service.FeedbackDatasetRepo
+    sample_build_worker.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
+    sample_build_worker.FeedbackCaseRepo = chain.cases
+    worker = DatasetSampleBuildWorker(builder=SftSampleBuilder(generator=Generator()))
     while await worker.run_once() is not None:
         pass
     candidate = (
@@ -575,16 +574,14 @@ async def test_timed_out_build_releases_sample_and_job_lease(
         async def build(self, **kwargs):
             await asyncio.Event().wait()
 
-    worker = DatasetSampleBuildWorker(
-        job_repository=chain.jobs,
-        dataset_repository=service.FeedbackDatasetRepo,
-        sample_repository=service.FeedbackDatasetSampleRepo,
-        case_repository=chain.cases,
-        builders={
+    sample_build_worker.AnalysisJobRepo = chain.jobs
+    worker_lease.AnalysisJobRepo = sample_build_worker.AnalysisJobRepo
+    sample_build_worker.FeedbackDatasetRepo = service.FeedbackDatasetRepo
+    sample_build_worker.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
+    sample_build_worker.FeedbackCaseRepo = chain.cases
+    worker = DatasetSampleBuildWorker(builders={
             task: HangingBuilder() for task in ("sft", "preference", "evaluation")
-        },
-        build_timeout_seconds=0.05,
-    )
+        }, build_timeout_seconds=0.05)
     result = await worker.run_once()
     assert (
         result.status == "failed"

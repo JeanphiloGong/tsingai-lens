@@ -501,8 +501,12 @@ async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     assert exc.data["collection_id"] == record["collection_id"]
 
 
+@pytest.mark.parametrize("filename, expected_disposition", [
+    ("paper-1.pdf", "inline; filename*=UTF-8''paper-1.pdf"),
+    ("论文.pdf", "inline; filename*=UTF-8''%E8%AE%BA%E6%96%87.pdf"),
+])
 async def test_document_source_route_streams_current_collection_document(
-    document_services,
+    document_services, filename, expected_disposition,
 ):
     (
         collection_service,
@@ -517,7 +521,7 @@ async def test_document_source_route_streams_current_collection_document(
     writer.write(pdf)
     payload = pdf.getvalue()
     document = await build_test_source_import_service(collection_service).add_document(
-        collection_id, "paper-1.pdf", payload, "application/pdf", user_id="local-user"
+        collection_id, filename, payload, "application/pdf", user_id="local-user"
     )
 
     response = await documents_controller.get_collection_document_source(
@@ -528,7 +532,7 @@ async def test_document_source_route_streams_current_collection_document(
 
     assert response.body == payload
     assert response.media_type == "application/pdf"
-    assert response.headers["content-disposition"].startswith("inline;")
+    assert response.headers["content-disposition"] == expected_disposition
 
 
 async def test_document_source_route_returns_404_when_document_is_missing(
@@ -689,7 +693,7 @@ async def test_document_figure_image_route_streams_extracted_asset(document_serv
 
     assert response.body == content
     assert response.media_type == "image/png"
-    assert response.headers["content-disposition"] == 'inline; filename="fig-1.png"'
+    assert response.headers["content-disposition"] == "inline; filename*=UTF-8''fig-1.png"
 
 
 async def test_document_figure_image_route_rejects_figure_from_other_document(

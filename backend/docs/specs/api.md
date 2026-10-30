@@ -1619,7 +1619,9 @@ error. Public messages never include provider responses, credentials, or stack
 traces. Request correlation remains available through `X-Request-ID`.
 
 File successes keep their media type and bytes, with encoded `filename*` headers
-where applicable. SSE successes remain `text/event-stream`. A failure before a
+where applicable. Document Source and figure reads always use
+`inline; filename*=UTF-8''` followed by the percent-encoded filename.
+SSE successes remain `text/event-stream`. A failure before a
 file/SSE response starts uses the JSON envelope. After SSE starts, failure uses
 an `error` event; cancellation still releases the stream and execution lock.
 An enqueue failure after saving feedback reports the saved feedback ID, and an

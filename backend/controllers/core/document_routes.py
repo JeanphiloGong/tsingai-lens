@@ -219,16 +219,11 @@ async def get_collection_document_source(
         or mimetypes.guess_type(filename)[0]
         or "application/octet-stream"
     )
-    encoded_filename = quote(filename, safe="")
-    content_disposition = (
-        f"inline; filename*=utf-8''{encoded_filename}"
-        if encoded_filename != filename
-        else f'inline; filename="{filename}"'
-    )
+    quoted_name = quote(filename, safe="")
     return Response(
         content=payload["content"],
         media_type=media_type,
-        headers={"content-disposition": content_disposition},
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quoted_name}"},
     )
 
 
@@ -264,14 +259,9 @@ async def get_collection_document_figure_image(
         or mimetypes.guess_type(filename)[0]
         or "application/octet-stream"
     )
-    encoded_filename = quote(filename, safe="")
-    content_disposition = (
-        f"inline; filename*=utf-8''{encoded_filename}"
-        if encoded_filename != filename
-        else f'inline; filename="{filename}"'
-    )
+    quoted_name = quote(filename, safe="")
     return Response(
         content=payload["content"],
         media_type=media_type,
-        headers={"content-disposition": content_disposition},
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{quoted_name}"},
     )

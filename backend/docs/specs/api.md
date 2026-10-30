@@ -499,7 +499,10 @@ answers, criteria, and add/remove controls for readable evidence. The confirm
 body contains the same expected revision ID. Confirmation is conditional on the
 sample still pointing at that
 revision, records the confirming user and time, and is idempotent when the same
-revision was already confirmed. A stale revision returns `409
+revision was already confirmed. The confirmation transaction locks the persisted
+revision and verifies its content against its saved digest, including repeated
+confirmation. A mismatch returns `409 sample_content_digest_mismatch` without
+changing the sample status or confirmation metadata. A stale revision returns `409
 sample_revision_stale`; the browser keeps its draft and asks the user to reload
 or compare before submitting again. The interface presents questions,
 readable context, answer text, and evidence excerpts; users do not type sample,

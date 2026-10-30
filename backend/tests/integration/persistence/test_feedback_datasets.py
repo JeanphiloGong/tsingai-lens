@@ -52,6 +52,7 @@ from repositories.feedback_dataset_repository import (
 )
 from repositories.feedback_dataset_sample_repository import (
     DatasetSampleActionConflict,
+    DatasetSampleRevisionConflict,
     FeedbackDatasetSampleRepository,
 )
 from tests.integration.persistence.test_feedback_workbench import (
@@ -182,8 +183,52 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
         await service.update_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
             expected_revision_id=None, expected_generation=sample.generation, content=content)
-    await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
+    # Simulate persisted content changing after the researcher reviewed it,
+    # while the original digest and revision identity remain unchanged.
+    async with postgres_session_factory.begin() as session:
+        revision_row = await session.get(FeedbackSampleRevisionRow, saved.current_revision_id)
+        original_content = revision_row.content
+        original_digest = revision_row.content_digest
+        changed_content = {**original_content, "messages": [
+            {"role": "user", "content": "A different, unreviewed research question."}
+        ]}
+        revision_row.content = changed_content
+
+    with pytest.raises(DatasetSampleRevisionConflict, match="sample_content_digest_mismatch"):
+        await samples.confirm_revision(
+            sample_id=sample_id,
+            expected_revision_id=saved.current_revision_id,
+            expected_source_digest=saved.source_digest,
+            confirmed_by=USER_ID,
+            confirmed_at=_now(),
+        )
+    with pytest.raises(FeedbackDatasetConflict, match="sample_content_digest_mismatch"):
+        await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id,
+            sample_id=sample_id, expected_revision_id=saved.current_revision_id)
+    assert await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id) == saved
+    async with postgres_session_factory.begin() as session:
+        revision_row = await session.get(FeedbackSampleRevisionRow, saved.current_revision_id)
+        assert revision_row.content_digest == original_digest
+        revision_row.content = original_content
+
+    confirmed = await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_id=sample_id,
         expected_revision_id=saved.current_revision_id)
+    repeated = await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id,
+        sample_id=sample_id, expected_revision_id=saved.current_revision_id)
+    assert repeated == confirmed
+
+    # Repeated confirmation must also check integrity before its idempotent return.
+    async with postgres_session_factory.begin() as session:
+        revision_row = await session.get(FeedbackSampleRevisionRow, saved.current_revision_id)
+        revision_row.content = changed_content
+    with pytest.raises(FeedbackDatasetConflict, match="sample_content_digest_mismatch"):
+        await service.confirm_sample(user_id=USER_ID, dataset_id=dataset.dataset_id,
+            sample_id=sample_id, expected_revision_id=saved.current_revision_id)
+    assert await samples.read_sample(dataset_id=dataset.dataset_id, sample_id=sample_id) == confirmed
+    async with postgres_session_factory.begin() as session:
+        revision_row = await session.get(FeedbackSampleRevisionRow, saved.current_revision_id)
+        revision_row.content = original_content
+
     exports = FeedbackDatasetExportService(dataset_service=service, sample_repository=samples,
         repository=FeedbackDatasetExportRepository())
     preview = await exports.preview_for_user(user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[sample_id])

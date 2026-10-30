@@ -560,38 +560,32 @@ class FeedbackDatasetSampleRepository:
                 or source_digest_for_case(case) != expected_source_digest
             ):
                 raise DatasetSampleRevisionConflict("sample_source_stale")
-            if row.confirmed_revision_id == expected_revision_id and row.status == "confirmed":
-                return DatasetSample(
-                    sample_id=row.sample_id,
-                    dataset_id=row.dataset_id,
-                    source_case_id=row.source_case_id,
-                    status=row.status,
-                    current_revision_id=row.current_revision_id,
-                    confirmed_revision_id=row.confirmed_revision_id,
-                    generation=row.generation,
-                    source_digest=row.source_digest,
-                    active_job_id=row.active_job_id,
-                    missing_reasons=tuple(row.missing_reasons or ()),
-                    created_at=_iso(row.created_at),
-                    updated_at=_iso(row.updated_at),
-                    confirmed_by=row.confirmed_by,
-                    confirmed_at=_iso(row.confirmed_at) if row.confirmed_at else None,
-                )
             if row.current_revision_id != expected_revision_id:
                 raise DatasetSampleRevisionConflict("sample_revision_stale")
-            if row.status != "needs_confirmation":
+            already_confirmed = (
+                row.confirmed_revision_id == expected_revision_id and row.status == "confirmed"
+            )
+            if row.status != "needs_confirmation" and not already_confirmed:
                 raise ValueError("sample_not_confirmable")
-            revision = await db.get(FeedbackSampleRevisionRow, expected_revision_id)
+            revision = await db.get(
+                FeedbackSampleRevisionRow, expected_revision_id, with_for_update=True
+            )
             if revision is None or revision.sample_id != sample_id:
                 raise ValueError("sample_revision_missing")
             if revision.input_digest != expected_source_digest:
                 raise DatasetSampleRevisionConflict("sample_source_stale")
-            row.confirmed_revision_id = expected_revision_id
-            row.confirmed_by = confirmed_by
-            row.confirmed_at = timestamp
-            row.status = "confirmed"
-            row.updated_at = timestamp
-            await db.flush()
+            encoded_content = json.dumps(
+                revision.content, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")
+            if revision.content_digest != sha256(encoded_content).hexdigest():
+                raise DatasetSampleRevisionConflict("sample_content_digest_mismatch")
+            if not already_confirmed:
+                row.confirmed_revision_id = expected_revision_id
+                row.confirmed_by = confirmed_by
+                row.confirmed_at = timestamp
+                row.status = "confirmed"
+                row.updated_at = timestamp
+                await db.flush()
             return DatasetSample(
                 sample_id=row.sample_id,
                 dataset_id=row.dataset_id,

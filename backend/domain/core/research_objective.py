@@ -395,14 +395,6 @@ class PreparedDocumentInput:
     document_id: str
     preparation_fingerprint: str
 
-    def __post_init__(self) -> None:
-        if not self.document_id:
-            raise ValueError("prepared document input requires document_id")
-        if not self.preparation_fingerprint:
-            raise ValueError(
-                "prepared document input requires preparation_fingerprint"
-            )
-
 
 @dataclass(frozen=True)
 class ResearchObjective:
@@ -561,10 +553,6 @@ class InspectedObjectiveSourceRef:
     source_kind: str
     source_ref: str
     source_digest: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.source_ref:
-            raise ValueError("inspected Source reference cannot be empty")
 
 
 @dataclass(frozen=True)

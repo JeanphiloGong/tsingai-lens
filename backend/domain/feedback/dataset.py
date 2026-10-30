@@ -25,10 +25,4 @@ class Dataset:
     spec_version: int
     created_by: str
 
-    def __post_init__(self) -> None:
-        if not self.dataset_id or not self.collection_id or not self.created_by:
-            raise ValueError("dataset identity is required")
-        if self.spec_version < 1:
-            raise ValueError("dataset spec version must be positive")
-
 __all__ = ["DATASET_TASK_TYPES", "Dataset", "DatasetTaskType"]

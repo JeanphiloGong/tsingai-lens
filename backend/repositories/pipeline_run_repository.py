@@ -90,10 +90,6 @@ class TokenUsage:
     output_tokens: int
     total_tokens: int
 
-    def __post_init__(self) -> None:
-        if min(self.input_tokens, self.output_tokens, self.total_tokens) < 0:
-            raise ValueError("token usage cannot be negative")
-
 
     @classmethod
     def sum(cls, values: Iterable["TokenUsage | None"]) -> "TokenUsage | None":
@@ -146,10 +142,6 @@ class ExecutionStats:
     duration_ms: int | None = None
     model_usage: tuple[ModelUsage, ...] = ()
     prompt_versions: Mapping[str, str] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if self.duration_ms is not None and self.duration_ms < 0:
-            raise ValueError("duration_ms cannot be negative")
 
     @property
     def token_usage(self) -> TokenUsage | None:

@@ -37,9 +37,3 @@ class AnalysisResult:
     model: str
     input_digest: str
     created_at: str
-
-    def __post_init__(self) -> None:
-        if not 0 <= self.confidence <= 1:
-            raise ValueError("analysis confidence must be between zero and one")
-        if len(self.input_digest) != 64:
-            raise ValueError("analysis input digest must be sha256")

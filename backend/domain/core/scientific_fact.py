@@ -44,10 +44,6 @@ class ScientificAttribute:
     context_scope: str = "unknown"
     applies_to_outcomes: tuple[str, ...] = ()
 
-    def __post_init__(self) -> None:
-        if not self.name.strip() or self.value is None:
-            raise ValueError("scientific attribute requires name and value")
-
 
 @dataclass(frozen=True)
 class ScientificVariable:

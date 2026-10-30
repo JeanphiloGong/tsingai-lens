@@ -112,19 +112,6 @@ class SourceReference:
     source_ref: str
     quote: str
 
-    def __post_init__(self) -> None:
-        if not all(
-            value.strip()
-            for value in (
-                self.document_id,
-                self.source_fingerprint,
-                self.source_kind,
-                self.source_ref,
-                self.quote,
-            )
-        ):
-            raise ValueError("source reference requires document, fingerprint, ref, and quote")
-
 
 @dataclass(frozen=True)
 class ExperimentalVariant:

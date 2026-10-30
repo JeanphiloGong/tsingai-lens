@@ -31,10 +31,6 @@ class ChatToolRequest:
     decision_basis: str = "explicit"
     authorization_revision: int | None = None
 
-    def __post_init__(self) -> None:
-        if self.position < 0:
-            raise ValueError("tool request position must be a non-negative integer")
-
 @dataclass(frozen=True)
 class ChatMessage:
     message_id: str

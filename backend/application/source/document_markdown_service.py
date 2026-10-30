@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import quote
 
-from application.source.artifact_input_service import load_document_tree
 from application.source.collection_service import CollectionService
 from domain.source import (
     SourceDocument,
@@ -90,10 +89,9 @@ class DocumentMarkdownService:
         await self.collection_service.get_collection(collection_id)
         documents = await self._load_source_documents(collection_id)
         document = self._find_document(documents, collection_id, document_id)
-        document_tree = await load_document_tree(
+        document_tree = await self.source_artifact_repository.read_document_tree(
             collection_id,
             document_id,
-            self.source_artifact_repository,
         )
         display_names = await self._document_display_names(
             collection_id, document

@@ -3,14 +3,11 @@ from __future__ import annotations
 from domain.source import (
     SourceBlock,
     SourceDocument,
-    SourceReferenceEntry,
-    SourceReferenceSet,
     SourceTable,
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
     assemble_source_documents,
-    build_source_document_tree,
 )
 from application.source import artifact_input_service
 import pytest
@@ -27,34 +24,14 @@ class _SourceRepository:
     def __init__(
         self,
         documents: tuple[SourceDocument, ...],
-        references: SourceReferenceSet = SourceReferenceSet(),
     ) -> None:
         self.documents = documents
-        self.references = references
 
     async def read_collection_documents(
         self,
         collection_id: str,
     ) -> tuple[SourceDocument, ...]:
         return self.documents
-
-    async def read_document_tree(
-        self,
-        collection_id: str,
-        document_id: str,
-    ):
-        document = next(
-            item for item in self.documents if item.document_id == document_id
-        )
-        return build_source_document_tree(
-            collection_id=collection_id,
-            document=document,
-            blocks=document.blocks,
-            tables=document.tables,
-            figures=document.figures,
-            references=self.references,
-        )
-
 
 async def test_artifact_input_service_uses_explicit_source_repository():
     repository = _SourceRepository(
@@ -142,57 +119,3 @@ async def test_artifact_input_service_uses_explicit_source_repository():
     assert tables[0]["table_matrix"] == [["Sample", "Value"], ["A", "1"]]
     assert table_rows[0]["row_text"] == "A | 1"
     assert table_cells[0]["header_path"] == "Value"
-
-
-async def test_artifact_input_service_loads_document_tree():
-    source_repository = _SourceRepository(
-        assemble_source_documents(
-            documents=(
-                SourceDocument(
-                    document_id="doc-1",
-                    document_order=0,
-                    title="Paper",
-                    text="Methods\nEvidence text",
-                ),
-            ),
-            blocks=(
-                SourceBlock(
-                    block_id="blk-heading",
-                    document_id="doc-1",
-                    block_type="heading",
-                    text="Methods",
-                    block_order=1,
-                    heading_path="Methods",
-                    heading_level=1,
-                ),
-                SourceBlock(
-                    block_id="blk-body",
-                    document_id="doc-1",
-                    block_type="paragraph",
-                    text="Evidence text",
-                    block_order=2,
-                    heading_path="Methods",
-                ),
-            ),
-        ),
-        SourceReferenceSet(
-            entries=(
-                SourceReferenceEntry(
-                    reference_id="ref-1",
-                    document_id="doc-1",
-                    raw_reference="Smith A. Related paper. 2024.",
-                ),
-            )
-        ),
-    )
-    tree = await artifact_input_service.load_document_tree(
-        "col_source",
-        "doc-1",
-        source_repository,
-    )
-
-    assert tree.document_id == "doc-1"
-    assert tree.collection_id == "col_source"
-    assert tree.root_node_id == "node_doc-1_document"
-    assert tree.nodes["node_doc-1_block_blk-body"].text == "Evidence text"
-    assert tree.reference_records["ref-1"].raw_reference.startswith("Smith")

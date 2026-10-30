@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from domain.source import SourceDocument, SourceDocumentTree
+from domain.source import SourceDocument
 from infra.source.artifact_bundle import (
     source_block_payload,
     source_document_payload,
@@ -98,17 +98,6 @@ async def load_tables_artifact(
         source_table_payload(table)
         for document in source_documents
         for table in document.tables
-    )
-
-
-async def load_document_tree(
-    collection_id: str,
-    document_id: str,
-    source_artifact_repository: SourceArtifactRepository,
-) -> SourceDocumentTree:
-    return await source_artifact_repository.read_document_tree(
-        collection_id,
-        document_id,
     )
 
 

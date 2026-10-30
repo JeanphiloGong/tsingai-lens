@@ -204,10 +204,10 @@ async def build_application_runtime() -> ApplicationRuntime:
     collection_workspace = FileCollectionWorkspace(DATA_DIR / "collections")
     object_store = FileObjectStore(collection_workspace.root_dir)
     preparation = DocumentPreparationService(
-        workspace=collection_workspace, object_store=object_store,
+        workspace=collection_workspace,
+        object_store=object_store,
     )
     analysis = ObjectiveAnalysisService()
-    collection_service.configure_file_resources(collection_workspace.root_dir)
     try:
         await auth_session_service.ensure_bootstrap_user()
         chat_model = OpenAIChatModel()

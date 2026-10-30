@@ -1,4 +1,5 @@
 from __future__ import annotations
+from application.source import collection_service
 
 import json
 from types import SimpleNamespace
@@ -14,7 +15,6 @@ except ImportError:  # pragma: no cover
 from application.goal import brief_service as goal_service
 from controllers.goal import goal_routes as goals_controller
 from controllers.goal.goal_routes import GoalIntakeRequest
-from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio
 
@@ -24,20 +24,31 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _request(goal_service, user_id: str = "local-user"):
+def _request(
+    goal_service,
+    user_id: str='local-user',
+    *,
+    collection_workspace,
+):
     goals_controller.brief_service = goal_service
-    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(runtime=SimpleNamespace(collection_workspace=collection_workspace))),
+        state=SimpleNamespace(current_user={"user_id": user_id}),
+    )
 
 
 @pytest.fixture()
 def goal_services(tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / "collections")
     goal_service.collection_service = collection_service
 
     return collection_service, goal_service
 
 
-async def test_goals_route_returns_goal_contract(goal_services):
+async def test_goals_route_returns_goal_contract(
+    goal_services,
+    *,
+    collection_workspace,
+):
     collection_service, goal_service = goal_services
 
     response = goals_controller.GoalIntakeResponse.model_validate(
@@ -50,7 +61,8 @@ async def test_goals_route_returns_goal_contract(goal_services):
                         intent="compare",
                         constraints={"substrate": "Al"},
                     ),
-                    user_id=_request(goal_service).state.current_user["user_id"],
+                    user_id=_request(goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
+                    request=_request(goal_service, collection_workspace=collection_workspace),
                 )
             ).body
         )["data"]
@@ -68,7 +80,11 @@ async def test_goals_route_returns_goal_contract(goal_services):
     assert collection["documents"] == []
 
 
-async def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
+async def test_goals_route_returns_400_for_empty_goal_signal(
+    goal_services,
+    *,
+    collection_workspace,
+):
     _collection_service, goal_service = goal_services
 
     with pytest.raises(RequestInvalidException) as exc_info:
@@ -83,7 +99,8 @@ async def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
                             constraints={},
                             context=None,
                         ),
-                        user_id=_request(goal_service).state.current_user["user_id"],
+                        user_id=_request(goal_service, collection_workspace=collection_workspace).state.current_user["user_id"],
+                        request=_request(goal_service, collection_workspace=collection_workspace),
                     )
                 ).body
             )["data"]

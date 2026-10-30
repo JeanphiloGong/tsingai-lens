@@ -1,10 +1,9 @@
-
 from exceptions import ProjectException
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from controllers.exception_router import project_exception_handler, http_exception_handler, request_validation_handler, general_exception_handler
 from infra.persistence import database
-from infra.persistence.file.object_store import FileObjectStore
+
 
 """Moved execution records preserve publication and failure history in PostgreSQL."""
 
@@ -144,7 +143,7 @@ async def test_finding_http_revision_and_abstention_are_persisted(
     from domain.core import PaperContribution
     from fastapi import FastAPI
     from httpx import ASGITransport, AsyncClient
-    from infra.persistence.file.collection_workspace import FileCollectionWorkspace
+
     from repositories.collection_repository import (
         CollectionRepository,
     )
@@ -256,9 +255,6 @@ async def test_finding_http_revision_and_abstention_are_persisted(
     finding_authoring_service.experiment_query_service = query
     finding_authoring_service.experiment_analysis_writer = writer
     collection_service.CollectionRepo = CollectionRepository()
-    collection_service.workspace = FileCollectionWorkspace(tmp_path)
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     app.dependency_overrides[get_current_user_id] = lambda: "user_source"
 
     path = f"/api/v1/collections/{COLLECTION_ID}/objectives/{objective.objective_id}/findings"

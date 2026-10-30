@@ -4,8 +4,8 @@ import pytest
 from application.source import collection_service
 from domain.chat.permissions import AUTO_ACTIONS
 from exceptions import ResourceConflictException, ResourceNotFoundException
-from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.file.object_store import FileObjectStore
+
+
 from repositories.collection_repository import CollectionRepository
 
 pytestmark = pytest.mark.anyio
@@ -24,15 +24,16 @@ def anyio_backend() -> str:
 
 
 async def test_collection_default_permission_round_trips_and_expands_all_actions(
-    tmp_path, *, postgres_session_factory
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ) -> None:
     collection_service.CollectionRepo = CollectionRepository()
-    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     service = collection_service
     collection = await service.create_collection(
-        "Agent settings", owner_user_id="owner"
+        "Agent settings", owner_user_id="owner",
+        workspace=collection_workspace,
     )
     expiry = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
 
@@ -56,15 +57,16 @@ async def test_collection_default_permission_round_trips_and_expands_all_actions
 
 
 async def test_collection_default_permission_can_be_persistent(
-    tmp_path, *, postgres_session_factory
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ) -> None:
     collection_service.CollectionRepo = CollectionRepository()
-    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     service = collection_service
     collection = await service.create_collection(
-        "Persistent Agent settings", owner_user_id="owner"
+        "Persistent Agent settings", owner_user_id="owner",
+        workspace=collection_workspace,
     )
 
     saved = await service.set_agent_default_permission_for_user(
@@ -86,15 +88,16 @@ async def test_collection_default_permission_can_be_persistent(
 
 
 async def test_collection_default_permission_hides_collection_from_other_users(
-    tmp_path, *, postgres_session_factory
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ) -> None:
     collection_service.CollectionRepo = CollectionRepository()
-    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     service = collection_service
     collection = await service.create_collection(
-        "Private settings", owner_user_id="owner"
+        "Private settings", owner_user_id="owner",
+        workspace=collection_workspace,
     )
 
     with pytest.raises(ResourceNotFoundException):
@@ -104,15 +107,16 @@ async def test_collection_default_permission_hides_collection_from_other_users(
 
 
 async def test_collection_default_permission_rejects_stale_revision(
-    tmp_path, *, postgres_session_factory
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ) -> None:
     collection_service.CollectionRepo = CollectionRepository()
-    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     service = collection_service
     collection = await service.create_collection(
-        "Concurrent settings", owner_user_id="owner"
+        "Concurrent settings", owner_user_id="owner",
+        workspace=collection_workspace,
     )
     expiry = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 

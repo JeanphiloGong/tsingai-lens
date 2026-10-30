@@ -24,7 +24,10 @@ pytest_plugins = ("tests.integration.test_app_layer_api",)
 
 
 def test_upload_classification_retry_content_and_research_readiness(
-    app_client, monkeypatch
+    app_client,
+    monkeypatch,
+    *,
+    collection_workspace,
 ):
     """Use the real text parser and HTTP routes, failing only the model boundary."""
     parse_calls = []
@@ -83,7 +86,7 @@ def test_upload_classification_retry_content_and_research_readiness(
     assert content.status_code == 200
     assert "2.0%" in content.json()["data"]["content_text"]
     source_output_dir = (
-        collection_service.workspace.get_paths(collection_id).output_dir
+        collection_workspace.get_paths(collection_id).output_dir
         / "documents"
         / document_id
     )

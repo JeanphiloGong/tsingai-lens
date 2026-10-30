@@ -1,4 +1,5 @@
 from __future__ import annotations
+from application.source import collection_service
 
 import asyncio
 from types import SimpleNamespace
@@ -17,7 +18,6 @@ from repositories.collection_repository import StoredDocument
 from repositories.document_profile_repository import DocumentProfileRepository
 from repositories.pipeline_run_repository import PipelineRunRepository
 from repositories.source_artifact_repository import SourceArtifactRepository
-from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio
 
@@ -28,9 +28,15 @@ def anyio_backend():
 
 
 @pytest.fixture
-async def preparation(document_preparation_runtime, tmp_path, *, postgres_session_factory):
-    collections = build_test_collection_service(tmp_path / "collections")
-    collection = await collections.create_collection("LPBF porosity research")
+async def preparation(
+    document_preparation_runtime,
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+):
+    collections = collection_service
+    collection = await collections.create_collection("LPBF porosity research", workspace=collection_workspace)
     collection_id = collection["collection_id"]
     document = StoredDocument(
         document=Document(
@@ -149,12 +155,17 @@ async def test_dispatch_failure_does_not_leave_queued_work(preparation, monkeypa
     assert not ctx.service._active_workers
 
 
-async def test_preparation_shutdown_only_cancels_its_own_tasks(preparation, monkeypatch):
+async def test_preparation_shutdown_only_cancels_its_own_tasks(
+    preparation,
+    monkeypatch,
+    *,
+    collection_workspace,
+):
     from dataclasses import replace
     from application.source.document_preparation_service import DocumentPreparationService
 
     ctx = preparation
-    collection = await ctx.collections.create_collection("Second preparation owner")
+    collection = await ctx.collections.create_collection("Second preparation owner", workspace=collection_workspace)
     second_collection_id = collection["collection_id"]
     second_document = replace(
         ctx.document,
@@ -166,7 +177,8 @@ async def test_preparation_shutdown_only_cancels_its_own_tasks(preparation, monk
         second_collection_id, (second_document,), updated_at=second_document.created_at,
     )
     second = DocumentPreparationService(
-        workspace=ctx.service.workspace, object_store=ctx.service.object_store,
+        workspace=ctx.service.workspace,
+        object_store=ctx.service.object_store,
         max_concurrency=1,
     )
     first_started, second_started, release = asyncio.Event(), asyncio.Event(), asyncio.Event()

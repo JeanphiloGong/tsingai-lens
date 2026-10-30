@@ -9,8 +9,8 @@ from application.source import collection_service, document_preparation_service
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
 from domain.core import DocumentProfile, PaperResearchMap
 from infra.persistence import database
-from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.file.object_store import FileObjectStore
+
+
 from infra.persistence.postgres.models.document_preparation import (
     DocumentPreparationRow,
 )
@@ -160,9 +160,6 @@ async def test_postgres_restart_recovery_is_retryable_and_api_readable(
     source_repository, tmp_path, *, postgres_session_factory
 ) -> None:
     collection_service.CollectionRepo = CollectionRepository()
-    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     await collection_service.update_document_preparation(
         COLLECTION_ID,
         "doc_a",

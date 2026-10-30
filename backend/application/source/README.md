@@ -62,6 +62,12 @@ use that instance; shutdown cancels and awaits its tasks. Business operations
 and repository instances are imported directly rather than injected as services.
 The Profile build function receives the actual extractor explicitly.
 
+The app runtime creates one actual workspace and object store. Collection creation
+and deletion receive that workspace explicitly. Uploads, original-file downloads,
+archives, and Figure/Markdown reads receive the actual object store. Database-only
+reads use the concrete repositories directly. The collection module holds no file
+resources and has no runtime configuration hook.
+
 A technical Profile classification failure keeps the parsed Source readable,
 leaves the Document `stored`, and finishes its run as `partial_success` with a
 failed classification node and a retryable warning. Only a completed Profile

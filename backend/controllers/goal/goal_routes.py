@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 
 from application.goal import brief_service
 from controllers.dependencies.auth import get_current_user_id
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from utils.response import ApiResponse, make_api_response
@@ -130,6 +130,8 @@ goal_router = APIRouter(prefix="/goals", tags=["goals"])
 async def intake_goal(
     payload: GoalIntakeRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
+    *,
+    request: Request,
 ) -> Response:
     response = await brief_service.intake_goal(
         material_system=payload.material_system,
@@ -139,5 +141,6 @@ async def intake_goal(
         context=payload.context,
         max_seed_documents=payload.max_seed_documents,
         owner_user_id=user_id,
+        workspace=request.app.state.runtime.collection_workspace,
     )
     return make_api_response(data=GoalIntakeResponse(**response))

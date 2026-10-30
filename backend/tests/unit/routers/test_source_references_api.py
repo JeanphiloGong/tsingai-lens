@@ -1,4 +1,5 @@
 from __future__ import annotations
+from application.source import collection_service
 
 import json
 from types import SimpleNamespace
@@ -20,7 +21,6 @@ from controllers.source import reference_routes as references_controller
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from repositories.source_artifact_repository import SourceArtifactRepository
-from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio
 
@@ -42,7 +42,6 @@ async def _store_source_documents(repository, collection_id, documents) -> None:
 
 @pytest.fixture()
 def source_reference_services(monkeypatch, tmp_path, *, postgres_session_factory):
-    collection_service = build_test_collection_service(tmp_path / "collections")
     repository = SourceArtifactRepository()
     reference_workflow_service.SourceArtifactRepo = repository
     workflow_service = reference_workflow_service
@@ -54,9 +53,13 @@ def source_reference_services(monkeypatch, tmp_path, *, postgres_session_factory
     return collection_service, repository, request
 
 
-async def test_source_reference_routes_build_and_read_refs(source_reference_services):
+async def test_source_reference_routes_build_and_read_refs(
+    source_reference_services,
+    *,
+    collection_workspace,
+):
     collection_service, repository, request = source_reference_services
-    collection = await collection_service.create_collection("Refs Collection")
+    collection = await collection_service.create_collection("Refs Collection", workspace=collection_workspace)
     collection_id = collection["collection_id"]
     artifacts = assemble_source_documents(
         documents=(
@@ -132,9 +135,11 @@ async def test_source_reference_routes_build_and_read_refs(source_reference_serv
 
 async def test_source_reference_build_route_returns_409_when_source_is_not_ready(
     source_reference_services,
+    *,
+    collection_workspace,
 ):
     collection_service, _repository, request = source_reference_services
-    collection = await collection_service.create_collection("Pending Refs Collection")
+    collection = await collection_service.create_collection("Pending Refs Collection", workspace=collection_workspace)
 
     with pytest.raises(ResourceConflictException) as exc_info:
         references_controller.SourceReferenceSummaryResponse.model_validate(

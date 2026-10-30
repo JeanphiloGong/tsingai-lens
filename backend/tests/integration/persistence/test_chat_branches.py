@@ -47,8 +47,8 @@ from exceptions import ProjectException
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from httpx import ASGITransport, AsyncClient
-from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-from infra.persistence.file.object_store import FileObjectStore
+
+
 from repositories.auth_repository import AuthRepository
 from repositories.chat_repository import ChatRepository
 from repositories.collection_repository import (
@@ -271,9 +271,6 @@ async def branch_app(postgres_session_factory, tmp_path):
     chat_session_service.SourceArtifactRepo = sources
     chat_session_service.ChatRepo = repository
     collection_service.CollectionRepo = collections
-    collection_service.workspace = FileCollectionWorkspace(tmp_path)
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     service = chat_session_service.ChatSessionService(runner=runner)
     app = FastAPI()
     app.state.runtime = SimpleNamespace(chat_session_service=service)

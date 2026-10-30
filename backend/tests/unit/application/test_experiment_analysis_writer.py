@@ -705,7 +705,11 @@ async def test_abstention_revision_writes_no_placeholder_finding():
 
 
 async def test_researcher_revises_limits_then_abstains_without_changing_source(
-    monkeypatch, collection_service, *, postgres_session_factory
+    monkeypatch,
+    collection_service,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ):
     from tests.support.postgres import seed_collection, seed_user
 
@@ -713,6 +717,7 @@ async def test_researcher_revises_limits_then_abstains_without_changing_source(
     collection = await collection_service.create_collection(
         "316L preheat and elongation",
         owner_user_id="researcher-1",
+        workspace=collection_workspace,
     )
     collection_id = collection["collection_id"]
     await seed_collection(

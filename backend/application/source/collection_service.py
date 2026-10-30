@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -11,7 +10,6 @@ from domain.chat.permissions import change_permission
 from domain.source import Collection
 from exceptions import ResourceConflictException, ResourceNotFoundException
 from infra.persistence.file import FileCollectionWorkspace
-from infra.persistence.file.object_store import FileObjectStore
 from repositories.collection_repository import (
     PermissionRevisionConflict,
     StoredCollection,
@@ -46,19 +44,6 @@ def collection_details(record: StoredCollection) -> dict[str, Any]:
 
 from repositories.collection_repository import CollectionRepo
 
-workspace: FileCollectionWorkspace | None = None
-root_dir: Path | None = None
-object_store: FileObjectStore | None = None
-
-
-def configure_file_resources(root: Path) -> None:
-    """Attach the process-owned collection workspace after application startup."""
-
-    global workspace, root_dir, object_store
-    workspace = FileCollectionWorkspace(root)
-    root_dir = workspace.root_dir
-    object_store = FileObjectStore(root_dir)
-
 
 def write_figure_asset(
     collection_id: str,
@@ -84,6 +69,8 @@ def read_figure_asset(
     collection_id: str,
     storage_key: str,
     expected_sha256: str,
+    *,
+    object_store: ObjectStore,
 ) -> bytes:
     key = PurePosixPath(str(storage_key))
     if (
@@ -113,8 +100,10 @@ def read_figure_asset(
 
 async def create_collection(
     name: str,
-    description: str | None = None,
-    owner_user_id: str = "local-user",
+    description: str | None=None,
+    owner_user_id: str='local-user',
+    *,
+    workspace: FileCollectionWorkspace,
 ) -> dict:
     collection_id = f"col_{uuid4().hex[:12]}"
     now = _now_iso()
@@ -337,7 +326,11 @@ async def update_collection(collection_id: str, **fields) -> dict:
     return await get_collection(collection_id)
 
 
-async def delete_collection(collection_id: str) -> dict:
+async def delete_collection(
+    collection_id: str,
+    *,
+    workspace: FileCollectionWorkspace,
+) -> dict:
     paths = workspace.get_paths(collection_id)
     target_dir = paths.collection_dir
     collection = await CollectionRepo.read_collection(collection_id)
@@ -347,7 +340,7 @@ async def delete_collection(collection_id: str) -> dict:
             data={"code": "collection_not_found", "collection_id": collection_id},
         )
 
-    resolved_root = root_dir.resolve()
+    resolved_root = workspace.root_dir.resolve()
     resolved_target = target_dir.resolve()
     try:
         resolved_target.relative_to(resolved_root)
@@ -377,9 +370,14 @@ async def delete_collection(collection_id: str) -> dict:
     }
 
 
-async def delete_collection_for_user(collection_id: str, owner_user_id: str) -> dict:
+async def delete_collection_for_user(
+    collection_id: str,
+    owner_user_id: str,
+    *,
+    workspace: FileCollectionWorkspace,
+) -> dict:
     await get_collection_for_user(collection_id, owner_user_id)
-    return await delete_collection(collection_id)
+    return await delete_collection(collection_id, workspace=workspace)
 
 
 def _input_storage_key(collection_id: str, stored_filename: str) -> str:

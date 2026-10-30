@@ -20,10 +20,11 @@ class _ImmediateDocumentPreparationService:
     """Complete the HTTP boundary test without invoking parser or LLM providers."""
 
     def __init__(
-        self, collection_service, pipeline_run_service
+        self, collection_service, pipeline_run_service, object_store
     ) -> None:  # noqa: ANN001
         self.collection_service = collection_service
         self.pipeline_run_service = pipeline_run_service
+        self.object_store = object_store
 
     async def queue_document_preparation(
         self,
@@ -54,7 +55,7 @@ class _ImmediateDocumentPreparationService:
                 document_id=document_id,
                 document_order=0,
                 title=document.document.original_filename,
-                text=self.collection_service.object_store.read(
+                text=self.object_store.read(
                     document.storage_key,
                     document.document.sha256,
                 ).decode("utf-8"),
@@ -123,6 +124,7 @@ def app_client(
             "queue_document_preparation",
             _ImmediateDocumentPreparationService(
                 collection_service, pipeline_run_service,
+                client.app.state.runtime.object_store,
             ).queue_document_preparation,
         )
         login = client.post(

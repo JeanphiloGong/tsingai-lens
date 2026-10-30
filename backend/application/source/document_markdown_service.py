@@ -19,6 +19,7 @@ from infra.source.mapping.text_quality import (
     is_garbled_pdf_text,
     normalize_display_text,
 )
+from repositories.object_store import ObjectStore
 
 
 class DocumentMarkdownNotReadyError(ResourceConflictException):
@@ -103,6 +104,7 @@ async def get_document_markdown(
     document_id: str,
     *,
     user_id: str,
+    object_store: ObjectStore,
 ) -> dict[str, Any]:
     collection = await collection_service.get_collection_for_user(
         collection_id, user_id
@@ -122,6 +124,7 @@ async def get_document_markdown(
         tables_by_id={table.table_id: table for table in document.tables},
         figures_by_id={figure.figure_id: figure for figure in document.figures},
         display_title=display_names["title"],
+        object_store=object_store,
     )
 
     if not markdown.strip():
@@ -145,6 +148,7 @@ async def resolve_figure_image_file(
     figure_id: str,
     *,
     user_id: str,
+    object_store: ObjectStore,
 ) -> dict[str, Any]:
     await collection_service.get_collection_for_user(collection_id, user_id)
     document_key = str(document_id or "").strip()
@@ -169,13 +173,15 @@ async def resolve_figure_image_file(
     )
     if figure is None:
         raise SourceFigureImageNotFoundError(collection_id, document_key, figure_key)
-    return _figure_image_payload(collection_id, document_key, figure)
+    return _figure_image_payload(collection_id, document_key, figure, object_store=object_store)
 
 
 def _figure_image_payload(
     collection_id: str,
     document_key: str,
     figure: SourceFigure,
+    *,
+    object_store: ObjectStore,
 ) -> dict[str, Any]:
     figure_key = figure.figure_id
     image_path = normalize_display_text(figure.image_path)
@@ -187,6 +193,7 @@ def _figure_image_payload(
             collection_id,
             image_path,
             normalize_display_text(figure.asset_sha256),
+            object_store=object_store,
         )
     except ValueError as exc:
         raise SourceFigureImageUnavailableError(
@@ -241,6 +248,7 @@ async def _project_markdown_from_tree(
     tables_by_id: Mapping[str, SourceTable],
     figures_by_id: Mapping[str, SourceFigure],
     display_title: str | None,
+    object_store: ObjectStore,
 ) -> tuple[str, list[dict[str, Any]], list[str]]:
     parts: list[str] = []
     source_map: list[dict[str, Any]] = []
@@ -273,6 +281,7 @@ async def _project_markdown_from_tree(
                 collection_id=collection_id,
                 document_id=document.document_id,
                 has_document_title=bool(title),
+                object_store=object_store,
             )
             or content_rendered
         )
@@ -296,6 +305,7 @@ async def _append_tree_node_markdown(
     collection_id: str,
     document_id: str,
     has_document_title: bool,
+    object_store: ObjectStore,
 ) -> bool:
     node_type = str(node.node_type or "").strip()
     if node_type in {"section", "references_section"}:
@@ -317,6 +327,7 @@ async def _append_tree_node_markdown(
                     collection_id=collection_id,
                     document_id=document_id,
                     has_document_title=has_document_title,
+                    object_store=object_store,
                 )
                 or rendered_child
             )
@@ -356,6 +367,7 @@ async def _append_tree_node_markdown(
             figure,
             collection_id=collection_id,
             document_id=document_id,
+            object_store=object_store,
         )
         if not figure_markdown:
             return False
@@ -431,6 +443,7 @@ async def _render_figure(
     *,
     collection_id: str,
     document_id: str,
+    object_store: ObjectStore,
 ) -> str | None:
     caption = normalize_display_text(figure.caption_text)
     label = normalize_display_text(figure.figure_label)
@@ -439,6 +452,7 @@ async def _render_figure(
         collection_id=collection_id,
         document_id=document_id,
         figure=figure,
+        object_store=object_store,
     ):
         alt_text = label or caption or "Figure"
         image_markdown = (
@@ -462,9 +476,10 @@ def _figure_image_available(
     collection_id: str,
     document_id: str,
     figure: SourceFigure,
+    object_store: ObjectStore,
 ) -> bool:
     try:
-        _figure_image_payload(collection_id, document_id, figure)
+        _figure_image_payload(collection_id, document_id, figure, object_store=object_store)
     except SourceFigureImageUnavailableError:
         return False
     return True

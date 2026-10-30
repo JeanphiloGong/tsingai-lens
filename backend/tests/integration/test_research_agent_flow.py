@@ -75,7 +75,12 @@ class _CandidateCapability:
 
 
 async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
-    auth_session_service, collection_service, monkeypatch, *, postgres_session_factory
+    auth_session_service,
+    collection_service,
+    monkeypatch,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ) -> None:
     user = await auth_session_service.create_user(
         email="agent-flow@example.com",
@@ -89,6 +94,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         "Ti-6Al-4V energy input",
         "Literature for a traceable energy-input comparison.",
         owner_user_id=user["user_id"],
+        workspace=collection_workspace,
     )
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
@@ -127,7 +133,7 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
 
     with TestClient(app) as client:
         monkeypatch.setattr(
-            chat_session_service,
+            client.app.state.runtime.chat_session_service,
             "runner",
             ResearchAgentRunner(
                 model=model,

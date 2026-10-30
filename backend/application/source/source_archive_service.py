@@ -14,6 +14,7 @@ from exceptions import (
     ResourceConflictException,
     ResourceNotFoundException,
 )
+from repositories.object_store import ObjectStore
 
 _SOURCE_ARCHIVE_MAX_MIB = 256
 _SOURCE_ARCHIVE_MAX_BYTES = _SOURCE_ARCHIVE_MAX_MIB * 1024 * 1024
@@ -73,6 +74,7 @@ async def build_source_archive(
     document_ids: list[str],
     *,
     user_id: str,
+    object_store: ObjectStore,
 ) -> dict[str, Any]:
     """Build a bounded ZIP of original uploads for failure reproduction."""
 
@@ -122,6 +124,7 @@ async def build_source_archive(
         _write_source_archive,
         collection_id,
         selected_records,
+        object_store=object_store,
     )
 
 
@@ -131,6 +134,7 @@ async def resolve_document_source_file(
     *,
     user_id: str,
     source_filename: str | None = None,
+    object_store: ObjectStore,
 ) -> dict[str, Any]:
     collection = await collection_service.get_collection_for_user(
         collection_id, user_id
@@ -150,6 +154,7 @@ async def resolve_document_source_file(
             collection_id=collection_id,
             document_id=document_key,
             record=document_matches[0],
+            object_store=object_store,
         )
     if len(document_matches) > 1:
         raise DocumentSourceUnavailableError(
@@ -171,6 +176,8 @@ async def resolve_document_source_file(
 def _write_source_archive(
     collection_id: str,
     selected_records: list[tuple[str, dict[str, Any]]],
+    *,
+    object_store: ObjectStore,
 ) -> dict[str, Any]:
     """Verify source bytes and write the archive outside the event loop."""
 
@@ -192,6 +199,7 @@ def _write_source_archive(
                         collection_id=collection_id,
                         document_id=document_id,
                         record=record,
+                        object_store=object_store,
                     )
                 except DocumentSourceUnavailableError as exc:
                     raise CollectionSourceArchiveError(
@@ -278,6 +286,7 @@ def _build_source_file_payload(
     collection_id: str,
     document_id: str,
     record: dict[str, Any],
+    object_store: ObjectStore,
 ) -> dict[str, Any]:
     storage_key = record.get("storage_key")
     expected_sha256 = record.get("sha256")
@@ -294,7 +303,7 @@ def _build_source_file_payload(
             message="The stored source file path is not safe to serve.",
         )
     try:
-        content = collection_service.object_store.read(storage_key, expected_sha256)
+        content = object_store.read(storage_key, expected_sha256)
     except FileNotFoundError as exc:
         raise DocumentSourceUnavailableError(collection_id, document_id) from exc
     except ValueError as exc:

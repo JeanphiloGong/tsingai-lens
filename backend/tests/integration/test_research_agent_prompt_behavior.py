@@ -58,7 +58,12 @@ class _EmptyObjectiveRepository:
         return ()
 
 
-async def _fixture_collection(collection_service, *, postgres_session_factory):
+async def _fixture_collection(
+    collection_service,
+    *,
+    postgres_session_factory,
+    collection_workspace,
+):
     from tests.support.postgres import seed_user
 
     user_id = "live-prompt-test-user"
@@ -67,6 +72,7 @@ async def _fixture_collection(collection_service, *, postgres_session_factory):
         "P002 prompt behavior fixture",
         "Isolated PostgreSQL collection for the opt-in prompt check.",
         owner_user_id=user_id,
+        workspace=collection_workspace,
     )
     record = json.loads(_FIXTURE.read_text(encoding="utf-8"))
     document_id = record["document_id"]
@@ -159,7 +165,10 @@ def _runner(
 
 
 async def test_live_agent_reads_source_when_profile_and_map_are_missing(
-    collection_service, *, postgres_session_factory
+    collection_service,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ):
     """A readable paper remains inspectable without optional navigation metadata."""
 
@@ -167,7 +176,8 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
     user_id, collection_id, document_id, sources = await _fixture_collection(
-        collection_service, postgres_session_factory=postgres_session_factory
+        collection_service, postgres_session_factory=postgres_session_factory,
+        collection_workspace=collection_workspace,
     )
     client = AsyncOpenAI(
         api_key=os.environ["LLM_API_KEY"],
@@ -245,7 +255,11 @@ async def test_live_agent_reads_source_when_profile_and_map_are_missing(
 
 @pytest.mark.parametrize("knowledge_scope", ["ordinary", "no_web", "supplied_only"])
 async def test_live_agent_respects_the_requested_knowledge_scope(
-    collection_service, knowledge_scope, *, postgres_session_factory
+    collection_service,
+    knowledge_scope,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ):
     """A trend supports arithmetic; explaining its mechanism needs allowed premises."""
 
@@ -253,7 +267,8 @@ async def test_live_agent_respects_the_requested_knowledge_scope(
     if any(not os.environ.get(name) for name in required):
         pytest.skip("explicit LLM_API_KEY, LLM_BASE_URL and LLM_MODEL are required")
     user_id, collection_id, _document_id, sources = await _fixture_collection(
-        collection_service, postgres_session_factory=postgres_session_factory
+        collection_service, postgres_session_factory=postgres_session_factory,
+        collection_workspace=collection_workspace,
     )
     scope_instruction = {
         "ordinary": "",

@@ -1,9 +1,9 @@
 from __future__ import annotations
+from application.source import collection_service
 
 import pytest
 from application.goal import brief_service as goal_service
 from exceptions import RequestInvalidException
-from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio
 
@@ -14,9 +14,11 @@ def anyio_backend() -> str:
 
 
 async def test_goal_service_creates_seed_collection_and_contract(
-    tmp_path, *, postgres_session_factory
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ):
-    collection_service = build_test_collection_service(tmp_path / "collections")
     goal_service.collection_service = collection_service
     service = goal_service
 
@@ -27,6 +29,7 @@ async def test_goal_service_creates_seed_collection_and_contract(
         constraints={"temperature": "298 K"},
         context="Focus on battery cathode studies.",
         max_seed_documents=24,
+        workspace=collection_workspace,
     )
 
     collection_id = payload["seed_collection"]["collection_id"]
@@ -53,9 +56,11 @@ async def test_goal_service_creates_seed_collection_and_contract(
 
 
 async def test_goal_service_rejects_empty_goal_signal(
-    tmp_path, *, postgres_session_factory
+    tmp_path,
+    *,
+    postgres_session_factory,
+    collection_workspace,
 ):
-    collection_service = build_test_collection_service(tmp_path / "collections")
     goal_service.collection_service = collection_service
     service = goal_service
 
@@ -67,6 +72,7 @@ async def test_goal_service_rejects_empty_goal_signal(
             constraints={},
             context=None,
             max_seed_documents=30,
+            workspace=collection_workspace,
         )
 
     assert "Provide at least one" in str(exc_info.value)

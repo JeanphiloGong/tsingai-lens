@@ -164,28 +164,32 @@ def auth_session_service(postgres_session_factory):
 
 
 @pytest.fixture
-def document_preparation_runtime(tmp_path):
-    from application.source.document_preparation_service import DocumentPreparationService
+def collection_workspace(tmp_path):
     from infra.persistence.file import FileCollectionWorkspace
 
-    workspace = FileCollectionWorkspace(tmp_path / "collections")
+    return FileCollectionWorkspace(tmp_path / "collections")
+
+
+@pytest.fixture
+def object_store(collection_workspace):
+    return FileObjectStore(collection_workspace.root_dir)
+
+
+@pytest.fixture
+def document_preparation_runtime(collection_workspace, object_store):
+    from application.source.document_preparation_service import DocumentPreparationService
     return DocumentPreparationService(
-        workspace=workspace,
-        object_store=FileObjectStore(workspace.root_dir),
-        max_concurrency=1,
+        workspace=collection_workspace,
+        object_store=object_store, max_concurrency=1,
     )
 
 
 @pytest.fixture
-def collection_service(tmp_path, postgres_session_factory):
+def collection_service(postgres_session_factory):
     from application.source import collection_service
-    from infra.persistence.file import FileCollectionWorkspace
     from repositories.collection_repository import CollectionRepository
 
     collection_service.CollectionRepo = CollectionRepository()
-    collection_service.workspace = FileCollectionWorkspace(tmp_path / "collections")
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
     return collection_service
 
 
@@ -391,7 +395,7 @@ def _isolate_application_module_dependencies(monkeypatch):
         (_test_pipeline_run_service, ["PipelineRunRepo", "CollectionRepo"]),
         (
             _test_collection_service,
-            ["CollectionRepo", "object_store", "root_dir", "workspace"],
+            ["CollectionRepo"],
         ),
         (_test_document_markdown_service, ["SourceArtifactRepo", "collection_service"]),
         (

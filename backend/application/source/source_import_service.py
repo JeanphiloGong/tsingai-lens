@@ -16,6 +16,7 @@ from repositories.collection_repository import (
     DocumentContentAlreadyExists,
     StoredDocument,
 )
+from repositories.object_store import ObjectStore
 
 
 def _now_iso() -> str:
@@ -34,6 +35,7 @@ async def add_document(
     *,
     user_id: str,
     reuse_existing: bool = False,
+    object_store: ObjectStore,
 ) -> dict:
     await collection_service.get_collection_for_user(collection_id, user_id)
 
@@ -64,7 +66,7 @@ async def add_document(
         created_at=_now_iso(),
         updated_at=_now_iso(),
     )
-    collection_service.object_store.write(storage_key, content, digest)
+    object_store.write(storage_key, content, digest)
     try:
         await CollectionRepo.add_documents(
             collection_id,
@@ -79,7 +81,7 @@ async def add_document(
         documents = current.documents if current is not None else ()
         # Registration may have committed before the caller received an error.
         if not any(existing.storage_key == storage_key for existing in documents):
-            collection_service.object_store.delete(storage_key)
+            object_store.delete(storage_key)
         if reuse_existing and isinstance(exc, DocumentContentAlreadyExists):
             for existing in documents:
                 if existing.document.sha256 == digest:

@@ -7,7 +7,7 @@ from urllib.parse import quote
 from application.core.document_profiles import service as document_profile_service
 from application.source import document_markdown_service, source_archive_service
 from controllers.dependencies.auth import get_current_user_id
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from utils.response import ApiResponse, make_api_response
@@ -181,9 +181,12 @@ async def get_collection_document_markdown(
     collection_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
+    *,
+    request: Request,
 ) -> Response:
     payload = await document_markdown_service.get_document_markdown(
-        collection_id, document_id, user_id=user_id
+        collection_id, document_id, user_id=user_id,
+        object_store=request.app.state.runtime.object_store,
     )
     return make_api_response(data=DocumentMarkdownResponse(**payload))
 
@@ -208,9 +211,12 @@ async def get_collection_document_source(
     collection_id: str,
     document_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
+    *,
+    request: Request,
 ) -> Response:
     payload = await source_archive_service.resolve_document_source_file(
-        collection_id, document_id, source_filename=None, user_id=user_id
+        collection_id, document_id, source_filename=None, user_id=user_id,
+        object_store=request.app.state.runtime.object_store,
     )
 
     filename = str(payload["filename"])
@@ -248,9 +254,12 @@ async def get_collection_document_figure_image(
     document_id: str,
     figure_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
+    *,
+    request: Request,
 ) -> Response:
     payload = await document_markdown_service.resolve_figure_image_file(
-        collection_id, document_id, figure_id, user_id=user_id
+        collection_id, document_id, figure_id, user_id=user_id,
+        object_store=request.app.state.runtime.object_store,
     )
 
     filename = str(payload["filename"])

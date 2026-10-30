@@ -38,8 +38,8 @@ from domain.feedback.correction_signal import CorrectionSignalAnalysisResult
 from domain.feedback.evidence_coverage import EvidenceCoverage
 from domain.feedback.tool_failure import tool_failure_signal_id, tool_result_digest
 from domain.source import Collection
-from infra.persistence.file.collection_workspace import FileCollectionWorkspace
-from infra.persistence.file.object_store import FileObjectStore
+
+
 from repositories.analysis_job_repository import (
     TOOL_FAILURE_JOB_TYPE,
     AnalysisJobRepository,
@@ -100,9 +100,6 @@ async def feedback_chain(postgres_session_factory, tmp_path):
         )
     )
     collection_service.CollectionRepo = collections
-    collection_service.workspace = FileCollectionWorkspace(tmp_path)
-    collection_service.root_dir = collection_service.workspace.root_dir
-    collection_service.object_store = FileObjectStore(collection_service.root_dir)
 
     chat = ChatRepository()
     session = ChatSession.create(

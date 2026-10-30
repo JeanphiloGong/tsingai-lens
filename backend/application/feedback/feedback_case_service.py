@@ -12,6 +12,8 @@ from application.source import collection_service
 from domain.chat import ChatMessageRole
 from domain.feedback import (
     AnalysisResult,
+    CorrectionSignalAnalysisResult,
+    ToolFailureAnalysisResult,
     FeedbackAnnotation,
     FeedbackCase,
     ReviewDecision,
@@ -455,7 +457,7 @@ def _detail(
             "result_id": latest.result_id,
             "coverage_status": latest.evidence_coverage.coverage_status,
         }
-        if hasattr(latest, "signal_type"):
+        if isinstance(latest, (CorrectionSignalAnalysisResult, ToolFailureAnalysisResult)):
             analysis.update(
                 {
                     "signal_type": latest.signal_type,
@@ -463,9 +465,9 @@ def _detail(
                     "resolution": "unresolved_candidate",
                 }
             )
-            if hasattr(latest, "trigger_message_id"):
+            if isinstance(latest, CorrectionSignalAnalysisResult):
                 analysis["trigger_message_id"] = latest.trigger_message_id
-            if hasattr(latest, "tool_call_id"):
+            if isinstance(latest, ToolFailureAnalysisResult):
                 analysis.update(
                     {
                         "tool_call_id": latest.tool_call_id,

@@ -81,7 +81,7 @@ class CurateFindingToolRequest(BaseModel):
         )
     )
     note: str | None = Field(default=None, max_length=2_000)
-    _parsed_finding: Finding | None = PrivateAttr(default=None)
+    _parsed_finding: Finding = PrivateAttr()
 
     @model_validator(mode="after")
     def _validate_complete_finding(self) -> "CurateFindingToolRequest":
@@ -193,8 +193,6 @@ class CurateFindingCapability:
             context.user_id,
         )
         candidate = arguments._parsed_finding
-        if candidate is None:  # pragma: no cover - Pydantic runs the validator.
-            raise ValueError("curated Finding was not validated")
         if candidate.collection_id != context.collection_id:
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,

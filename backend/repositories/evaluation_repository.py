@@ -105,7 +105,9 @@ class EvaluationRepository:
                     evidence_refs=tuple(dict(ref) for ref in item.get("evidence_refs", ())),
                     metadata=dict(item.get("metadata") or {}),
                 )
-                for item in _sorted_records(row.items)
+                for item in sorted(row.items, key=lambda item: (
+                    item["document_id"], item["family"], item["item_key"], item["gold_item_id"],
+                ))
             )
 
     async def upsert_prediction_snapshot(
@@ -174,7 +176,9 @@ class EvaluationRepository:
                             float(item["confidence"]) if item.get("confidence") is not None else None
                         ),
                     )
-                    for item in _sorted_records(row.items)
+                    for item in sorted(row.items, key=lambda item: (
+                        item["document_id"], item["family"], item["item_key"], item["item_id"],
+                    ))
                 ),
             )
 
@@ -287,7 +291,9 @@ class EvaluationRepository:
                         denominator=float(score["denominator"]) if score.get("denominator") is not None else None,
                         document_id=score.get("document_id"),
                     )
-                    for score in _sorted_records(row.scores)
+                    for score in sorted(row.scores, key=lambda score: (
+                        str(score.get("document_id", "")), score["family"], score["metric"], score["score_id"],
+                    ))
                 ),
                 failures=tuple(
                     EvaluationFailure(
@@ -305,7 +311,10 @@ class EvaluationRepository:
                         reason=failure.get("reason"),
                         source_refs=tuple(dict(ref) for ref in failure.get("source_refs", ())),
                     )
-                    for failure in _sorted_records(row.failures)
+                    for failure in sorted(row.failures, key=lambda failure: (
+                        failure["document_id"], failure["family"], failure["failure_id"],
+                        str(failure.get("gold_item_id", "")),
+                    ))
                 ),
             )
 
@@ -341,7 +350,9 @@ class EvaluationRepository:
                             denominator=float(score["denominator"]) if score.get("denominator") is not None else None,
                             document_id=score.get("document_id"),
                         )
-                        for score in _sorted_records(row.scores)
+                        for score in sorted(row.scores, key=lambda score: (
+                            str(score.get("document_id", "")), score["family"], score["metric"], score["score_id"],
+                        ))
                     ),
                     failures=tuple(
                         EvaluationFailure(
@@ -359,17 +370,14 @@ class EvaluationRepository:
                             reason=failure.get("reason"),
                             source_refs=tuple(dict(ref) for ref in failure.get("source_refs", ())),
                         )
-                        for failure in _sorted_records(row.failures)
+                        for failure in sorted(row.failures, key=lambda failure: (
+                            failure["document_id"], failure["family"], failure["failure_id"],
+                            str(failure.get("gold_item_id", "")),
+                        ))
                     ),
                 )
                 for row in rows
             )
-
-
-def _sorted_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(records, key=lambda item: tuple(str(item.get(key, "")) for key in (
-        "document_id", "family", "item_key", "metric", "failure_id", "score_id", "item_id", "gold_item_id"
-    )))
 
 
 def _now() -> datetime:

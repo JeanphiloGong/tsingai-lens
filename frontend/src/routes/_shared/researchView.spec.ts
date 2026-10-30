@@ -210,30 +210,35 @@ describe('objective Finding API', () => {
 		expect(result).toBe(payload);
 	});
 
-	it.each([null, {}, { collection_id: 'col_123', objectives: [null] }])(
-		'rejects an invalid Objective list instead of returning an empty success: %j',
-		async (payload) => {
-			request.mockResolvedValue(payload);
-			await expect(fetchCollectionObjectives('col_123')).rejects.toThrow('Objective list response');
-		}
-	);
+	it('rejects an Objective list from another collection', async () => {
+		request.mockResolvedValue({ collection_id: 'col_999', objectives: [] });
+		await expect(fetchCollectionObjectives('col_123')).rejects.toThrow(
+			'Objective list response does not match'
+		);
+	});
 
-	it('rejects a bad scope decision instead of silently dropping it', async () => {
-		request.mockResolvedValue({
-			collection_id: 'col_123', objective_id: 'obj_1', counts: {},
-			recommended_document_ids: [], review_document_ids: [], excluded_document_ids: [],
-			decisions: [{ document_id: 'paper-1', classification: 'maybe' }],
-			support_is_evidence: false
+	it('returns the declared Objective list shape without item revalidation', async () => {
+		request.mockResolvedValue({ collection_id: 'col_123', objectives: [null] });
+		await expect(fetchCollectionObjectives('col_123')).resolves.toEqual({
+			collection_id: 'col_123', objectives: [null]
 		});
-		await expect(fetchObjectiveScope('col_123', 'obj_1')).rejects.toThrow('Objective scope response');
+	});
+
+	it('rejects a scope response from another objective', async () => {
+		request.mockResolvedValue({
+			collection_id: 'col_123', objective_id: 'obj_2'
+		});
+		await expect(fetchObjectiveScope('col_123', 'obj_1')).rejects.toThrow(
+			'Objective scope response does not match'
+		);
 	});
 
 	it('rejects missing analysis data for both queue and read instead of inventing an Objective', async () => {
 		request.mockResolvedValue({ collection_id: 'col_123' });
 		await expect(runObjectiveAnalysis('col_123', 'obj_1', ['paper-1']))
-			.rejects.toThrow('Objective analysis response');
+			.rejects.toThrow('Objective analysis response does not match');
 		await expect(fetchObjectiveAnalysis('col_123', 'obj_1'))
-			.rejects.toThrow('Objective analysis response');
+			.rejects.toThrow('Objective analysis response does not match');
 	});
 
 	it('requests versioned Finding and exact Evidence pages', async () => {
@@ -313,11 +318,11 @@ describe('objective Finding API', () => {
 			items: [finding]
 		});
 		await expect(fetchObjectiveFindings('col_123', 'obj_1', 1)).rejects.toThrow(
-			'Objective Findings response is invalid.'
+			'Objective Findings response does not match'
 		);
 		request.mockResolvedValueOnce({ selections: [], findings: [] });
 		await expect(fetchExperimentAnalysis('col_123', 'obj_1', 1)).rejects.toThrow(
-			'Experiment analysis response is invalid.'
+			'Experiment analysis response does not match'
 		);
 	});
 
@@ -359,7 +364,13 @@ describe('objective Finding API', () => {
 	});
 
 	it('lists feedback and curations for one exact Finding version', async () => {
-		request.mockResolvedValue({ items: [] });
+		request.mockResolvedValue({
+			collection_id: 'col_123',
+			objective_id: 'obj_1',
+			analysis_version: 1,
+			finding_id: 'finding-1',
+			items: []
+		});
 
 		await fetchFindingFeedback('col_123', 'obj_1', 1, 'finding-1');
 		await fetchFindingCurations('col_123', 'obj_1', 1, 'finding-1');

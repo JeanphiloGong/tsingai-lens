@@ -479,13 +479,8 @@ export async function fetchCollectionObjectives(collectionId: string): Promise<O
 	const data = (await requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/objectives`
 	)) as ObjectiveList;
-	if (
-		!data || data.collection_id !== collectionId || !Array.isArray(data.objectives) ||
-		data.objectives.some((item) => !item || typeof item.objective_id !== 'string' ||
-			!item.objective_id || typeof item.question !== 'string' || !item.question ||
-			!['candidate', 'confirmed'].includes(item.confirmation_status))
-	) {
-		throw new Error('Objective list response is invalid.');
+	if (data.collection_id !== collectionId) {
+		throw new Error('Objective list response does not match collection_id.');
 	}
 	return data;
 }
@@ -496,16 +491,8 @@ export async function fetchObjectiveScope(
 ): Promise<ObjectiveScope> {
 	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/scope`;
 	const data = (await requestJson(path)) as ObjectiveScope;
-	if (
-		!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
-		!data.counts || !Array.isArray(data.recommended_document_ids) ||
-		!Array.isArray(data.review_document_ids) || !Array.isArray(data.excluded_document_ids) ||
-		!Array.isArray(data.decisions) || typeof data.support_is_evidence !== 'boolean' ||
-		data.decisions.some((item) => !item || typeof item.document_id !== 'string' ||
-			!item.document_id || !['likely_relevant', 'needs_inspection', 'confidently_out_of_scope']
-				.includes(item.classification))
-	) {
-		throw new Error('Objective scope response is invalid.');
+	if (data.collection_id !== collectionId || data.objective_id !== objectiveId) {
+		throw new Error('Objective scope response does not match the requested objective.');
 	}
 	return data;
 }
@@ -524,10 +511,9 @@ export async function fetchObjectiveFindings(
 		limit: String(limit)
 	});
 	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveFindingPage;
-	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
-		data.analysis_version !== analysisVersion || !Array.isArray(data.items) ||
-		data.items.some((item) => !item || typeof item.finding_id !== 'string' || !item.finding_id)) {
-		throw new Error('Objective Findings response is invalid.');
+	if (data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion) {
+		throw new Error('Objective Findings response does not match the requested analysis.');
 	}
 	return data;
 }
@@ -541,9 +527,9 @@ export async function fetchObjectiveFinding(
 	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}`;
 	const params = new URLSearchParams({ analysis_version: String(analysisVersion) });
 	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveFindingDetail;
-	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+	if (data.collection_id !== collectionId || data.objective_id !== objectiveId ||
 		data.analysis_version !== analysisVersion || data.finding?.finding_id !== findingId) {
-		throw new Error('Objective Finding response is invalid.');
+		throw new Error('Objective Finding response does not match the requested finding.');
 	}
 	return data;
 }
@@ -562,11 +548,9 @@ export async function fetchObjectiveEvidence(
 	params.set('offset', String(offset));
 	params.set('limit', String(limit));
 	const data = (await requestJson(`${path}?${params.toString()}`)) as ObjectiveEvidencePage;
-	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
-		data.analysis_version !== analysisVersion || !Array.isArray(data.items) ||
-		data.items.some((item) => !item || typeof item.evidence_id !== 'string' || !item.evidence_id ||
-			typeof item.document_id !== 'string' || !item.document_id)) {
-		throw new Error('Objective Evidence response is invalid.');
+	if (data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion || data.finding_id !== findingId) {
+		throw new Error('Objective Evidence response does not match the requested analysis.');
 	}
 	return data;
 }
@@ -684,11 +668,9 @@ export async function fetchExperimentAnalysis(
 	const data = (await requestJson(
 		`${path}?analysis_version=${encodeURIComponent(String(analysisVersion))}`
 	)) as ExperimentAnalysisProjection;
-	if (!data || data.collection_id !== collectionId || data.objective_id !== objectiveId ||
-		data.analysis_version !== analysisVersion ||
-		!Array.isArray(data.selections) || !Array.isArray(data.comparison_groups) ||
-		!Array.isArray(data.experiments) || !Array.isArray(data.findings)) {
-		throw new Error('Experiment analysis response is invalid.');
+	if (data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion) {
+		throw new Error('Experiment analysis response does not match the requested analysis.');
 	}
 	return data;
 }
@@ -753,14 +735,8 @@ export async function runObjectiveAnalysis(
 			body: JSON.stringify({ document_ids: documentIds })
 		}
 	)) as ObjectiveAnalysis;
-	if (
-		!data || data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId ||
-		!Array.isArray(data.warnings) || !Array.isArray(data.evidence_review?.gaps) ||
-		[data.active_analysis, data.published_analysis].some((state) => state !== null &&
-			(!state || state.objective_id !== objectiveId || !Number.isInteger(state.analysis_version) ||
-				state.analysis_version < 1 || !['queued', 'running', 'succeeded', 'failed'].includes(state.status)))
-	) {
-		throw new Error('Objective analysis response is invalid.');
+	if (data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId) {
+		throw new Error('Objective analysis response does not match the requested objective.');
 	}
 	return data;
 }
@@ -774,14 +750,8 @@ export async function fetchObjectiveAnalysis(
 	const data = (await requestJson(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`
 	)) as ObjectiveAnalysis;
-	if (
-		!data || data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId ||
-		!Array.isArray(data.warnings) || !Array.isArray(data.evidence_review?.gaps) ||
-		[data.active_analysis, data.published_analysis].some((state) => state !== null &&
-			(!state || state.objective_id !== objectiveId || !Number.isInteger(state.analysis_version) ||
-				state.analysis_version < 1 || !['queued', 'running', 'succeeded', 'failed'].includes(state.status)))
-	) {
-		throw new Error('Objective analysis response is invalid.');
+	if (data.collection_id !== collectionId || data.objective?.objective_id !== objectiveId) {
+		throw new Error('Objective analysis response does not match the requested objective.');
 	}
 	return data;
 }
@@ -826,8 +796,18 @@ export async function fetchFindingFeedback(
 	const encodedFinding = encodeURIComponent(findingId);
 	const data = (await requestJson(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/findings/${encodedFinding}/feedback?analysis_version=${analysisVersion}`
-	)) as { items?: FindingFeedback[] };
-	return Array.isArray(data.items) ? data.items : [];
+	)) as {
+		collection_id: string;
+		objective_id: string;
+		analysis_version: number;
+		finding_id: string;
+		items: FindingFeedback[];
+	};
+	if (data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion || data.finding_id !== findingId) {
+		throw new Error('Finding feedback response does not match the requested finding.');
+	}
+	return data.items;
 }
 
 export async function createFindingCuration(
@@ -859,8 +839,18 @@ export async function fetchFindingCurations(
 	const encodedFinding = encodeURIComponent(findingId);
 	const data = (await requestJson(
 		`/collections/${encodedCollection}/objectives/${encodedObjective}/findings/${encodedFinding}/curation?analysis_version=${analysisVersion}`
-	)) as { items?: FindingCuration[] };
-	return Array.isArray(data.items) ? data.items : [];
+	)) as {
+		collection_id: string;
+		objective_id: string;
+		analysis_version: number;
+		finding_id: string;
+		items: FindingCuration[];
+	};
+	if (data.collection_id !== collectionId || data.objective_id !== objectiveId ||
+		data.analysis_version !== analysisVersion || data.finding_id !== findingId) {
+		throw new Error('Finding curation response does not match the requested finding.');
+	}
+	return data.items;
 }
 
 function findingDatasetParams(filters: FindingDatasetFilters): URLSearchParams {

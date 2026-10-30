@@ -820,6 +820,9 @@ capabilities:
   accepts Evidence IDs, a hand-written statement, or assertion strength.
   After exact-argument approval it reads the canonical Finding aggregated for
   that selection set and returns the fixed analysis projection;
+  both Finding authoring capabilities report stale analyses, invalid references
+  and unavailable resources as tool rejections. Infrastructure and program
+  faults remain internal failures;
 - `record_finding_feedback` is a `write` capability. After exact-argument
   approval, it calls the same `finding_feedback_service.record_feedback()` path
   as the Finding workbench and records the authenticated user as reviewer. It

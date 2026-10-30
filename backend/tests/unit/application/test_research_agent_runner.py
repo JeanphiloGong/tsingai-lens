@@ -5080,9 +5080,10 @@ async def test_finding_draft_rejects_unavailable_selection_without_returning_a_d
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability, CreateFindingDraftToolRequest
+    from exceptions import RequestInvalidException
 
     capability = CreateFindingDraftCapability(finding_authoring_service=SimpleNamespace(
-        validate_selection_references=AsyncMock(side_effect=ValueError("internal storage details")),
+        validate_selection_references=AsyncMock(side_effect=RequestInvalidException("internal storage details")),
     ))
     result = await capability.execute(
         CapabilityExecutionContext.for_call(_context(), "draft-1"),

@@ -10,6 +10,11 @@ from application.chat.capabilities.contracts import (
     ToolSpec,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
+from exceptions import (
+    RequestInvalidException,
+    ResourceConflictException,
+    ResourceNotFoundException,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -74,7 +79,11 @@ class CreateFindingDraftCapability:
                     comparison_group_ids=tuple(arguments.comparison_group_ids),
                     user_id=context.user_id,
                 )
-            except (ValueError, FileNotFoundError):
+            except (
+                RequestInvalidException,
+                ResourceConflictException,
+                ResourceNotFoundException,
+            ):
                 return ChatToolResult(
                     tool_call_id=context.tool_call_id,
                     status=ToolResultStatus.FAILED,
@@ -166,7 +175,11 @@ class CreateFindingVersionCapability:
                 comparison_group_ids=tuple(arguments.comparison_group_ids),
                 parent_finding_id=arguments.parent_finding_id,
             )
-        except (ValueError, FileNotFoundError):
+        except (
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ):
             return ChatToolResult(
                 tool_call_id=context.tool_call_id,
                 status=ToolResultStatus.FAILED,

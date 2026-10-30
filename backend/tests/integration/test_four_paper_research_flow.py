@@ -467,7 +467,15 @@ def _wait_for_analysis(
         assert response.json()["code"] == 200, response.text
         analysis = response.json()["data"]
         active = analysis.get("active_analysis")
-        if active is not None and active["status"] not in {"queued", "running"}:
+        if active is not None and active["status"] == "failed":
+            return analysis
+        published = analysis.get("published_analysis")
+        if (
+            active is not None
+            and active["status"] == "succeeded"
+            and published is not None
+            and published["analysis_version"] == active["analysis_version"]
+        ):
             return analysis
         sleep(0.02)
     raise AssertionError(f"analysis did not finish: {objective_id}")
@@ -606,6 +614,10 @@ def test_four_paper_research_flow_publishes_only_context_compatible_evidence(
         assert queued_analysis.status_code == 200, queued_analysis.text
         assert queued_analysis.json()["code"] == 200, queued_analysis.text
         analysis = _wait_for_analysis(client, collection_id, objective_id)
+        assert analysis["published_analysis"] is not None, (
+            analysis["active_analysis"]["status"],
+            analysis["active_analysis"]["error_code"],
+        )
         assert analysis["published_analysis"]["status"] == "succeeded", analysis
 
         paper_a_id = document_ids_by_filename["paper-a-as-built.txt"]

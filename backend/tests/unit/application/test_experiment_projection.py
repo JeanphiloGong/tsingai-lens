@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import ModuleType, SimpleNamespace
 
@@ -370,3 +371,43 @@ async def test_projection_keeps_captured_response_and_typed_review_values(monkey
     assert (
         contributions[0].document_id == findings[0].paper_contributions[0].document_id
     )
+
+
+async def test_partial_measurement_keeps_missing_context_in_read_view(monkeypatch) -> None:
+    from unittest.mock import AsyncMock
+    from application.core.objectives import analysis_service
+
+    class PartialExperiments(_Experiments):
+        async def read_revision(self, *args):
+            stored = await super().read_revision(*args)
+            measurement = replace(
+                stored.revision.measurements[0], variant_key=None, test_key=None,
+                binding_status="partial",
+            )
+            return replace(stored, revision=replace(
+                stored.revision, measurements=(measurement,), comparisons=(),
+                binding_status="partial",
+            ))
+
+    class PartialSelections(_Selections):
+        async def list_selections(self, *args):
+            selection, = await super().list_selections(*args)
+            return (replace(selection, measurement_keys=("np-elongation",), comparison_keys=()),)
+
+    projection = _service()
+    monkeypatch.setattr(projection.experiment_query_service, "PaperExperimentRepo", PartialExperiments())
+    monkeypatch.setattr(projection.experiment_query_service, "ObjectiveExperimentSelectionRepo", PartialSelections())
+    records, total = await projection.list_analysis_evidence("collection-1", "objective-1", 1)
+    assert total == 1
+    assert records[0].resolution_status == "partial"
+    assert records[0].reported_result.value == 72
+    monkeypatch.setattr(analysis_service, "experiment_projection", projection)
+    monkeypatch.setattr(analysis_service, "collection_service", SimpleNamespace(get_collection_for_user=AsyncMock()))
+    monkeypatch.setattr(analysis_service, "_published_version", AsyncMock(return_value=1))
+    monkeypatch.setattr(analysis_service, "should_read_experiment_projection", AsyncMock(return_value=True))
+    response = await analysis_service.list_evidence("collection-1", "objective-1", user_id="user-1")
+    item, = response["items"]
+    assert item["evidence_status"] == "needs_context"
+    assert item["evidence_status_reason"] == "The selected measurement has incomplete binding context."
+    assert item["reported_result"]["value"] == 72
+    assert item["source_ref"] == "table-2"

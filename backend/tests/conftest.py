@@ -245,7 +245,12 @@ def _isolate_application_module_dependencies(monkeypatch):
 
     from application.chat.capabilities import objective_candidate, objective_proposal, objective_analysis, objective_derivation
 
+    from application.chat.capabilities import finding_authoring, finding_review, paper_experiment_authoring
+
     dependencies = (
+        (finding_authoring, ["finding_authoring_service"]),
+        (finding_review, ["collection_service", "finding_feedback_service"]),
+        (paper_experiment_authoring, ["paper_experiment_authoring_service", "ChatRepo"]),
         (objective_candidate, ["objective_authoring_service"]),
         (objective_proposal, ["collection_service", "ObjectiveRepo", "PaperMapRepo"]),
         (objective_analysis, ["collection_service", "ObjectiveRepo", "objective_authoring_service", "objective_analysis_service"]),

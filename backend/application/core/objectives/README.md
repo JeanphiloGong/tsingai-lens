@@ -51,6 +51,10 @@ requested creation or confirmation. Scientific analysis returns experiment
 records; `experiment_analysis_writer` stores revisions, selections, optional
 groups, and Findings. `analysis_service` controls the complete
 version's publication. Both HTTP and Agent callers use these owners.
+Agent paper authoring calls `prepare_paper_experiment_draft()` and
+`write_prepared_paper_experiments()` directly. Preparation checks the current
+Sources; the approved write persists immutable paper revisions without publishing
+an Objective analysis or Finding.
 `ObjectiveAnalysisService` belongs to the current app and owns the admitted tasks
 and concurrency limit. Shutdown cancels and awaits its work before disposing the
 database engine. Read operations remain module functions and do not require a

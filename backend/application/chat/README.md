@@ -615,6 +615,9 @@ Their classes implement the tool protocol and need no dependency-only constructo
 Objective proposal, creation, confirmation, derivation and inspection follow the
 same direct calls. Starting an analysis retains the current app's actual
 `ObjectiveAnalysisService` so task scheduling stays with its runtime owner.
+Finding review, Finding authoring, and paper-experiment authoring also call their
+owning modules directly. Draft validation always checks the canonical selections;
+experiment writes read their approved draft and digest from the actual Chat store.
 
 ## Boundaries
 

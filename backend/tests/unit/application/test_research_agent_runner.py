@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import finding_authoring
+
 from application.chat.capabilities import objective_analysis
 
 from domain.chat import ChatMessageRole
@@ -2652,8 +2654,15 @@ async def test_invalid_arguments_do_not_execute_capability() -> None:
     assert capability.executed_arguments == []
 
 
-async def test_finding_draft_repair_receives_actionable_selection_error() -> None:
+async def test_finding_draft_repair_receives_actionable_selection_error(monkeypatch) -> None:
     from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability
+    from unittest.mock import AsyncMock
+
+    validate = AsyncMock()
+    monkeypatch.setattr(
+        "application.core.objectives.finding_authoring_service.validate_selection_references",
+        validate,
+    )
 
     arguments = {
         "draft_id": "correction", "objective_id": "obj-1", "source_analysis_version": 6,
@@ -2674,6 +2683,10 @@ async def test_finding_draft_repair_receives_actionable_selection_error() -> Non
     assert "invalid_tool_arguments" in model.contexts[1][-1].content
     assert result.status is AgentRunStatus.COMPLETED
     assert any(item.data.get("draft") == {**corrected, "comparison_group_ids": []} for item in result.tool_results)
+    validate.assert_awaited_once_with(
+        collection_id="col-1", objective_id="obj-1", source_analysis_version=6,
+        selection_ids=("selection-1",), comparison_group_ids=(), user_id="user-1",
+    )
 
 
 async def test_finding_draft_does_not_invent_scientific_strength_and_deduplicates_evidence() -> None:
@@ -5082,9 +5095,10 @@ async def test_finding_draft_rejects_unavailable_selection_without_returning_a_d
     from application.chat.capabilities.finding_authoring import CreateFindingDraftCapability, CreateFindingDraftToolRequest
     from exceptions import RequestInvalidException
 
-    capability = CreateFindingDraftCapability(finding_authoring_service=SimpleNamespace(
+    finding_authoring.finding_authoring_service = SimpleNamespace(
         validate_selection_references=AsyncMock(side_effect=RequestInvalidException("internal storage details")),
-    ))
+    )
+    capability = CreateFindingDraftCapability()
     result = await capability.execute(
         CapabilityExecutionContext.for_call(_context(), "draft-1"),
         CreateFindingDraftToolRequest(draft_id="draft-1", objective_id="objective-1", source_analysis_version=1, selection_ids=["missing"]),

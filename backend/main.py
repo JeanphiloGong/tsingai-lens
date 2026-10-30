@@ -236,28 +236,12 @@ async def build_application_runtime() -> ApplicationRuntime:
                         objective_analysis_service=objective_analysis_service,
                         finding_feedback_service=finding_feedback_service,
                     ),
-                    RecordFindingFeedbackCapability(
-                        collection_service=collection_service,
-                        finding_feedback_service=finding_feedback_service,
-                    ),
-                    CurateFindingCapability(
-                        collection_service=collection_service,
-                        finding_feedback_service=finding_feedback_service,
-                    ),
-                    CreateFindingDraftCapability(
-                        finding_authoring_service=finding_authoring_service,
-                    ),
-                    CreateFindingVersionCapability(
-                        finding_authoring_service=finding_authoring_service,
-                    ),
-                    ProposePaperExperimentDraftCapability(
-                        authoring_service=paper_experiment_authoring_service,
-                        chat_repository=ChatRepo,
-                    ),
-                    CreatePaperExperimentRevisionCapability(
-                        authoring_service=paper_experiment_authoring_service,
-                        chat_repository=ChatRepo,
-                    ),
+                    RecordFindingFeedbackCapability(),
+                    CurateFindingCapability(),
+                    CreateFindingDraftCapability(),
+                    CreateFindingVersionCapability(),
+                    ProposePaperExperimentDraftCapability(),
+                    CreatePaperExperimentRevisionCapability(),
                     ProposeObjectiveDraftsCapability(),
                     PreviewResearchScopeCapability(),
                     CreateObjectiveCandidateCapability(),

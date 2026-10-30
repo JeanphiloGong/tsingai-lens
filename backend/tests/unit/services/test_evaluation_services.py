@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import finding_review
+
 from application.core.objectives.analysis import analysis_record_source
 
 from dataclasses import replace
@@ -1832,10 +1834,9 @@ async def test_typed_curation_preserves_published_finding_and_exports_expert_tar
             },
         )
         collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
-        result = await CurateFindingCapability(
-            collection_service=collection_service,
-            finding_feedback_service=service,
-        ).execute(
+        finding_review.collection_service = collection_service
+        finding_review.finding_feedback_service = service
+        result = await CurateFindingCapability().execute(
             CapabilityExecutionContext(
                 session_id="review-session",
                 user_id="user-1",

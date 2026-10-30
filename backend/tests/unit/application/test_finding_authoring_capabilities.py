@@ -1,3 +1,4 @@
+from application.chat.capabilities import finding_authoring
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -36,15 +37,13 @@ def finding_call(request):
         selection_ids=["selection-1"],
     )
     if request.param == "draft":
-        capability = CreateFindingDraftCapability(
-            finding_authoring_service=finding_authoring_service,
-        )
+        finding_authoring.finding_authoring_service = finding_authoring_service
+        capability = CreateFindingDraftCapability()
         payload = CreateFindingDraftToolRequest(draft_id="draft-1", **arguments)
         expected_code = "finding_selection_rejected"
     else:
-        capability = CreateFindingVersionCapability(
-            finding_authoring_service=finding_authoring_service,
-        )
+        finding_authoring.finding_authoring_service = finding_authoring_service
+        capability = CreateFindingVersionCapability()
         payload = CreateFindingVersionToolRequest(**arguments)
         expected_code = "finding_version_rejected"
     return capability, context, payload, expected_code

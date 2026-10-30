@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from application.evaluation import finding_feedback_service
+
 from typing import Any, Literal
 
 from application.chat.capabilities.contracts import (
@@ -107,23 +110,17 @@ class RecordFindingFeedbackCapability:
         input_model=RecordFindingFeedbackToolRequest,
     )
 
-    def __init__(
-        self, *, collection_service: Any, finding_feedback_service: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: RecordFindingFeedbackToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
         try:
-            feedback = await self.finding_feedback_service.record_feedback(
+            feedback = await finding_feedback_service.record_feedback(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 analysis_version=arguments.analysis_version,
@@ -186,18 +183,12 @@ class CurateFindingCapability:
         input_model=CurateFindingToolRequest,
     )
 
-    def __init__(
-        self, *, collection_service: Any, finding_feedback_service: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.finding_feedback_service = finding_feedback_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CurateFindingToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
@@ -212,7 +203,7 @@ class CurateFindingCapability:
                 error_message="The curated Finding belongs to another collection. Reopen the target Finding in the current collection.",
             )
         try:
-            curation = await self.finding_feedback_service.record_curation(
+            curation = await finding_feedback_service.record_curation(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 analysis_version=arguments.analysis_version,

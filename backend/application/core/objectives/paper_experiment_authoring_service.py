@@ -122,7 +122,7 @@ def _source_payloads(document: Any) -> tuple[Mapping[str, Any], ...]:
 from repositories.source_artifact_repository import SourceArtifactRepo
 
 
-async def prepare(
+async def prepare_paper_experiment_draft(
     *,
     collection_id: str,
     user_id: str,
@@ -189,7 +189,7 @@ async def prepare(
     )
 
 
-async def write(
+async def write_prepared_paper_experiments(
     *,
     prepared: PreparedPaperExperimentDraft,
     collection_id: str,
@@ -234,6 +234,6 @@ __all__ = [
     "PaperExperimentDraftEmptyError",
     "PaperExperimentSourceChangedError",
     "PreparedPaperExperimentDraft",
-    "prepare",
-    "write",
+    "prepare_paper_experiment_draft",
+    "write_prepared_paper_experiments",
 ]

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from application.core.objectives import paper_experiment_authoring_service
+from repositories.chat_repository import ChatRepo
+
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
-from types import ModuleType
 from typing import Any, Literal
 
 from application.chat.capabilities.contracts import CapabilityExecutionContext, ToolSpec
@@ -582,10 +584,6 @@ class ProposePaperExperimentDraftCapability:
         input_model=PaperExperimentDraftToolRequest,
     )
 
-    def __init__(self, *, authoring_service: ModuleType, chat_repository: Any) -> None:
-        self.authoring_service = authoring_service
-        self.chat_repository = chat_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
@@ -597,13 +595,13 @@ class ProposePaperExperimentDraftCapability:
             complete_source_reads,
         )
 
-        prepared = await self.authoring_service.prepare(
+        prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
             collection_id=context.collection_id,
             user_id=context.user_id,
             document_id=arguments.document_id,
             raw_draft=arguments.raw_draft(),
         )
-        messages = await self.chat_repository.read_messages(context.session_id)
+        messages = await ChatRepo.read_messages(context.session_id)
         completed = complete_source_reads(_successful_results_by_name(messages))
         labels: set[str] = set()
 
@@ -719,25 +717,12 @@ class CreatePaperExperimentRevisionCapability:
         input_model=PaperExperimentRevisionToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        authoring_service: ModuleType,
-        chat_repository: Any | None = None,
-    ) -> None:
-        self.authoring_service = authoring_service
-        self.chat_repository = chat_repository
-
     async def _stored_draft(
         self,
         context: CapabilityExecutionContext,
         arguments: PaperExperimentRevisionToolRequest,
     ) -> tuple[str, dict[str, Any]]:
-        if self.chat_repository is None:
-            raise PaperExperimentAuthoringError(
-                "paper experiment draft store is unavailable"
-            )
-        messages = await self.chat_repository.read_messages(context.session_id)
+        messages = await ChatRepo.read_messages(context.session_id)
         for message in reversed(messages):
             result = getattr(message, "tool_result", None)
             data = getattr(result, "data", None)
@@ -788,7 +773,7 @@ class CreatePaperExperimentRevisionCapability:
             raise PaperExperimentAuthoringError(
                 "stored paper experiment draft is missing its scope"
             )
-        prepared = await self.authoring_service.prepare(
+        prepared = await paper_experiment_authoring_service.prepare_paper_experiment_draft(
             collection_id=context.collection_id,
             user_id=context.user_id,
             document_id=document_id,
@@ -798,7 +783,7 @@ class CreatePaperExperimentRevisionCapability:
             raise PaperExperimentAuthoringError(
                 "paper experiment draft digest changed; review it again"
             )
-        result = await self.authoring_service.write(
+        result = await paper_experiment_authoring_service.write_prepared_paper_experiments(
             prepared=prepared,
             collection_id=context.collection_id,
             created_by=context.user_id,

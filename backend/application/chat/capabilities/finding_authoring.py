@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from application.core.objectives import finding_authoring_service
+
 from dataclasses import asdict
-from types import ModuleType
 
 from application.chat.capabilities.contracts import (
     CapabilityExecutionContext,
@@ -61,35 +62,31 @@ class CreateFindingDraftCapability:
         input_model=CreateFindingDraftToolRequest,
     )
 
-    def __init__(self, *, finding_authoring_service: ModuleType | None = None) -> None:
-        self.finding_authoring_service = finding_authoring_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateFindingDraftToolRequest,
     ) -> ChatToolResult:
-        if self.finding_authoring_service is not None:
-            try:
-                await self.finding_authoring_service.validate_selection_references(
-                    collection_id=context.collection_id,
-                    objective_id=arguments.objective_id,
-                    source_analysis_version=arguments.source_analysis_version,
-                    selection_ids=tuple(arguments.selection_ids),
-                    comparison_group_ids=tuple(arguments.comparison_group_ids),
-                    user_id=context.user_id,
-                )
-            except (
-                RequestInvalidException,
-                ResourceConflictException,
-                ResourceNotFoundException,
-            ):
-                return ChatToolResult(
-                    tool_call_id=context.tool_call_id,
-                    status=ToolResultStatus.FAILED,
-                    error_code="finding_selection_rejected",
-                    error_message="The Finding selections were rejected. Inspect the current published analysis and use its eligible selection and ComparisonGroup IDs.",
-                )
+        try:
+            await finding_authoring_service.validate_selection_references(
+                collection_id=context.collection_id,
+                objective_id=arguments.objective_id,
+                source_analysis_version=arguments.source_analysis_version,
+                selection_ids=tuple(arguments.selection_ids),
+                comparison_group_ids=tuple(arguments.comparison_group_ids),
+                user_id=context.user_id,
+            )
+        except (
+            RequestInvalidException,
+            ResourceConflictException,
+            ResourceNotFoundException,
+        ):
+            return ChatToolResult(
+                tool_call_id=context.tool_call_id,
+                status=ToolResultStatus.FAILED,
+                error_code="finding_selection_rejected",
+                error_message="The Finding selections were rejected. Inspect the current published analysis and use its eligible selection and ComparisonGroup IDs.",
+            )
         draft = arguments.model_dump()
         refs = [
             ChatResourceRef(
@@ -153,20 +150,13 @@ class CreateFindingVersionCapability:
         input_model=CreateFindingVersionToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        finding_authoring_service: ModuleType,
-    ) -> None:
-        self.finding_authoring_service = finding_authoring_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateFindingVersionToolRequest,
     ) -> ChatToolResult:
         try:
-            result = await self.finding_authoring_service.create_selection_version(
+            result = await finding_authoring_service.create_selection_version(
                 collection_id=context.collection_id,
                 objective_id=arguments.objective_id,
                 source_analysis_version=arguments.source_analysis_version,

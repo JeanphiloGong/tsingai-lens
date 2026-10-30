@@ -331,11 +331,11 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     dataset_export_service.FeedbackDatasetSampleRepo = samples
     dataset_export_service.FeedbackDatasetExportRepo = FeedbackDatasetExportRepository()
     exports = dataset_export_service
-    preview = await exports.preview_for_user(
+    preview = await exports.preview_dataset_export_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[sample_id]
     )
     assert preview.exportable_count == 1 and not preview.issues
-    published = await exports.publish_for_user(
+    published = await exports.publish_dataset_export_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         preview_id=preview.preview_id,
@@ -343,7 +343,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         allow_partial=False,
         idempotency_key="first-export",
     )
-    _, data, _, _ = await exports.download_for_user(
+    _, data, _, _ = await exports.download_dataset_export_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         export_id=published.export_id,
@@ -526,13 +526,13 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     dataset_export_service.FeedbackDatasetSampleRepo = samples
     dataset_export_service.FeedbackDatasetExportRepo = exports
     export_service = dataset_export_service
-    preview = await export_service.preview_for_user(
+    preview = await export_service.preview_dataset_export_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[sample_id]
     )
     assert preview.requested_count == 1
     assert preview.exportable_count == 1
     assert preview.issues == ()
-    published = await export_service.publish_for_user(
+    published = await export_service.publish_dataset_export_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         preview_id=preview.preview_id,
@@ -540,7 +540,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         allow_partial=False,
         idempotency_key="export-integration-1",
     )
-    replayed = await export_service.publish_for_user(
+    replayed = await export_service.publish_dataset_export_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         preview_id=preview.preview_id,
@@ -552,7 +552,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     assert published.row_count == 1
     model_payload = json.loads(
         (
-            await export_service.download_for_user(
+            await export_service.download_dataset_export_for_user(
                 user_id=USER_ID,
                 dataset_id=dataset.dataset_id,
                 export_id=published.export_id,
@@ -567,7 +567,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     assert "source-b-caption" not in json.dumps(model_payload, ensure_ascii=False)
     trace_payload = json.loads(
         (
-            await export_service.download_for_user(
+            await export_service.download_dataset_export_for_user(
                 user_id=USER_ID,
                 dataset_id=dataset.dataset_id,
                 export_id=published.export_id,

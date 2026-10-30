@@ -167,10 +167,10 @@ async def test_selected_export_never_reads_unselected_stale_members() -> None:
     )
     dataset_export_service.FeedbackDatasetExportRepo = _Exports()
     service = dataset_export_service
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test", sample_ids=["sample-1"]
     )
-    export = await service.publish_for_user(
+    export = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -278,12 +278,12 @@ def _service(
 async def test_selected_export_ignores_unselected_changes_but_rejects_selected_changes():
     samples = _Samples(_member(1), _member(2))
     service = _service(samples, _Exports())
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test", sample_ids=["sample-1"]
     )
     assert [item.sample_id for item in preview.members] == ["sample-1"]
     samples.members = [samples.members[0]]
-    export = await service.publish_for_user(
+    export = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -294,7 +294,7 @@ async def test_selected_export_ignores_unselected_changes_but_rejects_selected_c
     assert export.row_count == 1
     samples.members = []
     with pytest.raises(FeedbackDatasetConflict, match="export_preview_stale"):
-        await service.publish_for_user(
+        await service.publish_dataset_export_for_user(
             user_id="user-1",
             dataset_id="fdset_export_test",
             preview_id=preview.preview_id,
@@ -309,7 +309,7 @@ async def test_selected_export_ignores_unselected_changes_but_rejects_selected_c
 )
 async def test_export_rejects_invalid_selection(selection):
     with pytest.raises(DatasetExportError, match="export_sample_selection_invalid"):
-        await _service(_Samples(_member()), _Exports()).preview_for_user(
+        await _service(_Samples(_member()), _Exports()).preview_dataset_export_for_user(
             user_id="user-1", dataset_id="fdset_export_test", sample_ids=selection
         )
 
@@ -364,7 +364,7 @@ async def test_preview_reports_invalid_provenance_and_partial_publish_excludes_i
     exports = _Exports()
     service = _service(samples, exports)
 
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
 
@@ -372,7 +372,7 @@ async def test_preview_reports_invalid_provenance_and_partial_publish_excludes_i
     assert preview.exportable_count == 1
     assert {issue.sample_id for issue in preview.issues} == {"sample-2"}
     with pytest.raises(DatasetExportError, match="export_preview_has_issues"):
-        await service.publish_for_user(
+        await service.publish_dataset_export_for_user(
             user_id="user-1",
             dataset_id="fdset_export_test",
             preview_id=preview.preview_id,
@@ -381,7 +381,7 @@ async def test_preview_reports_invalid_provenance_and_partial_publish_excludes_i
             idempotency_key="publish-1",
         )
 
-    exported = await service.publish_for_user(
+    exported = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -398,11 +398,11 @@ async def test_publish_rejects_empty_export_and_stale_preview() -> None:
     empty_samples = _Samples()
     empty_exports = _Exports()
     empty_service = _service(empty_samples, empty_exports)
-    empty_preview = await empty_service.preview_for_user(
+    empty_preview = await empty_service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
     with pytest.raises(DatasetExportError, match="empty_export"):
-        await empty_service.publish_for_user(
+        await empty_service.publish_dataset_export_for_user(
             user_id="user-1",
             dataset_id="fdset_export_test",
             preview_id=empty_preview.preview_id,
@@ -414,12 +414,12 @@ async def test_publish_rejects_empty_export_and_stale_preview() -> None:
     samples = _Samples(_member(1))
     exports = _Exports()
     service = _service(samples, exports)
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
     samples.members[0] = _member(2)
     with pytest.raises(FeedbackDatasetConflict, match="export_preview_stale"):
-        await service.publish_for_user(
+        await service.publish_dataset_export_for_user(
             user_id="user-1",
             dataset_id="fdset_export_test",
             preview_id=preview.preview_id,
@@ -434,11 +434,11 @@ async def test_publish_is_idempotent_and_separates_model_file_from_provenance() 
     samples = _Samples(_member(1))
     exports = _Exports()
     service = _service(samples, exports)
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
 
-    first = await service.publish_for_user(
+    first = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -446,7 +446,7 @@ async def test_publish_is_idempotent_and_separates_model_file_from_provenance() 
         allow_partial=False,
         idempotency_key="same-key",
     )
-    second = await service.publish_for_user(
+    second = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -534,11 +534,11 @@ async def test_export_without_excerpts_preserves_input_and_identity(task_type) -
     service = _service(
         _Samples(member), _Exports(), replace(_dataset(), task_type=task_type)
     )
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
     assert preview.issues == ()
-    exported = await service.publish_for_user(
+    exported = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -571,7 +571,7 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
     samples = _Samples(_content_member(content, sample_id="preference-1"))
     exports = _Exports()
     service = _service(samples, exports, dataset)
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
     assert preview.exportable_count == 0
@@ -579,11 +579,11 @@ async def test_preference_export_requires_human_a_or_b_and_maps_chosen_rejected(
 
     content_with_label = replace(content, human_preference="b")
     samples.members = [_content_member(content_with_label, sample_id="preference-1")]
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
     assert preview.issues == ()
-    exported = await service.publish_for_user(
+    exported = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -618,11 +618,11 @@ async def test_evaluation_export_keeps_reference_and_criteria_outside_input() ->
         _Exports(),
         dataset,
     )
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
     assert preview.issues == ()
-    exported = await service.publish_for_user(
+    exported = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -684,10 +684,10 @@ async def test_published_files_load_offline_without_review_data_in_input(
         _Exports(),
         replace(_dataset(), task_type=task_type),
     )
-    preview = await service.preview_for_user(
+    preview = await service.preview_dataset_export_for_user(
         user_id="user-1", dataset_id="fdset_export_test"
     )
-    export = await service.publish_for_user(
+    export = await service.publish_dataset_export_for_user(
         user_id="user-1",
         dataset_id="fdset_export_test",
         preview_id=preview.preview_id,
@@ -698,7 +698,7 @@ async def test_published_files_load_offline_without_review_data_in_input(
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     for format in ("jsonl", "provenance", "manifest", "json"):
-        _, data, _, filename = await service.download_for_user(
+        _, data, _, filename = await service.download_dataset_export_for_user(
             user_id="user-1",
             dataset_id="fdset_export_test",
             export_id=export.export_id,

@@ -211,10 +211,10 @@ async def test_selected_publication_ignores_unselected_bad_source(
     dataset_export_service.FeedbackDatasetSampleRepo = service.FeedbackDatasetSampleRepo
     dataset_export_service.FeedbackDatasetExportRepo = FeedbackDatasetExportRepository()
     exports = dataset_export_service
-    preview = await exports.preview_for_user(
+    preview = await exports.preview_dataset_export_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id, sample_ids=[chosen.sample_id]
     )
-    exported = await exports.publish_for_user(
+    exported = await exports.publish_dataset_export_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         preview_id=preview.preview_id,

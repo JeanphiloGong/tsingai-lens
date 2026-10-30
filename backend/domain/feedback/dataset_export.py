@@ -143,7 +143,7 @@ class ExportPreview:
                     "content": content_payload,
                     "content_digest": member.content_digest,
                     "input_digest": member.input_digest,
-                    "provenance": deepcopy(member.provenance),
+                    "provenance": member.provenance,
                     "row_key": member.row_key,
                 }
             )

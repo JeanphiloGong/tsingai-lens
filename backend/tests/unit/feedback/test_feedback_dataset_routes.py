@@ -241,7 +241,7 @@ def test_task_dataset_route_maps_missing_to_404() -> None:
 
 def test_export_preview_maps_stale_source_to_conflict() -> None:
     class ExportService:
-        async def preview_for_user(self, **kwargs):
+        async def preview_dataset_export_for_user(self, **kwargs):
             raise ResourceConflictException(
                 "The source changed.", data={"code": "sample_source_stale"}
             )

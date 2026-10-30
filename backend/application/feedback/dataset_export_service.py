@@ -59,7 +59,7 @@ from repositories.feedback_dataset_export_repository import FeedbackDatasetExpor
 from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampleRepo
 
 
-async def preview_for_user(
+async def preview_dataset_export_for_user(
     *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
 ) -> ExportPreview:
     dataset = await dataset_service.get_dataset_for_user(
@@ -110,7 +110,7 @@ async def preview_for_user(
     return await FeedbackDatasetExportRepo.save_preview(preview)
 
 
-async def publish_for_user(
+async def publish_dataset_export_for_user(
     *,
     user_id: str,
     dataset_id: str,
@@ -226,7 +226,7 @@ async def publish_for_user(
         raise FeedbackDatasetConflict(str(exc)) from exc
 
 
-async def list_for_user(
+async def list_dataset_exports_for_user(
     *, user_id: str, dataset_id: str, limit: int = 50, offset: int = 0
 ) -> DatasetExportListResult:
     await dataset_service.get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
@@ -238,7 +238,7 @@ async def list_for_user(
     return DatasetExportListResult(items=items, limit=limit, offset=offset)
 
 
-async def read_for_user(
+async def get_dataset_export_for_user(
     *, user_id: str, dataset_id: str, export_id: str
 ) -> DatasetExport:
     await dataset_service.get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
@@ -255,14 +255,14 @@ async def read_for_user(
     return export
 
 
-async def download_for_user(
+async def download_dataset_export_for_user(
     *,
     user_id: str,
     dataset_id: str,
     export_id: str,
     format: ExportFormat,
 ) -> tuple[DatasetExport, bytes, str, str]:
-    export = await read_for_user(
+    export = await get_dataset_export_for_user(
         user_id=user_id, dataset_id=dataset_id, export_id=export_id
     )
     if format == "jsonl":
@@ -495,9 +495,9 @@ def _schema_for_task(task_type: DatasetTaskType) -> str:
 __all__ = [
     "DatasetExportError",
     "DatasetExportListResult",
-    "preview_for_user",
-    "publish_for_user",
-    "list_for_user",
-    "read_for_user",
-    "download_for_user",
+    "preview_dataset_export_for_user",
+    "publish_dataset_export_for_user",
+    "list_dataset_exports_for_user",
+    "get_dataset_export_for_user",
+    "download_dataset_export_for_user",
 ]

@@ -213,7 +213,7 @@ async def preview_feedback_dataset_export(
     user_id: Annotated[str, Depends(get_current_user_id)],
     payload: DatasetExportPreviewRequest | None = None,
 ) -> Response:
-    preview = await dataset_export_service.preview_for_user(
+    preview = await dataset_export_service.preview_dataset_export_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
         sample_ids=payload.sample_ids if payload else None,
@@ -234,7 +234,7 @@ async def publish_feedback_dataset_export(
         alias="Idempotency-Key", min_length=1, max_length=128
     ),
 ) -> Response:
-    export = await dataset_export_service.publish_for_user(
+    export = await dataset_export_service.publish_dataset_export_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
         preview_id=payload.preview_id,
@@ -266,7 +266,7 @@ async def list_feedback_dataset_exports(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
-    result = await dataset_export_service.list_for_user(
+    result = await dataset_export_service.list_dataset_exports_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
         limit=limit,
@@ -292,7 +292,7 @@ async def download_feedback_dataset_export(
     format: Literal["json", "jsonl", "provenance", "manifest"] = Query(default="jsonl"),
 ) -> Response:
     export, payload, media_type, filename = (
-        await dataset_export_service.download_for_user(
+        await dataset_export_service.download_dataset_export_for_user(
             user_id=user_id,
             dataset_id=dataset_id,
             export_id=export_id,

@@ -570,8 +570,11 @@ Evidence, permission, or a Finding.
 
 ## Key Areas
 
-- `session_service.py`: owns session reads, source-context validation, turn
-  persistence, streaming, and approval execution.
+- `session_service.py`: `ChatSessionService` owns session reads, source-context
+  validation, turn persistence, streaming, and approval execution. The current
+  app owns its runner, model-call observer, and active stream tasks. Its shutdown
+  cancels and awaits those tasks before the database engine closes. Repository
+  access uses the concrete module instances directly.
 - `agent_runner.py`: runs the bounded model, capability, and continuation loop
   and reports `completed`, `approval_required`, or `failed`. Completion records
   why work stopped: a model answer, resource budget, repeated observations, or

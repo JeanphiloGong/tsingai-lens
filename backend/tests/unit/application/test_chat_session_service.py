@@ -145,14 +145,14 @@ def _service(
     model: _Model,
     repository: ChatRepository,
     *capabilities,
-) -> ModuleType:
+) -> chat_session_service.ChatSessionService:
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     chat_session_service.ChatRepo = repository
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry(tuple(capabilities))
     )
-    return chat_session_service
+    return chat_session_service.ChatSessionService(runner=runner)
 
 
 async def test_chat_session_service_persists_ordinary_conversation(
@@ -185,7 +185,7 @@ async def test_chat_session_access_uses_collection_owner_probe(
     await service.get_session_for_user(session.session_id, "user-1")
     await service.list_sessions_for_user(collection_id="col-1", user_id="user-1")
 
-    assert service.collection_service.full_reads == 0
+    assert chat_session_service.collection_service.full_reads == 0
 
 
 class _FailingAnalysisJobs:
@@ -200,11 +200,11 @@ async def test_feedback_is_saved_but_enqueue_failure_is_explicitly_retryable(
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
     chat_session_service.ChatRepo = repository
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=_Model(ModelTurn(content="answer")), capabilities=CapabilityRegistry(())
     )
     chat_session_service.AnalysisJobRepo = _FailingAnalysisJobs()
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     await repository.save_trajectory(
         chat_session=session,
@@ -313,11 +313,11 @@ async def test_selected_blocks_are_canonicalized_together_before_a_turn(
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = sources
     chat_session_service.ChatRepo = repository
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=_Model(ModelTurn(content="Check the measurement conditions.")),
         capabilities=CapabilityRegistry(()),
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     contexts = tuple(
         ChatSourceContext(
@@ -621,6 +621,53 @@ class _PausedResponseModel:
         return ModelTurn(content=self.first + self.second)
 
 
+async def test_chat_shutdown_keeps_another_apps_stream_running(
+    *, postgres_session_factory
+) -> None:
+    repository = ChatRepository()
+    first_model = _PausedResponseModel()
+    second_model = _PausedResponseModel()
+    first = _service(first_model, repository)
+    second = _service(second_model, repository)
+    first_session = await first.create_session(collection_id="col-1", user_id="user-1")
+    second_session = await second.create_session(collection_id="col-1", user_id="user-1")
+    first_stream = await first.send_message_stream(
+        first_session.session_id, "user-1", message="Explain matched tensile conditions."
+    )
+    second_stream = await second.send_message_stream(
+        second_session.session_id, "user-1", message="Explain the comparison context."
+    )
+    try:
+        async with asyncio.timeout(5):
+            for stream in (first_stream, second_stream):
+                async for event in stream:
+                    if event["type"] == "text_delta":
+                        break
+            assert first.model_call_observer is not second.model_call_observer
+            first_task, = first._active_stream_tasks
+            second_task, = second._active_stream_tasks
+            await first.close()
+            assert first_task.cancelled()
+            assert not second_task.done()
+            interrupted = await first.get_trajectory_for_user(
+                first_session.session_id, "user-1"
+            )
+            assert interrupted["response"].status == "interrupted"
+            second_model.continue_response.set()
+            second_model.finish_response.set()
+            await second_task
+            completed = await second.get_trajectory_for_user(
+                second_session.session_id, "user-1"
+            )
+            assert completed["response"].status == "completed"
+            assert completed["messages"][-1].content == second_model.first + second_model.second
+    finally:
+        await first.close()
+        await second.close()
+        await first_stream.aclose()
+        await second_stream.aclose()
+
+
 async def test_disconnected_response_restores_text_and_continues_with_the_same_message(
     *, postgres_session_factory
 ) -> None:
@@ -676,7 +723,7 @@ async def test_disconnected_response_restores_text_and_continues_with_the_same_m
     finally:
         model.continue_response.set()
         model.finish_response.set()
-        await asyncio.gather(*service.runner.active_stream_tasks, return_exceptions=True)
+        await asyncio.gather(*service._active_stream_tasks, return_exceptions=True)
 
 
 async def test_interrupted_response_keeps_partial_text_without_claiming_it_completed(
@@ -695,7 +742,7 @@ async def test_interrupted_response_keeps_partial_text_without_claiming_it_compl
         if event["type"] == "text_delta":
             break
     await original.aclose()
-    tasks = tuple(service.runner.active_stream_tasks)
+    tasks = tuple(service._active_stream_tasks)
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
@@ -765,7 +812,7 @@ async def test_interrupted_tool_call_is_aborted_and_the_session_can_resume(
     try:
         async with asyncio.timeout(5):
             await started.wait()
-        active = tuple(service.runner.active_stream_tasks)
+        active = tuple(service._active_stream_tasks)
         assert active
         for task in active:
             task.cancel()
@@ -1255,8 +1302,7 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = collection
     chat_session_service.SourceArtifactRepo = sources
-    chat_session_service.runner = runner
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     stream = await service.send_message_stream(
         session.session_id,

@@ -193,9 +193,7 @@ async def test_http_context_recovery_persists_trajectory_budget_and_provider_rea
                 model=OpenAIChatModel(client=client, model="offline-test"),
                 capabilities=CapabilityRegistry(()),
             )
-            fixture.service.model_call_observer = RepositoryModelCallObserver(
-                fixture.repository
-            )
+            fixture.service.model_call_observer = RepositoryModelCallObserver()
             browser = fixture.client
             path = f"/api/v1/chat-sessions/{session.session_id}"
             response = await browser.post(

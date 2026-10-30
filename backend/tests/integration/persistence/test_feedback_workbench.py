@@ -174,9 +174,9 @@ async def feedback_chain(postgres_session_factory, tmp_path):
     chat_session_service.collection_service = collection_service
     chat_session_service.SourceArtifactRepo = None
     chat_session_service.ChatRepo = chat
-    chat_session_service.runner = None
+    runner = None
     chat_session_service.AnalysisJobRepo = jobs
-    chat_service = chat_session_service
+    chat_service = chat_session_service.ChatSessionService(runner=runner)
     cases = FeedbackCaseRepository()
     feedback_case_service.FeedbackCaseRepo = cases
     feedback_case_service.ChatRepo = chat

@@ -10,6 +10,7 @@ import json
 import multiprocessing
 import os
 import socket
+from types import SimpleNamespace
 from contextlib import asynccontextmanager
 
 import pytest
@@ -75,10 +76,12 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
         chat_session_service.collection_service = collection_service
         chat_session_service.SourceArtifactRepo = sources
         chat_session_service.ChatRepo = ChatRepository()
-        chat_session_service.runner = ResearchAgentRunner(
+        runner = ResearchAgentRunner(
             model=_ProcessPausedModel(resume, finish, calls), capabilities=CapabilityRegistry(()),
         )
+        service = chat_session_service.ChatSessionService(runner=runner)
         app = FastAPI()
+        app.state.runtime = SimpleNamespace(chat_session_service=service)
         app.add_exception_handler(ProjectException, project_exception_handler)
         app.include_router(router, prefix="/api/v1")
         server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
@@ -98,9 +101,9 @@ def _worker(database_url, listener, ready, stop, resume, finish, calls, active_t
             try:
                 await asyncio.wait_for(task, 10)
                 await asyncio.wait_for(
-                    asyncio.gather(*chat_session_service.runner.active_stream_tasks), 10,
+                    asyncio.gather(*service._active_stream_tasks), 10,
                 )
-                active_tasks.value = len(chat_session_service.runner.active_stream_tasks)
+                active_tasks.value = len(service._active_stream_tasks)
             finally:
                 await engine.dispose()
                 ready.close()

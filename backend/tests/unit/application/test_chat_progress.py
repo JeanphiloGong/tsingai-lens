@@ -6,6 +6,7 @@ from application.chat.agent_runner import (
     AgentRunResult,
     AgentRunStatus,
 )
+from application.chat import session_service as chat_session_service
 from repositories.chat_repository import ChatRepository
 from tests.support.postgres import seed_collection
 from tests.unit.application.test_chat_session_service import _Model, _service
@@ -67,9 +68,9 @@ async def test_heartbeat_preserves_research_phase_and_completed_counts(
         release.set()
         remaining = await asyncio.wait_for(finish_turn(), 5)
     assert remaining[-1]["type"] == "turn"
-    snapshot = await service.ChatRepo.read_response_snapshot(session.session_id)
+    snapshot = await chat_session_service.ChatRepo.read_response_snapshot(session.session_id)
     assert snapshot.status == "completed"
-    assert not await service.ChatRepo.is_session_running(session.session_id)
+    assert not await chat_session_service.ChatRepo.is_session_running(session.session_id)
 
 
 @pytest.fixture(autouse=True)

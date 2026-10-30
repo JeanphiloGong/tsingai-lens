@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -221,8 +222,10 @@ class _Service:
 
 
 def _request(service: _Service, user_id: str = "user-1") -> SimpleNamespace:
-    sessions_controller.chat_session_service = service
     return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(runtime=SimpleNamespace(chat_session_service=service))
+        ),
         state=SimpleNamespace(current_user={"user_id": user_id}), headers={}
     )
 
@@ -236,6 +239,7 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
             (
                 asyncio.run(
                     sessions_controller.create_chat_session(
+                        request=request,
                         payload=ChatSessionCreateRequest(collection_id="col-1"),
                         user_id=request.state.current_user["user_id"],
                     )
@@ -248,6 +252,7 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
             (
                 asyncio.run(
                     sessions_controller.get_chat_session(
+                        request=request,
                         session_id="chat-1",
                         user_id=request.state.current_user["user_id"],
                     )
@@ -274,6 +279,7 @@ def test_chat_sessions_api_creates_reads_and_posts_ordinary_chat() -> None:
             (
                 asyncio.run(
                     sessions_controller.list_chat_messages(
+                        request=request,
                         session_id="chat-1",
                         user_id=request.state.current_user["user_id"],
                     )
@@ -296,6 +302,7 @@ def test_chat_sessions_api_lists_owned_collection_sessions() -> None:
             (
                 asyncio.run(
                     sessions_controller.list_chat_sessions(
+                        request=_request(_Service()),
                         user_id=_request(_Service()).state.current_user["user_id"],
                         collection_id="col-1",
                         limit=12,
@@ -345,6 +352,7 @@ def test_chat_history_title_is_a_bounded_first_question(
             (
                 asyncio.run(
                     sessions_controller.list_chat_sessions(
+                        request=_request(service),
                         user_id=_request(service).state.current_user["user_id"],
                         collection_id="col-1",
                         limit=12,
@@ -485,6 +493,7 @@ def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
                 (
                     asyncio.run(
                         sessions_controller.get_chat_session(
+                            request=_request(service, "user-2"),
                             session_id="chat-1",
                             user_id=_request(service, "user-2").state.current_user[
                                 "user_id"
@@ -503,6 +512,7 @@ def test_chat_sessions_api_hides_other_user_and_maps_digest_conflict() -> None:
                 (
                     asyncio.run(
                         sessions_controller.decide_chat_tool_call(
+                            request=_request(service),
                             session_id="chat-1",
                             tool_call_id="call-1",
                             payload=ChatToolDecisionRequest(
@@ -561,7 +571,6 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
 ) -> None:
     service = _Service()
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
-    monkeypatch.setattr(sessions_controller, "chat_session_service", service)
     monkeypatch.setattr(
         "application.auth.session_service.resolve_session",
         _AuthService().resolve_session,
@@ -574,6 +583,7 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn(
     app = create_app()
 
     with TestClient(app) as client:
+        app.state.runtime = replace(app.state.runtime, chat_session_service=service)
         response = client.post("/api/v1/chat-sessions", json={"collection_id": "col-1"})
         assert response.status_code == 200
         assert response.json()["code"] == 200301
@@ -599,7 +609,6 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
 ) -> None:
     service = _Service()
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
-    monkeypatch.setattr(sessions_controller, "chat_session_service", service)
     monkeypatch.setattr(
         "application.auth.session_service.resolve_session",
         _AuthService().resolve_session,
@@ -612,6 +621,7 @@ def test_chat_message_route_streams_text_then_the_persisted_turn(
     app = create_app()
 
     with TestClient(app) as client:
+        app.state.runtime = replace(app.state.runtime, chat_session_service=service)
         client.cookies.set("lens_session", "browser-session")
         response = client.post(
             "/api/v1/chat-sessions/chat-1/messages",
@@ -647,7 +657,6 @@ def test_title_route_validates_input_and_hides_unowned_sessions(
         service.create_session(collection_id="col-1", user_id="user-1")
     )
     pipeline_run_service.PipelineRunRepo = PipelineRunRepository()
-    monkeypatch.setattr(sessions_controller, "chat_session_service", service)
     monkeypatch.setattr(
         "application.auth.session_service.resolve_session",
         _AuthService().resolve_session,

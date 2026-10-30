@@ -102,14 +102,14 @@ class _Jobs:
         return 1
 
 
-def _service(chat: _Chat, jobs: _Jobs) -> ModuleType:
+def _service(chat: _Chat, jobs: _Jobs) -> chat_session_service.ChatSessionService:
     chat_session_service.collection_service = _Collections()
     chat_session_service.CollectionRepo = _Collections()
     chat_session_service.SourceArtifactRepo = object()
     chat_session_service.ChatRepo = chat
-    chat_session_service.runner = None
+    runner = None
     chat_session_service.AnalysisJobRepo = jobs
-    return chat_session_service
+    return chat_session_service.ChatSessionService(runner=runner)
 
 
 async def test_feedback_version_is_the_idempotent_analysis_job_identity() -> None:

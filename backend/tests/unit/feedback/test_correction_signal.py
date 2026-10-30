@@ -507,9 +507,9 @@ async def test_chat_turn_trigger_requires_adjacent_final_answer_and_deduplicates
     chat_session_service.collection_service = SimpleNamespace()
     chat_session_service.SourceArtifactRepo = SimpleNamespace()
     chat_session_service.ChatRepo = SimpleNamespace()
-    chat_session_service.runner = SimpleNamespace()
+    runner = SimpleNamespace()
     chat_session_service.AnalysisJobRepo = _SignalJobs()
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     result = AgentRunResult(
         status=AgentRunStatus.COMPLETED,
         messages=messages

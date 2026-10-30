@@ -161,7 +161,7 @@ def test_app_lifespan_uses_shared_module_dependencies(
             for service in collection_consumers
         )
         capability_names = {
-            spec.name for spec in chat_session_service.runner.capabilities.specs
+            spec.name for spec in client.app.state.runtime.chat_session_service.runner.capabilities.specs
         }
         assert {
             "get_collection_context",

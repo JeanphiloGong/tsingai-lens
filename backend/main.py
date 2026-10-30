@@ -6,7 +6,6 @@ from time import perf_counter
 
 from application.auth import session_service as auth_session_service
 from application.chat import AgentRunLimits, CapabilityRegistry, ResearchAgentRunner
-from application.chat import session_service as chat_session_service
 from application.chat.capabilities import (
     AssessObjectiveQualityCapability,
     BrowseCollectionPapersCapability,
@@ -37,7 +36,7 @@ from application.chat.capabilities import (
     StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
-from application.chat.session_service import RepositoryModelCallObserver
+from application.chat.session_service import ChatSessionService
 from application.core.objectives.objective_discovery_service import ObjectiveDiscoveryService
 from application.core.objectives import analysis_service as objective_analysis_service
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
@@ -185,12 +184,14 @@ class ApplicationRuntime:
     objective_discovery_service: ObjectiveDiscoveryService
     document_preparation_service: DocumentPreparationService
     objective_analysis_service: ObjectiveAnalysisService
+    chat_session_service: ChatSessionService
     feedback_analysis_worker: FeedbackAnalysisWorker
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker
     tool_failure_analysis_worker: ToolFailureAnalysisWorker
     dataset_sample_build_worker: DatasetSampleBuildWorker
 
     async def close(self) -> None:
+        await self.chat_session_service.close()
         await self.objective_discovery_service.close()
         await self.document_preparation_service.close()
         await self.objective_analysis_service.close()
@@ -210,8 +211,7 @@ async def build_application_runtime() -> ApplicationRuntime:
     try:
         await auth_session_service.ensure_bootstrap_user()
         chat_model = OpenAIChatModel()
-        chat_session_service.model_call_observer = RepositoryModelCallObserver(ChatRepo)
-        chat_session_service.runner = ResearchAgentRunner(
+        runner = ResearchAgentRunner(
             model=chat_model,
             limits=_parse_agent_run_limits(),
             capabilities=CapabilityRegistry(
@@ -344,6 +344,7 @@ async def build_application_runtime() -> ApplicationRuntime:
             objective_discovery_service=ObjectiveDiscoveryService(),
             document_preparation_service=preparation,
             objective_analysis_service=analysis,
+            chat_session_service=ChatSessionService(runner=runner),
             feedback_analysis_worker=FeedbackAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,

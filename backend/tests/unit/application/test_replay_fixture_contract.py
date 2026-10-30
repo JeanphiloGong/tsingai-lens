@@ -161,10 +161,10 @@ async def test_replay_uses_service_permission_and_exact_approval(
     chat_session_service.ChatRepo = repo
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((write,))
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     case = {
         "id": "S21",
         "collection_id": "col-1",

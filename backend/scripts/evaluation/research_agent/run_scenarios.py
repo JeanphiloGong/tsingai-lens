@@ -313,11 +313,11 @@ async def run(args):
             "fixture scientific snapshot differs; verify imported data first"
         )
     # Import composition only after selecting the isolated database.
-    from application.chat import session_service as chat_session_service
     from application.chat.model import RESEARCH_AGENT_PROMPT_VERSION
     from main import build_application_runtime
 
     runtime = await build_application_runtime()
+    chat_session_service = runtime.chat_session_service
     try:
         report = {
             "implementation_revision": subprocess.check_output(

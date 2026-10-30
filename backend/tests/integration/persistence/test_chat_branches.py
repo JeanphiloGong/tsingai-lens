@@ -270,13 +270,13 @@ async def branch_app(postgres_session_factory, tmp_path):
     chat_session_service.collection_service = collection_service
     chat_session_service.SourceArtifactRepo = sources
     chat_session_service.ChatRepo = repository
-    chat_session_service.runner = runner
     collection_service.CollectionRepo = collections
     collection_service.workspace = FileCollectionWorkspace(tmp_path)
     collection_service.root_dir = collection_service.workspace.root_dir
     collection_service.object_store = FileObjectStore(collection_service.root_dir)
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     app = FastAPI()
+    app.state.runtime = SimpleNamespace(chat_session_service=service)
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
@@ -850,7 +850,7 @@ async def test_disconnected_stream_keeps_the_turn_busy_until_durable_completion(
     finally:
         release.set()
         await asyncio.wait_for(
-            asyncio.gather(*app.service.runner.active_stream_tasks), timeout=5
+            asyncio.gather(*app.service._active_stream_tasks), timeout=5
         )
     saved = (await app.client.get(f"{BASE}/{branch['session_id']}/messages")).json()[
         "data"

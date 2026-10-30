@@ -41,7 +41,7 @@ Chat runner and model-call observer, and constructs background worker resources.
 Repositories expose concrete singletons beside their implementations. Controllers
 import stateless application operations directly. Components that own live tasks
 belong to the current app's `ApplicationRuntime`: discovery, document preparation,
-and Objective analysis admission use their runtime instances. Shutdown cancels
+Objective analysis, and Chat use their runtime instances. Shutdown cancels
 and awaits those instances' tasks before
 disposing the engine. The runtime also constructs file resources and background
 workers. Startup recovers interrupted preparation, discovery, and analysis.

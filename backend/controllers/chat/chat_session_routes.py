@@ -8,7 +8,6 @@ from collections.abc import AsyncIterator
 from dataclasses import asdict
 from typing import Annotated, Any, Mapping
 
-from application.chat import session_service as chat_session_service
 from application.chat.inline_citations import format_message_citations
 from application.chat.session_service import ChatSourceContextError
 from controllers.chat.schemas import (
@@ -50,27 +49,31 @@ chat_session_router = APIRouter(prefix="/chat-sessions", tags=["chat-sessions"])
     "/{session_id}/permissions", response_model=ApiResponse[ChatPermissionResponse]
 )
 async def get_chat_permission(
+    request: Request,
     session_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ):
     return make_api_response(
-        data=await chat_session_service.get_permission_for_user(session_id, user_id)
+        data=await request.app.state.runtime.chat_session_service.get_permission_for_user(session_id, user_id)
     )
+
 
 
 @chat_session_router.put(
     "/{session_id}/permissions", response_model=ApiResponse[ChatPermissionResponse]
 )
 async def set_chat_permission(
+    request: Request,
     session_id: str,
     payload: ChatPermissionRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ):
     return make_api_response(
-        data=await chat_session_service.set_permission_for_user(
+        data=await request.app.state.runtime.chat_session_service.set_permission_for_user(
             session_id, user_id, **payload.model_dump()
         )
     )
+
 
 
 @chat_session_router.get(
@@ -79,12 +82,13 @@ async def set_chat_permission(
     summary="List owned Chat sessions",
 )
 async def list_chat_sessions(
+    request: Request,
     user_id: Annotated[str, Depends(get_current_user_id)],
     collection_id: str = Query(min_length=1, max_length=64),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
-    sessions = await chat_session_service.list_sessions_for_user(
+    sessions = await request.app.state.runtime.chat_session_service.list_sessions_for_user(
         collection_id=collection_id,
         user_id=user_id,
         limit=limit,
@@ -102,6 +106,7 @@ async def list_chat_sessions(
     )
 
 
+
 @chat_session_router.post(
     "",
     response_model=ApiResponse[ChatSessionResponse],
@@ -109,10 +114,11 @@ async def list_chat_sessions(
     summary="Create a collection-bound Research Agent Chat session",
 )
 async def create_chat_session(
+    request: Request,
     payload: ChatSessionCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    session = await chat_session_service.create_session(
+    session = await request.app.state.runtime.chat_session_service.create_session(
         collection_id=payload.collection_id,
         user_id=user_id,
     )
@@ -121,16 +127,18 @@ async def create_chat_session(
     )
 
 
+
 @chat_session_router.get(
     "/{session_id}",
     response_model=ApiResponse[ChatSessionResponse],
     summary="Read one owned Research Agent Chat session",
 )
 async def get_chat_session(
+    request: Request,
     session_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    session = await chat_session_service.get_session_for_user(
+    session = await request.app.state.runtime.chat_session_service.get_session_for_user(
         session_id,
         user_id,
     )
@@ -139,17 +147,19 @@ async def get_chat_session(
     )
 
 
+
 @chat_session_router.put(
     "/{session_id}/pin",
     response_model=ApiResponse[ChatSessionResponse],
     summary="Pin or unpin one owned Chat session",
 )
 async def set_chat_session_pin(
+    request: Request,
     session_id: str,
     payload: ChatSessionPinRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    session = await chat_session_service.set_session_pin_for_user(
+    session = await request.app.state.runtime.chat_session_service.set_session_pin_for_user(
         session_id,
         user_id,
         is_pinned=payload.is_pinned,
@@ -159,17 +169,19 @@ async def set_chat_session_pin(
     )
 
 
+
 @chat_session_router.put(
     "/{session_id}/title",
     response_model=ApiResponse[ChatSessionResponse],
     summary="Rename one owned Chat session",
 )
 async def set_chat_session_title(
+    request: Request,
     session_id: str,
     payload: ChatSessionTitleRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    session = await chat_session_service.set_session_title_for_user(
+    session = await request.app.state.runtime.chat_session_service.set_session_title_for_user(
         session_id,
         user_id,
         title=payload.title,
@@ -179,6 +191,7 @@ async def set_chat_session_title(
     )
 
 
+
 @chat_session_router.delete(
     "/{session_id}",
     status_code=200,
@@ -186,10 +199,12 @@ async def set_chat_session_title(
     response_model=ApiResponse[dict],
 )
 async def delete_chat_session(
+    request: Request,
     session_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
 ) -> Response:
-    await chat_session_service.delete_session_for_user(session_id, user_id)
+    await request.app.state.runtime.chat_session_service.delete_session_for_user(session_id, user_id)
     return make_api_response()
+
 
 
 @chat_session_router.post(
@@ -198,11 +213,12 @@ async def delete_chat_session(
     status_code=200,
 )
 async def branch_chat_message(
+    request: Request,
     session_id: str,
     payload: ChatBranchRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    session = await chat_session_service.branch_message_for_user(
+    session = await request.app.state.runtime.chat_session_service.branch_message_for_user(
         session_id,
         payload.message_id,
         user_id,
@@ -215,13 +231,15 @@ async def branch_chat_message(
     )
 
 
+
 @chat_session_router.get(
     "/{session_id}/tree", response_model=ApiResponse[ChatTreeResponse]
 )
 async def get_chat_tree(
+    request: Request,
     session_id: str, user_id: Annotated[str, Depends(get_current_user_id)]
 ) -> Response:
-    tree = await chat_session_service.get_tree_for_user(
+    tree = await request.app.state.runtime.chat_session_service.get_tree_for_user(
         session_id,
         user_id,
     )
@@ -244,17 +262,20 @@ async def get_chat_tree(
     )
 
 
+
 @chat_session_router.get(
     "/{session_id}/messages",
     response_model=ApiResponse[ChatMessageListResponse],
     summary="List one owned Chat trajectory",
 )
 async def list_chat_messages(
+    request: Request,
     session_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    trajectory = await chat_session_service.get_trajectory_for_user(session_id, user_id)
+    trajectory = await request.app.state.runtime.chat_session_service.get_trajectory_for_user(session_id, user_id)
     return make_api_response(data=_trajectory_response(trajectory))
+
 
 
 @chat_session_router.get(
@@ -263,12 +284,13 @@ async def list_chat_messages(
     summary="List exact provider calls for an owned Chat session",
 )
 async def list_chat_model_calls(
+    request: Request,
     session_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
-    calls = await chat_session_service.list_model_calls_for_user(
+    calls = await request.app.state.runtime.chat_session_service.list_model_calls_for_user(
         session_id,
         user_id,
         limit=limit,
@@ -288,17 +310,19 @@ async def list_chat_model_calls(
     )
 
 
+
 @chat_session_router.get(
     "/{session_id}/model-calls/{call_id}",
     response_model=ApiResponse[ChatModelCallResponse],
     summary="Read one exact provider call for an owned Chat session",
 )
 async def get_chat_model_call(
+    request: Request,
     session_id: str,
     call_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    call = await chat_session_service.get_model_call_for_user(
+    call = await request.app.state.runtime.chat_session_service.get_model_call_for_user(
         session_id,
         call_id,
         user_id,
@@ -308,16 +332,18 @@ async def get_chat_model_call(
     )
 
 
+
 @chat_session_router.get(
     "/{session_id}/events",
     summary="Resume updates for one owned Research Agent response",
 )
 async def stream_chat_updates(
+    request: Request,
     session_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     response_id: str = Query(min_length=1, max_length=128),
 ) -> Response:
-    events = await chat_session_service.stream_updates_for_user(
+    events = await request.app.state.runtime.chat_session_service.stream_updates_for_user(
         session_id,
         user_id,
         response_id=response_id,
@@ -327,6 +353,7 @@ async def stream_chat_updates(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
 
 
 def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListResponse:
@@ -370,12 +397,13 @@ def _trajectory_response(trajectory: Mapping[str, Any]) -> ChatMessageListRespon
     summary="Set or withdraw usefulness feedback on an owned assistant answer",
 )
 async def set_chat_message_feedback(
+    request: Request,
     session_id: str,
     message_id: str,
     payload: ChatMessageFeedbackRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    feedback = await chat_session_service.set_message_feedback_for_user(
+    feedback = await request.app.state.runtime.chat_session_service.set_message_feedback_for_user(
         session_id,
         message_id,
         user_id,
@@ -386,6 +414,7 @@ async def set_chat_message_feedback(
     return make_api_response(
         data=ChatMessageFeedbackResponse.model_validate(feedback) if feedback else None
     )
+
 
 
 @chat_session_router.post(
@@ -401,7 +430,7 @@ async def send_chat_message(
 ) -> Response:
     source_contexts = _map_source_contexts(payload)
     if "text/event-stream" in request.headers.get("accept", ""):
-        events = await chat_session_service.send_message_stream(
+        events = await request.app.state.runtime.chat_session_service.send_message_stream(
             session_id,
             user_id,
             message=payload.message,
@@ -417,7 +446,7 @@ async def send_chat_message(
                 "X-Accel-Buffering": "no",
             },
         )
-    turn = await chat_session_service.send_message(
+    turn = await request.app.state.runtime.chat_session_service.send_message(
         session_id,
         user_id,
         message=payload.message,
@@ -426,6 +455,7 @@ async def send_chat_message(
         branch_revision=payload.branch_revision,
     )
     return make_api_response(data=_turn_response(turn))
+
 
 
 def _map_source_contexts(
@@ -505,12 +535,13 @@ async def _chat_event_stream(
     summary="Approve or reject one exact Research Agent write call",
 )
 async def decide_chat_tool_call(
+    request: Request,
     session_id: str,
     tool_call_id: str,
     payload: ChatToolDecisionRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    turn = await chat_session_service.decide_tool_call_for_user(
+    turn = await request.app.state.runtime.chat_session_service.decide_tool_call_for_user(
         session_id,
         tool_call_id,
         user_id,
@@ -518,6 +549,7 @@ async def decide_chat_tool_call(
         decision=payload.decision,
     )
     return make_api_response(data=_turn_response(turn))
+
 
 
 def _turn_response(turn: Mapping[str, Any]) -> ChatTurnResponse:

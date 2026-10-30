@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from application.chat import (
@@ -60,10 +61,10 @@ async def test_session_permission_controls_actual_write(
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((write,))
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     permission = await repository.set_permission(
         session.session_id,
@@ -120,7 +121,7 @@ async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
                 tool_calls=(
@@ -134,7 +135,7 @@ async def test_automatic_grant_is_not_reinterpreted_from_user_phrases(
         ),
         capabilities=CapabilityRegistry((write,)),
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     await repository.set_permission(
         session.session_id,
@@ -224,10 +225,10 @@ async def test_each_automatic_write_rechecks_current_permission(
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=model, capabilities=CapabilityRegistry((finding_write, plan_write))
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     await repository.set_permission(
         session.session_id,
@@ -285,13 +286,16 @@ async def test_permission_controller_enforces_owner_and_revision(
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = _CollectionService()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=_Model(), capabilities=CapabilityRegistry(())
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(
+        runtime=SimpleNamespace(chat_session_service=service)
+    )))
     session = await service.create_session(collection_id="col-1", user_id="user-1")
     assert (
-        json.loads((await get_chat_permission(session.session_id, "user-1")).body)[
+        json.loads((await get_chat_permission(request, session.session_id, "user-1")).body)[
             "data"
         ]["mode"]
         == "confirm"
@@ -299,19 +303,19 @@ async def test_permission_controller_enforces_owner_and_revision(
     payload = ChatPermissionRequest(mode="read_only", expected_revision=0)
     assert (
         json.loads(
-            (await set_chat_permission(session.session_id, payload, "user-1")).body
+            (await set_chat_permission(request, session.session_id, payload, "user-1")).body
         )["data"]["revision"]
         == 1
     )
     with pytest.raises(ResourceConflictException) as conflict:
-        await set_chat_permission(session.session_id, payload, "user-1")
+        await set_chat_permission(request, session.session_id, payload, "user-1")
     assert conflict.value.code == 200204
     with pytest.raises(ResourceNotFoundException) as forbidden:
-        await get_chat_permission(session.session_id, "another-user")
+        await get_chat_permission(request, session.session_id, "another-user")
     assert forbidden.value.code == 200201
     fresh = await service.create_session(collection_id="col-1", user_id="user-1")
     assert (
-        json.loads((await get_chat_permission(fresh.session_id, "user-1")).body)[
+        json.loads((await get_chat_permission(request, fresh.session_id, "user-1")).body)[
             "data"
         ]["mode"]
         == "confirm"
@@ -364,10 +368,10 @@ async def test_new_session_inherits_collection_default_permission(
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = _CollectionDefaults()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=_Model(), capabilities=CapabilityRegistry(())
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
 
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
@@ -398,10 +402,10 @@ async def test_collection_read_only_default_is_applied_before_runner_tool_select
     chat_session_service.ChatRepo = repository
     chat_session_service.collection_service = _CollectionDefaults()
     chat_session_service.SourceArtifactRepo = SourceArtifactRepository()
-    chat_session_service.runner = ResearchAgentRunner(
+    runner = ResearchAgentRunner(
         model=_Model(), capabilities=CapabilityRegistry(())
     )
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     session = await service.create_session(collection_id="col-1", user_id="user-1")
 
     assert (

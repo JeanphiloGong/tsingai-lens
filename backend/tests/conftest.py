@@ -247,8 +247,6 @@ def _isolate_application_module_dependencies(monkeypatch):
                 "CollectionRepo",
                 "SourceArtifactRepo",
                 "collection_service",
-                "model_call_observer",
-                "runner",
             ],
         ),
         (

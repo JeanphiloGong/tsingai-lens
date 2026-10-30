@@ -63,9 +63,10 @@ writes; callers pass the actor's user ID explicitly. Stateless operations do not
 need service objects or forwarding interfaces. Runtime components with live
 tasks belong to `ApplicationRuntime`; controllers obtain those components from
 their own app's runtime. `ObjectiveDiscoveryService`,
-`DocumentPreparationService`, and `ObjectiveAnalysisService` retain their own
-admitted tasks and cancel and await them on shutdown. Workers and the Agent runner
-retain their actual execution state and lifecycle.
+`DocumentPreparationService`, `ObjectiveAnalysisService`, and `ChatSessionService`
+retain their own admitted tasks and cancel and await them on shutdown. Chat keeps
+its existing session operations on the runtime owner alongside its runner and
+model-call observer. Workers retain their actual execution state and lifecycle.
 
 External formats are parsed at their input boundary. An expected missing
 resource, invalid decision, stale version, or write conflict is reported by its

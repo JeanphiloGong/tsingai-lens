@@ -164,13 +164,14 @@ async def feedback_app(postgres_session_factory, tmp_path):
     chat_session_service.collection_service = collection_service
     chat_session_service.SourceArtifactRepo = None
     chat_session_service.ChatRepo = repository
-    chat_session_service.runner = None
+    runner = None
     collection_service.CollectionRepo = collections
     collection_service.workspace = FileCollectionWorkspace(tmp_path)
     collection_service.root_dir = collection_service.workspace.root_dir
     collection_service.object_store = FileObjectStore(collection_service.root_dir)
-    service = chat_session_service
+    service = chat_session_service.ChatSessionService(runner=runner)
     app = FastAPI()
+    app.state.runtime = SimpleNamespace(chat_session_service=service)
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)

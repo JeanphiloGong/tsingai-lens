@@ -97,13 +97,13 @@ async def test_listing_does_not_create_datasets_or_collect_withdrawn_cases() -> 
     dataset_service.FeedbackCaseRepo = UnreadCases()
     service = dataset_service
     assert (
-        await service.list_records_for_user(
+        await service.list_dataset_records_for_user(
             user_id="user-1", collection_id="collection-1"
         )
         == ()
     )
     assert (
-        await service.list_records_for_user(
+        await service.list_dataset_records_for_user(
             user_id="user-1", collection_id="collection-1", offset=1
         )
         == ()
@@ -127,7 +127,7 @@ async def test_collect_reports_source_changed_during_transaction_as_conflict():
     dataset_service.FeedbackCaseRepo = _Cases(_source_case())
     service = dataset_service
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name="SFT",
@@ -136,7 +136,7 @@ async def test_collect_reports_source_changed_during_transaction_as_conflict():
         )
     ).dataset
     with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
-        await service.collect_cases_for_user(
+        await service.collect_dataset_cases_for_user(
             user_id="user-1", dataset_id=dataset.dataset_id, source_case_ids=("case-1",)
         )
 
@@ -186,7 +186,7 @@ async def test_needs_input_can_save_its_first_complete_human_revision(
     dataset_service.FeedbackCaseRepo = _Cases(case)
     service = dataset_service
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name="SFT",
@@ -213,7 +213,7 @@ async def test_needs_input_can_save_its_first_complete_human_revision(
         "target": excerpt,
         "evidence": [{"document_title": "B", "text": excerpt}],
     }
-    saved = await service.update_sample(
+    saved = await service.update_dataset_sample(
         user_id="user-1",
         dataset_id=dataset.dataset_id,
         sample_id="sample-1",
@@ -241,7 +241,7 @@ async def test_needs_input_can_save_its_first_complete_human_revision(
         assert "source_ref" not in record
         assert samples.revision.provenance["source_refs"] == []
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
-        await service.update_sample(
+        await service.update_dataset_sample(
             user_id="user-1",
             dataset_id=dataset.dataset_id,
             sample_id="sample-1",
@@ -265,7 +265,7 @@ async def test_create_dataset_has_own_identity_and_fixed_sft_type() -> None:
     service = dataset_service
 
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name="  Preheating corrections  ",
@@ -280,7 +280,7 @@ async def test_create_dataset_has_own_identity_and_fixed_sft_type() -> None:
     assert dataset.task_type == "sft"
     assert dataset.spec_version == 1
     assert (
-        await service.read_for_user(user_id="user-1", dataset_id=dataset.dataset_id)
+        await service.get_dataset_for_user(user_id="user-1", dataset_id=dataset.dataset_id)
         == dataset
     )
 
@@ -292,7 +292,7 @@ async def test_reused_request_rules_cannot_change_saved_spec() -> None:
     service = dataset_service
     spec = {"source_filter": {"kinds": ["feedback_case"]}}
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name="SFT",
@@ -313,7 +313,7 @@ async def test_create_allows_task_types_and_rejects_credentials() -> None:
     service = dataset_service
 
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name="Preference",
@@ -325,7 +325,7 @@ async def test_create_allows_task_types_and_rejects_credentials() -> None:
     with pytest.raises(
         FeedbackDatasetError, match="construction_spec_contains_credential"
     ):
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name="SFT",
@@ -340,7 +340,7 @@ async def test_collection_scope_and_pagination_are_enforced() -> None:
     dataset_service.FeedbackDatasetRepo = repository
     dataset_service.collection_service = _Collections()
     service = dataset_service
-    await service.create_for_user(
+    await service.create_dataset_for_user(
         user_id="user-1",
         collection_id="collection-1",
         name="One",
@@ -349,11 +349,11 @@ async def test_collection_scope_and_pagination_are_enforced() -> None:
     )
 
     with pytest.raises(FileNotFoundError):
-        await service.list_records_for_user(
+        await service.list_dataset_records_for_user(
             user_id="user-2", collection_id="collection-1"
         )
     with pytest.raises(FeedbackDatasetError, match="pagination_invalid"):
-        await service.list_records_for_user(
+        await service.list_dataset_records_for_user(
             user_id="user-1", collection_id="collection-1", limit=0
         )
 
@@ -372,7 +372,7 @@ async def test_dataset_service_rejects_invalid_input(name, task_type, code) -> N
     dataset_service.collection_service = _Collections()
     service = dataset_service
     with pytest.raises(FeedbackDatasetError, match=code):
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name=name,
@@ -390,7 +390,7 @@ async def test_collect_cases_creates_one_pending_sample_job_and_is_explicit() ->
     dataset_service.FeedbackCaseRepo = _Cases(_source_case())
     service = dataset_service
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id="user-1",
             collection_id="collection-1",
             name="SFT",
@@ -399,7 +399,7 @@ async def test_collect_cases_creates_one_pending_sample_job_and_is_explicit() ->
         )
     ).dataset
 
-    collected = await service.collect_cases_for_user(
+    collected = await service.collect_dataset_cases_for_user(
         user_id="user-1",
         dataset_id=dataset.dataset_id,
         source_case_ids=("case-1",),

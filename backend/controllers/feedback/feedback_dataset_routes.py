@@ -158,7 +158,7 @@ async def create_feedback_dataset(
     payload: TaskDatasetCreateRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    record = await dataset_service.create_for_user(
+    record = await dataset_service.create_dataset_for_user(
         user_id=user_id,
         collection_id=payload.collection_id,
         name=payload.name,
@@ -175,7 +175,7 @@ async def list_feedback_datasets(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
-    datasets = await dataset_service.list_records_for_user(
+    datasets = await dataset_service.list_dataset_records_for_user(
         user_id=user_id,
         collection_id=collection_id,
         limit=limit,
@@ -197,7 +197,7 @@ async def get_feedback_dataset(
     dataset_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    record = await dataset_service.read_record_for_user(
+    record = await dataset_service.read_dataset_record_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
     )
@@ -324,7 +324,7 @@ async def list_dataset_samples(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> Response:
-    result = await dataset_service.list_samples_for_user(
+    result = await dataset_service.list_dataset_samples_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
         status=status_filter,
@@ -353,7 +353,7 @@ async def get_dataset_sample(
     sample_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    result = await dataset_service.read_sample_for_user(
+    result = await dataset_service.get_dataset_sample_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
         sample_id=sample_id,
@@ -424,7 +424,7 @@ async def update_dataset_sample(
         raise RequestInvalidException(
             str(exc), data={"code": "sample_content_invalid"}
         ) from exc
-    result = await dataset_service.update_sample(
+    result = await dataset_service.update_dataset_sample(
         user_id=user_id,
         dataset_id=dataset_id,
         sample_id=sample_id,
@@ -447,7 +447,7 @@ async def confirm_dataset_sample(
     payload: SampleConfirmRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    result = await dataset_service.confirm_sample(
+    result = await dataset_service.confirm_dataset_sample(
         user_id=user_id,
         dataset_id=dataset_id,
         sample_id=sample_id,
@@ -471,7 +471,7 @@ async def act_on_dataset_sample(
         alias="Idempotency-Key", min_length=1, max_length=128
     ),
 ) -> Response:
-    result = await dataset_service.apply_sample_action_for_user(
+    result = await dataset_service.apply_dataset_sample_action_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
         sample_id=sample_id,
@@ -495,7 +495,7 @@ async def collect_feedback_cases(
     payload: DatasetCollectionRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    result = await dataset_service.collect_cases_for_user(
+    result = await dataset_service.collect_dataset_cases_for_user(
         user_id=user_id,
         dataset_id=dataset_id,
         source_case_ids=tuple(payload.source_case_ids),

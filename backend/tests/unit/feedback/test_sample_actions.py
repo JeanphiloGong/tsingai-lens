@@ -105,7 +105,7 @@ def _service(samples: _Samples) -> ModuleType:
 
 async def test_rebuild_creates_new_generation_and_review_note() -> None:
     samples = _Samples(_sample())
-    result = await _service(samples).apply_sample_action_for_user(
+    result = await _service(samples).apply_dataset_sample_action_for_user(
         user_id="user-1",
         dataset_id="fdset-1",
         sample_id="sample-1",
@@ -131,7 +131,7 @@ async def test_service_surfaces_concurrent_generation_change() -> None:
 
     samples = _RacingSamples(_sample())
     with pytest.raises(FeedbackDatasetConflict, match="sample_revision_stale"):
-        await _service(samples).apply_sample_action_for_user(
+        await _service(samples).apply_dataset_sample_action_for_user(
             user_id="user-1",
             dataset_id="fdset-1",
             sample_id="sample-1",

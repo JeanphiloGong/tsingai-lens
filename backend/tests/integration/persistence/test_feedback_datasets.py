@@ -100,7 +100,7 @@ async def test_feedback_analysis_worker_auto_creates_three_task_samples(
 
     terminal = await worker.run_once()
     assert terminal is not None and terminal.status == "succeeded"
-    listed = await service.list_records_for_user(
+    listed = await service.list_dataset_records_for_user(
         user_id=USER_ID, collection_id=COLLECTION_ID
     )
     system = {item.dataset.task_type: item.dataset for item in listed}
@@ -139,7 +139,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id=USER_ID,
             collection_id=COLLECTION_ID,
             name=f"Preheating {task_type}",
@@ -147,13 +147,13 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
             construction_spec={},
         )
     ).dataset
-    stored = await service.read_record_for_user(
+    stored = await service.read_dataset_record_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id
     )
     assert stored.dataset == dataset
     assert stored.created_at.tzinfo is not None
     assert stored.updated_at == stored.created_at
-    listed = await service.list_records_for_user(
+    listed = await service.list_dataset_records_for_user(
         user_id=USER_ID, collection_id=COLLECTION_ID
     )
     listed_by_id = {item.dataset.dataset_id: item for item in listed}
@@ -163,7 +163,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         "preference",
         "evaluation",
     }
-    collected = await service.collect_cases_for_user(
+    collected = await service.collect_dataset_cases_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,)
     )
     sample_id = collected.items[0].sample.sample_id
@@ -215,7 +215,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     from application.feedback.dataset_service import FeedbackDatasetConflict
 
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
-        await service.update_sample(
+        await service.update_dataset_sample(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             sample_id=sample_id,
@@ -223,7 +223,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
             expected_generation=sample.generation + 1,
             content=content,
         )
-    saved = await service.update_sample(
+    saved = await service.update_dataset_sample(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=sample_id,
@@ -235,7 +235,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
     revision = await samples.read_revision(saved.current_revision_id)
     assert revision.content.messages[0]["content"] == "Compare A and B's preheating."
     with pytest.raises(FeedbackDatasetConflict, match="stale"):
-        await service.update_sample(
+        await service.update_dataset_sample(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             sample_id=sample_id,
@@ -273,7 +273,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
             confirmed_at=_now(),
         )
     with pytest.raises(FeedbackDatasetConflict, match="sample_content_digest_mismatch"):
-        await service.confirm_sample(
+        await service.confirm_dataset_sample(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             sample_id=sample_id,
@@ -290,13 +290,13 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         assert revision_row.content_digest == original_digest
         revision_row.content = original_content
 
-    confirmed = await service.confirm_sample(
+    confirmed = await service.confirm_dataset_sample(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=sample_id,
         expected_revision_id=saved.current_revision_id,
     )
-    repeated = await service.confirm_sample(
+    repeated = await service.confirm_dataset_sample(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=sample_id,
@@ -311,7 +311,7 @@ async def test_missing_candidate_first_revision_confirmation_and_export(
         )
         revision_row.content = changed_content
     with pytest.raises(FeedbackDatasetConflict, match="sample_content_digest_mismatch"):
-        await service.confirm_sample(
+        await service.confirm_dataset_sample(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             sample_id=sample_id,
@@ -400,7 +400,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id=USER_ID,
             collection_id=COLLECTION_ID,
             name="Preheating SFT",
@@ -408,7 +408,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
             construction_spec={},
         )
     ).dataset
-    collected = await service.collect_cases_for_user(
+    collected = await service.collect_dataset_cases_for_user(
         user_id=USER_ID, dataset_id=dataset.dataset_id, source_case_ids=(case.case_id,)
     )
     sample_id = collected.items[0].sample.sample_id
@@ -431,7 +431,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     original_revision_id = candidate.current_revision_id
     assert original_revision_id is not None
 
-    rebuilt = await service.apply_sample_action_for_user(
+    rebuilt = await service.apply_dataset_sample_action_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=sample_id,
@@ -455,7 +455,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     assert reclaimed_job is not None and reclaimed_job.status == "running"
     assert reclaimed_job.lease_version == rebuild_job.lease_version + 1
 
-    discarded = await service.apply_sample_action_for_user(
+    discarded = await service.apply_dataset_sample_action_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=sample_id,
@@ -499,7 +499,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     )
     assert unchanged.status == "discarded"
 
-    restored = await service.apply_sample_action_for_user(
+    restored = await service.apply_dataset_sample_action_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=sample_id,
@@ -512,7 +512,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
         restored.status == "needs_confirmation"
         and restored.confirmed_revision_id is None
     )
-    confirmed = await service.confirm_sample(
+    confirmed = await service.confirm_dataset_sample(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=sample_id,
@@ -578,7 +578,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
     assert trace_payload["source_refs"] == ["source-b-caption"]
 
     assert (
-        await service.apply_sample_action_for_user(
+        await service.apply_dataset_sample_action_for_user(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             sample_id=sample_id,
@@ -610,7 +610,7 @@ async def test_rebuild_discard_restore_and_late_worker_result(
 
     concurrent_discards = await asyncio.gather(
         *(
-            service.apply_sample_action_for_user(
+            service.apply_dataset_sample_action_for_user(
                 user_id=USER_ID,
                 dataset_id=dataset.dataset_id,
                 sample_id=sample_id,
@@ -697,7 +697,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
     dataset_service.FeedbackCaseRepo = chain.cases
     service = dataset_service
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id=USER_ID,
             collection_id=COLLECTION_ID,
             name="Lease test",
@@ -705,7 +705,7 @@ async def test_reclaimed_build_rejects_old_lease_completion(
             construction_spec={},
         )
     ).dataset
-    collected = await service.collect_cases_for_user(
+    collected = await service.collect_dataset_cases_for_user(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         source_case_ids=(case.case_id,),

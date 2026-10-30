@@ -128,7 +128,7 @@ class _DatasetService:
     def __init__(self, dataset: Dataset | None = None) -> None:
         self.dataset = dataset or _dataset()
 
-    async def read_for_user(self, *, user_id: str, dataset_id: str) -> Dataset:
+    async def get_dataset_for_user(self, *, user_id: str, dataset_id: str) -> Dataset:
         assert user_id == "user-1"
         if dataset_id != "fdset_export_test":
             raise FileNotFoundError("dataset not found")

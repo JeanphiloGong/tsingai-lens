@@ -106,7 +106,7 @@ from repositories.feedback_dataset_repository import FeedbackDatasetRepo
 from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampleRepo
 
 
-async def create_for_user(
+async def create_dataset_for_user(
     *,
     user_id: str,
     collection_id: str,
@@ -135,7 +135,7 @@ async def create_for_user(
     return await FeedbackDatasetRepo.create(dataset)
 
 
-async def read_for_user(*, user_id: str, dataset_id: str) -> Dataset:
+async def get_dataset_for_user(*, user_id: str, dataset_id: str) -> Dataset:
     dataset = await FeedbackDatasetRepo.read(dataset_id)
     if dataset is None:
         raise ResourceNotFoundException(
@@ -149,7 +149,7 @@ async def read_for_user(*, user_id: str, dataset_id: str) -> Dataset:
     return dataset
 
 
-async def read_record_for_user(*, user_id: str, dataset_id: str) -> StoredDataset:
+async def read_dataset_record_for_user(*, user_id: str, dataset_id: str) -> StoredDataset:
     record = await FeedbackDatasetRepo.read_record(dataset_id)
     if record is None:
         raise ResourceNotFoundException(
@@ -162,7 +162,7 @@ async def read_record_for_user(*, user_id: str, dataset_id: str) -> StoredDatase
     return record
 
 
-async def list_records_for_user(
+async def list_dataset_records_for_user(
     *,
     user_id: str,
     collection_id: str,
@@ -179,7 +179,7 @@ async def list_records_for_user(
     )
 
 
-async def collect_cases_for_user(
+async def collect_dataset_cases_for_user(
     *,
     user_id: str,
     dataset_id: str,
@@ -187,7 +187,7 @@ async def collect_cases_for_user(
 ) -> DatasetCollectionResult:
     """Freeze selected cases and enqueue one build job per new sample."""
 
-    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    dataset = await get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     case_ids = tuple(
         dict.fromkeys(
             str(item).strip() for item in source_case_ids if str(item).strip()
@@ -261,7 +261,7 @@ async def collect_cases_for_user(
     )
 
 
-async def list_samples_for_user(
+async def list_dataset_samples_for_user(
     *,
     user_id: str,
     dataset_id: str,
@@ -269,7 +269,7 @@ async def list_samples_for_user(
     limit: int = 50,
     offset: int = 0,
 ) -> DatasetSampleListResult:
-    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    dataset = await get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     _require_supported(dataset)
     repository = FeedbackDatasetSampleRepo
     if limit < 1 or limit > 200 or offset < 0:
@@ -295,10 +295,10 @@ async def list_samples_for_user(
     return DatasetSampleListResult(items=items, total=total, limit=limit, offset=offset)
 
 
-async def read_sample_for_user(
+async def get_dataset_sample_for_user(
     *, user_id: str, dataset_id: str, sample_id: str
 ) -> DatasetSampleDetail:
-    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    dataset = await get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     _require_supported(dataset)
     repository = FeedbackDatasetSampleRepo
     sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
@@ -336,7 +336,7 @@ async def read_sample_for_user(
     )
 
 
-async def update_sample(
+async def update_dataset_sample(
     *,
     user_id: str,
     dataset_id: str,
@@ -345,7 +345,7 @@ async def update_sample(
     content: RevisionContent,
     expected_generation: int | None = None,
 ) -> DatasetSample:
-    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    dataset = await get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     _require_supported(dataset)
     repository = FeedbackDatasetSampleRepo
     sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
@@ -524,14 +524,14 @@ async def update_sample(
         raise FeedbackDatasetConflict(str(exc)) from exc
 
 
-async def confirm_sample(
+async def confirm_dataset_sample(
     *,
     user_id: str,
     dataset_id: str,
     sample_id: str,
     expected_revision_id: str,
 ) -> DatasetSample:
-    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    dataset = await get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     _require_supported(dataset)
     repository = FeedbackDatasetSampleRepo
     sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
@@ -571,7 +571,7 @@ async def confirm_sample(
         raise FeedbackDatasetConflict(str(exc)) from exc
 
 
-async def apply_sample_action_for_user(
+async def apply_dataset_sample_action_for_user(
     *,
     user_id: str,
     dataset_id: str,
@@ -581,7 +581,7 @@ async def apply_sample_action_for_user(
     reason: str | None,
     idempotency_key: str,
 ) -> DatasetSample:
-    dataset = await read_for_user(user_id=user_id, dataset_id=dataset_id)
+    dataset = await get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     _require_supported(dataset)
     repository = FeedbackDatasetSampleRepo
     sample = await repository.read_sample(dataset_id=dataset_id, sample_id=sample_id)
@@ -716,14 +716,14 @@ __all__ = [
     "DatasetSampleListResult",
     "FeedbackDatasetConflict",
     "FeedbackDatasetError",
-    "create_for_user",
-    "read_for_user",
-    "read_record_for_user",
-    "list_records_for_user",
-    "collect_cases_for_user",
-    "list_samples_for_user",
-    "read_sample_for_user",
-    "update_sample",
-    "confirm_sample",
-    "apply_sample_action_for_user",
+    "create_dataset_for_user",
+    "get_dataset_for_user",
+    "read_dataset_record_for_user",
+    "list_dataset_records_for_user",
+    "collect_dataset_cases_for_user",
+    "list_dataset_samples_for_user",
+    "get_dataset_sample_for_user",
+    "update_dataset_sample",
+    "confirm_dataset_sample",
+    "apply_dataset_sample_action_for_user",
 ]

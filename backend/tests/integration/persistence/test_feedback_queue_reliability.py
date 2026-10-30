@@ -122,7 +122,7 @@ def _content():
 
 
 async def _confirm_all_sft(chain, service):
-    records = await service.list_records_for_user(
+    records = await service.list_dataset_records_for_user(
         user_id=USER_ID, collection_id=COLLECTION_ID
     )
     dataset = next(
@@ -141,7 +141,7 @@ async def _confirm_all_sft(chain, service):
     )
     confirmed = []
     for sample in samples:
-        edited = await service.update_sample(
+        edited = await service.update_dataset_sample(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             sample_id=sample.sample_id,
@@ -150,7 +150,7 @@ async def _confirm_all_sft(chain, service):
             content=SftRevisionContent(**_content()),
         )
         confirmed.append(
-            await service.confirm_sample(
+            await service.confirm_dataset_sample(
                 user_id=USER_ID,
                 dataset_id=dataset.dataset_id,
                 sample_id=sample.sample_id,
@@ -172,12 +172,12 @@ async def test_list_is_read_only_and_withdrawn_case_does_not_hide_normal_case(
     service = _service(chain, postgres_session_factory)
     before = tuple(job.job_id for job in await chain.jobs.list_jobs())
     for _ in range(2):
-        records = await service.list_records_for_user(
+        records = await service.list_dataset_records_for_user(
             user_id=USER_ID, collection_id=COLLECTION_ID
         )
         assert len(records) == 3
         for record in records:
-            result = await service.list_samples_for_user(
+            result = await service.list_dataset_samples_for_user(
                 user_id=USER_ID, dataset_id=record.dataset.dataset_id
             )
             assert result.total == 1
@@ -394,7 +394,7 @@ async def test_source_changed_between_read_and_collect_is_rejected(
     case = await _analyze(chain)
     service = _service(chain, postgres_session_factory)
     dataset = (
-        await service.create_for_user(
+        await service.create_dataset_for_user(
             user_id=USER_ID,
             collection_id=COLLECTION_ID,
             name="Concurrent SFT",
@@ -419,7 +419,7 @@ async def test_source_changed_between_read_and_collect_is_rejected(
         service.FeedbackDatasetSampleRepo, "collect", update_source_before_collect
     )
     with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
-        await service.collect_cases_for_user(
+        await service.collect_dataset_cases_for_user(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             source_case_ids=(case.case_id,),
@@ -441,7 +441,7 @@ async def test_new_analysis_preserves_human_revision_and_requires_reconfirmation
     service = _service(chain, postgres_session_factory)
     if scope == "explicit":
         dataset = (
-            await service.create_for_user(
+            await service.create_dataset_for_user(
                 user_id=USER_ID,
                 collection_id=COLLECTION_ID,
                 name="Explicit SFT",
@@ -449,7 +449,7 @@ async def test_new_analysis_preserves_human_revision_and_requires_reconfirmation
                 construction_spec={},
             )
         ).dataset
-        await service.collect_cases_for_user(
+        await service.collect_dataset_cases_for_user(
             user_id=USER_ID,
             dataset_id=dataset.dataset_id,
             source_case_ids=(case.case_id,),
@@ -505,7 +505,7 @@ async def test_source_change_requeues_confirmed_worker_candidate(
     service = _service(chain, postgres_session_factory)
     dataset = next(
         record.dataset
-        for record in await service.list_records_for_user(
+        for record in await service.list_dataset_records_for_user(
             user_id=USER_ID,
             collection_id=COLLECTION_ID,
         )
@@ -536,7 +536,7 @@ async def test_source_change_requeues_confirmed_worker_candidate(
         )
     )[0]
     assert candidate.status == "needs_confirmation"
-    before = await service.confirm_sample(
+    before = await service.confirm_dataset_sample(
         user_id=USER_ID,
         dataset_id=dataset.dataset_id,
         sample_id=candidate.sample_id,

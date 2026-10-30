@@ -182,7 +182,7 @@ async def test_no_excerpt_candidate_can_be_saved_and_confirmed() -> None:
         "evidence": [],
         "target": "Compare laser power at fixed scan speed.",
     }
-    saved = await service.update_sample(
+    saved = await service.update_dataset_sample(
         user_id="user-1",
         dataset_id="fdset-1",
         sample_id="sample-1",
@@ -197,7 +197,7 @@ async def test_no_excerpt_candidate_can_be_saved_and_confirmed() -> None:
         ),
     )
     assert saved.status == "needs_confirmation"
-    confirmed = await service.confirm_sample(
+    confirmed = await service.confirm_dataset_sample(
         user_id="user-1",
         dataset_id="fdset-1",
         sample_id="sample-1",
@@ -212,7 +212,7 @@ async def test_human_edit_appends_revision_and_clears_confirmation() -> None:
     samples = _Samples()
     service = _service(samples)
 
-    result = await service.update_sample(
+    result = await service.update_dataset_sample(
         user_id="user-1",
         dataset_id="fdset-1",
         sample_id="sample-1",
@@ -238,7 +238,7 @@ async def test_confirmation_binds_current_revision_and_stale_edit_is_rejected() 
     samples = _Samples()
     service = _service(samples)
 
-    confirmed = await service.confirm_sample(
+    confirmed = await service.confirm_dataset_sample(
         user_id="user-1",
         dataset_id="fdset-1",
         sample_id="sample-1",
@@ -250,7 +250,7 @@ async def test_confirmation_binds_current_revision_and_stale_edit_is_rejected() 
     assert confirmed.confirmed_at is not None
 
     with pytest.raises(FeedbackDatasetConflict, match="sample_revision_stale"):
-        await service.update_sample(
+        await service.update_dataset_sample(
             user_id="user-1",
             dataset_id="fdset-1",
             sample_id="sample-1",
@@ -276,7 +276,7 @@ async def test_edit_rejects_sample_when_source_case_digest_changed() -> None:
     )
 
     with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
-        await service.update_sample(
+        await service.update_dataset_sample(
             user_id="user-1",
             dataset_id="fdset-1",
             sample_id="sample-1",
@@ -302,7 +302,7 @@ async def test_confirmation_rejects_sample_when_source_case_digest_changed() -> 
     )
 
     with pytest.raises(FeedbackDatasetConflict, match="sample_source_stale"):
-        await service.confirm_sample(
+        await service.confirm_dataset_sample(
             user_id="user-1",
             dataset_id="fdset-1",
             sample_id="sample-1",

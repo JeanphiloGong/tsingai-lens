@@ -62,7 +62,7 @@ from repositories.feedback_dataset_sample_repository import FeedbackDatasetSampl
 async def preview_for_user(
     *, user_id: str, dataset_id: str, sample_ids: list[str] | None = None
 ) -> ExportPreview:
-    dataset = await dataset_service.read_for_user(
+    dataset = await dataset_service.get_dataset_for_user(
         user_id=user_id, dataset_id=dataset_id
     )
     if sample_ids is not None and (
@@ -119,7 +119,7 @@ async def publish_for_user(
     allow_partial: bool,
     idempotency_key: str,
 ) -> DatasetExport:
-    dataset = await dataset_service.read_for_user(
+    dataset = await dataset_service.get_dataset_for_user(
         user_id=user_id, dataset_id=dataset_id
     )
     if not idempotency_key.strip() or len(idempotency_key) > 128:
@@ -229,7 +229,7 @@ async def publish_for_user(
 async def list_for_user(
     *, user_id: str, dataset_id: str, limit: int = 50, offset: int = 0
 ) -> DatasetExportListResult:
-    await dataset_service.read_for_user(user_id=user_id, dataset_id=dataset_id)
+    await dataset_service.get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     if limit < 1 or limit > 200 or offset < 0:
         raise DatasetExportError("pagination_invalid")
     items = await FeedbackDatasetExportRepo.list_exports(
@@ -241,7 +241,7 @@ async def list_for_user(
 async def read_for_user(
     *, user_id: str, dataset_id: str, export_id: str
 ) -> DatasetExport:
-    await dataset_service.read_for_user(user_id=user_id, dataset_id=dataset_id)
+    await dataset_service.get_dataset_for_user(user_id=user_id, dataset_id=dataset_id)
     export = await FeedbackDatasetExportRepo.read_export(export_id)
     if export is None or export.dataset_id != dataset_id:
         raise ResourceNotFoundException(

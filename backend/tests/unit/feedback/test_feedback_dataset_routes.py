@@ -115,33 +115,33 @@ def _case() -> FeedbackCase:
 
 
 class _Service:
-    async def create_for_user(self, **kwargs):
+    async def create_dataset_for_user(self, **kwargs):
         assert kwargs["user_id"] == "user-1"
         now = datetime.now(timezone.utc)
         return StoredDataset(_dataset(), now, now)
 
-    async def list_records_for_user(self, **kwargs):
-        return (await self.read_record_for_user(dataset_id="fdset_1"),)
+    async def list_dataset_records_for_user(self, **kwargs):
+        return (await self.read_dataset_record_for_user(dataset_id="fdset_1"),)
 
-    async def read_record_for_user(self, **kwargs):
+    async def read_dataset_record_for_user(self, **kwargs):
         from datetime import datetime, timezone
 
         now = datetime.now(timezone.utc)
-        return StoredDataset(await self.read_for_user(**kwargs), now, now)
+        return StoredDataset(await self.get_dataset_for_user(**kwargs), now, now)
 
-    async def read_for_user(self, **kwargs):
+    async def get_dataset_for_user(self, **kwargs):
         if kwargs["dataset_id"] != "fdset_1":
             raise ResourceNotFoundException("dataset not found")
         return _dataset()
 
-    async def list_samples_for_user(self, **kwargs):
+    async def list_dataset_samples_for_user(self, **kwargs):
         from application.feedback.dataset_service import DatasetSampleListResult
 
         return DatasetSampleListResult(
             items=(_sample(),), total=1, limit=kwargs["limit"], offset=kwargs["offset"]
         )
 
-    async def read_sample_for_user(self, **kwargs):
+    async def get_dataset_sample_for_user(self, **kwargs):
         from application.feedback.dataset_service import DatasetSampleDetail
 
         return DatasetSampleDetail(
@@ -152,10 +152,10 @@ class _Service:
             source_case=_case(),
         )
 
-    async def update_sample(self, **kwargs):
+    async def update_dataset_sample(self, **kwargs):
         return _sample()
 
-    async def confirm_sample(self, **kwargs):
+    async def confirm_dataset_sample(self, **kwargs):
         return replace(
             _sample(),
             status="confirmed",
@@ -285,7 +285,7 @@ def test_task_dataset_request_accepts_task_types_and_rejects_extra_fields() -> N
 
 def test_task_dataset_collection_returns_accepted_operation() -> None:
     class Service(_Service):
-        async def collect_cases_for_user(self, **kwargs):
+        async def collect_dataset_cases_for_user(self, **kwargs):
             from domain.feedback import DatasetSample
             from repositories.feedback_dataset_sample_repository import (
                 CollectedDatasetSample,
@@ -417,7 +417,7 @@ def test_first_revision_request_passes_null_revision_and_generation_to_service()
     None
 ):
     class Service(_Service):
-        async def update_sample(self, **kwargs):
+        async def update_dataset_sample(self, **kwargs):
             assert kwargs["expected_revision_id"] is None
             assert kwargs["expected_generation"] == 3
             assert kwargs["user_id"] == "user-1"
@@ -466,7 +466,7 @@ def test_sample_update_rejects_missing_message_content_before_write(
     task_fields,
     monkeypatch,
 ) -> None:
-    service = SimpleNamespace(update_sample=AsyncMock(return_value=_sample()))
+    service = SimpleNamespace(update_dataset_sample=AsyncMock(return_value=_sample()))
     app = FastAPI()
     app.add_exception_handler(ProjectException, project_exception_handler)
     app.add_exception_handler(RequestValidationError, request_validation_handler)
@@ -497,7 +497,7 @@ def test_sample_update_rejects_missing_message_content_before_write(
         error["loc"][-3:] == ["messages", 0, "content"] and error["type"] == "missing"
         for error in response.json()["data"]["errors"]
     )
-    service.update_sample.assert_not_awaited()
+    service.update_dataset_sample.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -524,7 +524,7 @@ def test_sample_revision_rejects_missing_message_content_before_writing(
     app.add_exception_handler(RequestValidationError, request_validation_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
-    service = SimpleNamespace(update_sample=AsyncMock(return_value=_sample()))
+    service = SimpleNamespace(update_dataset_sample=AsyncMock(return_value=_sample()))
     task_datasets.dataset_service = service
     app.dependency_overrides[get_current_user_id] = lambda: "user-1"
     app.include_router(task_datasets.feedback_dataset_router, prefix="/api/v1")
@@ -542,7 +542,7 @@ def test_sample_revision_rejects_missing_message_content_before_writing(
         )
         assert response.status_code == 200
         assert response.json()["code"] == 200100
-        service.update_sample.assert_not_awaited()
+        service.update_dataset_sample.assert_not_awaited()
 
         content["messages"][0]["content"] = "比较文献中的孔隙率。"
         response = client.patch(
@@ -550,4 +550,4 @@ def test_sample_revision_rejects_missing_message_content_before_writing(
             json={"expected_revision_id": "revision-1", "content": content},
         )
         assert response.status_code == 200, response.text
-        service.update_sample.assert_awaited_once()
+        service.update_dataset_sample.assert_awaited_once()

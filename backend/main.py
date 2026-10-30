@@ -258,35 +258,14 @@ async def build_application_runtime() -> ApplicationRuntime:
                         authoring_service=paper_experiment_authoring_service,
                         chat_repository=ChatRepo,
                     ),
-                    ProposeObjectiveDraftsCapability(
-                        collection_service=collection_service,
-                        objective_repository=ObjectiveRepo,
-                        paper_map_repository=PaperMapRepo,
-                    ),
+                    ProposeObjectiveDraftsCapability(),
                     PreviewResearchScopeCapability(),
-                    CreateObjectiveCandidateCapability(
-                        objective_authoring_service=objective_authoring_service,
-                    ),
-                    ConfirmObjectiveCapability(
-                        objective_authoring_service=objective_authoring_service,
-                    ),
-                    StartObjectiveAnalysisCapability(
-                        collection_service=collection_service,
-                        objective_repository=ObjectiveRepo,
-                        objective_analysis_service=analysis,
-                    ),
-                    InspectObjectiveAnalysisCapability(
-                        collection_service=collection_service,
-                        objective_analysis_service=objective_analysis_service,
-                    ),
-                    AssessObjectiveQualityCapability(
-                        collection_service=collection_service,
-                        objective_analysis_service=objective_analysis_service,
-                    ),
-                    DeriveObjectiveCapability(
-                        collection_service=collection_service,
-                        objective_analysis_service=objective_analysis_service,
-                    ),
+                    CreateObjectiveCandidateCapability(),
+                    ConfirmObjectiveCapability(),
+                    StartObjectiveAnalysisCapability(objective_analysis_service=analysis),
+                    InspectObjectiveAnalysisCapability(),
+                    AssessObjectiveQualityCapability(),
+                    DeriveObjectiveCapability(),
                     ProposeResearchPlanCapability(
                         collection_service=collection_service,
                         finding_feedback_service=finding_feedback_service,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from domain.chat import ToolResultStatus
+from application.core.objectives import objective_authoring_service
 
-from typing import Any
+from domain.chat import ToolResultStatus
 
 from pydantic import ConfigDict, Field, field_validator
 
@@ -58,16 +58,13 @@ class CreateObjectiveCandidateCapability:
         input_model=CreateObjectiveCandidateToolRequest,
     )
 
-    def __init__(self, *, objective_authoring_service: Any) -> None:
-        self.objective_authoring_service = objective_authoring_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateObjectiveCandidateToolRequest,
     ) -> ChatToolResult:
         try:
-            objective = await self.objective_authoring_service.create_chat_assisted_candidate(
+            objective = await objective_authoring_service.create_chat_assisted_candidate(
                 collection_id=context.collection_id,
                 user_id=context.user_id,
                 tool_call_id=context.tool_call_id,

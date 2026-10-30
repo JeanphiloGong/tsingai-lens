@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import objective_candidate
+
 from application.core.objectives.analysis import analysis_record_source
 
 from dataclasses import replace
@@ -329,9 +331,8 @@ async def test_approved_derived_candidate_keeps_parent_lineage_in_service_call()
     None
 ):
     service = _ObjectiveAuthoringService()
-    capability = CreateObjectiveCandidateCapability(
-        objective_authoring_service=service,
-    )
+    objective_candidate.objective_authoring_service = service
+    capability = CreateObjectiveCandidateCapability()
 
     result = await capability.execute(
         _context(),

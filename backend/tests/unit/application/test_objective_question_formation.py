@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import objective_candidate
+
 from application.core.objectives.analysis import analysis_record_source
 
 import asyncio
@@ -178,9 +180,8 @@ def test_candidate_request_preserves_paper_id_case_through_actual_authoring():
     )
     objective_authoring_service.ObjectiveRepo = repository
     analysis_record_source.ObjectiveRepo = objective_authoring_service.ObjectiveRepo
-    capability = CreateObjectiveCandidateCapability(
-        objective_authoring_service=objective_authoring_service,
-    )
+    objective_candidate.objective_authoring_service = objective_authoring_service
+    capability = CreateObjectiveCandidateCapability()
     request = CreateObjectiveCandidateToolRequest.model_validate(
         {
             "question": " How does laser power affect porosity? ",

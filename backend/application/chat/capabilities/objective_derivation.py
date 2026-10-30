@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from application.core.objectives import analysis_service as objective_analysis_service
+
 import json
 from collections.abc import Mapping
 from hashlib import sha256
@@ -56,25 +59,16 @@ class DeriveObjectiveCapability:
         input_model=DeriveObjectiveToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_analysis_service: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_analysis_service = objective_analysis_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: DeriveObjectiveToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        state = await self.objective_analysis_service.get_analysis_state(
+        state = await objective_analysis_service.get_analysis_state(
             context.collection_id, arguments.objective_id, user_id=context.user_id
         )
         published = state.get("published_analysis")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import objective_analysis
+
 from domain.chat import ChatMessageRole
 
 from domain.chat import ChatToolRequest
@@ -5060,13 +5062,11 @@ async def test_analysis_prerequisites_return_actionable_rejections_without_sched
     from application.chat.capabilities.objective_analysis import StartObjectiveAnalysisCapability, StartObjectiveAnalysisToolRequest
 
     analysis = SimpleNamespace(start_analysis=AsyncMock())
-    capability = StartObjectiveAnalysisCapability(
-        collection_service=SimpleNamespace(get_collection_for_user=AsyncMock()),
-        objective_repository=SimpleNamespace(read_objective=AsyncMock(return_value=(
+    objective_analysis.collection_service = SimpleNamespace(get_collection_for_user=AsyncMock())
+    objective_analysis.ObjectiveRepo = SimpleNamespace(read_objective=AsyncMock(return_value=(
             None if confirmation is None else SimpleNamespace(confirmation_status=confirmation)
-        ))),
-        objective_analysis_service=analysis,
-    )
+        )))
+    capability = StartObjectiveAnalysisCapability(objective_analysis_service=analysis)
     result = await capability.execute(
         CapabilityExecutionContext.for_call(_context(), "start-1"),
         StartObjectiveAnalysisToolRequest(objective_id="objective-1", document_ids=["paper-1"]),

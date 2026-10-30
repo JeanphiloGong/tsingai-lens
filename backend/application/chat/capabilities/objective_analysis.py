@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from application.core.objectives import objective_authoring_service
+from application.core.objectives import analysis_service as objective_analysis_service
+from repositories.objective_repository import ObjectiveRepo
+
 from collections.abc import Mapping
 from typing import Annotated, Any
 from urllib.parse import urlencode
@@ -61,16 +66,13 @@ class ConfirmObjectiveCapability:
         input_model=ConfirmObjectiveToolRequest,
     )
 
-    def __init__(self, *, objective_authoring_service: Any) -> None:
-        self.objective_authoring_service = objective_authoring_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ConfirmObjectiveToolRequest,
     ) -> ChatToolResult:
         try:
-            objective = await self.objective_authoring_service.confirm_objective(
+            objective = await objective_authoring_service.confirm_objective(
                 collection_id=context.collection_id,
                 user_id=context.user_id,
                 objective_id=arguments.objective_id,
@@ -117,14 +119,8 @@ class StartObjectiveAnalysisCapability:
     )
 
     def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_repository: Any,
-        objective_analysis_service: ObjectiveAnalysisService,
+        self, *, objective_analysis_service: ObjectiveAnalysisService,
     ) -> None:
-        self.collection_service = collection_service
-        self.objective_repository = objective_repository
         self.objective_analysis_service = objective_analysis_service
 
     async def execute(
@@ -132,11 +128,11 @@ class StartObjectiveAnalysisCapability:
         context: CapabilityExecutionContext,
         arguments: StartObjectiveAnalysisToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        objective = await self.objective_repository.read_objective(
+        objective = await ObjectiveRepo.read_objective(
             context.collection_id,
             arguments.objective_id,
         )
@@ -208,22 +204,16 @@ class InspectObjectiveAnalysisCapability:
         input_model=InspectObjectiveAnalysisToolRequest,
     )
 
-    def __init__(
-        self, *, collection_service: Any, objective_analysis_service: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_analysis_service = objective_analysis_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectObjectiveAnalysisToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        payload = await self.objective_analysis_service.get_analysis_state(
+        payload = await objective_analysis_service.get_analysis_state(
             context.collection_id, arguments.objective_id, user_id=context.user_id
         )
         projection = _project_analysis(payload)
@@ -256,25 +246,16 @@ class AssessObjectiveQualityCapability:
         input_model=AssessObjectiveQualityToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_analysis_service: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_analysis_service = objective_analysis_service
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: AssessObjectiveQualityToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        payload = await self.objective_analysis_service.get_analysis_state(
+        payload = await objective_analysis_service.get_analysis_state(
             context.collection_id, arguments.objective_id, user_id=context.user_id
         )
         published = payload.get("published_analysis")

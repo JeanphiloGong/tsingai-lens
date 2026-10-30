@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from repositories.objective_repository import ObjectiveRepo
+from repositories.paper_map_repository import PaperMapRepo
+
 from domain.chat import ToolResultStatus
 
 from hashlib import sha256
@@ -92,30 +96,19 @@ class ProposeObjectiveDraftsCapability:
         input_model=ProposeObjectiveDraftsToolRequest,
     )
 
-    def __init__(
-        self,
-        *,
-        collection_service: Any,
-        objective_repository: Any,
-        paper_map_repository: Any,
-    ) -> None:
-        self.collection_service = collection_service
-        self.objective_repository = objective_repository
-        self.paper_map_repository = paper_map_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ProposeObjectiveDraftsToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        paper_maps = await self.paper_map_repository.list_collection(
+        paper_maps = await PaperMapRepo.list_collection(
             context.collection_id
         )
-        existing = await self.objective_repository.list_objectives(
+        existing = await ObjectiveRepo.list_objectives(
             context.collection_id
         )
         records: list[dict[str, Any]] = []

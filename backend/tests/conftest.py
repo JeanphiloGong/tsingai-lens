@@ -243,7 +243,13 @@ def _isolate_application_module_dependencies(monkeypatch):
         reference_routes,
     )
 
+    from application.chat.capabilities import objective_candidate, objective_proposal, objective_analysis, objective_derivation
+
     dependencies = (
+        (objective_candidate, ["objective_authoring_service"]),
+        (objective_proposal, ["collection_service", "ObjectiveRepo", "PaperMapRepo"]),
+        (objective_analysis, ["collection_service", "ObjectiveRepo", "objective_authoring_service", "objective_analysis_service"]),
+        (objective_derivation, ["collection_service", "objective_analysis_service"]),
         (document_sources, ["collection_service", "SourceArtifactRepo"]),
         (collection_context, ["collection_service", "ObjectiveRepo", "DocumentProfileRepo", "PaperMapRepo", "SourceArtifactRepo"]),
         (research_scope, ["collection_service", "PaperMapRepo"]),

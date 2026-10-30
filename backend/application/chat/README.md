@@ -612,6 +612,9 @@ Evidence, permission, or a Finding.
 Collection context, paper browsing, research-scope preview, and Source inspection
 handlers import their owning business modules and concrete repositories directly.
 Their classes implement the tool protocol and need no dependency-only constructors.
+Objective proposal, creation, confirmation, derivation and inspection follow the
+same direct calls. Starting an analysis retains the current app's actual
+`ObjectiveAnalysisService` so task scheduling stays with its runtime owner.
 
 ## Boundaries
 

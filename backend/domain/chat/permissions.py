@@ -13,21 +13,30 @@ class ToolPermissionMode(StrEnum):
     NONE = "none"
 
 
-AUTO_ACTIONS = frozenset({
-    "start_research_process",
-    "create_objective_candidate",
-    "confirm_objective",
-    "start_objective_analysis",
-    "create_finding_version",
-    "record_finding_feedback",
-    "curate_finding",
-    "create_paper_experiment_revision",
-    "create_research_plan",
-    "revise_research_plan",
-})
+AUTO_ACTIONS = frozenset(
+    {
+        "start_research_process",
+        "create_objective_candidate",
+        "confirm_objective",
+        "start_objective_analysis",
+        "create_finding_version",
+        "record_finding_feedback",
+        "curate_finding",
+        "create_paper_experiment_revision",
+        "create_research_plan",
+        "revise_research_plan",
+    }
+)
 # A non-null expiry is a temporary grant; persistent grants use ``None``.
 MAX_AUTOMATIC_PERMISSION_HOURS = 24
 
+
+class PermissionChangeError(ValueError):
+    """One rejected permission change, with an explicit stable reason."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 def change_permission(
@@ -48,33 +57,35 @@ def change_permission(
     if current:
         current_record.update(current)
     if current_record["revision"] != expected_revision:
-        raise ValueError("permission_revision_conflict")
+        raise PermissionChangeError("permission_revision_conflict")
     if mode not in {"read_only", "confirm", "auto"}:
-        raise ValueError("invalid_permission_mode")
+        raise PermissionChangeError("invalid_permission_mode")
     requested_actions = set(actions)
     if not requested_actions <= AUTO_ACTIONS:
-        raise ValueError("unknown_permission_action")
+        raise PermissionChangeError("unknown_permission_action")
     if all_actions and mode != "auto":
-        raise ValueError("only_automatic_permission_accepts_all_actions")
+        raise PermissionChangeError("only_automatic_permission_accepts_all_actions")
     if all_actions:
         actions = sorted(AUTO_ACTIONS)
     if mode == "auto":
         if not actions:
-            raise ValueError("automatic_permission_requires_actions")
+            raise PermissionChangeError("automatic_permission_requires_actions")
         if expires_at is not None:
             try:
                 expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
             except (AttributeError, TypeError, ValueError) as exc:
-                raise ValueError("invalid_permission_expiry") from exc
+                raise PermissionChangeError("invalid_permission_expiry") from exc
             if expiry.tzinfo is None or expiry <= datetime.now(timezone.utc):
-                raise ValueError("permission_expiry_must_be_in_the_future")
+                raise PermissionChangeError("permission_expiry_must_be_in_the_future")
             maximum = datetime.now(timezone.utc) + timedelta(
                 hours=MAX_AUTOMATIC_PERMISSION_HOURS
             )
             if expiry > maximum:
-                raise ValueError("permission_expiry_cannot_exceed_24_hours")
+                raise PermissionChangeError("permission_expiry_cannot_exceed_24_hours")
     elif actions or expires_at is not None:
-        raise ValueError("only_automatic_permission_accepts_actions_and_expiry")
+        raise PermissionChangeError(
+            "only_automatic_permission_accepts_actions_and_expiry"
+        )
     return {
         "mode": mode,
         "actions": sorted(set(actions)),
@@ -121,6 +132,7 @@ __all__ = [
     "AUTO_ACTIONS",
     "MAX_AUTOMATIC_PERMISSION_HOURS",
     "ToolPermissionMode",
+    "PermissionChangeError",
     "change_permission",
     "permits_automatic",
 ]

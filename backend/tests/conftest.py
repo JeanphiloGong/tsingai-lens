@@ -424,7 +424,6 @@ def _isolate_application_module_dependencies(monkeypatch):
             research_objective_routes,
             [
                 "objective_analysis_service",
-                "objective_discovery_service",
                 "objective_scope_service",
                 "list_objectives",
             ],

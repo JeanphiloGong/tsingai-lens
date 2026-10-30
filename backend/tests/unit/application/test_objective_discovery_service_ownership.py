@@ -33,14 +33,14 @@ def test_objective_discovery_stages_have_direct_owners() -> None:
     assert "build_collection_paper_maps" in paper_research_map_service.__dict__
     assert "discover_candidate_facts" in objective_candidate_service.__dict__
 
-    assert "start_objective_discovery" in objective_discovery_service.__dict__
+    assert "start_objective_discovery" in objective_discovery_service.ObjectiveDiscoveryService.__dict__
     assert (
         "discover_and_replace_objective_candidates"
-        in objective_discovery_service.__dict__
+        in objective_discovery_service.ObjectiveDiscoveryService.__dict__
     )
 
 
-def _service(pipeline_run_service: ModuleType) -> ModuleType:
+def _service(pipeline_run_service: ModuleType) -> objective_discovery_service.ObjectiveDiscoveryService:
     objective_input_service.collection_service = object()
     objective_input_service.SourceArtifactRepo = object()
     objective_input_service.PaperMapRepo = object()
@@ -53,7 +53,7 @@ def _service(pipeline_run_service: ModuleType) -> ModuleType:
     )
     objective_discovery_service.ObjectiveRepo = object()
     objective_discovery_service.pipeline_run_service = pipeline_run_service
-    return objective_discovery_service
+    return objective_discovery_service.ObjectiveDiscoveryService()
 
 
 async def _wait_for_run(pipeline_run_service: ModuleType, run_id: str) -> None:
@@ -63,6 +63,48 @@ async def _wait_for_run(pipeline_run_service: ModuleType, run_id: str) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"run did not finish: {run_id}")
+
+
+async def test_discovery_shutdown_only_cancels_its_own_tasks(
+    monkeypatch, *, postgres_session_factory
+) -> None:
+    from tests.support.postgres import seed_collection
+
+    await seed_collection(postgres_session_factory, "col_b", document_ids=("doc_c",))
+    first = objective_discovery_service.ObjectiveDiscoveryService()
+    second = objective_discovery_service.ObjectiveDiscoveryService()
+    first_started, second_started = asyncio.Event(), asyncio.Event()
+    release = asyncio.Event()
+
+    async def resolve_inputs(collection_id, document_ids):
+        return tuple(PreparedDocumentInput(value, value) for value in document_ids)
+
+    async def first_run(*args):
+        first_started.set()
+        await release.wait()
+        return {}
+
+    async def second_run(*args):
+        second_started.set()
+        await release.wait()
+        return {}
+
+    monkeypatch.setattr(objective_input_service, "resolve_prepared_document_inputs", resolve_inputs)
+    monkeypatch.setattr(first, "run_objective_discovery", first_run)
+    monkeypatch.setattr(second, "run_objective_discovery", second_run)
+    try:
+        await first.start_objective_discovery("col_a", ("doc_a",), user_id="user-1")
+        await second.start_objective_discovery("col_b", ("doc_c",), user_id="user-1")
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        await asyncio.wait_for(second_started.wait(), timeout=1)
+        second_tasks = tuple(second._workers)
+        await first.close()
+        assert not first._workers
+        assert second_tasks and all(not task.done() for task in second_tasks)
+    finally:
+        release.set()
+        await first.close()
+        await second.close()
 
 
 async def test_objective_discovery_reuses_one_active_run_and_executes_once(
@@ -95,7 +137,7 @@ async def test_objective_discovery_reuses_one_active_run_and_executes_once(
         return ObjectiveFactSet(research_objectives_ready=True)
 
     monkeypatch.setattr(
-        service.objective_input_service,
+        objective_input_service,
         "resolve_prepared_document_inputs",
         resolve_inputs,
     )
@@ -134,7 +176,7 @@ async def test_objective_discovery_records_failure_and_allows_retry(
         raise RuntimeError("model unavailable")
 
     monkeypatch.setattr(
-        service.objective_input_service,
+        objective_input_service,
         "resolve_prepared_document_inputs",
         resolve_inputs,
     )
@@ -171,7 +213,7 @@ async def test_objective_discovery_progress_does_not_move_backwards(
         input_fingerprint="scope-a",
     )
     pending_updates = []
-    report = service._build_discovery_progress_callback(
+    report = objective_discovery_service._build_discovery_progress_callback(
         run["run_id"],
         pending_updates,
     )

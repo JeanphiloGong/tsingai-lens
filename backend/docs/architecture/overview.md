@@ -39,10 +39,11 @@ routes, middleware, and the startup lifecycle. On startup,
 `build_application_runtime()` binds the database session factory, configures the
 Chat runner and model-call observer, and constructs background worker resources.
 Repositories expose concrete singletons beside their implementations. Controllers
-import the owning application module functions directly; they do not look up
-services on `app.state` or call dependency factories. `ApplicationRuntime` owns the
-database engine and workers, with no per-route service fields. Startup recovers
-interrupted preparation, discovery, and analysis; shutdown disposes the engine.
+import stateless application operations directly. Components that own live tasks
+belong to the current app's `ApplicationRuntime`: Discovery admission uses its
+runtime instance and shutdown cancels and awaits that instance's tasks before
+disposing the engine. The runtime also constructs file resources and background
+workers. Startup recovers interrupted preparation, discovery, and analysis.
 The four legacy snapshot handlers remain unmounted.
 
 `controllers/exception_router.py` owns the four centralized exception handlers;
@@ -55,7 +56,8 @@ The public contract is specified in [the API reference](../specs/api.md).
 For Paper Maps, read `paper_research_map_service` as the coordinator. It orders
 Source selection, bounded extraction, optional expansion, reconciliation, and
 status assessment. `paper_map_sources.py` selects Sources and builds windows;
-`paper_map_extraction.py` performs model calls, structured-output recovery, and
+`paper_map_extraction.py` assembles and fits windows, performs model calls,
+structured-output recovery, and
 window-result normalization; `paper_map_aggregation.py` owns merging, signal
 reconciliation, and map status. This separation is structural: the scientific
 selection rules and persisted Paper Map contract remain unchanged.

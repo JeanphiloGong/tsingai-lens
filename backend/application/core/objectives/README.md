@@ -23,7 +23,7 @@ Use the following entry points when modifying the Core workflow:
 | Task | Entry point | Result |
 |---|---|---|
 | Resolve selected ready papers | `objective_input_service.resolve_prepared_document_inputs()` | frozen input set; no parsing |
-| Discover candidates | `objective_discovery_service.start_objective_discovery()` | queued discovery run |
+| Discover candidates | `ObjectiveDiscoveryService.start_objective_discovery()` | queued discovery run |
 | Form candidates | `objective_candidate_service.discover_candidate_facts()` | candidate Objectives |
 | Create/confirm a candidate | `objective_authoring_service.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
 | Queue analysis | `analysis_service.start_analysis()` | queued versioned analysis |
@@ -33,9 +33,9 @@ Use the following entry points when modifying the Core workflow:
 Paper Map construction is intentionally split by responsibility:
 
 - `paper_research_map_service.py` coordinates the document-level sequence;
-- `paper_map_sources.py` owns Source selection and window payloads;
-- `paper_map_extraction.py` owns model extraction, structured-output recovery,
-  and window-result normalization;
+- `paper_map_sources.py` owns Source selection and traversal;
+- `paper_map_extraction.py` assembles and fits selected windows, then owns model
+  extraction, structured-output recovery, and window-result normalization;
 - `paper_map_aggregation.py` owns window consolidation, study identity merging,
   unresolved-scope retention, and final status assessment.
 
@@ -154,6 +154,13 @@ Candidate formation identifies shared scientific themes while preserving each
 paper's stated variables, outcomes, material scope, process theme, and Source
 lineage. It must not infer experiment conditions or force unlike materials,
 states, methods, or broad outcome families into a directly comparable question.
+
+Each application constructs its own `ObjectiveDiscoveryService` in its runtime.
+The instance tracks admitted tasks, logs unexpected failures, and cancels and
+awaits its own tasks at shutdown. Repository access and candidate algorithms are
+direct module calls; they are not constructor-injected dependencies. Startup
+recovery turns durable interrupted runs into retryable failures before requests
+are accepted.
 
 The discovered Objective list is a bounded human review set, not the complete
 Paper Map. The map remains the discovery ledger: every emitted relationship,

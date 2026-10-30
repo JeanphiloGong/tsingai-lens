@@ -7,9 +7,6 @@ from application.core.objectives import analysis_service as objective_analysis_s
 from application.core.objectives import (
     objective_analysis_service as objective_scope_service,
 )
-from application.core.objectives import (
-    objective_discovery_service,
-)
 from application.core.objectives.analysis_service import list_objectives
 from controllers.core.research_objective_schemas import (
     FindingDetailResponse,
@@ -25,7 +22,7 @@ from controllers.core.research_objective_schemas import (
 from controllers.dependencies.auth import get_current_user_id
 from controllers.schemas.core.research_objectives import analysis_state_response
 from controllers.schemas.source.pipeline_run import PipelineRunResponse
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from utils.response import ApiResponse, make_api_response
@@ -53,11 +50,12 @@ research_objective_router = APIRouter(
     summary="Queue research question formation from selected ready documents",
 )
 async def discover_collection_objectives(
+    request: Request,
     collection_id: str,
     payload: DocumentSelectionRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    run = await objective_discovery_service.start_objective_discovery(
+    run = await request.app.state.runtime.objective_discovery_service.start_objective_discovery(
         collection_id, tuple(payload.document_ids), user_id=user_id
     )
     return make_api_response(data=PipelineRunResponse(**run))

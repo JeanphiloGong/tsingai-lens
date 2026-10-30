@@ -38,11 +38,11 @@ from application.chat.capabilities import (
     StartResearchProcessCapability,
 )
 from application.chat.session_service import RepositoryModelCallObserver
+from application.core.objectives.objective_discovery_service import ObjectiveDiscoveryService
 from application.core.objectives import analysis_service as objective_analysis_service
 from application.core.objectives import (
     finding_authoring_service,
     objective_authoring_service,
-    objective_discovery_service,
     paper_experiment_authoring_service,
 )
 from application.evaluation import finding_feedback_service
@@ -180,12 +180,14 @@ class ApplicationRuntime:
     database_engine: AsyncEngine
     collection_workspace: FileCollectionWorkspace
     object_store: FileObjectStore
+    objective_discovery_service: ObjectiveDiscoveryService
     feedback_analysis_worker: FeedbackAnalysisWorker
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker
     tool_failure_analysis_worker: ToolFailureAnalysisWorker
     dataset_sample_build_worker: DatasetSampleBuildWorker
 
     async def close(self) -> None:
+        await self.objective_discovery_service.close()
         await self.database_engine.dispose()
 
 
@@ -329,6 +331,7 @@ async def build_application_runtime() -> ApplicationRuntime:
             database_engine=database_engine,
             collection_workspace=collection_workspace,
             object_store=object_store,
+            objective_discovery_service=ObjectiveDiscoveryService(),
             feedback_analysis_worker=FeedbackAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,
@@ -368,9 +371,10 @@ async def build_application_runtime() -> ApplicationRuntime:
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     runtime = await build_application_runtime()
+    application.state.runtime = runtime
     try:
         await document_preparation_service.recover_interrupted_runs()
-        await objective_discovery_service.recover_interrupted_discoveries()
+        await runtime.objective_discovery_service.recover_interrupted_discoveries()
         await objective_analysis_service.recover_interrupted_analyses()
         yield
     finally:

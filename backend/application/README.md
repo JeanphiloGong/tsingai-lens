@@ -59,11 +59,12 @@ Inside it, business responsibilities are now grouped as:
 HTTP controllers import the owning module functions. Those functions use the
 concrete repository singletons defined in `repositories/*_repository.py`.
 They own resource authorization and orchestrate reads, domain decisions, and
-writes; callers pass the actor's user ID explicitly. Background recovery has
-separate process-owned operations for interrupted work. There is no service
-container, `app.state` service registration, injection-only service class, or
-forwarding compatibility interface. Stateful workers and the Agent runner keep
-their actual execution state and lifecycle.
+writes; callers pass the actor's user ID explicitly. Stateless operations do not
+need service objects or forwarding interfaces. Runtime components with live
+tasks belong to `ApplicationRuntime`; controllers obtain those components from
+their own app's runtime. `ObjectiveDiscoveryService` retains its own admitted
+tasks and cancels and awaits them on shutdown. Workers and the Agent runner
+retain their actual execution state and lifecycle.
 
 External formats are parsed at their input boundary. An expected missing
 resource, invalid decision, stale version, or write conflict is reported by its

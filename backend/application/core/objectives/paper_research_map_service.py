@@ -11,14 +11,12 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
 from application.core.objectives.paper_map_aggregation import (
-    PaperMapAggregator,
     notify_progress,
 )
 from application.core.objectives.paper_map_extraction import (
     PaperMapExtractionBudget,
-    PaperMapExtractionService,
 )
-from application.core.objectives.paper_map_sources import PaperMapSourceSelector
+from application.core.objectives import paper_map_aggregation, paper_map_extraction, paper_map_sources
 from domain.core import (
     PaperResearchMap,
     PaperResearchSignal,
@@ -32,13 +30,6 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 # Research-scope limits for the bounded pre-Objective reading rounds.
 _PAPER_MAP_EXPANSION_SOURCE_LIMIT = 8
 _PAPER_MAP_EXPANSION_SOURCE_BUDGET = 24
-
-
-_paper_map_aggregator = PaperMapAggregator()
-_paper_map_extraction = PaperMapExtractionService()
-_paper_map_sources = PaperMapSourceSelector(
-    fit_payload=_paper_map_extraction.fit_payload_to_prompt_limit
-)
 
 
 def build_document_paper_map(
@@ -96,7 +87,7 @@ def build_collection_paper_maps(
             len(document_tables),
             len(document_figures),
         )
-        payloads = _paper_map_sources.build_payloads(
+        payloads = paper_map_extraction.build_payloads(
             collection_id=collection_id,
             document=document,
             profile=profiles_by_document_id.get(document.document_id),
@@ -113,12 +104,12 @@ def build_collection_paper_maps(
         selected_source_unit_count = sum(
             len(payload.get("source_units") or ()) for payload in payloads
         )
-        recovery_call_budget = _paper_map_extraction.document_recovery_call_budget(
+        recovery_call_budget = paper_map_extraction.document_recovery_call_budget(
             window_count,
             selected_source_unit_count=selected_source_unit_count,
         )
         extraction_budget = PaperMapExtractionBudget(
-            deadline=monotonic() + _paper_map_extraction.document_time_budget_seconds(),
+            deadline=monotonic() + paper_map_extraction.document_time_budget_seconds(),
             max_calls=window_count + recovery_call_budget,
             max_recovery_calls=recovery_call_budget,
         )
@@ -137,7 +128,7 @@ def build_collection_paper_maps(
                 active_window_count=window_count,
                 active_window_role=payload["window_role"],
             )
-        for batch_maps, batch_signals in _paper_map_extraction.extract_window_payloads(
+        for batch_maps, batch_signals in paper_map_extraction.extract_window_payloads(
             collection_id=collection_id,
             document_id=document.document_id,
             payloads=payloads,
@@ -146,15 +137,15 @@ def build_collection_paper_maps(
         ):
             window_maps.extend(batch_maps)
             paper_signals.extend(batch_signals)
-        paper_map = _paper_map_aggregator.consolidate_window_maps(
+        paper_map = paper_map_aggregation.consolidate_window_maps(
             document.document_id,
             window_maps,
             profile=profiles_by_document_id.get(document.document_id),
         )
-        paper_map = _paper_map_aggregator.drop_signals_resolved_by_relationships(
+        paper_map = paper_map_aggregation.drop_signals_resolved_by_relationships(
             paper_map
         )
-        assessment = _paper_map_aggregator.assess(
+        assessment = paper_map_aggregation.assess(
             paper_map,
             signals=tuple(paper_signals),
             final=False,
@@ -178,7 +169,7 @@ def build_collection_paper_maps(
                 for unit in payload.get("source_units") or ()
                 if isinstance(unit, Mapping)
             )
-            expansion_payloads = _paper_map_sources.build_payloads(
+            expansion_payloads = paper_map_extraction.build_payloads(
                 collection_id=collection_id,
                 document=document,
                 profile=profiles_by_document_id.get(document.document_id),
@@ -189,7 +180,7 @@ def build_collection_paper_maps(
                 document_tree=document_trees_by_document_id.get(document.document_id),
                 paper_map_extractor=paper_map_extractor,
                 selection_focus=expansion_focus,
-                expansion_search_terms=_paper_map_sources.expansion_search_terms(
+                expansion_search_terms=paper_map_sources.expansion_search_terms(
                     paper_map,
                     paper_signals,
                 ),
@@ -203,7 +194,7 @@ def build_collection_paper_maps(
             remaining_expansion_sources -= sum(
                 len(payload.get("source_units") or ()) for payload in expansion_payloads
             )
-            expansion_payloads = _paper_map_sources.build_context_reading_payloads(
+            expansion_payloads = paper_map_extraction.build_context_reading_payloads(
                 previous_payloads=payloads,
                 new_payloads=expansion_payloads,
                 unresolved_signals=paper_map.unresolved_signals,
@@ -261,7 +252,7 @@ def build_collection_paper_maps(
             for (
                 batch_maps,
                 batch_signals,
-            ) in _paper_map_extraction.extract_window_payloads(
+            ) in paper_map_extraction.extract_window_payloads(
                 collection_id=collection_id,
                 document_id=document.document_id,
                 payloads=expansion_payloads,
@@ -271,24 +262,24 @@ def build_collection_paper_maps(
                 window_maps.extend(batch_maps)
                 paper_signals.extend(batch_signals)
             payloads.extend(expansion_payloads)
-            paper_map = _paper_map_aggregator.consolidate_window_maps(
+            paper_map = paper_map_aggregation.consolidate_window_maps(
                 document.document_id,
                 window_maps,
                 profile=profiles_by_document_id.get(document.document_id),
             )
-            paper_map = _paper_map_aggregator.drop_signals_resolved_by_relationships(
+            paper_map = paper_map_aggregation.drop_signals_resolved_by_relationships(
                 paper_map
             )
             expansion_round += 1
-            assessment = _paper_map_aggregator.assess(
+            assessment = paper_map_aggregation.assess(
                 paper_map,
                 signals=tuple(paper_signals),
                 final=False,
             )
-        paper_map = _paper_map_aggregator.drop_signals_resolved_by_relationships(
+        paper_map = paper_map_aggregation.drop_signals_resolved_by_relationships(
             paper_map
         )
-        final_assessment = _paper_map_aggregator.assess(
+        final_assessment = paper_map_aggregation.assess(
             paper_map,
             signals=paper_map.unresolved_signals,
             final=True,

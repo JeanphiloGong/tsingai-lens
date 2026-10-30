@@ -14,10 +14,8 @@ from application.core.objectives.discovery.paper_understanding.paper_map_outputs
 from application.core.objectives.discovery.paper_understanding.paper_map_results import (
     StructuredPaperResearchMap,
 )
-from application.core.objectives.paper_map_aggregation import PaperMapAggregator
-from application.core.objectives.paper_map_extraction import (
-    PaperMapExtractionService,
-)
+from application.core.objectives import paper_map_aggregation
+from application.core.objectives import paper_map_extraction
 from domain.core import PaperResearchMap, PaperResearchScope
 from domain.core.research_objective import (
     PaperResearchRelationship,
@@ -1417,7 +1415,7 @@ def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
         )
     ).extract(payload)
 
-    skim, signals = PaperMapExtractionService()._resolve_window_result(
+    skim, signals = paper_map_extraction._resolve_window_result(
         document_id="paper-heat-treatment",
         payload=payload,
         parsed=parsed,
@@ -1485,7 +1483,7 @@ def test_review_cited_experiment_cannot_become_current_work():
         ],
     )
 
-    skim, signals = PaperMapExtractionService()._resolve_window_result(
+    skim, signals = paper_map_extraction._resolve_window_result(
         document_id="review-paper",
         payload=payload,
         parsed=parsed,
@@ -1541,7 +1539,7 @@ def test_resolve_window_result_merges_duplicate_relationships_and_preserves_sour
         ],
     )
 
-    skim, signals = PaperMapExtractionService()._resolve_window_result(
+    skim, signals = paper_map_extraction._resolve_window_result(
         document_id="paper-duplicate-relationship",
         payload=payload,
         parsed=parsed,
@@ -1823,7 +1821,7 @@ def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
         ),
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -1903,7 +1901,7 @@ def test_labeled_and_unlabeled_claims_without_shared_source_stay_separate():
         ),
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -1955,7 +1953,7 @@ def test_different_experiment_labels_keep_equal_relationship_axes_separate():
         for experiment_label in ("experiment A", "experiment B")
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -1991,7 +1989,7 @@ def test_merged_relationship_identity_keeps_its_final_study_boundary():
             )
             for source_ref in ("methods-1", "results-1")
         )
-        return PaperMapAggregator._merge_studies(
+        return paper_map_aggregation._merge_studies(
             studies[0],
             studies[1],
             document_id="paper-1",
@@ -2132,7 +2130,7 @@ def test_merging_studies_collapses_duplicate_relationships_before_rebuilding_ids
         confidence=0.0,
     )
 
-    merged = PaperMapAggregator._merge_studies(
+    merged = paper_map_aggregation._merge_studies(
         existing,
         duplicate,
         document_id="paper-1",
@@ -2230,7 +2228,7 @@ def test_same_axes_with_incompatible_process_context_are_not_merged():
         ),
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -2306,7 +2304,7 @@ def test_same_axes_with_partially_overlapping_material_scopes_are_not_merged():
         ),
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -2384,7 +2382,7 @@ def test_same_axes_and_context_without_shared_study_identity_are_not_merged():
         ),
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -2407,7 +2405,7 @@ def test_consolidation_keeps_only_the_first_two_unique_paper_warnings():
         for position in range(4)
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=None,
@@ -2437,7 +2435,7 @@ def test_document_profile_owns_the_paper_role_across_windows():
         ),
     ]
 
-    skim = service._paper_map_aggregator.consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         window_skims,
         profile=SimpleNamespace(doc_type="experimental"),
@@ -2482,7 +2480,7 @@ def test_document_profile_bounds_study_claim_scope(
         confidence=0.9,
     )
 
-    skim = PaperMapAggregator().consolidate_window_maps(
+    skim = paper_map_aggregation.consolidate_window_maps(
         "paper-1",
         [
             PaperResearchMap(

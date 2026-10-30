@@ -15,11 +15,11 @@ from application.core.objectives.discovery.paper_understanding.workflow import (
     PaperResearchMapExtractor,
 )
 from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.objectives import paper_map_extraction
 from application.core.objectives.paper_map_extraction import (
     PaperMapExtractionBudget,
-    PaperMapExtractionService,
 )
-from application.core.objectives.paper_map_sources import PaperMapSourceSelector
+from application.core.objectives import paper_map_extraction
 from infra.llm.usage import capture_llm_usage
 from tests.unit.application.test_paper_research_map_service import (
     _artifacts,
@@ -50,9 +50,7 @@ class _ContextReader:
 def _selected_payloads(blocks, *, reader=None):
     documents, tree = _artifacts(blocks=blocks)
     document = documents[0]
-    return PaperMapSourceSelector(
-        PaperMapExtractionService().fit_payload_to_prompt_limit
-    ).build_payloads(
+    return paper_map_extraction.build_payloads(
         collection_id="context-reading",
         document=document,
         profile=None,
@@ -244,7 +242,7 @@ def test_oversized_input_splits_losslessly_with_distinct_fragment_lineage():
 def test_actual_provider_attempts_share_budget_and_do_not_count_unsent_calls(mode, allowed_recovery):
     class BudgetClient(_FakeOpenAIClient):
         def __init__(self):
-            super().__init__("not JSON", parse_error=RuntimeError("invalid provider response"))
+            super().__init__("not JSON", parse_error=json.JSONDecodeError("invalid provider response", "not JSON", 0))
             self.options = []
 
         def with_options(self, **kwargs):
@@ -259,7 +257,7 @@ def test_actual_provider_attempts_share_budget_and_do_not_count_unsent_calls(mod
     budget = PaperMapExtractionBudget(deadline=monotonic() + 30, max_calls=1 + allowed_recovery, max_recovery_calls=allowed_recovery)
 
     with capture_llm_usage() as usage:
-        results = PaperMapExtractionService().extract_window_payloads(
+        results = paper_map_extraction.extract_window_payloads(
             collection_id="test", document_id="paper-1", payloads=payloads,
             paper_map_extractor=reader, extraction_budget=budget,
         )
@@ -277,7 +275,7 @@ def test_expired_document_budget_sends_no_model_request():
     payloads = _selected_payloads([_paragraph("abstract", "Current study.", 1, "Abstract")])
     budget = PaperMapExtractionBudget(deadline=monotonic() - 1, max_calls=2, max_recovery_calls=1)
 
-    results = PaperMapExtractionService().extract_window_payloads(
+    results = paper_map_extraction.extract_window_payloads(
         collection_id="test", document_id="paper-1", payloads=payloads,
         paper_map_extractor=reader, extraction_budget=budget,
     )
@@ -352,7 +350,7 @@ def test_other_window_budget_failure_does_not_mask_this_window_parse_failure():
         failure_kind="recovery_budget_exhausted",
     )
 
-    results = PaperMapExtractionService().extract_window_payloads(
+    results = paper_map_extraction.extract_window_payloads(
         collection_id="test", document_id="paper-1", payloads=payloads,
         paper_map_extractor=_ContextReader(respond), extraction_budget=budget,
     )
@@ -479,7 +477,7 @@ def test_paper_map_binding_preserves_scope_identity_and_confidence():
     reader = PaperResearchMapExtractor(StructuredResponseClient(client=client, model="fake-model", extraction_mode="json_text"))
 
     parsed = reader.extract(payload)
-    paper_map, signals = PaperMapExtractionService()._resolve_window_result(document_id="paper-ti", payload=payload, parsed=parsed)
+    paper_map, signals = paper_map_extraction._resolve_window_result(document_id="paper-ti", payload=payload, parsed=parsed)
 
     study = paper_map.studies[0]
     assert study.study_id == "study_1f65d7cf7de93d0f9a8f6936"

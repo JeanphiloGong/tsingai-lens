@@ -1,3 +1,4 @@
+from application.chat.capabilities import document_sources
 from application.chat.capabilities import collection_context
 from infra.persistence import database
 from copy import deepcopy
@@ -250,10 +251,9 @@ def test_browse_can_continue_to_source_read_when_optional_metadata_is_missing(*,
     collection_context.PaperMapRepo = PaperMapRepository()
     collection_context.SourceArtifactRepo = sources
     browse = BrowseCollectionPapersCapability()
-    inspect = InspectDocumentSourcesCapability(
-        collection_service=collection_service,
-        source_artifact_repository=sources,
-    )
+    document_sources.collection_service = collection_service
+    document_sources.SourceArtifactRepo = sources
+    inspect = InspectDocumentSourcesCapability()
     context = CapabilityExecutionContext(
         session_id="s", user_id="u", collection_id="c", tool_call_id="browse"
     )

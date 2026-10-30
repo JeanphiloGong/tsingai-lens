@@ -218,22 +218,10 @@ async def build_application_runtime() -> ApplicationRuntime:
                 (
                     GetCollectionContextCapability(),
                     BrowseCollectionPapersCapability(),
-                    InspectDocumentSourcesCapability(
-                        collection_service=collection_service,
-                        source_artifact_repository=SourceArtifactRepo,
-                    ),
-                    SearchSourcesCapability(
-                        collection_service=collection_service,
-                        source_artifact_repository=SourceArtifactRepo,
-                    ),
-                    InspectTableCapability(
-                        collection_service=collection_service,
-                        source_artifact_repository=SourceArtifactRepo,
-                    ),
-                    ReadSourceCapability(
-                        collection_service=collection_service,
-                        source_artifact_repository=SourceArtifactRepo,
-                    ),
+                    InspectDocumentSourcesCapability(),
+                    SearchSourcesCapability(),
+                    InspectTableCapability(),
+                    ReadSourceCapability(),
                     InspectResearchProcessCapability(),
                     StartResearchProcessCapability(
                         document_preparation_service=preparation,

@@ -197,7 +197,7 @@ def collection_service(postgres_session_factory):
 def _isolate_application_module_dependencies(monkeypatch):
     """Restore directly patched singleton dependencies and per-test task state."""
     import application.chat.session_service as _test_chat_session_service
-    from application.chat.capabilities import collection_context, research_scope
+    from application.chat.capabilities import collection_context, research_scope, document_sources
     import application.core.objectives.analysis.analysis_record_source as _test_analysis_record_source
     import application.core.document_profiles.service as _test_document_profile_service
     import application.core.objectives.analysis.experiment_analysis_writer as _test_experiment_analysis_writer
@@ -244,6 +244,7 @@ def _isolate_application_module_dependencies(monkeypatch):
     )
 
     dependencies = (
+        (document_sources, ["collection_service", "SourceArtifactRepo"]),
         (collection_context, ["collection_service", "ObjectiveRepo", "DocumentProfileRepo", "PaperMapRepo", "SourceArtifactRepo"]),
         (research_scope, ["collection_service", "PaperMapRepo"]),
         (_test_analysis_record_source, ["ObjectiveRepo"]),

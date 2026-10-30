@@ -1,5 +1,6 @@
 """Source tools use the real collection lookup to distinguish unavailable papers."""
 
+from application.chat.capabilities import document_sources
 from unittest.mock import AsyncMock
 
 import pytest
@@ -67,9 +68,9 @@ async def test_source_availability_uses_real_collection_lookup(
     context = CapabilityExecutionContext(
         session_id="chat", user_id="local-user", collection_id=collection_id, tool_call_id="read",
     )
-    handler = capability(
-        collection_service=collection_service, source_artifact_repository=SourceArtifactRepository(),
-    )
+    document_sources.collection_service = collection_service
+    document_sources.SourceArtifactRepo = SourceArtifactRepository()
+    handler = capability()
     if state == "database_failure":
         with pytest.raises(OperationalError) as raised:
             await handler.execute(context, arguments)

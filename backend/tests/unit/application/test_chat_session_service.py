@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import document_sources
+
 import asyncio
 from dataclasses import replace
 from hashlib import sha256
@@ -1256,9 +1258,9 @@ async def test_source_comparison_preserves_inspected_paper_and_can_resume(
     repository = ChatRepository()
     sources = SourceArtifactRepository()
     collection = _CollectionService()
-    read = ReadSourceCapability(
-        collection_service=collection, source_artifact_repository=sources
-    )
+    document_sources.collection_service = collection
+    document_sources.SourceArtifactRepo = sources
+    read = ReadSourceCapability()
     cancelled = asyncio.Event()
 
     class Model(_Model):

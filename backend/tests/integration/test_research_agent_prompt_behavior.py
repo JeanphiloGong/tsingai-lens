@@ -7,6 +7,8 @@ explicit operator-supplied endpoint. No environment file is loaded here.
 
 from __future__ import annotations
 
+from application.chat.capabilities import document_sources
+
 from application.chat.capabilities import collection_context
 
 import json
@@ -125,25 +127,15 @@ def _runner(
     collection_context.DocumentProfileRepo = profiles
     collection_context.PaperMapRepo = maps
     collection_context.SourceArtifactRepo = sources
+    document_sources.collection_service = collection_service
+    document_sources.SourceArtifactRepo = sources
     handlers = (
         GetCollectionContextCapability(),
         BrowseCollectionPapersCapability(),
-        InspectDocumentSourcesCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
-        SearchSourcesCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
-        ReadSourceCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
-        InspectTableCapability(
-            collection_service=collection_service,
-            source_artifact_repository=sources,
-        ),
+        InspectDocumentSourcesCapability(),
+        SearchSourcesCapability(),
+        ReadSourceCapability(),
+        InspectTableCapability(),
     )
     from infra.llm.chat_model import OpenAIChatModel
 

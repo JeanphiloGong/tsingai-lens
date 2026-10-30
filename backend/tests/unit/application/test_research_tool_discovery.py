@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from application.chat.capabilities import document_sources
+
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -174,9 +176,9 @@ async def test_missing_source_distinguishes_unknown_identity_from_unprepared_pap
         ),
     }
     capability, args = handlers[tool]
-    result = await capability(
-        collection_service=collection, source_artifact_repository=sources
-    ).execute(
+    document_sources.collection_service = collection
+    document_sources.SourceArtifactRepo = sources
+    result = await capability().execute(
         CapabilityExecutionContext.for_call(_context(), "read"),
         args,
     )
@@ -247,10 +249,9 @@ async def test_source_reads_expose_the_authoring_label_catalog():
         collection_id="collection-1",
         tool_call_id="call-1",
     )
-    inspected = await InspectDocumentSourcesCapability(
-        collection_service=_Collection(),
-        source_artifact_repository=_Sources(),
-    ).execute(context, InspectDocumentSourcesToolRequest(document_id="paper-1"))
+    document_sources.collection_service = _Collection()
+    document_sources.SourceArtifactRepo = _Sources()
+    inspected = await InspectDocumentSourcesCapability().execute(context, InspectDocumentSourcesToolRequest(document_id="paper-1"))
 
     assert [item["source_label"] for item in inspected.data["sources"]] == [
         "S001",
@@ -265,10 +266,9 @@ async def test_source_reads_expose_the_authoring_label_catalog():
         "S002": "results-1",
     }
 
-    read = await ReadSourceCapability(
-        collection_service=_Collection(),
-        source_artifact_repository=_Sources(),
-    ).execute(
+    document_sources.collection_service = _Collection()
+    document_sources.SourceArtifactRepo = _Sources()
+    read = await ReadSourceCapability().execute(
         context,
         ReadSourceToolRequest(
             document_id="paper-1",

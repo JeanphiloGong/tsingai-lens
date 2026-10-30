@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from application.source import collection_service
+from repositories.source_artifact_repository import SourceArtifactRepo
+
 import hashlib
 import json
 from dataclasses import replace
@@ -34,7 +37,6 @@ ReadableSourceKind = Literal["text_window", "table", "figure"]
 
 
 async def _unavailable_document_sources(
-    collection_service: Any,
     context: CapabilityExecutionContext,
     document_ids: list[str],
 ) -> ChatToolResult:
@@ -170,28 +172,22 @@ class ReadSourceCapability:
         parallel_safe=True,
     )
 
-    def __init__(
-        self, *, collection_service: Any, source_artifact_repository: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ReadSourceToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        document = await self.source_artifact_repository.read_document(
+        document = await SourceArtifactRepo.read_document(
             context.collection_id,
             arguments.document_id,
         )
         if document is None:
             return await _unavailable_document_sources(
-                self.collection_service, context, [arguments.document_id]
+                context, [arguments.document_id]
             )
 
         source = self._source_record(document, arguments)
@@ -398,29 +394,23 @@ class SearchSourcesCapability:
         parallel_safe=True,
     )
 
-    def __init__(
-        self, *, collection_service: Any, source_artifact_repository: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: SearchSourcesToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
         try:
-            documents = await self.source_artifact_repository.read_documents(
+            documents = await SourceArtifactRepo.read_documents(
                 context.collection_id,
                 tuple(arguments.document_ids),
             )
         except FileNotFoundError:
             return await _unavailable_document_sources(
-                self.collection_service, context, arguments.document_ids
+                context, arguments.document_ids
             )
         documents_by_id = {document.document_id: document for document in documents}
         missing = [
@@ -430,7 +420,7 @@ class SearchSourcesCapability:
         ]
         if missing:
             return await _unavailable_document_sources(
-                self.collection_service, context, missing
+                context, missing
             )
 
         selected_types = set(arguments.source_types)
@@ -544,28 +534,22 @@ class InspectTableCapability:
         parallel_safe=True,
     )
 
-    def __init__(
-        self, *, collection_service: Any, source_artifact_repository: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectTableToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        document = await self.source_artifact_repository.read_document(
+        document = await SourceArtifactRepo.read_document(
             context.collection_id,
             arguments.document_id,
         )
         if document is None:
             return await _unavailable_document_sources(
-                self.collection_service, context, [arguments.document_id]
+                context, [arguments.document_id]
             )
         table = next(
             (item for item in document.tables if item.table_id == arguments.table_ref),
@@ -756,28 +740,22 @@ class InspectDocumentSourcesCapability:
         parallel_safe=True,
     )
 
-    def __init__(
-        self, *, collection_service: Any, source_artifact_repository: Any
-    ) -> None:
-        self.collection_service = collection_service
-        self.source_artifact_repository = source_artifact_repository
-
     async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: InspectDocumentSourcesToolRequest,
     ) -> ChatToolResult:
-        await self.collection_service.get_collection_for_user(
+        await collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        document = await self.source_artifact_repository.read_document(
+        document = await SourceArtifactRepo.read_document(
             context.collection_id,
             arguments.document_id,
         )
         if document is None:
             return await _unavailable_document_sources(
-                self.collection_service, context, [arguments.document_id]
+                context, [arguments.document_id]
             )
 
         sources = [

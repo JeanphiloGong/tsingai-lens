@@ -12,7 +12,7 @@ from domain.core.finding import Finding
 from domain.core.objective_experiment_selection import ObjectiveExperimentSelection
 from domain.core.paper_experiment import PaperExperimentRevision
 from infra.persistence.postgres.models.objective import ObjectiveAnalysisRecord
-from repositories.comparison_group_repository import _add_group
+from repositories.comparison_group_repository import ComparisonGroupRepository
 from repositories.experiment_finding_repository import _add_finding
 from repositories.objective_experiment_selection_repository import _add_selection
 from repositories.paper_experiment_repository import (
@@ -144,7 +144,7 @@ class ExperimentAnalysisRepository:
         )
         groups = tuple(
             [
-                await _add_group(db, graph.collection_id, group)
+                await ComparisonGroupRepository().add_group(db, graph.collection_id, group)
                 for group in graph.groups
             ]
         )

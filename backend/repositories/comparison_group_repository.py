@@ -27,7 +27,44 @@ class ComparisonGroupRepository:
         collection_id: str,
         group: ComparisonGroup,
     ) -> ComparisonGroup:
-        return await _add_group(db, collection_id, group)
+        existing = await db.scalar(
+            select(ComparisonGroupRow).where(
+                ComparisonGroupRow.group_id == group.group_id,
+                ComparisonGroupRow.collection_id == collection_id,
+            )
+        )
+        if existing is not None:
+            restored = await load_comparison_group(db, existing)
+            if restored == group:
+                return restored
+            raise ValueError("comparison group identity already exists")
+        await _validate_group_context(db, collection_id, group)
+        row = ComparisonGroupRow(
+            group_id=group.group_id,
+            collection_id=collection_id,
+            objective_id=group.objective_id,
+            analysis_version=group.analysis_version,
+            outcome=group.outcome,
+            comparison_target=group.comparison_target,
+            comparison_basis_json=list(group.comparison_basis),
+            normalizations_json=[dict(item) for item in group.normalizations],
+            status=group.status,
+            limitations_json=list(group.limitations),
+        )
+        db.add(row)
+        await db.flush()
+        db.add_all(
+            ComparisonGroupMemberRow(
+                group_id=group.group_id,
+                selection_id=item.selection_id,
+                role=item.role,
+                comparability=item.comparability,
+                reason=item.reason,
+            )
+            for item in group.members
+        )
+        await db.flush()
+        return group
 
     async def read_group(
         self,
@@ -62,52 +99,6 @@ class ComparisonGroupRepository:
             )
         )
         return tuple([await load_comparison_group(db, row) for row in rows])
-
-
-async def _add_group(
-    db: AsyncSession,
-    collection_id: str,
-    group: ComparisonGroup,
-) -> ComparisonGroup:
-    existing = await db.scalar(
-        select(ComparisonGroupRow).where(
-            ComparisonGroupRow.group_id == group.group_id,
-            ComparisonGroupRow.collection_id == collection_id,
-        )
-    )
-    if existing is not None:
-        restored = await load_comparison_group(db, existing)
-        if restored == group:
-            return restored
-        raise ValueError("comparison group identity already exists")
-    await _validate_group_context(db, collection_id, group)
-    row = ComparisonGroupRow(
-        group_id=group.group_id,
-        collection_id=collection_id,
-        objective_id=group.objective_id,
-        analysis_version=group.analysis_version,
-        outcome=group.outcome,
-        comparison_target=group.comparison_target,
-        comparison_basis_json=list(group.comparison_basis),
-        normalizations_json=[dict(item) for item in group.normalizations],
-        status=group.status,
-        limitations_json=list(group.limitations),
-    )
-    db.add(row)
-    # The member rows reference the group's natural key. Flush the parent first.
-    await db.flush()
-    db.add_all(
-        ComparisonGroupMemberRow(
-            group_id=group.group_id,
-            selection_id=item.selection_id,
-            role=item.role,
-            comparability=item.comparability,
-            reason=item.reason,
-        )
-        for item in group.members
-    )
-    await db.flush()
-    return group
 
 
 async def _validate_group_context(

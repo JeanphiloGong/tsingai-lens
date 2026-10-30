@@ -32,15 +32,8 @@ class ComparisonGroup:
     limitations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.group_id.strip() or not self.objective_id.strip() or not self.outcome.strip():
-            raise ValueError("comparison group requires identity and outcome")
-        if self.analysis_version < 1:
-            raise ValueError("comparison group analysis_version must be positive")
         if not self.comparison_basis:
             raise ValueError("comparison group requires a comparison basis")
-        ids = [item.selection_id for item in self.members]
-        if len(ids) != len(set(ids)):
-            raise ValueError("comparison group members must be unique")
         if self.status == "comparable" and any(
             item.role == "included" and item.comparability != "comparable"
             for item in self.members

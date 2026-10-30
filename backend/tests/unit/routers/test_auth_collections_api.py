@@ -215,7 +215,7 @@ def test_app_lifespan_recovers_orphaned_work_before_serving_requests(
         preparation_recovery,
     )
     monkeypatch.setattr(
-        objective_analysis_service,
+        objective_analysis_service.ObjectiveAnalysisService,
         "recover_interrupted_analyses",
         analysis_recovery,
     )

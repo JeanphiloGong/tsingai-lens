@@ -8,6 +8,7 @@ from asyncio import (
     Task,
     create_task,
     get_running_loop,
+    gather,
     run_coroutine_threadsafe,
     to_thread,
 )
@@ -217,66 +218,197 @@ class ObjectiveAnalysisDispatchError(ServiceUnavailableException):
 
 from repositories.objective_repository import ObjectiveRepo, StoredObjective
 
-_analysis_semaphore = Semaphore(_ANALYSIS_MAX_CONCURRENCY)
 
+class ObjectiveAnalysisService:
+    """Own analysis tasks and concurrency admitted by one application."""
 
-async def recover_interrupted_analyses() -> int:
-    interrupted_count = await ObjectiveRepo.interrupt_active_analyses()
-    if interrupted_count:
-        logger.warning(
-            "Recovered interrupted Objective analyses count=%s",
-            interrupted_count,
+    def __init__(self, *, max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY) -> None:
+        self._analysis_semaphore = Semaphore(max_concurrency)
+        self._analysis_tasks: set[Task[dict[str, Any]]] = set()
+
+    async def close(self) -> None:
+        tasks = tuple(self._analysis_tasks)
+        for task in tasks:
+            task.cancel()
+        await gather(*tasks, return_exceptions=True)
+
+    async def recover_interrupted_analyses(self) -> int:
+        interrupted_count = await ObjectiveRepo.interrupt_active_analyses()
+        if interrupted_count:
+            logger.warning(
+                "Recovered interrupted Objective analyses count=%s",
+                interrupted_count,
+            )
+        return interrupted_count
+
+    async def start_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        document_ids: tuple[str, ...],
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Confirm, queue, and asynchronously dispatch one canonical analysis."""
+        await collection_service.get_collection_for_user(collection_id, user_id)
+
+        payload = await queue_analysis(
+            collection_id,
+            objective_id,
+            document_ids,
         )
-    return interrupted_count
+        analysis = payload.get("analysis")
+        if analysis is None or analysis.status != "queued":
+            return payload
 
-
-async def start_analysis(
-    collection_id: str,
-    objective_id: str,
-    document_ids: tuple[str, ...],
-    *,
-    user_id: str,
-) -> dict[str, Any]:
-    """Confirm, queue, and asynchronously dispatch one canonical analysis."""
-    await collection_service.get_collection_for_user(collection_id, user_id)
-
-    payload = await queue_analysis(
-        collection_id,
-        objective_id,
-        document_ids,
-    )
-    analysis = payload.get("analysis")
-    if analysis is None or analysis.status != "queued":
+        coroutine = self._execute_scheduled_analysis(
+            collection_id,
+            objective_id,
+            analysis.analysis_version,
+        )
+        try:
+            task = create_task(coroutine)
+        except Exception as exc:  # noqa: BLE001
+            coroutine.close()
+            logger.exception(
+                "Objective analysis dispatch failed collection_id=%s "
+                "objective_id=%s analysis_version=%s",
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            )
+            await fail_analysis_dispatch(
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            )
+            raise ObjectiveAnalysisDispatchError(
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            ) from exc
+        self._analysis_tasks.add(task)
+        task.add_done_callback(self._analysis_tasks.discard)
+        task.add_done_callback(_log_unexpected_analysis_failure)
         return payload
 
-    coroutine = _execute_scheduled_analysis(
-        collection_id,
-        objective_id,
-        analysis.analysis_version,
-    )
-    try:
-        task = create_task(coroutine)
-    except Exception as exc:  # noqa: BLE001
-        coroutine.close()
-        logger.exception(
-            "Objective analysis dispatch failed collection_id=%s "
-            "objective_id=%s analysis_version=%s",
-            collection_id,
-            objective_id,
-            analysis.analysis_version,
-        )
-        await fail_analysis_dispatch(
-            collection_id,
-            objective_id,
-            analysis.analysis_version,
-        )
-        raise ObjectiveAnalysisDispatchError(
-            collection_id,
-            objective_id,
-            analysis.analysis_version,
-        ) from exc
-    task.add_done_callback(_log_unexpected_analysis_failure)
-    return payload
+    async def execute_queued_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> dict[str, Any]:
+        try:
+            objective = await _require_objective(collection_id, objective_id)
+            claimed = await ObjectiveRepo.claim_analysis(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            if claimed is None:
+                return await _result(collection_id, objective.objective_id)
+            usage_started_at = perf_counter()
+            progress_callback = _build_progress_callback(claimed)
+            with (
+                capture_llm_usage() as usage,
+                capture_analysis_diagnostics() as diagnostics,
+            ):
+                artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
+                try:
+                    artifacts = await experiment_analysis_service.generate_experiment_analysis_artifacts(
+                        collection_id,
+                        claimed,
+                        progress_callback=progress_callback,
+                    )
+                    _validate_artifacts(artifacts)
+                except Exception as exc:
+                    record_analysis_failure(
+                        exc,
+                        collection_id=collection_id,
+                        objective_id=objective_id,
+                        analysis_version=analysis_version,
+                        stage="generate_artifacts",
+                    )
+                    raise
+                finally:
+                    claimed = await ObjectiveRepo.update_analysis_execution_stats(
+                        collection_id,
+                        objective_id,
+                        analysis_version,
+                        stats=usage.execution_stats(
+                            duration_ms=round((perf_counter() - usage_started_at) * 1000)
+                        ),
+                        model_name=(
+                            usage.model_name
+                            or (artifacts.model_name if artifacts is not None else None)
+                            or claimed.model_name
+                        ),
+                        prompt_versions=usage.prompt_versions,
+                        diagnostics=diagnostics.records,
+                    )
+            async with AsyncSessionLocal() as db, db.begin():
+                native_result = await experiment_analysis_writer.write_experiment_analysis(
+                    db=db,
+                    collection_id=collection_id,
+                    objective=objective,
+                    analysis=claimed,
+                    experiment_outputs=artifacts.experiment_outputs,
+                    partial_experiment_outputs=artifacts.partial_experiment_outputs,
+                    reused_revisions=artifacts.reused_revisions,
+                )
+                abstention_reason, abstention_note = _experiment_abstention(native_result)
+                objective, completed = await ObjectiveRepo.publish_experiment_analysis(
+                    db,
+                    collection_id,
+                    objective_id,
+                    analysis_version,
+                    contributions=artifacts.contributions,
+                    abstention_reason=abstention_reason,
+                    abstention_note=abstention_note,
+                )
+            return await _result(collection_id, objective.objective_id, analysis=completed)
+        except Exception as exc:  # noqa: BLE001
+            record_analysis_failure(
+                exc,
+                collection_id=collection_id,
+                objective_id=objective_id,
+                analysis_version=analysis_version,
+                stage="execute_analysis",
+            )
+            logger.error(
+                "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
+                collection_id,
+                objective_id,
+                analysis_version,
+                type(exc).__name__,
+            )
+            current = await ObjectiveRepo.read_analysis(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            if current is not None and current.status in {"queued", "running"}:
+                current = await ObjectiveRepo.fail_analysis(
+                    collection_id,
+                    objective_id,
+                    analysis_version,
+                    error_code=_error_code(exc),
+                    error_message=analysis_error_message(_error_code(exc)),
+                )
+            return await _result(collection_id, objective_id, analysis=current)
+
+    async def _execute_scheduled_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> dict[str, Any]:
+        async with self._analysis_semaphore:
+            return await self.execute_queued_analysis(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
 
 
 async def queue_analysis(
@@ -1458,124 +1590,6 @@ async def _all_published_evidence(
             return tuple(records)
 
 
-async def execute_queued_analysis(
-    collection_id: str,
-    objective_id: str,
-    analysis_version: int,
-) -> dict[str, Any]:
-    try:
-        objective = await _require_objective(collection_id, objective_id)
-        claimed = await ObjectiveRepo.claim_analysis(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        if claimed is None:
-            return await _result(collection_id, objective.objective_id)
-        usage_started_at = perf_counter()
-        progress_callback = _build_progress_callback(claimed)
-        with (
-            capture_llm_usage() as usage,
-            capture_analysis_diagnostics() as diagnostics,
-        ):
-            artifacts: ObjectiveExperimentAnalysisArtifacts | None = None
-            try:
-                artifacts = await experiment_analysis_service.generate_experiment_analysis_artifacts(
-                    collection_id,
-                    claimed,
-                    progress_callback=progress_callback,
-                )
-                _validate_artifacts(artifacts)
-            except Exception as exc:
-                record_analysis_failure(
-                    exc,
-                    collection_id=collection_id,
-                    objective_id=objective_id,
-                    analysis_version=analysis_version,
-                    stage="generate_artifacts",
-                )
-                raise
-            finally:
-                claimed = await ObjectiveRepo.update_analysis_execution_stats(
-                    collection_id,
-                    objective_id,
-                    analysis_version,
-                    stats=usage.execution_stats(
-                        duration_ms=round((perf_counter() - usage_started_at) * 1000)
-                    ),
-                    model_name=(
-                        usage.model_name
-                        or (artifacts.model_name if artifacts is not None else None)
-                        or claimed.model_name
-                    ),
-                    prompt_versions=usage.prompt_versions,
-                    diagnostics=diagnostics.records,
-                )
-        async with AsyncSessionLocal() as db, db.begin():
-            native_result = await experiment_analysis_writer.write_experiment_analysis(
-                db=db,
-                collection_id=collection_id,
-                objective=objective,
-                analysis=claimed,
-                experiment_outputs=artifacts.experiment_outputs,
-                partial_experiment_outputs=artifacts.partial_experiment_outputs,
-                reused_revisions=artifacts.reused_revisions,
-            )
-            abstention_reason, abstention_note = _experiment_abstention(native_result)
-            objective, completed = await ObjectiveRepo.publish_experiment_analysis(
-                db,
-                collection_id,
-                objective_id,
-                analysis_version,
-                contributions=artifacts.contributions,
-                abstention_reason=abstention_reason,
-                abstention_note=abstention_note,
-            )
-        return await _result(collection_id, objective.objective_id, analysis=completed)
-    except Exception as exc:  # noqa: BLE001
-        record_analysis_failure(
-            exc,
-            collection_id=collection_id,
-            objective_id=objective_id,
-            analysis_version=analysis_version,
-            stage="execute_analysis",
-        )
-        logger.error(
-            "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s error_type=%s",
-            collection_id,
-            objective_id,
-            analysis_version,
-            type(exc).__name__,
-        )
-        current = await ObjectiveRepo.read_analysis(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        if current is not None and current.status in {"queued", "running"}:
-            current = await ObjectiveRepo.fail_analysis(
-                collection_id,
-                objective_id,
-                analysis_version,
-                error_code=_error_code(exc),
-                error_message=analysis_error_message(_error_code(exc)),
-            )
-        return await _result(collection_id, objective_id, analysis=current)
-
-
-async def _execute_scheduled_analysis(
-    collection_id: str,
-    objective_id: str,
-    analysis_version: int,
-) -> dict[str, Any]:
-    async with _analysis_semaphore:
-        return await execute_queued_analysis(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-
-
 def _log_unexpected_analysis_failure(task: Task[dict[str, Any]]) -> None:
     try:
         task.result()
@@ -1830,8 +1844,7 @@ def _error_code(exc: Exception) -> str:
 
 __all__ = [
     "ObjectiveAnalysisDispatchError",
-    "recover_interrupted_analyses",
-    "start_analysis",
+    "ObjectiveAnalysisService",
     "queue_analysis",
     "fail_analysis_dispatch",
     "get_analysis_state",
@@ -1842,5 +1855,4 @@ __all__ = [
     "summarize_finding",
     "list_evidence",
     "get_evidence_map",
-    "execute_queued_analysis",
 ]

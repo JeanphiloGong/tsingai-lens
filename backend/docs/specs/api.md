@@ -865,7 +865,7 @@ capabilities:
   only the bounded detail projection;
 - `start_objective_analysis` is a `write` capability for an already confirmed
   Objective. A separate exact-argument approval calls the same canonical
-  `analysis_service.start_analysis()` used by the HTTP route with the
+  `ObjectiveAnalysisService.start_analysis()` used by the HTTP route with the
   exact approved ready `document_ids`. An unconfirmed candidate is rejected
   without allocating an analysis version. It
   returns the persisted queued, running, succeeded, or failed state and never

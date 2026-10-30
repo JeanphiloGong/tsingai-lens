@@ -12,6 +12,8 @@ from application.chat.capabilities.contracts import (
 )
 from application.core.objectives.analysis_service import (
     ObjectiveAnalysisDispatchError,
+    ObjectiveAnalysisService,
+    get_analysis_state,
 )
 from domain.chat import ChatResourceRef, ChatToolResult, ToolResultStatus, ToolRisk
 from pydantic import BaseModel, ConfigDict, Field
@@ -119,7 +121,7 @@ class StartObjectiveAnalysisCapability:
         *,
         collection_service: Any,
         objective_repository: Any,
-        objective_analysis_service: Any,
+        objective_analysis_service: ObjectiveAnalysisService,
     ) -> None:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
@@ -160,7 +162,7 @@ class StartObjectiveAnalysisCapability:
                 user_id=context.user_id,
             )
         except ObjectiveAnalysisDispatchError:
-            payload = await self.objective_analysis_service.get_analysis_state(
+            payload = await get_analysis_state(
                 context.collection_id, arguments.objective_id, user_id=context.user_id
             )
         projection = _project_analysis(payload)

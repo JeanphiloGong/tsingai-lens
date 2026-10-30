@@ -62,9 +62,9 @@ They own resource authorization and orchestrate reads, domain decisions, and
 writes; callers pass the actor's user ID explicitly. Stateless operations do not
 need service objects or forwarding interfaces. Runtime components with live
 tasks belong to `ApplicationRuntime`; controllers obtain those components from
-their own app's runtime. `ObjectiveDiscoveryService` and
-`DocumentPreparationService` retain their own admitted tasks and cancel and await
-them on shutdown. Workers and the Agent runner
+their own app's runtime. `ObjectiveDiscoveryService`,
+`DocumentPreparationService`, and `ObjectiveAnalysisService` retain their own
+admitted tasks and cancel and await them on shutdown. Workers and the Agent runner
 retain their actual execution state and lifecycle.
 
 External formats are parsed at their input boundary. An expected missing

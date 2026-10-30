@@ -40,6 +40,7 @@ from application.chat.capabilities import (
 from application.chat.session_service import RepositoryModelCallObserver
 from application.core.objectives.objective_discovery_service import ObjectiveDiscoveryService
 from application.core.objectives import analysis_service as objective_analysis_service
+from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives import (
     finding_authoring_service,
     objective_authoring_service,
@@ -183,6 +184,7 @@ class ApplicationRuntime:
     object_store: FileObjectStore
     objective_discovery_service: ObjectiveDiscoveryService
     document_preparation_service: DocumentPreparationService
+    objective_analysis_service: ObjectiveAnalysisService
     feedback_analysis_worker: FeedbackAnalysisWorker
     correction_signal_analysis_worker: CorrectionSignalAnalysisWorker
     tool_failure_analysis_worker: ToolFailureAnalysisWorker
@@ -191,6 +193,7 @@ class ApplicationRuntime:
     async def close(self) -> None:
         await self.objective_discovery_service.close()
         await self.document_preparation_service.close()
+        await self.objective_analysis_service.close()
         await self.database_engine.dispose()
 
 
@@ -202,6 +205,7 @@ async def build_application_runtime() -> ApplicationRuntime:
     preparation = DocumentPreparationService(
         workspace=collection_workspace, object_store=object_store,
     )
+    analysis = ObjectiveAnalysisService()
     collection_service.configure_file_resources(collection_workspace.root_dir)
     try:
         await auth_session_service.ensure_bootstrap_user()
@@ -296,7 +300,7 @@ async def build_application_runtime() -> ApplicationRuntime:
                     StartObjectiveAnalysisCapability(
                         collection_service=collection_service,
                         objective_repository=ObjectiveRepo,
-                        objective_analysis_service=objective_analysis_service,
+                        objective_analysis_service=analysis,
                     ),
                     InspectObjectiveAnalysisCapability(
                         collection_service=collection_service,
@@ -339,6 +343,7 @@ async def build_application_runtime() -> ApplicationRuntime:
             object_store=object_store,
             objective_discovery_service=ObjectiveDiscoveryService(),
             document_preparation_service=preparation,
+            objective_analysis_service=analysis,
             feedback_analysis_worker=FeedbackAnalysisWorker(
                 job_repository=AnalysisJobRepo,
                 case_repository=FeedbackCaseRepo,
@@ -382,7 +387,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         await runtime.document_preparation_service.recover_interrupted_runs()
         await runtime.objective_discovery_service.recover_interrupted_discoveries()
-        await objective_analysis_service.recover_interrupted_analyses()
+        await runtime.objective_analysis_service.recover_interrupted_analyses()
         yield
     finally:
         await runtime.close()

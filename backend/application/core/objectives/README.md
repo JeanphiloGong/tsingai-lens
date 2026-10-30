@@ -26,9 +26,9 @@ Use the following entry points when modifying the Core workflow:
 | Discover candidates | `ObjectiveDiscoveryService.start_objective_discovery()` | queued discovery run |
 | Form candidates | `objective_candidate_service.discover_candidate_facts()` | candidate Objectives |
 | Create/confirm a candidate | `objective_authoring_service.create_chat_assisted_candidate()` / `confirm_objective()` | persisted Objective |
-| Queue analysis | `analysis_service.start_analysis()` | queued versioned analysis |
+| Queue analysis | `ObjectiveAnalysisService.start_analysis()` | queued versioned analysis |
 | Reconstruct experiments | `objective_analysis_service.generate_experiment_analysis_artifacts()` | per-paper PaperExperiment inputs and coverage |
-| Publish/read analysis | `analysis_service.execute_queued_analysis()` / read methods | immutable published snapshot |
+| Publish/read analysis | `ObjectiveAnalysisService.execute_queued_analysis()` / module read functions | immutable published snapshot |
 
 Paper Map construction is intentionally split by responsibility:
 
@@ -50,6 +50,10 @@ requested creation or confirmation. Scientific analysis returns experiment
 records; `experiment_analysis_writer` stores revisions, selections, optional
 groups, and Findings. `analysis_service` controls the complete
 version's publication. Both HTTP and Agent callers use these owners.
+`ObjectiveAnalysisService` belongs to the current app and owns the admitted tasks
+and concurrency limit. Shutdown cancels and awaits its work before disposing the
+database engine. Read operations remain module functions and do not require a
+running analysis component.
 
 The analysis module imports `objective_input_service` and
 `document_profiles.service` directly. It does not reach through the scientific

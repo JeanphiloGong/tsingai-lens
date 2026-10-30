@@ -135,12 +135,13 @@ async def preview_collection_objective_scope(
     name="run_collection_objective_analysis",  # Preserve the OpenAPI operation ID.
 )
 async def start_collection_objective_analysis(
+    request: Request,
     collection_id: str,
     objective_id: str,
     payload: DocumentSelectionRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Response:
-    result = await objective_analysis_service.start_analysis(
+    result = await request.app.state.runtime.objective_analysis_service.start_analysis(
         collection_id,
         objective_id,
         tuple(payload.document_ids),

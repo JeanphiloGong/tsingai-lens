@@ -3,6 +3,7 @@ from __future__ import annotations
 from domain.core.research_objective import (
     OBJECTIVE_CONFIRMATION_STATUSES,
     OBJECTIVE_ORIGINS,
+    PreparedDocumentInput,
     ResearchObjective,
     build_research_objective_id,
     normalize_objective_terms,
@@ -22,7 +23,7 @@ from application.core.objectives.objective_authoring_service import (
     ObjectiveAuthoringService,
 )
 from domain.core import ResearchObjective
-from repositories.objective_repository import ObjectiveRepository
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
 pytestmark = pytest.mark.anyio
 
@@ -131,6 +132,25 @@ class _ParentObjectiveRepository:
             ),
         )
         self.created: list[ResearchObjective] = []
+
+    async def read_analysis(self, collection_id, objective_id, analysis_version):
+        if (collection_id, objective_id, analysis_version) != (
+            "col-1", "objective-parent", self.parent.published_analysis_version
+        ):
+            return None
+        return ObjectiveAnalysis(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            document_inputs=(PreparedDocumentInput("paper-1", "fingerprint-paper-1"),),
+            pipeline_version="test-v1",
+            model_name=None,
+            prompt_versions={},
+            status="succeeded",
+            phase="completed",
+            processed_document_count=1,
+            total_document_count=1,
+        )
 
     async def read_objective(self, collection_id: str, objective_id: str):
         if (collection_id, objective_id) == ("col-1", "objective-parent"):

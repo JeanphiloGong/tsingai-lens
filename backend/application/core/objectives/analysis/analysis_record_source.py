@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from repositories.objective_repository import ObjectiveAnalysis, ObjectiveRepository
 
-from repositories.objective_repository import ObjectiveAnalysis
+from .experiment_compatibility_projection import ExperimentCompatibilityProjection
 
 
 def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
@@ -19,8 +19,8 @@ def is_experiment_backed_analysis(analysis: ObjectiveAnalysis | None) -> bool:
 
 async def should_read_experiment_projection(
     *,
-    objective_repository: Any,
-    experiment_projection: Any,
+    objective_repository: ObjectiveRepository,
+    experiment_projection: ExperimentCompatibilityProjection | None,
     collection_id: str,
     objective_id: str,
     analysis_version: int,
@@ -28,17 +28,14 @@ async def should_read_experiment_projection(
     """Select the projection only for automatic experiment-backed versions.
 
     Authored and hybrid versions retain their immutable authored snapshots, even
-    when the runtime has a PaperExperiment projection available.  A repository
-    test double that cannot expose analysis metadata is treated as a native
-    projection caller; the production repository always exposes ``read_analysis``.
+    when the runtime has a PaperExperiment projection available.
     """
 
     if experiment_projection is None:
         return False
-    reader = getattr(objective_repository, "read_analysis", None)
-    if not callable(reader):
-        return True
-    analysis = await reader(collection_id, objective_id, analysis_version)
+    analysis = await objective_repository.read_analysis(
+        collection_id, objective_id, analysis_version
+    )
     return analysis is None or is_experiment_backed_analysis(analysis)
 
 

@@ -258,13 +258,8 @@ class DatasetSnapshotService:
             support_source_refs=source_refs,
             messages=messages,
         )
-        if dataset_type in {"sft", "preference"}:
-            if not annotation.target:
-                raise DatasetSnapshotError("target_missing")
-            if not source_refs:
-                raise DatasetSnapshotError("support_source_missing")
-            if not evidence:
-                raise DatasetSnapshotError("evidence_content_missing")
+        if dataset_type in {"sft", "preference"} and not evidence:
+            raise DatasetSnapshotError("evidence_content_missing")
         target = annotation.target.strip() if annotation.target else None
         if dataset_type == "preference" and (not target or target == answer_text):
             raise DatasetSnapshotError("preference_pair_missing")

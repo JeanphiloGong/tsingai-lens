@@ -53,6 +53,7 @@ reuse revisions from one or more papers.
 - `application/core/`: Document profiling, Paper Map creation, Objective
   discovery, PaperExperiment extraction, selection, and Finding synthesis.
 - `application/chat/`: Research Agent trajectory and approved capability calls.
+- `application/pipeline/`: Technical execution creation and node transitions.
 - `application/model_connections/`: Application error contract for model
   configuration failures; database failures remain persistence errors.
 - `domain/`: Business objects, invariants, and state transitions.

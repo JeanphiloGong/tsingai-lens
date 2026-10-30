@@ -9,6 +9,9 @@ from typing import Any
 from uuid import uuid4
 
 from repositories.pipeline_run_repository import (
+    ExecutionStats,
+    ExecutionTimestamps,
+    PipelineNodeRun,
     PipelineNodeStatus,
     PipelineRun,
     PipelineRunRepository,
@@ -378,6 +381,8 @@ class PipelineRunService:
         errors: Iterable[str] | None = None,
         warnings: Iterable[str] | None = None,
     ) -> dict[str, Any]:
+        if progress_percent is not None and not 0 <= progress_percent <= 100:
+            raise ValueError("progress_percent must be between zero and 100")
         stored = await self.repository.read_run(run_id)
         if stored is None:
             raise FileNotFoundError(f"pipeline run not found: {run_id}")
@@ -385,7 +390,11 @@ class PipelineRunService:
         resolved_status = PipelineRunStatus(status or stored.status)
         updated = stored
         if resolved_status is PipelineRunStatus.RUNNING and stored.timestamps.started_at is None:
-            updated = updated.start(now)
+            updated = replace(
+                updated,
+                status=PipelineRunStatus.RUNNING,
+                timestamps=replace(updated.timestamps, started_at=now, updated_at=now),
+            )
         updated = self._transition_nodes(
             updated,
             current_node=current_node or stored.current_node,
@@ -394,7 +403,13 @@ class PipelineRunService:
             now=now,
         )
         if resolved_status.is_terminal:
-            updated = updated.finish(resolved_status, now)
+            timestamps = replace(updated.timestamps, finished_at=now, updated_at=now)
+            updated = replace(
+                updated,
+                status=resolved_status,
+                timestamps=timestamps,
+                stats=replace(updated.stats, duration_ms=timestamps.duration_ms()),
+            )
         else:
             updated = replace(updated, status=resolved_status)
         updated = replace(
@@ -522,19 +537,47 @@ class PipelineRunService:
         context: Mapping[str, Any] | None,
     ) -> PipelineRun:
         now = _now_iso()
-        return replace(
-            PipelineRun.create(
-                pipeline_name=str(pipeline_name),
-                mode=str(mode).strip() or "standard",
-                run_id=f"run_{uuid4().hex[:12]}",
-                collection_id=str(collection_id),
-                scope_type=str(scope_type),
-                scope_id=str(scope_id),
-                input_fingerprint=input_fingerprint,
-                context=context,
-                node_dependencies=_PIPELINE_NODES.get(str(pipeline_name), {}),
-                created_at=now,
+        dependencies = _PIPELINE_NODES.get(pipeline_name, {})
+        if not all((pipeline_name, mode, collection_id, scope_type, scope_id)):
+            raise ValueError("pipeline run identity is required")
+        for name, parents in dependencies.items():
+            if name in parents:
+                raise ValueError(f"pipeline node cannot depend on itself: {name}")
+            if len(set(parents)) != len(parents):
+                raise ValueError(f"pipeline node dependencies must be unique: {name}")
+            unknown = set(parents) - dependencies.keys()
+            if unknown:
+                raise ValueError(
+                    "pipeline node dependencies are not part of the run: "
+                    + ", ".join(sorted(unknown))
+                )
+        remaining = {name: set(parents) for name, parents in dependencies.items()}
+        while remaining:
+            ready = {name for name, parents in remaining.items() if not parents}
+            if not ready:
+                raise ValueError("pipeline node dependencies contain a cycle")
+            remaining = {
+                name: parents - ready for name, parents in remaining.items()
+                if name not in ready
+            }
+        return PipelineRun(
+            pipeline_name=pipeline_name,
+            mode=mode,
+            run_id=f"run_{uuid4().hex[:12]}",
+            collection_id=collection_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            status=PipelineRunStatus.QUEUED,
+            nodes=tuple(
+                PipelineNodeRun(name=name, dependencies=tuple(parents))
+                for name, parents in dependencies.items()
             ),
+            errors=(),
+            warnings=(),
+            stats=ExecutionStats(),
+            timestamps=ExecutionTimestamps(created_at=now, updated_at=now),
+            input_fingerprint=input_fingerprint,
+            context=context or {},
             current_node="queued",
         )
 
@@ -548,61 +591,75 @@ class PipelineRunService:
         now: str,
     ) -> PipelineRun:
         selected_name = PipelineRunService._semantic_node(run, current_node)
-        updated = run
-        if selected_name is not None and not status.is_terminal:
-            nodes = []
-            for node in updated.nodes:
-                if node.status is PipelineNodeStatus.RUNNING and node.name != selected_name:
-                    node = node.succeed(now)
-                if node.name == selected_name and node.status is PipelineNodeStatus.QUEUED:
-                    node = node.start(now)
-                nodes.append(node)
-            for node in nodes:
-                updated = updated.with_node(node)
-        if not status.is_terminal:
-            return updated
-
-        if status is PipelineRunStatus.FAILED or (
+        if selected_name is None and not status.is_terminal:
+            return run
+        failed = status is PipelineRunStatus.FAILED or (
             run.pipeline_name == "document_preparation"
             and status is PipelineRunStatus.PARTIAL_SUCCESS
             and errors
-        ):
-            failed_name = selected_name or next(
-                (
-                    node.name
-                    for node in updated.nodes
-                    if node.status is PipelineNodeStatus.RUNNING
-                ),
-                None,
+        )
+        if failed and selected_name is None:
+            selected_name = next(
+                (node.name for node in run.nodes if node.status is PipelineNodeStatus.RUNNING),
+                next((node.name for node in run.nodes if node.status is PipelineNodeStatus.QUEUED), None),
             )
-            if failed_name is None:
-                failed_name = next(
-                    (
-                        node.name
-                        for node in updated.nodes
-                        if node.status is PipelineNodeStatus.QUEUED
-                    ),
-                    None,
-                )
-            if failed_name is not None:
-                node = updated.node(failed_name)
-                if node.status is PipelineNodeStatus.QUEUED:
-                    node = node.start(now)
-                if not node.status.is_terminal:
-                    node = node.fail(errors[0] if errors else "Pipeline execution failed.", now)
-                updated = updated.with_node(node)
-            return updated
-
-        for node in updated.nodes:
+        nodes = []
+        for node in run.nodes:
             if node.status.is_terminal:
+                nodes.append(node)
                 continue
-            if status is PipelineRunStatus.PARTIAL_SUCCESS and node.status is PipelineNodeStatus.QUEUED:
-                updated = updated.with_node(node.skip(finished_at=now))
-                continue
-            if node.status is PipelineNodeStatus.QUEUED:
-                node = node.start(now)
-            updated = updated.with_node(node.succeed(now))
-        return updated
+            if not status.is_terminal:
+                if node.name == selected_name and node.status is PipelineNodeStatus.QUEUED:
+                    node = replace(
+                        node, status=PipelineNodeStatus.RUNNING, errors=(),
+                        timestamps=ExecutionTimestamps(started_at=now),
+                    )
+                elif node.name != selected_name and node.status is PipelineNodeStatus.RUNNING:
+                    timestamps = replace(node.timestamps, finished_at=now)
+                    node = replace(
+                        node, status=PipelineNodeStatus.SUCCEEDED, warnings=(),
+                        timestamps=timestamps, output_summary={},
+                        stats=ExecutionStats(duration_ms=timestamps.duration_ms()),
+                    )
+            elif failed:
+                if node.name == selected_name:
+                    timestamps = replace(
+                        node.timestamps,
+                        started_at=node.timestamps.started_at or now,
+                        finished_at=now,
+                    )
+                    node = replace(
+                        node, status=PipelineNodeStatus.FAILED,
+                        errors=(errors[0] if errors else "Pipeline execution failed.",),
+                        timestamps=timestamps,
+                        stats=replace(node.stats, duration_ms=timestamps.duration_ms()),
+                    )
+            elif status is PipelineRunStatus.PARTIAL_SUCCESS and node.status is PipelineNodeStatus.QUEUED:
+                node = replace(
+                    node, status=PipelineNodeStatus.SKIPPED,
+                    timestamps=ExecutionTimestamps(finished_at=now),
+                )
+            else:
+                timestamps = replace(
+                    node.timestamps,
+                    started_at=node.timestamps.started_at or now,
+                    finished_at=now,
+                )
+                node = replace(
+                    node, status=PipelineNodeStatus.SUCCEEDED, warnings=(),
+                    timestamps=timestamps, output_summary={},
+                    stats=ExecutionStats(duration_ms=timestamps.duration_ms()),
+                )
+            nodes.append(node)
+        return replace(
+            run,
+            nodes=tuple(nodes),
+            errors=tuple(f"{node.name}: {error}" for node in nodes for error in node.errors),
+            warnings=tuple(f"{node.name}: {warning}" for node in nodes for warning in node.warnings),
+            stats=ExecutionStats.aggregate(
+                (node.stats for node in nodes), duration_ms=run.timestamps.duration_ms(),
+            ),
+        )
 
     @staticmethod
     def _semantic_node(run: PipelineRun, phase: str | None) -> str | None:

@@ -6,6 +6,9 @@ import pytest
 
 from repositories.pipeline_run_repository import (
     ExecutionStats,
+    ExecutionTimestamps,
+    PipelineNodeRun,
+    PipelineNodeStatus,
     ModelUsage,
     TokenUsage,
     PipelineRun,
@@ -27,7 +30,7 @@ def _run(
     scope_type: str = "document",
     scope_id: str = "doc_a",
 ) -> PipelineRun:
-    return PipelineRun.create(
+    return PipelineRun(
         pipeline_name=(
             "document_preparation"
             if scope_type == "document"
@@ -40,11 +43,10 @@ def _run(
         scope_id=scope_id,
         input_fingerprint=fingerprint,
         context={"document_ids": ["doc_a", "doc_b"]},
-        node_dependencies={
-            "source_parsing": (),
-            "document_profile": ("source_parsing",),
-        },
-        created_at=NOW,
+        status=PipelineRunStatus.QUEUED,
+        nodes=(PipelineNodeRun("source_parsing"), PipelineNodeRun("document_profile", ("source_parsing",))),
+        errors=(), warnings=(), stats=ExecutionStats(),
+        timestamps=ExecutionTimestamps(created_at=NOW, updated_at=NOW),
     )
 
 
@@ -60,9 +62,9 @@ async def test_document_run_reuses_active_and_matching_completed_work(
     )
     assert (reused_active, created) == (first, False)
 
-    completed = first.start(NOW).finish(
-        PipelineRunStatus.COMPLETED,
-        "2026-08-27T10:01:00+00:00",
+    completed = replace(
+        first, status=PipelineRunStatus.COMPLETED,
+        timestamps=replace(first.timestamps, started_at=NOW, finished_at="2026-08-27T10:01:00+00:00"),
     )
     assert await runs.update_run(completed) is True
 
@@ -98,10 +100,8 @@ async def test_collection_run_reuses_only_active_work(source_repository) -> None
     assert (reused_active, created) == (first, False)
 
     assert await runs.update_run(
-        first.start(NOW).finish(
-            PipelineRunStatus.COMPLETED,
-            "2026-08-27T10:01:00+00:00",
-        )
+        replace(first, status=PipelineRunStatus.COMPLETED,
+                timestamps=replace(first.timestamps, started_at=NOW, finished_at="2026-08-27T10:01:00+00:00"))
     )
     retry = _run(
         "run-discovery-retry",
@@ -118,8 +118,9 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
     runs = PipelineRunRepository()
     queued = _run("run-round-trip", "fingerprint-a")
     await runs.add_run(queued)
-    source_node = queued.node("source_parsing").start(NOW).succeed(
-        "2026-08-27T10:00:10+00:00",
+    source_node = PipelineNodeRun(
+        name="source_parsing", status=PipelineNodeStatus.SUCCEEDED,
+        timestamps=ExecutionTimestamps(started_at=NOW, finished_at="2026-08-27T10:00:10+00:00"),
         output_summary={"block_count": 12},
         stats=ExecutionStats(
             duration_ms=10000,
@@ -131,11 +132,12 @@ async def test_pipeline_run_round_trips_progress_nodes_and_context(
         ),
     )
     running = replace(
-        queued.start(NOW).with_node(source_node).with_progress(
-            current_node="document_profile",
-            progress_percent=45,
-            progress_detail={"unit": "document", "message": "Profiling."},
-        ),
+        queued, status=PipelineRunStatus.RUNNING,
+        nodes=(source_node, queued.nodes[1]),
+        stats=source_node.stats,
+        timestamps=replace(queued.timestamps, started_at=NOW),
+        current_node="document_profile", progress_percent=45,
+        progress_detail={"unit": "document", "message": "Profiling."},
         warnings=("low confidence title",),
     )
 
@@ -172,7 +174,7 @@ async def test_artifact_retry_bypasses_completed_run_but_reuses_active_run(
 ):
     runs = PipelineRunRepository()
     first = _run("run-incomplete-artifacts", "same-input")
-    await runs.add_run(first.start(NOW).finish(PipelineRunStatus.COMPLETED, NOW))
+    await runs.add_run(replace(first, status=PipelineRunStatus.COMPLETED, timestamps=replace(first.timestamps, started_at=NOW, finished_at=NOW)))
     retry, created = await runs.get_or_create_document_run(
         _run("run-retry-artifacts", "same-input"),
         reuse_completed=False,

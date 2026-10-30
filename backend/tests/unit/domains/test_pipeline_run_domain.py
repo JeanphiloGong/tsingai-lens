@@ -1,87 +1,119 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
+from application.pipeline import PipelineRunService
+from application.pipeline import pipeline_run_service as module
 from repositories.pipeline_run_repository import (
-    ExecutionStats,
-    ExecutionTimestamps,
-    ModelUsage,
-    PipelineNodeRun,
-    PipelineNodeStatus,
-    PipelineRun,
-    PipelineRunStatus,
-    TokenUsage,
+    ExecutionStats, ExecutionTimestamps, ModelUsage, PipelineNodeStatus,
+    PipelineRunStatus, TokenUsage,
 )
 
 
-def test_pipeline_run_tracks_document_preparation_execution() -> None:
-    run = PipelineRun.create(
-        pipeline_name="document_preparation",
-        mode="standard",
-        run_id="run_1",
-        collection_id="col_1",
-        scope_type="document",
-        scope_id="doc_1",
-        input_fingerprint="input-fingerprint",
-        context={"requested_by": "upload"},
-        node_dependencies={
-            "source_artifacts": (),
-            "document_profiles": ("source_artifacts",),
-        },
-        created_at="2026-08-11T01:00:00+00:00",
-    ).start("2026-08-11T01:00:01+00:00")
+class _Runs:
+    async def read_run(self, run_id):
+        return self.run
 
-    source = run.node("source_artifacts").start(
-        "2026-08-11T01:00:02+00:00"
-    ).succeed(
-        "2026-08-11T01:00:04+00:00",
-        output_summary={"document_count": 3},
-        stats=ExecutionStats(
-            duration_ms=2000,
-            prompt_versions={"source_triage": "source_triage.v1"},
-            model_usage=(
-                ModelUsage(
-                    model_name="model-a",
-                    request_count=2,
-                    token_usage=TokenUsage(
-                        input_tokens=100,
-                        output_tokens=20,
-                        total_tokens=120,
-                    ),
-                ),
-            ),
-        ),
+    async def update_run(self, run):
+        self.run = run
+        return True
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_preparation_keeps_sources_when_classification_fails(monkeypatch):
+    times = iter(f"2026-08-11T01:00:0{n}+00:00" for n in range(6))
+    monkeypatch.setattr(module, "_now_iso", lambda: next(times))
+    runs = _Runs()
+    service = PipelineRunService(runs)
+    runs.run = service._new_run(
+        collection_id="col_1", pipeline_name="document_preparation",
+        scope_type="document", scope_id="doc_1", mode="standard",
+        input_fingerprint="fingerprint", context={"requested_by": "upload"},
     )
-    run = run.with_node(source)
-    profiles = run.node("document_profiles").start(
-        "2026-08-11T01:00:05+00:00"
-    ).fail("profile extraction failed", "2026-08-11T01:00:06+00:00")
-    run = run.with_node(profiles).finish(
-        PipelineRunStatus.PARTIAL_SUCCESS,
-        "2026-08-11T01:00:07+00:00",
+    run_id = runs.run.run_id
+    await service.update_run(run_id, status="running", current_node="source_parsing")
+    running = await service.update_run(run_id, current_node="source_parsing")
+    assert running["nodes"]["source_parsing"]["status"] == "running"
+    profiling = await service.update_run(
+        run_id, current_node="document_profile", progress_percent=50,
+        progress_detail={"unit": "document", "message": "Profiling."},
     )
-
-    assert run.run_id == "run_1"
-    assert run.collection_id == "col_1"
-    assert run.input_fingerprint == "input-fingerprint"
-    assert run.context == {"requested_by": "upload"}
-    assert run.errors == (
-        "document_profiles: profile extraction failed",
+    assert profiling["nodes"]["source_parsing"]["status"] == "succeeded"
+    assert profiling["nodes"]["document_profile"]["status"] == "running"
+    assert profiling["progress_percent"] == 50
+    result = await service.finish_run(
+        run_id, status="failed", current_node="document_profile",
+        errors=["private provider text"],
     )
-    assert run.stats.duration_ms == 6000
-    assert run.stats.token_usage == TokenUsage(100, 20, 120)
-    assert run.stats.model_usage[0].model_name == "model-a"
-    assert run.stats.prompt_versions == {"source_triage": "source_triage.v1"}
+    assert result["nodes"]["source_parsing"]["status"] == "succeeded"
+    assert result["nodes"]["document_profile"]["status"] == "failed"
+    assert "private provider text" not in str(result)
+    assert runs.run.nodes[0].stats.duration_ms == 2000
+    assert runs.run.nodes[1].stats.duration_ms == 1000
+    assert runs.run.stats.duration_ms == 3000
+    assert runs.run.input_fingerprint == "fingerprint"
+    assert runs.run.context == {"requested_by": "upload"}
+    assert await runs.read_run(run_id) == runs.run
 
 
-def test_pipeline_node_records_the_runtime_dependency_graph() -> None:
-    node = PipelineNodeRun(name="objective_candidates").skip(
-        finished_at="2026-08-11T01:00:07+00:00",
+@pytest.mark.anyio
+async def test_progress_without_a_node_keeps_reported_errors():
+    runs = _Runs()
+    service = PipelineRunService(runs)
+    runs.run = service._new_run(
+        collection_id="col_1", pipeline_name="document_preparation",
+        scope_type="document", scope_id="doc_1", mode="standard",
+        input_fingerprint=None, context=None,
     )
+    runs.run = replace(runs.run, errors=("dispatch failure",))
+    result = await service.update_run(runs.run.run_id, progress_percent=10)
+    assert runs.run.errors == ("dispatch failure",)
+    assert result["progress_percent"] == 10
 
-    assert node.status is PipelineNodeStatus.SKIPPED
-    assert node.dependencies == ()
-    assert node.output_summary == {}
+
+@pytest.mark.anyio
+async def test_partial_success_skips_unstarted_nodes():
+    runs = _Runs()
+    service = PipelineRunService(runs)
+    runs.run = service._new_run(
+        collection_id="col_1", pipeline_name="objective_discovery",
+        scope_type="collection", scope_id="col_1", mode="standard",
+        input_fingerprint=None, context=None,
+    )
+    await service.update_run(runs.run.run_id, status="running", current_node="paper_map")
+    result = await service.finish_run(runs.run.run_id, status="partial_success")
+    assert result["nodes"]["paper_map"]["status"] == "succeeded"
+    assert result["nodes"]["objective_candidates"]["status"] == "skipped"
+    assert result["nodes"]["objective_candidates"]["timestamps"]["started_at"] is None
+
+
+@pytest.mark.anyio
+async def test_invalid_progress_is_rejected_before_loading():
+    service = PipelineRunService(_Runs())
+    with pytest.raises(ValueError, match="progress_percent"):
+        await service.update_run("run-1", progress_percent=101)
+
+
+@pytest.mark.parametrize("dependencies, message", [
+    ({"first": ("missing",)}, "dependencies are not part"),
+    ({"first": ("second",), "second": ("first",)}, "contain a cycle"),
+])
+def test_invalid_dependencies_are_rejected_at_creation(monkeypatch, dependencies, message):
+    monkeypatch.setitem(module._PIPELINE_NODES, "document_preparation", dependencies)
+    service = PipelineRunService(_Runs())
+    with pytest.raises(ValueError, match=message):
+        service._new_run(
+            collection_id="col_1", pipeline_name="document_preparation",
+            scope_type="document", scope_id="doc_1", mode="standard",
+            input_fingerprint=None, context=None,
+        )
 
 
 def test_execution_stats_aggregate_usage_by_model() -> None:
@@ -127,66 +159,3 @@ def test_execution_timestamps_reject_finish_before_start() -> None:
             started_at="2026-08-11T01:00:02+00:00",
             finished_at="2026-08-11T01:00:01+00:00",
         )
-
-
-def test_pipeline_run_rejects_invalid_dependency_graphs() -> None:
-    run = PipelineRun.create(
-        pipeline_name="document_preparation",
-        mode="standard",
-        run_id="run_1",
-        collection_id="col_1",
-        scope_type="document",
-        scope_id="doc_1",
-        node_dependencies={"source_artifacts": ()},
-        created_at="2026-08-11T01:00:00+00:00",
-    )
-
-    with pytest.raises(ValueError, match="dependencies are not part"):
-        run.with_node(
-            PipelineNodeRun(
-                name="source_artifacts",
-                status=PipelineNodeStatus.SKIPPED,
-                dependencies=("missing_node",),
-            )
-        )
-
-    with pytest.raises(ValueError, match="contain a cycle"):
-        PipelineRun.create(
-            pipeline_name="document_preparation",
-            mode="standard",
-            run_id="run_2",
-            collection_id="col_1",
-            scope_type="document",
-            scope_id="doc_1",
-            node_dependencies={"first": ("second",), "second": ("first",)},
-            created_at="2026-08-11T01:00:00+00:00",
-        )
-
-
-def test_pipeline_run_updates_browser_progress_without_changing_artifacts() -> None:
-    run = PipelineRun.create(
-        pipeline_name="document_preparation",
-        mode="standard",
-        run_id="run_1",
-        collection_id="col_1",
-        scope_type="document",
-        scope_id="doc_1",
-        input_fingerprint="input-fingerprint",
-        node_dependencies={"source_parsing": (), "document_profile": ("source_parsing",)},
-        created_at="2026-08-11T01:00:00+00:00",
-    )
-
-    updated = run.with_progress(
-        current_node="source_parsing",
-        progress_percent=25,
-        progress_detail={"unit": "document", "message": "Parsing the document."},
-    )
-
-    assert updated.current_node == "source_parsing"
-    assert updated.progress_percent == 25
-    assert updated.progress_detail == {
-        "unit": "document",
-        "message": "Parsing the document.",
-    }
-    with pytest.raises(ValueError, match="progress_percent"):
-        run.with_progress(current_node="source_parsing", progress_percent=101)

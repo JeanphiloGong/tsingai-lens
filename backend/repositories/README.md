@@ -24,6 +24,10 @@ record codecs and object-to-dictionary round trips are not repository interfaces
 Saved canonical fields are read directly; external formats are parsed at their
 actual input boundary. Domain objects retain ownership, revision and state rules.
 
+Model configuration errors belong to
+`application/model_connections/errors.py`; database failures propagate through
+the persistence path.
+
 ## Find the Owner
 
 | File | Data and operations |

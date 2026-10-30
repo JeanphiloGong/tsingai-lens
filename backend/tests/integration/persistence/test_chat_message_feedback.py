@@ -173,8 +173,9 @@ async def test_feedback_permissions_and_input_boundaries(feedback_app):
     app.client.cookies.set(SESSION_COOKIE_NAME, app.cookies[0])
     assert (await app.client.put(PATH.replace("chat-1", "chat-2"), json={"rating": "helpful"})).status_code == 404
     for message_id, status in (("missing", 404), ("local-stream-1", 404), ("question", 422), ("request", 422), ("tool-result", 422)):
-        response = await app.client.put(PATH.replace("/answer/", f"/{message_id}/"), json={"rating": "helpful"})
-        assert response.status_code == status, response.text
+        for rating in ("helpful", None):
+            response = await app.client.put(PATH.replace("/answer/", f"/{message_id}/"), json={"rating": rating})
+            assert response.status_code == status, response.text
     for payload in (
         {}, {"rating": "wrong"}, {"rating": "not_helpful", "reason": "wrong"},
         {"rating": "helpful", "reason": "incorrect"}, {"rating": None, "comment": "retained"},

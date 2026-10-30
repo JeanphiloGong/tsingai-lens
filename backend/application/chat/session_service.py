@@ -601,8 +601,8 @@ class ChatSessionService:
         message = await self.repository.read_message(message_id)
         if message is None or message.session_id != session_id:
             raise ChatMessageNotFoundError("chat message not found")
-        ChatMessageFeedback.validate_answer(message)
         if rating is None:
+            ChatMessageFeedback.validate_answer(message)
             if reason is not None or comment is not None:
                 raise ValueError("withdrawn feedback cannot have a reason or comment")
             current_feedback = next(
